@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "ePurse",
+    "slug": "epurse",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF5A1F"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "./plugins/withEPurseAndroid"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.epurse.app",
+      "infoPlist": {
+        "NSUserNotificationsUsageDescription": "ePurse uses notifications to detect financial messages and auto-categorise them."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FF5A1F"
+      },
+      "package": "com.epurse.app",
+      "permissions": [
+        "android.permission.READ_SMS",
+        "android.permission.RECEIVE_SMS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "aa096ea5-1aae-4d07-aa45-f17b9f52ef42"
+      }
+    },
+    "owner": "13pvn"
+  }
+}

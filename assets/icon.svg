@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF5A1F"/>
+      <stop offset="100%" stop-color="#FC8019"/>
+    </linearGradient>
+    <linearGradient id="purse" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFE3D1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App background -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+
+  <!-- Soft inner glow -->
+  <circle cx="780" cy="200" r="280" fill="#FFFFFF" opacity="0.10"/>
+
+  <!-- Purse body -->
+  <path d="M260 360
+           Q260 300 320 300
+           L704 300
+           Q764 300 764 360
+           L800 720
+           Q800 800 720 800
+           L304 800
+           Q224 800 224 720 Z"
+        fill="url(#purse)"/>
+
+  <!-- Purse clasp -->
+  <rect x="450" y="270" width="124" height="60" rx="22" fill="#FF5A1F"/>
+  <circle cx="512" cy="300" r="14" fill="#FFFFFF"/>
+
+  <!-- Stylised "e" mark -->
+  <text x="512" y="640"
+        font-family="Inter, Helvetica, Arial, sans-serif"
+        font-size="380"
+        font-weight="900"
+        text-anchor="middle"
+        fill="#FF5A1F"
+        letter-spacing="-12">e</text>
+</svg>

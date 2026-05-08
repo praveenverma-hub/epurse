@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1242 2436">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF5A1F"/>
+      <stop offset="100%" stop-color="#FC8019"/>
+    </linearGradient>
+  </defs>
+  <rect width="1242" height="2436" fill="url(#bg)"/>
+  <circle cx="900" cy="500" r="500" fill="#FFFFFF" opacity="0.06"/>
+  <circle cx="200" cy="2000" r="600" fill="#FFFFFF" opacity="0.06"/>
+
+  <g transform="translate(621 1218) scale(0.75) translate(-512 -512)">
+    <path d="M260 360 Q260 300 320 300 L704 300 Q764 300 764 360 L800 720 Q800 800 720 800 L304 800 Q224 800 224 720 Z"
+          fill="#FFFFFF"/>
+    <rect x="450" y="270" width="124" height="60" rx="22" fill="#FF5A1F"/>
+    <circle cx="512" cy="300" r="14" fill="#FFFFFF"/>
+    <text x="512" y="640" font-family="Helvetica, Arial, sans-serif" font-size="380" font-weight="900" text-anchor="middle" fill="#FF5A1F">e</text>
+  </g>
+
+  <text x="621" y="1700"
+        font-family="Helvetica, Arial, sans-serif"
+        font-size="120"
+        font-weight="800"
+        text-anchor="middle"
+        fill="#FFFFFF"
+        letter-spacing="-2">ePurse</text>
+  <text x="621" y="1790"
+        font-family="Helvetica, Arial, sans-serif"
+        font-size="46"
+        font-weight="500"
+        text-anchor="middle"
+        fill="#FFFFFFCC">All your money, in one pocket</text>
+</svg>
