@@ -11,6 +11,7 @@ import AddTransactionScreen from '../screens/AddTransactionScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import CategoriesScreen from '../screens/CategoriesScreen';
 import LentBorrowedScreen from '../screens/LentBorrowedScreen';
+import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -47,6 +48,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Analytics" component={AnalyticsScreen} />
         <Stack.Screen name="Categories" component={CategoriesScreen} />
         <Stack.Screen name="LentBorrowed" component={LentBorrowedScreen} />
+        <Stack.Screen name="SmsDiagnostic" component={SmsDiagnosticScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -22,6 +22,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import GradientButton from '../components/GradientButton';
+import { parseMessageDetailed } from '../utils/messageParser';
 
 const AddTransactionScreen = ({ navigation }) => {
   const categories = useEPurseStore((s) => s.categories);
@@ -71,12 +72,15 @@ const AddTransactionScreen = ({ navigation }) => {
       Alert.alert('Empty message', 'Paste an SMS to parse.');
       return;
     }
+    const diagnostic = parseMessageDetailed(smsBody.trim());
+    if (!diagnostic?.ok) {
+      Alert.alert('Could not parse', diagnostic?.error?.message || 'Message format not recognised.');
+      return;
+    }
+
     const parsed = ingestMessage(smsBody.trim());
     if (!parsed) {
-      Alert.alert(
-        'Could not parse',
-        'No financial keywords (Debited / Spent / Credited) detected.'
-      );
+      Alert.alert('Not added', 'Looks like this SMS was already imported (duplicate).');
       return;
     }
     Alert.alert(

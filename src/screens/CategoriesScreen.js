@@ -121,7 +121,11 @@ const CategoriesScreen = ({ navigation }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* ============= Auto-import SMS ============= */}
+        {/* ============= Auto-import SMS — HIDDEN =============
+            SMS permission is now requested during onboarding (PermissionScreen),
+            so this in-app toggle is redundant. Keeping the implementation here
+            so we can re-enable a "Manage SMS access" sub-screen later if needed.
+
         <View style={styles.card}>
           <View style={styles.smsRow}>
             <View style={{ flex: 1 }}>
@@ -159,6 +163,7 @@ const CategoriesScreen = ({ navigation }) => {
             </View>
           )}
         </View>
+        ============= /Auto-import SMS ============= */}
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Add a custom category</Text>

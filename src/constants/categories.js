@@ -1,28 +1,144 @@
-// Default expense categories with iconography (emoji-based, no heavy images)
+// =============================================================================
+// Categories + the keyword dictionary the SMS parser uses to classify txns.
+// -----------------------------------------------------------------------------
+// Strategy: identify the *merchant brand* in the SMS body (Swiggy, Uber,
+// Amazon, Netflix…) and assign the category that matches the brand.
+// Generic words like "UPI", "txn" are NOT category keywords — they're just
+// payment rails and would over-trigger.
+// =============================================================================
+
 export const DEFAULT_CATEGORIES = [
-  { id: 'food', name: 'Food', icon: 'food', color: '#FF5A1F', emoji: '🍔' },
-  { id: 'travel', name: 'Travel', icon: 'travel', color: '#3B82F6', emoji: '✈️' },
-  { id: 'bills', name: 'Bills', icon: 'bills', color: '#8B5CF6', emoji: '💡' },
-  { id: 'shopping', name: 'Shopping', icon: 'shopping', color: '#EC4899', emoji: '🛍️' },
-  { id: 'groceries', name: 'Groceries', icon: 'groceries', color: '#10B981', emoji: '🥦' },
-  { id: 'entertainment', name: 'Entertainment', icon: 'entertainment', color: '#F59E0B', emoji: '🎬' },
-  { id: 'health', name: 'Health', icon: 'health', color: '#EF4444', emoji: '💊' },
-  { id: 'salary', name: 'Salary', icon: 'salary', color: '#059669', emoji: '💰' },
-  { id: 'transfer', name: 'Transfer', icon: 'transfer', color: '#6B7280', emoji: '🔁' },
-  { id: 'other', name: 'Other', icon: 'other', color: '#9CA3AF', emoji: '📌' },
+  { id: 'food',          name: 'Food & Dining',  color: '#FF5A1F', emoji: '🍔' },
+  { id: 'travel',        name: 'Travel & Cabs',  color: '#3B82F6', emoji: '🚕' },
+  { id: 'fuel',          name: 'Fuel',           color: '#F97316', emoji: '⛽' },
+  { id: 'bills',         name: 'Bills & Utility',color: '#8B5CF6', emoji: '💡' },
+  { id: 'shopping',      name: 'Shopping',       color: '#EC4899', emoji: '🛍️' },
+  { id: 'groceries',     name: 'Groceries',      color: '#10B981', emoji: '🥦' },
+  { id: 'entertainment', name: 'Entertainment',  color: '#F59E0B', emoji: '🎬' },
+  { id: 'health',        name: 'Health & Fitness', color: '#EF4444', emoji: '💊' },
+  { id: 'education',     name: 'Education',      color: '#0EA5E9', emoji: '🎓' },
+  { id: 'investments',   name: 'Investments',    color: '#14B8A6', emoji: '📈' },
+  { id: 'salary',        name: 'Salary',         color: '#059669', emoji: '💰' },
+  { id: 'transfer',      name: 'P2P Transfer',   color: '#6B7280', emoji: '🔁' },
+  { id: 'lent',          name: 'You Lent',       color: '#10B981', emoji: '🤝' },
+  { id: 'borrowed',      name: 'You Borrowed',   color: '#8B5CF6', emoji: '🧾' },
+  { id: 'lent_settled',  name: 'Lent Settled',   color: '#14B8A6', emoji: '✅' },
+  { id: 'borrow_repaid', name: 'Borrow Repaid',  color: '#6366F1', emoji: '💳' },
+  { id: 'other',         name: 'Other',          color: '#9CA3AF', emoji: '📌' },
 ];
 
-// Keyword → category mapping used by the message parser
+/**
+ * Merchant-brand → category map.
+ * Keys are lowercase substrings searched in the SMS body and the parsed
+ * merchant string. Order doesn't matter — first hit wins.
+ */
 export const CATEGORY_KEYWORDS = {
-  food: ['swiggy', 'zomato', 'mcdonald', 'kfc', 'dominos', 'restaurant', 'cafe', 'starbucks', 'food', 'eat'],
-  travel: ['uber', 'ola', 'rapido', 'irctc', 'makemytrip', 'goibibo', 'flight', 'metro', 'bus', 'cab', 'fuel', 'petrol'],
-  bills: ['electricity', 'recharge', 'jio', 'airtel', 'broadband', 'water bill', 'gas bill', 'dth', 'rent'],
-  shopping: ['amazon', 'flipkart', 'myntra', 'ajio', 'meesho', 'shopping', 'mall'],
-  groceries: ['bigbasket', 'blinkit', 'zepto', 'dmart', 'reliance fresh', 'grocery', 'supermarket'],
-  entertainment: ['netflix', 'prime video', 'hotstar', 'spotify', 'bookmyshow', 'cinema', 'pvr', 'inox'],
-  health: ['pharmacy', 'apollo', 'medplus', 'hospital', 'clinic', 'doctor', 'medicine'],
-  salary: ['salary', 'payroll', 'stipend'],
-  transfer: ['upi', 'imps', 'neft', 'rtgs', 'transfer'],
+  food: [
+    // Indian food delivery
+    'swiggy', 'zomato', 'eatfit', 'faasos', 'box8', 'freshmenu', 'eatsure',
+    // Restaurants / fast-food
+    'mcdonald', 'kfc', 'dominos', 'pizza hut', 'subway', 'burger king',
+    'starbucks', 'cafe coffee day', ' ccd ', 'haldiram', 'barbeque nation',
+    'chai point', 'theobroma', 'wow momo',
+    // Generic
+    'restaurant', 'cafe ', 'cafe.', 'dining', 'eatery',
+  ],
+  travel: [
+    // Cab apps
+    'uber', 'ola ', 'olacabs', 'rapido', 'meru', 'jugnoo', 'blusmart',
+    // Travel booking
+    'irctc', 'makemytrip', 'mmt ', 'goibibo', 'cleartrip', 'ixigo',
+    'easemytrip', 'yatra', 'redbus', 'abhibus', 'agoda', 'oyo', 'airbnb',
+    'booking.com',
+    // Airlines
+    'indigo', 'spicejet', 'air india', 'vistara', 'akasa',
+    // Transit / generic
+    'metro', 'fastag', 'paytm fastag', 'flight', 'cab ', 'cab.',
+  ],
+  fuel: [
+    'fuel', 'petrol', 'diesel', 'shell', 'hpcl', 'iocl', 'bpcl',
+    'reliance petroleum', 'indian oil', 'hp petrol', 'bharat petroleum',
+  ],
+  bills: [
+    // Telecom
+    'jio', 'airtel', 'vi recharge', 'vodafone', 'bsnl', 'mtnl',
+    // ISP / DTH
+    'broadband', 'tata sky', 'tatasky', 'tata play', 'd2h', 'dish tv', 'dth',
+    // Utility
+    'electricity', 'water bill', 'gas bill', 'bescom', 'mseb', 'kseb',
+    'mahanagar gas', 'igl bill', 'adani gas',
+    // Recharge / rent / insurance
+    'recharge', 'rent', 'lic premium', 'insurance', 'premium paid',
+    'hdfc ergo', 'bajaj allianz', 'icici lombard',
+  ],
+  shopping: [
+    // E-commerce
+    'amazon', 'flipkart', 'myntra', 'ajio', 'meesho', 'snapdeal', 'tata cliq',
+    'nykaa', 'firstcry', 'lenskart', 'bewakoof', 'urbanic', 'limeroad',
+    // Electronics / brands
+    'apple store', 'apple.com', 'croma', 'reliance digital', 'vijay sales',
+    'samsung shop', 'mi store',
+    // Apparel
+    'lifestyle', 'pantaloons', 'shoppers stop', 'westside',
+    'h&m', 'zara ', 'uniqlo', 'levis', 'puma', 'nike', 'adidas', 'decathlon',
+    // Generic
+    ' mall ', 'shopping',
+  ],
+  groceries: [
+    'bigbasket', 'blinkit', 'zepto', 'instamart', 'dunzo',
+    'dmart', 'd-mart', 'd mart',
+    'reliance fresh', 'reliance smart', 'spencer', 'natures basket',
+    ' more ', 'kirana', 'grocery', 'supermarket',
+  ],
+  entertainment: [
+    // Streaming
+    'netflix', 'prime video', 'amazon prime', 'hotstar', 'disney+',
+    'spotify', 'youtube premium', 'sonyliv', 'sony liv', 'zee5', 'voot',
+    'mubi', 'jiocinema', 'jio cinema', 'eros now',
+    // Music
+    'gaana', 'wynk', 'jiosaavn',
+    // Movies / events
+    'bookmyshow', 'pvr ', 'inox', 'cinepolis',
+  ],
+  health: [
+    // Pharmacy
+    'pharmeasy', '1mg', 'tata 1mg', 'netmeds', 'apollo pharmacy', 'medplus',
+    'medlife', 'practo',
+    // Fitness
+    'cult fit', 'cure fit', 'cult.fit', 'gympik', 'gym ', 'fitness',
+    // Generic
+    'pharmacy', 'hospital', 'clinic', 'doctor', 'medicine',
+  ],
+  education: [
+    'unacademy', 'byju', 'vedantu', 'whitehat', 'cuemath', 'simplilearn',
+    'coursera', 'udemy', 'upgrad', 'edx ',
+    'school fee', 'college fee', 'tuition',
+  ],
+  investments: [
+    'zerodha', 'upstox', 'groww', 'kuvera', 'paytm money', 'inditrade',
+    'smallcase', 'ind money',
+    ' sip ', 'mutual fund', ' mf ', ' nps ', ' ppf ', ' fd ', ' rd ',
+  ],
+  salary: ['salary', 'payroll', 'stipend', 'wages credited', 'compensation'],
+  transfer: [
+    // P2P transfers — generic pattern, lowest priority
+    'imps to', 'neft to', 'rtgs to', 'transferred to', 'sent to ',
+    'paid to mr', 'paid to mrs', 'paid to ms',
+  ],
+  lent: [
+    'you lent', 'lent to', 'loaned to', 'gave loan', 'gave to',
+  ],
+  borrowed: [
+    'you borrowed', 'borrowed from', 'loan taken', 'took loan',
+  ],
+  lent_settled: [
+    'settled', 'settlement received', 'paid back', 'returned', 'returned amount',
+    'repayment received',
+  ],
+  borrow_repaid: [
+    'loan repaid', 'repaid', 'repayment done', 'paid back to', 'borrow repaid',
+    'borrowed amount paid',
+  ],
 };
 
 export const ACCOUNT_TYPES = {

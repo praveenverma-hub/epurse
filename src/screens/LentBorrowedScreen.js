@@ -26,11 +26,21 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [note, setNote] = useState('');
 
   const all = useEPurseStore((s) => s.lentBorrowed);
+  const transactions = useEPurseStore((s) => s.transactions);
   const addLentBorrowed = useEPurseStore((s) => s.addLentBorrowed);
   const settle = useEPurseStore((s) => s.settleLentBorrowed);
 
   const list = useMemo(() => all.filter((l) => l.kind === kind), [all, kind]);
-  const total = useMemo(() => list.reduce((s, l) => s + l.amount, 0), [list]);
+  const total = useMemo(() => {
+    const manualTotal = list.reduce((s, l) => s + l.amount, 0);
+    const taggedBase = transactions
+      .filter((t) => t.categoryId === kind)
+      .reduce((s, t) => s + (t.amount || 0), 0);
+    const taggedSettled = transactions
+      .filter((t) => t.categoryId === (kind === 'lent' ? 'lent_settled' : 'borrow_repaid'))
+      .reduce((s, t) => s + (t.amount || 0), 0);
+    return manualTotal + taggedBase - taggedSettled;
+  }, [list, transactions, kind]);
 
   const grad =
     kind === 'lent'

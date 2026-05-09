@@ -41,29 +41,72 @@ export const smsSupported = Platform.OS === 'android' && !!SmsAndroid && !!SmsLi
 // Permissions
 // =============================================================================
 
-/** True if the app currently holds READ_SMS + RECEIVE_SMS at runtime. */
+/**
+ * True if the app currently holds READ_SMS at runtime.
+ *
+ * NOTE: On Android 10+ READ_SMS and RECEIVE_SMS share the same permission
+ * group — granting one grants both. We only gate on READ_SMS because:
+ *   • It is the permission `react-native-get-sms-android` actually needs.
+ *   • On many OEM ROMs (MIUI, One UI, etc.) RECEIVE_SMS still returns
+ *     `never_ask_again` via PermissionsAndroid even after the user tapped
+ *     "Allow", so checking both causes a false-negative.
+ */
 export const hasSmsPermission = async () => {
   if (Platform.OS !== 'android') return false;
-  const read = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
-  const recv = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
-  return read && recv;
+  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
 };
 
 /**
  * Show the native runtime permission prompt.
  * @returns {Promise<{granted: boolean, neverAskAgain: boolean}>}
+ *
+ * Strategy (most reliable across OEM ROMs & Android versions):
+ *   1. Call requestMultiple to show the system dialog.
+ *   2. IGNORE the dialog result — it is unreliable on MIUI, One UI, etc.
+ *   3. Immediately re-check with PermissionsAndroid.check(READ_SMS), which
+ *      always reflects the real OS state.
+ *   4. Only if check() still returns false do we inspect the dialog result
+ *      to decide if the user permanently denied (never_ask_again).
  */
 export const requestSmsPermission = async () => {
   if (Platform.OS !== 'android') return { granted: false, neverAskAgain: false };
-  const result = await PermissionsAndroid.requestMultiple([
-    PermissionsAndroid.PERMISSIONS.READ_SMS,
-    PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
-  ]);
-  const read = result[PermissionsAndroid.PERMISSIONS.READ_SMS];
-  const recv = result[PermissionsAndroid.PERMISSIONS.RECEIVE_SMS];
+
+  // On some Android builds (sideloaded APKs, custom ROMs) requestMultiple can
+  // hang and never resolve — we race it against a 25 s safety timeout.
+  const PERM_TIMEOUT_MS = 25_000;
+
+  let result = null;
+  try {
+    const permRequest = PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.READ_SMS,
+      PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+    ]);
+    const timedOut = new Promise((res) => setTimeout(() => res('__timeout__'), PERM_TIMEOUT_MS));
+    const race = await Promise.race([permRequest, timedOut]);
+    result = race === '__timeout__' ? null : race;
+    if (result === null) {
+      console.warn('[smsService] requestSmsPermission timed out after', PERM_TIMEOUT_MS, 'ms');
+    }
+  } catch (e) {
+    console.warn('[smsService] requestSmsPermission threw', e?.message);
+  }
+
+  // Ground-truth verification — always use check() after requestMultiple.
+  // This is more reliable than the dialog return value on OEM ROMs.
+  const actuallyGranted = await PermissionsAndroid.check(
+    PermissionsAndroid.PERMISSIONS.READ_SMS
+  );
+
+  if (actuallyGranted) {
+    return { granted: true, neverAskAgain: false };
+  }
+
+  // Not granted — inspect the dialog result (if we got one) only to detect
+  // permanent denial on READ_SMS.
+  const read = result?.[PermissionsAndroid.PERMISSIONS.READ_SMS];
   return {
-    granted: read === 'granted' && recv === 'granted',
-    neverAskAgain: read === 'never_ask_again' || recv === 'never_ask_again',
+    granted: false,
+    neverAskAgain: read === 'never_ask_again',
   };
 };
 
@@ -76,27 +119,59 @@ export const requestSmsPermission = async () => {
  * @param {number} sinceMs   defaults to "30 days ago"
  * @returns {Promise<Array<{ _id, address, body, date }>>}
  */
-export const readInbox = (sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000) =>
-  new Promise((resolve, reject) => {
-    if (!smsSupported) return resolve([]);
+/**
+ * Read inbox messages with date >= sinceMs.
+ *
+ * Critical performance fix: the `selection` field is passed straight to
+ * ContentResolver.query() as a SQL WHERE clause, so Android's SQLite engine
+ * filters rows before returning them to Java. Without this, the Java layer
+ * has to iterate over every SMS in the inbox (potentially thousands) and
+ * check the date in a while loop — on a real device this reliably exceeds
+ * the 15 s timeout.
+ *
+ * `minDate` is kept as a belt-and-suspenders guard inside the native loop.
+ * `sortOrder: 'date ASC'` returns oldest-first so callers can ingest in
+ * chronological order without needing to re-sort.
+ * `maxCount: 2000` is generous enough to cover 3 months for heavy SMS users.
+ */
+export const readInbox = (sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000) => {
+  if (!smsSupported) return Promise.resolve([]);
+
+  // 60 s — large enough for 2 000 messages to parse + serialize to JSON,
+  // but still a hard upper bound so the UI never hangs forever.
+  const READ_TIMEOUT_MS = 60_000;
+
+  const nativeRead = new Promise((resolve, reject) => {
     const filter = JSON.stringify({
-      box: 'inbox',
-      minDate: sinceMs,
-      maxCount: 500,
+      box:       'inbox',
+      selection: `date >= ${sinceMs}`,   // ← SQL WHERE: database-level filter
+      minDate:   sinceMs,                // ← belt-and-suspenders Java filter
+      sortOrder: 'date ASC',             // oldest → newest for chronological ingest
+      maxCount:  2000,
     });
     SmsAndroid.list(
       filter,
       (failure) => reject(new Error(failure)),
-      (count, smsList) => {
+      (_count, smsList) => {
         try {
           const parsed = JSON.parse(smsList || '[]');
           resolve(Array.isArray(parsed) ? parsed : []);
-        } catch (e) {
+        } catch (_) {
           resolve([]);
         }
       }
     );
   });
+
+  const timeout = new Promise((resolve) =>
+    setTimeout(() => {
+      console.warn('[smsService] readInbox timed out after', READ_TIMEOUT_MS, 'ms');
+      resolve([]);
+    }, READ_TIMEOUT_MS)
+  );
+
+  return Promise.race([nativeRead, timeout]).catch(() => []);
+};
 
 // =============================================================================
 // Live listener

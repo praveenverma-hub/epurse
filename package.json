@@ -12,7 +12,8 @@
     "build:aab": "eas build -p android --profile production",
     "build:ios": "eas build -p ios --profile preview",
     "prebuild": "expo prebuild",
-    "build:apk-local": "expo prebuild --clean && cd android && ./gradlew assembleRelease"
+    "build:apk-local": "expo prebuild --clean && cd android && ./gradlew assembleRelease",
+    "deploy": "bash deploy.sh"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.21.0",
