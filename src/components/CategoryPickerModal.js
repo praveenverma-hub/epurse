@@ -16,6 +16,9 @@ const CategoryPickerModal = ({
   selectedCategoryId,
   isHidden,
   isIgnored,
+  canSplit,
+  isSplitTxn,
+  onPressSplit,
   onSelectCategory,
   onToggleHidden,
   onIgnore,
@@ -47,6 +50,12 @@ const CategoryPickerModal = ({
             );
           })}
         </ScrollView>
+
+        {canSplit && !isIgnored && onPressSplit ? (
+          <TouchableOpacity style={styles.splitBillBtn} activeOpacity={0.85} onPress={onPressSplit}>
+            <Text style={styles.splitBillText}>{isSplitTxn ? 'Edit split' : 'Split bill'}</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.hideIgnoreRow}>
           <TouchableOpacity
@@ -118,6 +127,16 @@ const styles = StyleSheet.create({
   rowLabel: { flex: 1, ...typography.body, color: colors.textPrimary },
   rowLabelActive: { color: colors.primary, fontWeight: '700' },
   check: { color: colors.primary, fontWeight: '800' },
+  splitBillBtn: {
+    marginTop: spacing.sm,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    backgroundColor: colors.info + '18',
+    borderWidth: 1,
+    borderColor: colors.info + '55',
+  },
+  splitBillText: { color: colors.info, ...typography.bodyBold, fontWeight: '700' },
   hideIgnoreRow: {
     flexDirection: 'row',
     gap: spacing.sm,

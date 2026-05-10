@@ -20,7 +20,6 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,7 +29,11 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import GradientButton from '../components/GradientButton';
 import TransactionItem from '../components/TransactionItem';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import SplitConfigModal from '../components/SplitConfigModal';
+import SplitDetailsModal from '../components/SplitDetailsModal';
+import CenterModal from '../components/CenterModal';
 import { formatCurrency } from '../utils/format';
+import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
 
 // Timeframe options for the segmented control at the top of the screen.
 // `month` is the default per the product spec.
@@ -49,6 +52,8 @@ const TransactionsScreen = ({ navigation }) => {
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
+  const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
+  const userName = useEPurseStore((s) => s.userName);
 
   const [timeframe, setTimeframe] = useState('month'); // default per spec
   const [filter, setFilter] = useState('all'); // 'all' | 'split' | 'hidden' | 'ignored' | category id
@@ -59,6 +64,9 @@ const TransactionsScreen = ({ navigation }) => {
   });
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
+  const [splitTxn, setSplitTxn] = useState(null);
+  const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
+  const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
 
   // Active filters list — used to render removable tag chips above the list.
   const activeAdvanced = useMemo(() => {
@@ -131,8 +139,10 @@ const TransactionsScreen = ({ navigation }) => {
     // 3. Advanced filters
     const min = parseFloat(advanced.minAmount);
     const max = parseFloat(advanced.maxAmount);
-    if (!Number.isNaN(min)) res = res.filter((t) => t.amount > min);
-    if (!Number.isNaN(max)) res = res.filter((t) => t.amount < max);
+    if (!Number.isNaN(min))
+      res = res.filter((t) => debitDisplayAmount(t) > min);
+    if (!Number.isNaN(max))
+      res = res.filter((t) => debitDisplayAmount(t) < max);
     if (advanced.query.trim()) {
       const q = advanced.query.trim().toLowerCase();
       res = res.filter(
@@ -252,8 +262,8 @@ const TransactionsScreen = ({ navigation }) => {
         renderItem={({ item }) => (
           <TransactionItem
             txn={item}
-            onPress={() => navigation.navigate('TransactionDetail', { id: item.id })}
             onPressCategory={() => setActiveTxn(item)}
+            onPressSplitChip={() => setSplitDetailsTxn(item)}
           />
         )}
         ListEmptyComponent={
@@ -283,6 +293,13 @@ const TransactionsScreen = ({ navigation }) => {
         selectedCategoryId={activeTxn?.categoryId}
         isHidden={!!activeTxn?.isHidden}
         isIgnored={!!activeTxn?.isIgnored}
+        canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
+        isSplitTxn={!!activeTxn?.isSplit}
+        onPressSplit={() => {
+          const t = activeTxn;
+          setActiveTxn(null);
+          setSplitTxn(t);
+        }}
         onClose={() => setActiveTxn(null)}
         onSelectCategory={(categoryId) => {
           if (!activeTxn) return;
@@ -296,53 +313,87 @@ const TransactionsScreen = ({ navigation }) => {
         }}
         onDelete={() => {
           if (!activeTxn) return;
-          Alert.alert('Delete transaction?', 'This action cannot be undone.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: () => {
-                deleteTransaction(activeTxn.id);
-                setActiveTxn(null);
-              },
+          setConfirm({
+            title: 'Delete transaction?',
+            message: 'This action cannot be undone.',
+            primaryText: 'Delete',
+            destructive: true,
+            secondaryText: 'Cancel',
+            onSecondary: () => setConfirm(null),
+            onConfirm: () => {
+              deleteTransaction(activeTxn.id);
+              setActiveTxn(null);
+              setConfirm(null);
             },
-          ]);
+          });
         }}
         onIgnore={() => {
           if (!activeTxn) return;
-          Alert.alert(
-            'Ignore transaction?',
-            'This removes it from your balances and every total and chart. It will be treated as if it never happened.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Ignore',
-                style: 'destructive',
-                onPress: () => {
-                  ignoreTransaction(activeTxn.id);
-                  setActiveTxn(null);
-                },
-              },
-            ]
-          );
+          setConfirm({
+            title: 'Ignore transaction?',
+            message:
+              'This removes it from your balances and every total and chart. It will be treated as if it never happened.',
+            primaryText: 'Ignore',
+            destructive: true,
+            secondaryText: 'Cancel',
+            onSecondary: () => setConfirm(null),
+            onConfirm: () => {
+              ignoreTransaction(activeTxn.id);
+              setActiveTxn(null);
+              setConfirm(null);
+            },
+          });
         }}
         onRestore={() => {
           if (!activeTxn) return;
-          Alert.alert(
-            'Restore transaction?',
-            'This adds it back to balances, totals, and charts.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Restore',
-                onPress: () => {
-                  unignoreTransaction(activeTxn.id);
-                  setActiveTxn(null);
-                },
-              },
-            ]
-          );
+          setConfirm({
+            title: 'Restore transaction?',
+            message: 'This adds it back to balances, totals, and charts.',
+            primaryText: 'Restore',
+            destructive: false,
+            secondaryText: 'Cancel',
+            onSecondary: () => setConfirm(null),
+            onConfirm: () => {
+              unignoreTransaction(activeTxn.id);
+              setActiveTxn(null);
+              setConfirm(null);
+            },
+          });
         }}
+      />
+
+      <SplitConfigModal
+        visible={!!splitTxn}
+        transaction={splitTxn}
+        onClose={() => setSplitTxn(null)}
+        onApply={(others, meta) => {
+          if (splitTxn) setTransactionSplit(splitTxn.id, others, meta);
+          setSplitTxn(null);
+        }}
+      />
+
+      <SplitDetailsModal
+        visible={!!splitDetailsTxn}
+        txn={splitDetailsTxn}
+        myName={userName ? `You (${userName})` : 'You'}
+        onClose={() => setSplitDetailsTxn(null)}
+        onEdit={() => {
+          const t = splitDetailsTxn;
+          setSplitDetailsTxn(null);
+          setSplitTxn(t);
+        }}
+      />
+
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        destructive={!!confirm?.destructive}
+        secondaryText={confirm?.secondaryText}
+        onSecondary={confirm?.onSecondary}
+        onClose={() => setConfirm(null)}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
     </SafeAreaView>
   );

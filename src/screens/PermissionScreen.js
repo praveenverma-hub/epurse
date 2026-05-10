@@ -1,11 +1,12 @@
 // =============================================================================
 // PermissionScreen — first-launch onboarding
 // -----------------------------------------------------------------------------
-// Shown ONCE (gated by hasOnboarded in the store). Three steps:
+// Shown ONCE (gated by hasOnboarded in the store). Four steps:
 //
 //   0. Welcome carousel + feature bullets
 //   1. Name input — "What should we call you?"
-//   2. Permission ask + inbox sweep with a live progress bar
+//   2. SMS permission + inbox sweep with a live progress bar
+//   3. Contacts permission — split expenses with people from your address book
 //
 // On grant we ingest the last 30 days of inbox messages right here in the
 // foreground, with progress reporting, so the user sees what's happening.
@@ -21,7 +22,6 @@ import {
   Animated,
   TouchableOpacity,
   Platform,
-  AppState,
   ActivityIndicator,
   Linking,
   Alert,
@@ -34,10 +34,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEPurseStore } from "../store/ePurseStore";
 import {
   smsSupported,
-  hasSmsPermission,
   requestSmsPermission,
   readInbox,
 } from "../services/smsService";
+import { requestContactsPermissionMeta } from "../services/contactsService";
 import {
   colors,
   radius,
@@ -88,6 +88,9 @@ export default function PermissionScreen({ navigation }) {
   const setSmsPermissionGranted = useEPurseStore(
     (s) => s.setSmsPermissionGranted,
   );
+  const setContactsPermissionGranted = useEPurseStore(
+    (s) => s.setContactsPermissionGranted,
+  );
   const setUserName = useEPurseStore((s) => s.setUserName);
   const setLastSmsSync = useEPurseStore((s) => s.setLastSmsSync);
   const setLastSmsDate = useEPurseStore((s) => s.setLastSmsDate);
@@ -95,7 +98,7 @@ export default function PermissionScreen({ navigation }) {
   const compactTransactions = useEPurseStore((s) => s.compactTransactions);
   const storedName = useEPurseStore((s) => s.userName);
 
-  const [step, setStep] = useState(0); // 0 = welcome, 1 = name, 2 = permission
+  const [step, setStep] = useState(0); // 0 welcome, 1 name
   const [name, setName] = useState(storedName || "");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(null); // { current, total, label }
@@ -103,6 +106,7 @@ export default function PermissionScreen({ navigation }) {
   // ── Entrance animation ─────────────────────────────────────────────────────
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  const smsAutoRequested = useRef(false);
 
   useEffect(() => {
     Animated.parallel([
@@ -210,10 +214,10 @@ export default function PermissionScreen({ navigation }) {
   }, [ingestMessage, setLastSmsSync, setLastSmsDate, compactTransactions]);
 
   // ── Permission request ─────────────────────────────────────────────────────
-  const handleAllow = async () => {
+  const handleAllowSms = async () => {
     if (Platform.OS !== "android" || !smsSupported) {
-      // iOS / Expo Go — nothing to request, just proceed
-      finishOnboarding();
+      setSmsPermissionGranted(false);
+      await handleAllowContacts();
       return;
     }
 
@@ -224,9 +228,11 @@ export default function PermissionScreen({ navigation }) {
       if (granted) {
         setSmsPermissionGranted(true);
         await sweepInboxWithProgress();
-        finishOnboarding();
+        await handleAllowContacts();
         return;
       }
+
+      setSmsPermissionGranted(false);
 
       if (neverAskAgain) {
         Alert.alert(
@@ -237,42 +243,52 @@ export default function PermissionScreen({ navigation }) {
             {
               text: "Skip",
               style: "cancel",
-              onPress: () => finishOnboarding(),
+              onPress: () => handleAllowContacts(),
             },
           ],
         );
       } else {
-        finishOnboarding();
+        await handleAllowContacts();
       }
     } catch (e) {
-      console.warn("[PermissionScreen] handleAllow error", e?.message);
-      finishOnboarding();
+      console.warn("[PermissionScreen] handleAllowSms error", e?.message);
+      await handleAllowContacts();
     } finally {
       setLoading(false);
     }
   };
 
-  // ── AppState — auto-proceed if user grants in Settings then comes back ─────
-  useEffect(() => {
-    if (step !== 2) return;
-    let wentToBackground = false;
-    const sub = AppState.addEventListener("change", async (next) => {
-      if (next === "background" || next === "inactive") wentToBackground = true;
-      if (next === "active" && wentToBackground) {
-        wentToBackground = false;
-        const ok = await hasSmsPermission();
-        if (ok) {
-          setSmsPermissionGranted(true);
-          setLoading(true);
-          await sweepInboxWithProgress();
-          finishOnboarding();
-        }
-      }
-    });
-    return () => sub.remove();
-  }, [step, finishOnboarding, sweepInboxWithProgress, setSmsPermissionGranted]);
+  const handleAllowContacts = async () => {
+    const { granted, canAskAgain } = await requestContactsPermissionMeta();
+    if (!granted && !canAskAgain) {
+      Alert.alert(
+        "Enable contacts in Settings",
+        "Contacts permission was blocked. Open Settings and allow Contacts for ePurse.",
+        [
+          { text: "Not now", style: "cancel", onPress: handleSkipContacts },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
+      );
+      return;
+    }
+    setContactsPermissionGranted(granted);
+    finishOnboarding();
+  };
 
-  const handleSkip = () => finishOnboarding();
+  const handleSkipContacts = () => {
+    setContactsPermissionGranted(false);
+    finishOnboarding();
+  };
+
+  const handleStartPermissionFlow = async () => {
+    if (smsAutoRequested.current) return;
+    smsAutoRequested.current = true;
+    await handleAllowSms();
+  };
+
+  const handleGetStarted = () => {
+    animateStep(1);
+  };
 
   // ─── Step 0: welcome ───────────────────────────────────────────────────────
   const renderWelcome = () => (
@@ -299,11 +315,11 @@ export default function PermissionScreen({ navigation }) {
       </View>
 
       <View style={styles.footer}>
-        <Dots total={3} active={0} />
+        <Dots total={2} active={0} />
         <TouchableOpacity
           style={styles.primaryBtn}
           activeOpacity={0.85}
-          onPress={() => animateStep(1)}
+          onPress={handleGetStarted}
         >
           <LinearGradient
             colors={["#FF9F46", "#FF5A1F"]}
@@ -346,30 +362,59 @@ export default function PermissionScreen({ navigation }) {
         maxLength={30}
         onSubmitEditing={() => {
           setUserName(name);
-          animateStep(2);
+          handleStartPermissionFlow();
         }}
       />
 
       <View style={styles.footer}>
-        <Dots total={3} active={1} />
-        <TouchableOpacity
-          style={[styles.primaryBtn, !name.trim() && { opacity: 0.5 }]}
-          activeOpacity={0.85}
-          disabled={!name.trim()}
-          onPress={() => {
-            setUserName(name);
-            animateStep(2);
-          }}
-        >
-          <LinearGradient
-            colors={["#FF9F46", "#FF5A1F"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.btnGradient}
+        <Dots total={2} active={1} />
+        {progress ? (
+          <View style={styles.progressWrap}>
+            <Text style={styles.progressLabel}>{progress.label}</Text>
+            <View style={styles.progressBarBg}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    width:
+                      progress.total > 0
+                        ? `${Math.min(100, (progress.current / progress.total) * 100)}%`
+                        : "6%",
+                  },
+                ]}
+              />
+            </View>
+            {progress.total > 0 && (
+              <Text style={styles.progressCount}>
+                {progress.current} / {progress.total}
+              </Text>
+            )}
+          </View>
+        ) : loading ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color="#fff" size="small" />
+            <Text style={styles.loadingText}>Requesting permissions…</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.primaryBtn, !name.trim() && { opacity: 0.5 }]}
+            activeOpacity={0.85}
+            disabled={!name.trim()}
+            onPress={() => {
+              setUserName(name);
+              handleStartPermissionFlow();
+            }}
           >
-            <Text style={styles.btnText}>Continue</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+            <LinearGradient
+              colors={["#FF9F46", "#FF5A1F"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.btnGradient}
+            >
+              <Text style={styles.btnText}>Continue</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
       </View>
     </Animated.View>
   );
@@ -403,7 +448,7 @@ export default function PermissionScreen({ navigation }) {
       </View>
 
       <View style={styles.footer}>
-        <Dots total={3} active={2} />
+        <Dots total={4} active={2} />
 
         {progress ? (
           <View style={styles.progressWrap}>
@@ -437,7 +482,7 @@ export default function PermissionScreen({ navigation }) {
             <TouchableOpacity
               style={styles.primaryBtn}
               activeOpacity={0.85}
-              onPress={handleAllow}
+              onPress={handleAllowSms}
             >
               <LinearGradient
                 colors={["#FF9F46", "#FF5A1F"]}
@@ -449,11 +494,65 @@ export default function PermissionScreen({ navigation }) {
               </LinearGradient>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
+            <TouchableOpacity style={styles.skipBtn} onPress={handleSkipSms}>
               <Text style={styles.skipText}>Skip — I'll add manually</Text>
             </TouchableOpacity>
           </>
         )}
+      </View>
+    </Animated.View>
+  );
+
+  // ─── Step 3: contacts (split with friends) ─────────────────────────────────
+  const renderContacts = () => (
+    <Animated.View
+      style={[
+        styles.content,
+        { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+      ]}
+    >
+      <View style={styles.permIconWrap}>
+        <Text style={styles.permIcon}>👥</Text>
+      </View>
+
+      <Text style={styles.permTitle}>Contacts for split bills</Text>
+      <Text style={styles.permBody}>
+        When you split an expense, ePurse can show people from your address book
+        so you can tag who owes their share.{" "}
+        <Text style={styles.bold}>Names stay on your device.</Text>
+      </Text>
+
+      <View style={styles.privacyBox}>
+        <Text style={styles.privacyTitle}>🔒 Optional</Text>
+        <Text style={styles.privacyItem}>
+          • You can add splits later from any transaction
+        </Text>
+        <Text style={styles.privacyItem}>
+          • Skip now and allow access in Settings anytime
+        </Text>
+      </View>
+
+      <View style={styles.footer}>
+        <Dots total={4} active={3} />
+
+        <TouchableOpacity
+          style={styles.primaryBtn}
+          activeOpacity={0.85}
+          onPress={handleAllowContacts}
+        >
+          <LinearGradient
+            colors={["#FF9F46", "#FF5A1F"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.btnGradient}
+          >
+            <Text style={styles.btnText}>Allow contacts access</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.skipBtn} onPress={handleSkipContacts}>
+          <Text style={styles.skipText}>Not now</Text>
+        </TouchableOpacity>
       </View>
     </Animated.View>
   );
@@ -471,11 +570,7 @@ export default function PermissionScreen({ navigation }) {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <SafeAreaView style={styles.safe}>
-          {step === 0
-            ? renderWelcome()
-            : step === 1
-              ? renderName()
-              : renderPermission()}
+          {step === 0 ? renderWelcome() : renderName()}
           <Text style={styles.copyrightText}>
             © All rights reserved by pvn13
           </Text>

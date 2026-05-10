@@ -4,9 +4,10 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency, formatDateTime } from '../utils/format';
+import { debitDisplayAmount, splitParticipantsLabel } from '../utils/split';
 import CategoryIcon from './CategoryIcon';
 
-const TransactionItem = ({ txn, onPress, onPressCategory }) => {
+const TransactionItem = ({ txn, onPress, onPressCategory, onPressSplitChip }) => {
   const categories = useEPurseStore((s) => s.categories);
   const category = useMemo(
     () => categories.find((c) => c.id === txn.categoryId) || categories[categories.length - 1],
@@ -16,10 +17,18 @@ const TransactionItem = ({ txn, onPress, onPressCategory }) => {
   const isCredit = txn.type === 'credit';
   const sign = isCredit ? '+' : '−';
   const amountColor = isCredit ? colors.success : colors.textPrimary;
+  const displayAmount = isCredit ? txn.amount : debitDisplayAmount(txn);
+  const splitLabel = txn.isSplit ? splitParticipantsLabel(txn.splitWith) : '';
   const statusChip = getStatusChip(txn.categoryId);
+  const cardPressable = typeof onPress === 'function';
 
   return (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.card}>
+    <TouchableOpacity
+      activeOpacity={cardPressable ? 0.8 : 1}
+      onPress={cardPressable ? onPress : undefined}
+      disabled={!cardPressable}
+      style={styles.card}
+    >
       <TouchableOpacity
         activeOpacity={onPressCategory ? 0.75 : 1}
         onPress={onPressCategory}
@@ -51,12 +60,24 @@ const TransactionItem = ({ txn, onPress, onPressCategory }) => {
 
       <View style={styles.right}>
         <Text style={[styles.amount, { color: amountColor }]}>
-          {sign} {formatCurrency(txn.amount)}
+          {sign} {formatCurrency(displayAmount)}
         </Text>
         {txn.isSplit ? (
-          <View style={styles.splitTag}>
-            <Text style={styles.splitText}>SPLIT</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.splitTag}
+            activeOpacity={onPressSplitChip ? 0.8 : 1}
+            onPress={onPressSplitChip ? () => onPressSplitChip(txn) : undefined}
+            disabled={!onPressSplitChip}
+          >
+            <View style={styles.splitRow}>
+              <Text style={styles.splitIcon}>👥</Text>
+              {splitLabel ? (
+                <Text style={styles.splitNames} numberOfLines={1}>
+                  {splitLabel}
+                </Text>
+              ) : null}
+            </View>
+          </TouchableOpacity>
         ) : null}
       </View>
     </TouchableOpacity>
@@ -114,12 +135,21 @@ const styles = StyleSheet.create({
   amount: { ...typography.bodyBold, fontWeight: '700' },
   splitTag: {
     marginTop: 4,
+    alignItems: 'flex-end',
     backgroundColor: colors.info + '22',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: radius.sm,
+    maxWidth: 120,
   },
-  splitText: { ...typography.tiny, color: colors.info, fontWeight: '700' },
+  splitRow: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 112 },
+  splitIcon: { fontSize: 12 },
+  splitNames: {
+    ...typography.tiny,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    maxWidth: 112,
+  },
 });
 
 function getStatusChip(categoryId) {

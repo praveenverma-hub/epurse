@@ -15,9 +15,15 @@
 //   • smsPermissionGranted — true once OS-level SMS permission is granted
 //
 // Retention rules (enforced by `compactTransactions`):
-//   • 0 – 3 months  → raw transactions
+//   • 0 – 3 months  → raw transactions (general categories only)
 //   • 3 – 24 months → only monthly aggregates per category & account
-//   • > 24 months   → dropped entirely
+//   • > 24 months   → dropped entirely (aggregates), raw pruned per rules below
+//   • Lent / borrow (REAL txns too — any SMS or manual row with these categoryIds):
+//       · `lent`, `borrowed` — stay raw forever; never rolled into monthly aggregates
+//         (so they are not lost when general data older than 3 months compacts away).
+//       · `lent_settled`, `borrow_repaid` — stay raw up to 1 year from that row’s date,
+//         then removed; still never aggregated.
+//   • Manual IOU list (`lentBorrowed`): unsettled kept; settled rows pruned after 1 year (`settledAt`)
 // =============================================================================
 
 import { create } from 'zustand';
@@ -28,6 +34,12 @@ import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constan
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { isSameMonth, monthKey } from '../utils/format';
+import {
+  computeEqualSplit,
+  computePercentSplit,
+  canSplitTransaction,
+  debitDisplayAmount,
+} from '../utils/split';
 
 // =============================================================================
 // Constants
@@ -37,6 +49,12 @@ const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
 const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
 const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
 const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid'];
+
+/** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
+const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
+/** Settled categories — same; kept raw ≤ 1 yr then dropped, never merged into monthly aggregates. */
+const LB_SETTLED_CATS = new Set(['lent_settled', 'borrow_repaid']);
+const LB_SETTLED_RETENTION_MS = 365 * DAY_MS;
 
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
 const SUPPRESS_SMS_CAP = 2500;
@@ -198,8 +216,9 @@ const aggregate = (transactions) => {
     }
     const a = out[key];
     if (t.type === TRANSACTION_TYPES.DEBIT) {
-      a.totalSpend += t.amount;
-      a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + t.amount;
+      const spend = debitDisplayAmount(t);
+      a.totalSpend += spend;
+      a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + spend;
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) - t.amount;
     } else if (t.type === TRANSACTION_TYPES.CREDIT) {
       a.totalIncome += t.amount;
@@ -238,6 +257,7 @@ export const useEPurseStore = create(
 
       hasOnboarded: false,
       smsPermissionGranted: false,
+      contactsPermissionGranted: false,
 
       hydrated: false,
 
@@ -245,6 +265,7 @@ export const useEPurseStore = create(
       setUserName: (name) => set({ userName: (name || '').trim() }),
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
+      setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
 
       // ----- accounts ----------------------------------------------------
       addAccount: (account) =>
@@ -275,21 +296,72 @@ export const useEPurseStore = create(
           const id =
             txn.id ||
             `IdM${String(nextSeq).padStart(4, '0')}`;
+          const { splitOthers, ...txnRest } = txn;
           const newTxn = {
             id,
             createdAt: new Date().toISOString(),
             isSplit: false,
             splitWith: [],
             source: 'manual',
-            ...txn,
+            ...txnRest,
             id,
           };
-          // Manual entries are allowed without category — caller picks one.
+
+          let nextLent = s.lentBorrowed;
+          const others = Array.isArray(splitOthers) ? splitOthers : [];
+          if (
+            newTxn.isSplit &&
+            others.length > 0 &&
+            canSplitTransaction(newTxn)
+          ) {
+            // Amount mode: accept explicit myShareAmount + splitOthers[].shareAmount
+            if (
+              typeof txn?.myShareAmount === 'number' &&
+              others.every((o) => typeof o.shareAmount === 'number')
+            ) {
+              newTxn.myShareAmount = txn.myShareAmount;
+              newTxn.splitWith = others.map((o) => ({
+                contactId: o.contactId ?? null,
+                name: (o.name || 'Friend').trim(),
+                shareAmount: Number(o.shareAmount) || 0,
+              }));
+            } else {
+              // Percent mode (or fallback to equal)
+              const myPercent = typeof txn?.myPercent === 'number' ? txn.myPercent : null;
+              const hasPercents = myPercent != null && others.every((o) => typeof o.percent === 'number');
+              const { myShare, otherShares } = hasPercents
+                ? computePercentSplit(newTxn.amount, myPercent, others)
+                : computeEqualSplit(newTxn.amount, others);
+              newTxn.myShareAmount = myShare;
+              newTxn.splitWith = others.map((o, i) => ({
+                contactId: o.contactId ?? null,
+                name: (o.name || 'Friend').trim(),
+                shareAmount: otherShares[i],
+              }));
+            }
+            const stamp = Date.now();
+            const newRows = newTxn.splitWith.map((o, i) => ({
+              id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+              kind: 'lent',
+              person: (o.name || 'Friend').trim(),
+              amount: Number(o.shareAmount) || 0,
+              note: `Split · ${newTxn.merchant || 'Expense'}`,
+              date: newTxn.createdAt,
+              sourceTxnId: newTxn.id,
+            }));
+            nextLent = [...newRows, ...nextLent];
+          } else {
+            newTxn.isSplit = false;
+            newTxn.splitWith = [];
+            delete newTxn.myShareAmount;
+          }
+
           const { accounts: nextAccounts, account } = ensureAccountForParsed(s.accounts, newTxn);
           newTxn.accountId = account?.id || null;
           return {
             transactions: [newTxn, ...s.transactions],
             accounts: applyDelta(nextAccounts, account?.id, newTxn),
+            lentBorrowed: nextLent,
             ...(useProvidedId ? {} : { manualTxnSeq: nextSeq }),
           };
         }),
@@ -346,6 +418,7 @@ export const useEPurseStore = create(
             return {
               transactions: s.transactions.filter((t) => t.id !== id),
               accounts: s.accounts,
+              lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
               ...(txn.smsId
                 ? {
                     suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
@@ -364,6 +437,7 @@ export const useEPurseStore = create(
           return {
             transactions: s.transactions.filter((t) => t.id !== id),
             accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
             ...(txn.smsId
               ? {
                   suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
@@ -390,6 +464,7 @@ export const useEPurseStore = create(
               t.id === id ? { ...t, isIgnored: true } : t
             ),
             accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
             ...(txn.smsId
               ? {
                   suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
@@ -418,19 +493,114 @@ export const useEPurseStore = create(
           };
         }),
 
-      toggleSplit: (id, splitWith = []) =>
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id ? { ...t, isSplit: !t.isSplit, splitWith } : t
-          ),
-        })),
+      /**
+       * Equal split: `others` = friends (not you). Creates lent rows with `sourceTxnId`.
+       * Pass empty `others` to clear split and remove linked lent rows.
+       */
+      setTransactionSplit: (txnId, others, meta = {}) =>
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === txnId);
+          if (!txn) return s;
+          const lb = s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
+          const clearSplit = {
+            isSplit: false,
+            splitWith: [],
+            myShareAmount: undefined,
+          };
+
+          if (!others || others.length === 0 || !canSplitTransaction(txn)) {
+            return {
+              transactions: s.transactions.map((t) =>
+                t.id === txnId ? { ...t, ...clearSplit } : t
+              ),
+              lentBorrowed: lb,
+            };
+          }
+
+          const mode = meta?.mode || 'percent';
+          let myShare = null;
+          let splitWith = [];
+
+          if (
+            mode === 'amount' &&
+            typeof meta?.myAmount === 'number' &&
+            others.every((o) => typeof o.shareAmount === 'number')
+          ) {
+            myShare = meta.myAmount;
+            splitWith = others.map((o) => ({
+              contactId: o.contactId ?? null,
+              name: (o.name || 'Friend').trim(),
+              shareAmount: Number(o.shareAmount) || 0,
+            }));
+          } else if (
+            mode === 'percent' &&
+            typeof meta?.myPercent === 'number' &&
+            others.every((o) => typeof o.percent === 'number')
+          ) {
+            const { myShare: ms, otherShares } = computePercentSplit(txn.amount, meta.myPercent, others);
+            myShare = ms;
+            splitWith = others.map((o, i) => ({
+              contactId: o.contactId ?? null,
+              name: (o.name || 'Friend').trim(),
+              shareAmount: otherShares[i],
+            }));
+          } else {
+            const { myShare: ms, otherShares } = computeEqualSplit(txn.amount, others);
+            myShare = ms;
+            splitWith = others.map((o, i) => ({
+              contactId: o.contactId ?? null,
+              name: (o.name || 'Friend').trim(),
+              shareAmount: otherShares[i],
+            }));
+          }
+
+          const stamp = Date.now();
+          const newLent = splitWith.map((o, i) => ({
+            id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+            kind: 'lent',
+            person: (o.name || 'Friend').trim(),
+            amount: Number(o.shareAmount) || 0,
+            note: `Split · ${txn.merchant || 'Expense'}`,
+            date: txn.createdAt,
+            sourceTxnId: txnId,
+          }));
+
+          return {
+            transactions: s.transactions.map((t) =>
+              t.id === txnId
+                ? { ...t, isSplit: true, myShareAmount: Number(myShare) || 0, splitWith }
+                : t
+            ),
+            lentBorrowed: [...newLent, ...lb],
+          };
+        }),
 
       updateTransactionCategory: (id, categoryId) =>
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id ? { ...t, categoryId } : t
-          ),
-        })),
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === id);
+          if (!txn) return s;
+          const hypothetical = { ...txn, categoryId };
+          const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
+          const lb = mustClearSplit
+            ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id)
+            : s.lentBorrowed;
+          return {
+            transactions: s.transactions.map((t) => {
+              if (t.id !== id) return t;
+              if (mustClearSplit) {
+                return {
+                  ...t,
+                  categoryId,
+                  isSplit: false,
+                  splitWith: [],
+                  myShareAmount: undefined,
+                };
+              }
+              return { ...t, categoryId };
+            }),
+            lentBorrowed: lb,
+          };
+        }),
 
       setTransactionHidden: (id, hidden) =>
         set((s) => ({
@@ -465,7 +635,11 @@ export const useEPurseStore = create(
         })),
 
       settleLentBorrowed: (id) =>
-        set((s) => ({ lentBorrowed: s.lentBorrowed.filter((l) => l.id !== id) })),
+        set((s) => ({
+          lentBorrowed: s.lentBorrowed.map((l) =>
+            l.id === id ? { ...l, settledAt: new Date().toISOString() } : l
+          ),
+        })),
 
       // ----- SMS sync flags ---------------------------------------------
       setSmsAutoImport: (val) => set({ smsAutoImport: !!val }),
@@ -484,8 +658,8 @@ export const useEPurseStore = create(
       // ----- retention / compaction -------------------------------------
       /**
        * Enforce the retention policy:
-       *   • compute aggregates for any transaction ≥ 3 months old
-       *   • drop those raw transactions
+       *   • General categories: txns ≥ 3 months old → aggregated, raw row dropped
+       *   • Lent/borrow categoryIds on ANY transaction: never aggregated; see LB_* branches below
        *   • drop aggregates older than 24 months
        *
        * Throttled: a no-op if we ran less than COMPACT_THROTTLE ago, unless
@@ -510,8 +684,27 @@ export const useEPurseStore = create(
               if (ts >= rawCutoff) stillRaw.push(t);
               return;
             }
+
+            const cat = t.categoryId;
+            // Real bank/SMS/manual txns tagged settled: same rule as manual IOUs — raw ≤ 1 yr, not aggregated.
+            if (LB_SETTLED_CATS.has(cat)) {
+              if (now - ts > LB_SETTLED_RETENTION_MS) return;
+              stillRaw.push(t);
+              return;
+            }
+            // Real txns tagged lent/borrowed: bypass 3-month compaction — stay raw until user changes category.
+            if (LB_OUTSTANDING_CATS.has(cat)) {
+              stillRaw.push(t);
+              return;
+            }
+
             if (ts >= rawCutoff) stillRaw.push(t);
             else toAggregate.push(t);
+          });
+
+          const lentBorrowedPruned = (s.lentBorrowed || []).filter((l) => {
+            if (!l.settledAt) return true;
+            return new Date(l.settledAt).getTime() >= now - LB_SETTLED_RETENTION_MS;
           });
 
           // Merge new aggregates into the existing map.
@@ -537,6 +730,7 @@ export const useEPurseStore = create(
 
           return {
             transactions: stillRaw,
+            lentBorrowed: lentBorrowedPruned,
             monthlyAggregates: merged,
             lastCompactedAt: now,
           };
@@ -547,7 +741,9 @@ export const useEPurseStore = create(
       getTotalBalance: () => get().accounts.reduce((sum, a) => sum + (a.balance || 0), 0),
 
       getTotalLent: () =>
-        get().lentBorrowed.filter((l) => l.kind === 'lent').reduce((s, l) => s + l.amount, 0) +
+        get()
+          .lentBorrowed.filter((l) => l.kind === 'lent' && !l.settledAt)
+          .reduce((s, l) => s + l.amount, 0) +
         get().transactions
           .filter((t) => !t.isIgnored && t.categoryId === 'lent')
           .reduce((s, t) => s + (t.amount || 0), 0) -
@@ -556,7 +752,9 @@ export const useEPurseStore = create(
           .reduce((s, t) => s + (t.amount || 0), 0),
 
       getTotalBorrowed: () =>
-        get().lentBorrowed.filter((l) => l.kind === 'borrowed').reduce((s, l) => s + l.amount, 0) +
+        get()
+          .lentBorrowed.filter((l) => l.kind === 'borrowed' && !l.settledAt)
+          .reduce((s, l) => s + l.amount, 0) +
         get().transactions
           .filter((t) => !t.isIgnored && t.categoryId === 'borrowed')
           .reduce((s, t) => s + (t.amount || 0), 0) -
@@ -575,7 +773,9 @@ export const useEPurseStore = create(
             t.type === TRANSACTION_TYPES.DEBIT &&
             isSameMonth(t.createdAt, date)
         );
-        if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
+        if (txns.length > 0) {
+          return txns.reduce((sum, t) => sum + debitDisplayAmount(t), 0);
+        }
         return get().monthlyAggregates[monthKey(date)]?.totalSpend || 0;
       },
 
@@ -610,7 +810,7 @@ export const useEPurseStore = create(
         if (raw.length > 0) {
           totals = {};
           raw.forEach((t) => {
-            totals[t.categoryId] = (totals[t.categoryId] || 0) + t.amount;
+            totals[t.categoryId] = (totals[t.categoryId] || 0) + debitDisplayAmount(t);
           });
           grandTotal = Object.values(totals).reduce((s, v) => s + v, 0) || 1;
         } else {
@@ -649,6 +849,7 @@ export const useEPurseStore = create(
           userName: '',
           hasOnboarded: false,
           smsPermissionGranted: false,
+          contactsPermissionGranted: false,
         }),
     }),
     {
@@ -656,7 +857,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 6,
+      version: 7,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -701,6 +902,13 @@ export const useEPurseStore = create(
           };
         }
 
+        if (version < 7) {
+          state = {
+            ...state,
+            contactsPermissionGranted: state.contactsPermissionGranted ?? false,
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -719,6 +927,7 @@ export const useEPurseStore = create(
         userName: state.userName,
         hasOnboarded: state.hasOnboarded,
         smsPermissionGranted: state.smsPermissionGranted,
+        contactsPermissionGranted: state.contactsPermissionGranted,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;

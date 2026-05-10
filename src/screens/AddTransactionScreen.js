@@ -3,7 +3,7 @@
 // Supports manual cash entries plus pasting an SMS to be auto-parsed.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,9 @@ import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import GradientButton from '../components/GradientButton';
+import SplitConfigModal from '../components/SplitConfigModal';
 import { parseMessageDetailed } from '../utils/messageParser';
+import { canSplitTransaction } from '../utils/split';
 
 const AddTransactionScreen = ({ navigation }) => {
   const categories = useEPurseStore((s) => s.categories);
@@ -39,10 +41,38 @@ const AddTransactionScreen = ({ navigation }) => {
   const [accountType, setAccountType] = useState(ACCOUNT_TYPES.CASH);
   const [categoryId, setCategoryId] = useState('food');
   const [isSplit, setIsSplit] = useState(false);
+  const [splitPicks, setSplitPicks] = useState([]);
+  const [splitMode, setSplitMode] = useState('percent'); // 'percent' | 'amount'
+  const [mySplitPercent, setMySplitPercent] = useState(null);
+  const [mySplitAmount, setMySplitAmount] = useState(null);
+  const [splitModalOpen, setSplitModalOpen] = useState(false);
   const [note, setNote] = useState('');
 
   // sms field
   const [smsBody, setSmsBody] = useState('');
+
+  const splitDraftTxn = useMemo(
+    () => ({
+      amount: parseFloat(amount) || 0,
+      merchant: merchant.trim(),
+      type,
+      categoryId,
+      isIgnored: false,
+      isSplit,
+      splitWith: splitPicks.map((p) => ({
+        contactId: p.contactId,
+        name: p.name,
+        shareAmount: 0,
+      })),
+    }),
+    [amount, merchant, type, categoryId, isSplit, splitPicks]
+  );
+
+  const canSplitHere = canSplitTransaction({
+    type,
+    categoryId,
+    isIgnored: false,
+  });
 
   const handleSave = () => {
     const num = parseFloat(amount);
@@ -58,6 +88,11 @@ const AddTransactionScreen = ({ navigation }) => {
       Alert.alert('Missing merchant', 'Please enter who you paid / received from.');
       return;
     }
+    const wantSplit = isSplit && canSplitHere;
+    if (wantSplit && splitPicks.length === 0) {
+      Alert.alert('Choose people', 'Pick at least one person to split this expense with.');
+      return;
+    }
     addTransaction({
       amount: num,
       type,
@@ -65,8 +100,22 @@ const AddTransactionScreen = ({ navigation }) => {
       categoryId,
       merchant: merchant.trim(),
       note: note.trim(),
-      isSplit,
-      splitWith: [],
+      isSplit: wantSplit,
+      splitOthers: wantSplit
+        ? splitMode === 'amount'
+          ? splitPicks.map((p) => ({
+              contactId: p.contactId,
+              name: p.name,
+              shareAmount: Number(p.shareAmount) || 0,
+            }))
+          : splitPicks
+        : undefined,
+      ...(wantSplit && splitMode === 'percent' && typeof mySplitPercent === 'number'
+        ? { myPercent: mySplitPercent }
+        : {}),
+      ...(wantSplit && splitMode === 'amount' && typeof mySplitAmount === 'number'
+        ? { myShareAmount: mySplitAmount }
+        : {}),
       source: 'manual',
     });
     navigation.goBack();
@@ -139,7 +188,18 @@ const AddTransactionScreen = ({ navigation }) => {
                     { key: TRANSACTION_TYPES.DEBIT, label: 'Expense' },
                     { key: TRANSACTION_TYPES.CREDIT, label: 'Income' },
                   ].map((opt) => (
-                    <Seg key={opt.key} label={opt.label} active={type === opt.key} onPress={() => setType(opt.key)} />
+                    <Seg
+                      key={opt.key}
+                      label={opt.label}
+                      active={type === opt.key}
+                      onPress={() => {
+                        setType(opt.key);
+                        if (opt.key === TRANSACTION_TYPES.CREDIT) {
+                          setIsSplit(false);
+                          setSplitPicks([]);
+                        }
+                      }}
+                    />
                   ))}
                 </View>
               </Field>
@@ -167,7 +227,14 @@ const AddTransactionScreen = ({ navigation }) => {
                   {categories.map((c) => (
                     <TouchableOpacity
                       key={c.id}
-                      onPress={() => setCategoryId(c.id)}
+                      onPress={() => {
+                        setCategoryId(c.id);
+                        const draft = { type, categoryId: c.id, isIgnored: false };
+                        if (!canSplitTransaction(draft)) {
+                          setIsSplit(false);
+                          setSplitPicks([]);
+                        }
+                      }}
                       style={[
                         styles.catPill,
                         categoryId === c.id && {
@@ -201,23 +268,81 @@ const AddTransactionScreen = ({ navigation }) => {
                 />
               </Field>
 
-              <TouchableOpacity
-                style={[styles.splitToggle, isSplit && styles.splitToggleActive]}
-                onPress={() => setIsSplit((v) => !v)}
-              >
-                <Text style={styles.splitEmoji}>👥</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.splitTitle}>Split with friends?</Text>
-                  <Text style={styles.splitHelp}>
-                    Tag this transaction so you can settle it later.
-                  </Text>
-                </View>
-                <View style={[styles.checkbox, isSplit && styles.checkboxOn]}>
-                  {isSplit && <Text style={styles.checkmark}>✓</Text>}
-                </View>
-              </TouchableOpacity>
+              {canSplitHere ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.splitToggle, isSplit && styles.splitToggleActive]}
+                    onPress={() => {
+                      setIsSplit((v) => {
+                        const next = !v;
+                        if (!next) setSplitPicks([]);
+                        return next;
+                      });
+                    }}
+                  >
+                    <Text style={styles.splitEmoji}>👥</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.splitTitle}>Split with friends?</Text>
+                      <Text style={styles.splitHelp}>
+                        Your share is tracked; others appear in Lent from this split.
+                      </Text>
+                    </View>
+                    <View style={[styles.checkbox, isSplit && styles.checkboxOn]}>
+                      {isSplit && <Text style={styles.checkmark}>✓</Text>}
+                    </View>
+                  </TouchableOpacity>
+
+                  {isSplit ? (
+                    <TouchableOpacity
+                      style={styles.splitPickBtn}
+                      onPress={() => setSplitModalOpen(true)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.splitPickBtnTitle}>
+                        {splitPicks.length === 0
+                          ? 'Tap to choose people'
+                          : `${splitPicks.length} friend${splitPicks.length === 1 ? '' : 's'} · equal split`}
+                      </Text>
+                      <Text style={styles.splitPickBtnHint}>Uses your contacts</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.splitUnavailable}>
+                  Split is available for expenses only (not income or lend / borrow categories).
+                </Text>
+              )}
 
               <GradientButton title="Save transaction" onPress={handleSave} style={{ marginTop: spacing.xl }} />
+
+              <SplitConfigModal
+                visible={splitModalOpen}
+                transaction={splitDraftTxn}
+                onClose={() => setSplitModalOpen(false)}
+                onApply={(others, meta) => {
+                  if (!others?.length) {
+                    setSplitPicks([]);
+                    setMySplitPercent(null);
+                    setMySplitAmount(null);
+                    setSplitMode('percent');
+                    setIsSplit(false);
+                  } else {
+                    setSplitMode(meta?.mode || 'percent');
+                    if ((meta?.mode || 'percent') === 'amount') {
+                      // others come in as { shareAmount }
+                      setSplitPicks(others);
+                      setMySplitAmount(typeof meta?.myAmount === 'number' ? meta.myAmount : null);
+                      setMySplitPercent(null);
+                    } else {
+                      // others come in as { percent }
+                      setSplitPicks(others);
+                      setMySplitPercent(typeof meta?.myPercent === 'number' ? meta.myPercent : null);
+                      setMySplitAmount(null);
+                    }
+                  }
+                  setSplitModalOpen(false);
+                }}
+              />
             </>
           ) : (
             <>
@@ -389,6 +514,24 @@ const styles = StyleSheet.create({
   },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   checkmark: { color: '#fff', fontWeight: '700' },
+
+  splitPickBtn: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primary + '44',
+    ...shadows.card,
+  },
+  splitPickBtnTitle: { ...typography.bodyBold, color: colors.primary, fontWeight: '700' },
+  splitPickBtnHint: { ...typography.tiny, color: colors.textSecondary, marginTop: 4 },
+  splitUnavailable: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginBottom: spacing.sm,
+  },
 
   smsHelp: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
 });
