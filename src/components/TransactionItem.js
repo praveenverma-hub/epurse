@@ -43,7 +43,8 @@ const TransactionItem = ({ txn, onPress, onPressCategory }) => {
               <Text style={[styles.statusChipText, { color: statusChip.text }]}>{statusChip.label}</Text>
             </View>
           ) : null}
-          {txn.isHidden ? <Text style={styles.hiddenTag}>HIDDEN</Text> : null}
+          {txn.isIgnored ? <Text style={styles.ignoredTag}>IGNORED</Text> : null}
+          {!txn.isIgnored && txn.isHidden ? <Text style={styles.hiddenTag}>HIDDEN</Text> : null}
         </View>
         <Text style={styles.time}>{formatDateTime(txn.createdAt)}</Text>
       </View>
@@ -95,6 +96,16 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     backgroundColor: colors.textMuted + '26',
     color: colors.textSecondary,
+    ...typography.tiny,
+    fontWeight: '700',
+  },
+  ignoredTag: {
+    marginLeft: spacing.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: colors.warning + '22',
+    color: colors.warning,
     ...typography.tiny,
     fontWeight: '700',
   },

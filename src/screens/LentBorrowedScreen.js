@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency, formatDate } from '../utils/format';
 import GradientButton from '../components/GradientButton';
@@ -34,10 +35,14 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const total = useMemo(() => {
     const manualTotal = list.reduce((s, l) => s + l.amount, 0);
     const taggedBase = transactions
-      .filter((t) => t.categoryId === kind)
+      .filter((t) => !t.isIgnored && t.categoryId === kind)
       .reduce((s, t) => s + (t.amount || 0), 0);
     const taggedSettled = transactions
-      .filter((t) => t.categoryId === (kind === 'lent' ? 'lent_settled' : 'borrow_repaid'))
+      .filter(
+        (t) =>
+          !t.isIgnored &&
+          t.categoryId === (kind === 'lent' ? 'lent_settled' : 'borrow_repaid')
+      )
       .reduce((s, t) => s + (t.amount || 0), 0);
     return manualTotal + taggedBase - taggedSettled;
   }, [list, transactions, kind]);
@@ -51,6 +56,10 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     const n = parseFloat(amount);
     if (!person.trim() || !n || n <= 0) {
       Alert.alert('Missing fields', 'Add a person and a positive amount.');
+      return;
+    }
+    if (n > MAX_ALLOWED_AMOUNT) {
+      Alert.alert('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
       return;
     }
     addLentBorrowed({ kind, person: person.trim(), amount: n, note: note.trim() });

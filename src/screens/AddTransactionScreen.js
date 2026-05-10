@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import GradientButton from '../components/GradientButton';
 import { parseMessageDetailed } from '../utils/messageParser';
@@ -49,6 +50,10 @@ const AddTransactionScreen = ({ navigation }) => {
       Alert.alert('Invalid amount', 'Please enter an amount greater than zero.');
       return;
     }
+    if (num > MAX_ALLOWED_AMOUNT) {
+      Alert.alert('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
+      return;
+    }
     if (!merchant.trim()) {
       Alert.alert('Missing merchant', 'Please enter who you paid / received from.');
       return;
@@ -75,6 +80,11 @@ const AddTransactionScreen = ({ navigation }) => {
     const diagnostic = parseMessageDetailed(smsBody.trim());
     if (!diagnostic?.ok) {
       Alert.alert('Could not parse', diagnostic?.error?.message || 'Message format not recognised.');
+      return;
+    }
+    const parsedItems = diagnostic.transactions || [diagnostic.transaction];
+    if (parsedItems.some((item) => (item?.amount || 0) > MAX_ALLOWED_AMOUNT)) {
+      Alert.alert('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
       return;
     }
 
@@ -112,7 +122,7 @@ const AddTransactionScreen = ({ navigation }) => {
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           {mode === 'manual' ? (
             <>
-              <Field label="Amount (₹)">
+              <Field label="Amount (₹) · Max 10 crore">
                 <TextInput
                   value={amount}
                   onChangeText={setAmount}

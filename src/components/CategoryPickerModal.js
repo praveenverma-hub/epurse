@@ -15,8 +15,12 @@ const CategoryPickerModal = ({
   categories,
   selectedCategoryId,
   isHidden,
+  isIgnored,
   onSelectCategory,
   onToggleHidden,
+  onIgnore,
+  onRestore,
+  onDelete,
   onClose,
 }) => (
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -44,13 +48,27 @@ const CategoryPickerModal = ({
           })}
         </ScrollView>
 
-        <TouchableOpacity
-          style={[styles.hideBtn, isHidden && styles.unhideBtn]}
-          onPress={() => onToggleHidden(!isHidden)}
-        >
-          <Text style={[styles.hideText, isHidden && styles.unhideText]}>
-            {isHidden ? 'Show transaction' : 'Hide transaction'}
-          </Text>
+        <View style={styles.hideIgnoreRow}>
+          <TouchableOpacity
+            style={[styles.hideIgnoreHalf, isHidden ? styles.unhideHalf : styles.hideHalf]}
+            onPress={() => onToggleHidden(!isHidden)}
+          >
+            <Text style={[styles.hideIgnoreText, isHidden && styles.unhideText]}>
+              {isHidden ? 'Show' : 'Hide'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.hideIgnoreHalf, isIgnored ? styles.restoreHalf : styles.ignoreHalf]}
+            onPress={isIgnored ? onRestore : onIgnore}
+          >
+            <Text style={isIgnored ? styles.restoreText : styles.ignoreText}>
+              {isIgnored ? 'Restore' : 'Ignore'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
+          <Text style={styles.deleteText}>Delete transaction</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -100,21 +118,50 @@ const styles = StyleSheet.create({
   rowLabel: { flex: 1, ...typography.body, color: colors.textPrimary },
   rowLabelActive: { color: colors.primary, fontWeight: '700' },
   check: { color: colors.primary, fontWeight: '800' },
-  hideBtn: {
+  hideIgnoreRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
     marginTop: spacing.sm,
+  },
+  hideIgnoreHalf: {
+    flex: 1,
     borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hideHalf: {
     backgroundColor: colors.danger + '16',
     borderWidth: 1,
     borderColor: colors.danger + '55',
+  },
+  unhideHalf: {
+    backgroundColor: colors.success + '16',
+    borderColor: colors.success + '55',
+    borderWidth: 1,
+  },
+  hideIgnoreText: { color: colors.danger, ...typography.small, fontWeight: '700' },
+  unhideText: { color: colors.success },
+  ignoreHalf: {
+    backgroundColor: colors.warning + '18',
+    borderWidth: 1,
+    borderColor: colors.warning + '66',
+  },
+  ignoreText: { color: colors.warning, ...typography.small, fontWeight: '700' },
+  restoreHalf: {
+    backgroundColor: colors.success + '18',
+    borderWidth: 1,
+    borderColor: colors.success + '66',
+  },
+  restoreText: { color: colors.success, ...typography.small, fontWeight: '700' },
+  deleteBtn: {
+    marginTop: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.danger,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  hideText: { color: colors.danger, ...typography.bodyBold, fontWeight: '700' },
-  unhideBtn: {
-    backgroundColor: colors.success + '16',
-    borderColor: colors.success + '55',
-  },
-  unhideText: { color: colors.success },
+  deleteText: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
 });
 
 export default CategoryPickerModal;

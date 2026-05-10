@@ -62,6 +62,9 @@ const DashboardScreen = ({ navigation }) => {
   const ingestMessage   = useEPurseStore((s) => s.ingestMessage);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
+  const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
+  const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
+  const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
 
   const [period, setPeriod]     = useState('M');
   const [refreshing, setRefreshing] = useState(false);
@@ -72,8 +75,10 @@ const DashboardScreen = ({ navigation }) => {
     const startMs = periodStart(period);
     const now = new Date();
 
-    // Filter raw transactions within the period window
-    const inPeriod = transactions.filter((t) => new Date(t.createdAt).getTime() >= startMs);
+    // Filter raw transactions within the period window (ignored = excluded everywhere)
+    const inPeriod = transactions.filter(
+      (t) => !t.isIgnored && new Date(t.createdAt).getTime() >= startMs
+    );
     const visibleInPeriod = inPeriod.filter((t) => !t.isHidden);
 
     const rawSpend  = inPeriod.filter((t) => t.type === TRANSACTION_TYPES.DEBIT)
@@ -121,8 +126,9 @@ const DashboardScreen = ({ navigation }) => {
     let startMs = null;
 
     // Check raw transactions first
-    if (transactions.length > 0) {
-      const oldest = [...transactions].sort(
+    const counted = transactions.filter((t) => !t.isIgnored);
+    if (counted.length > 0) {
+      const oldest = [...counted].sort(
         (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
       )[0];
       startMs = new Date(oldest.createdAt).getTime();
@@ -318,6 +324,7 @@ const DashboardScreen = ({ navigation }) => {
         categories={categories}
         selectedCategoryId={activeTxn?.categoryId}
         isHidden={!!activeTxn?.isHidden}
+        isIgnored={!!activeTxn?.isIgnored}
         onClose={() => setActiveTxn(null)}
         onSelectCategory={(categoryId) => {
           if (!activeTxn) return;
@@ -328,6 +335,55 @@ const DashboardScreen = ({ navigation }) => {
           if (!activeTxn) return;
           setTransactionHidden(activeTxn.id, hidden);
           setActiveTxn(null);
+        }}
+        onDelete={() => {
+          if (!activeTxn) return;
+          Alert.alert('Delete transaction?', 'This action cannot be undone.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => {
+                deleteTransaction(activeTxn.id);
+                setActiveTxn(null);
+              },
+            },
+          ]);
+        }}
+        onIgnore={() => {
+          if (!activeTxn) return;
+          Alert.alert(
+            'Ignore transaction?',
+            'This removes it from your balances and every total and chart. It will be treated as if it never happened.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Ignore',
+                style: 'destructive',
+                onPress: () => {
+                  ignoreTransaction(activeTxn.id);
+                  setActiveTxn(null);
+                },
+              },
+            ]
+          );
+        }}
+        onRestore={() => {
+          if (!activeTxn) return;
+          Alert.alert(
+            'Restore transaction?',
+            'This adds it back to balances, totals, and charts.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Restore',
+                onPress: () => {
+                  unignoreTransaction(activeTxn.id);
+                  setActiveTxn(null);
+                },
+              },
+            ]
+          );
         }}
       />
     </View>

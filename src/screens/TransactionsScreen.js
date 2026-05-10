@@ -3,7 +3,7 @@
 // -----------------------------------------------------------------------------
 // Three filter layers stacked above the list:
 //   1. Timeframe segmented control: Week / Month (default) / Year / All
-//   2. Quick filter chips: All / Split / by-category
+//   2. Quick filter chips: All / Split / by-category / Hidden / Ignored
 //   3. Advanced filter modal: amount range + merchant/person search
 // Active advanced filters render as removable tag chips above the list.
 // =============================================================================
@@ -20,6 +20,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -45,9 +46,12 @@ const TransactionsScreen = ({ navigation }) => {
   const categories   = useEPurseStore((s) => s.categories);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
+  const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
+  const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
+  const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
 
   const [timeframe, setTimeframe] = useState('month'); // default per spec
-  const [filter, setFilter] = useState('all');         // 'all' | 'split' | 'hidden' | category id
+  const [filter, setFilter] = useState('all'); // 'all' | 'split' | 'hidden' | 'ignored' | category id
   const [advanced, setAdvanced] = useState({
     minAmount: '',
     maxAmount: '',
@@ -88,19 +92,25 @@ const TransactionsScreen = ({ navigation }) => {
   }, [timeframe]);
 
   const data = useMemo(() => {
-    const sorted = [...transactions].sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
+    let res;
 
-    let res = sorted;
-
-    // Hidden behavior:
-    // - default views show visible transactions only
-    // - dedicated "Hidden" chip shows only hidden transactions
-    if (filter === 'hidden') {
-      res = res.filter((t) => t.isHidden);
+    if (filter === 'ignored') {
+      res = [...transactions]
+        .filter((t) => t.isIgnored)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     } else {
-      res = res.filter((t) => !t.isHidden);
+      res = [...transactions]
+        .filter((t) => !t.isIgnored)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      // Hidden behaviour:
+      // - default views show visible transactions only
+      // - dedicated "Hidden" chip shows only hidden (non-ignored) transactions
+      if (filter === 'hidden') {
+        res = res.filter((t) => t.isHidden);
+      } else {
+        res = res.filter((t) => !t.isHidden);
+      }
     }
 
     // 1. Timeframe filter (defaults to current calendar month)
@@ -110,7 +120,13 @@ const TransactionsScreen = ({ navigation }) => {
 
     // 2. Category / split chip
     if (filter === 'split') res = res.filter((t) => t.isSplit);
-    else if (filter !== 'all' && filter !== 'hidden') res = res.filter((t) => t.categoryId === filter);
+    else if (
+      filter !== 'all' &&
+      filter !== 'hidden' &&
+      filter !== 'ignored'
+    ) {
+      res = res.filter((t) => t.categoryId === filter);
+    }
 
     // 3. Advanced filters
     const min = parseFloat(advanced.minAmount);
@@ -205,6 +221,11 @@ const TransactionsScreen = ({ navigation }) => {
             active={filter === 'hidden'}
             onPress={() => setFilter('hidden')}
           />
+          <FilterPill
+            label="🚫 Ignored"
+            active={filter === 'ignored'}
+            onPress={() => setFilter('ignored')}
+          />
         </ScrollView>
       </View>
 
@@ -261,6 +282,7 @@ const TransactionsScreen = ({ navigation }) => {
         categories={categories}
         selectedCategoryId={activeTxn?.categoryId}
         isHidden={!!activeTxn?.isHidden}
+        isIgnored={!!activeTxn?.isIgnored}
         onClose={() => setActiveTxn(null)}
         onSelectCategory={(categoryId) => {
           if (!activeTxn) return;
@@ -271,6 +293,55 @@ const TransactionsScreen = ({ navigation }) => {
           if (!activeTxn) return;
           setTransactionHidden(activeTxn.id, hidden);
           setActiveTxn(null);
+        }}
+        onDelete={() => {
+          if (!activeTxn) return;
+          Alert.alert('Delete transaction?', 'This action cannot be undone.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => {
+                deleteTransaction(activeTxn.id);
+                setActiveTxn(null);
+              },
+            },
+          ]);
+        }}
+        onIgnore={() => {
+          if (!activeTxn) return;
+          Alert.alert(
+            'Ignore transaction?',
+            'This removes it from your balances and every total and chart. It will be treated as if it never happened.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Ignore',
+                style: 'destructive',
+                onPress: () => {
+                  ignoreTransaction(activeTxn.id);
+                  setActiveTxn(null);
+                },
+              },
+            ]
+          );
+        }}
+        onRestore={() => {
+          if (!activeTxn) return;
+          Alert.alert(
+            'Restore transaction?',
+            'This adds it back to balances, totals, and charts.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Restore',
+                onPress: () => {
+                  unignoreTransaction(activeTxn.id);
+                  setActiveTxn(null);
+                },
+              },
+            ]
+          );
         }}
       />
     </SafeAreaView>

@@ -2,6 +2,11 @@
 # =============================================================================
 # ePurse — EAS Deploy Script
 # Usage: ./deploy.sh
+#
+# Syncs semantic version (x.y.z) to app.json, package.json, Android versionName,
+# iOS CFBundleShortVersionString / MARKETING_VERSION.
+# Native build counters (Android versionCode, iOS CFBundleVersion) are left to
+# EAS production autoIncrement (eas.json) — local bumps would double-increment.
 # =============================================================================
 
 set -e
@@ -44,18 +49,18 @@ fi
 header
 
 # =============================================================================
-# STEP 1 — Version
+# STEP 1 — Version (sync across Expo + native + npm)
 # =============================================================================
-CURRENT_VERSION=$(node -p "require('./app.json').expo.version" 2>/dev/null || echo "1.0.0")
+INITIAL_VERSION=$(node -p "require('./app.json').expo.version" 2>/dev/null || echo "1.0.0")
 
 step "App version"
-dim "Current version in app.json: ${CURRENT_VERSION}"
+dim "Current version in app.json: ${INITIAL_VERSION}"
 echo ""
-echo -e "  Enter new version ${DIM}(press Enter to keep ${CURRENT_VERSION})${RESET}: \c"
+echo -e "  Enter new version ${DIM}(press Enter to keep ${INITIAL_VERSION})${RESET}: \c"
 read -r INPUT_VERSION
 
 if [ -z "$INPUT_VERSION" ]; then
-  VERSION="$CURRENT_VERSION"
+  VERSION="$INITIAL_VERSION"
   dim "Keeping version ${VERSION}"
 else
   # Basic semver format check: x.y.z
@@ -64,16 +69,81 @@ else
   fi
   VERSION="$INPUT_VERSION"
   ok "Version set to ${VERSION}"
-
-  # Write new version into app.json using node
-  node -e "
-    const fs = require('fs');
-    const cfg = JSON.parse(fs.readFileSync('app.json', 'utf8'));
-    cfg.expo.version = '${VERSION}';
-    fs.writeFileSync('app.json', JSON.stringify(cfg, null, 2) + '\n');
-    console.log('  app.json updated');
-  "
 fi
+
+sync_version_files() {
+  export VERSION
+  node <<'SYNC_NODE'
+const fs = require('fs');
+
+const v = process.env.VERSION;
+
+if (!v || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(v)) {
+  console.error('sync_version_files: invalid VERSION');
+  process.exit(1);
+}
+
+const report = (msg) => console.log(`  ${msg}`);
+
+// ----- app.json -----
+const appPath = 'app.json';
+const appCfg = JSON.parse(fs.readFileSync(appPath, 'utf8'));
+appCfg.expo.version = v;
+fs.writeFileSync(appPath, JSON.stringify(appCfg, null, 2) + '\n');
+report('app.json → expo.version');
+
+// ----- package.json -----
+const pkgPath = 'package.json';
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+pkg.version = v;
+fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+report('package.json → version');
+
+// ----- Android -----
+const gradlePath = 'android/app/build.gradle';
+if (fs.existsSync(gradlePath)) {
+  let g = fs.readFileSync(gradlePath, 'utf8');
+  if (!/versionName\s+"/.test(g)) {
+    console.warn('  warn: android/app/build.gradle has no versionName line — skipped');
+  } else {
+    g = g.replace(/versionName\s+"[^"]*"/, `versionName "${v}"`);
+    fs.writeFileSync(gradlePath, g);
+    report(`Android → versionName "${v}" (versionCode unchanged — use EAS autoIncrement for prod)`);
+  }
+} else {
+  console.warn('  warn: android/app/build.gradle not found — skipped');
+}
+
+// ----- iOS Info.plist -----
+const plistPath = 'ios/ePurse/Info.plist';
+if (fs.existsSync(plistPath)) {
+  let plist = fs.readFileSync(plistPath, 'utf8');
+  plist = plist.replace(
+    /(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]*(<\/string>)/,
+    `$1${v}$2`
+  );
+  fs.writeFileSync(plistPath, plist);
+  report('iOS Info.plist → CFBundleShortVersionString (CFBundleVersion unchanged)');
+} else {
+  console.warn('  warn: ios/ePurse/Info.plist not found — skipped');
+}
+
+// ----- Xcode project -----
+const pbxPath = 'ios/ePurse.xcodeproj/project.pbxproj';
+if (fs.existsSync(pbxPath)) {
+  let pbx = fs.readFileSync(pbxPath, 'utf8');
+  pbx = pbx.replace(/MARKETING_VERSION = [^;\s]+;/g, `MARKETING_VERSION = ${v};`);
+  fs.writeFileSync(pbxPath, pbx);
+  report('iOS project.pbxproj → MARKETING_VERSION');
+} else {
+  console.warn('  warn: ios/ePurse.xcodeproj/project.pbxproj not found — skipped');
+}
+SYNC_NODE
+}
+
+step "Sync version files"
+sync_version_files
+ok "Version synced across project files"
 
 echo ""
 

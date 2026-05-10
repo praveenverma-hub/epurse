@@ -4,6 +4,7 @@
 // Single source of truth for:
 //   • accounts             — created on the fly from incoming SMSes
 //   • transactions         — auto-parsed (SMS) + manual entries
+//       · isIgnored        — excluded everywhere + balances reversed (see ignoreTransaction)
 //   • monthlyAggregates    — compacted summaries for older months
 //   • categories           — defaults + custom user-added
 //   • lentBorrowed         — informal IOUs ("you lent ₹500 to Rohit")
@@ -24,6 +25,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { isSameMonth, monthKey } from '../utils/format';
 
@@ -35,6 +37,32 @@ const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
 const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
 const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
 const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid'];
+
+/** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
+const SUPPRESS_SMS_CAP = 2500;
+
+const appendSuppressedSmsIds = (existing = [], additions = []) => {
+  const seen = new Set(existing);
+  const next = [...existing];
+  for (const id of additions) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    next.push(String(id));
+  }
+  if (next.length <= SUPPRESS_SMS_CAP) return next;
+  return next.slice(-SUPPRESS_SMS_CAP);
+};
+
+/** Highest numeric suffix among manual txn ids `IdM0001`, so the counter never collides after restore. */
+const maxManualIdSuffixFromTransactions = (transactions = []) => {
+  let max = 0;
+  transactions.forEach((t) => {
+    if (t.source !== 'manual') return;
+    const m = /^IdM(\d+)$/i.exec(String(t.id || ''));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return max;
+};
 
 // =============================================================================
 // Helpers
@@ -126,10 +154,11 @@ const ensureRequiredCategories = (categories = []) => {
  * @param {object}   parsed        candidate transaction from parseMessage
  * @param {string|null} smsId      Android SMS _id (null for live-listener)
  */
-const isDuplicate = (transactions, parsed, smsId = null) => {
+const isDuplicate = (transactions, parsed, smsId = null, suppressedSmsIds = []) => {
   // Tier 1 — authoritative SMS ID check
   if (smsId) {
-    if (transactions.some((t) => t.smsId === smsId)) return true;
+    if (suppressedSmsIds.includes(smsId)) return true;
+    if (transactions.some((t) => t.smsId === smsId && !t.isIgnored)) return true;
   }
 
   // Tier 2 — near-time content fingerprint (for messages without smsId)
@@ -137,6 +166,7 @@ const isDuplicate = (transactions, parsed, smsId = null) => {
   const DEDUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
   return transactions.some(
     (t) => {
+      if (t.isIgnored) return false;
       if (t.amount !== parsed.amount) return false;
       if (t.type !== parsed.type) return false;
 
@@ -161,6 +191,7 @@ const isDuplicate = (transactions, parsed, smsId = null) => {
 const aggregate = (transactions) => {
   const out = {};
   transactions.forEach((t) => {
+    if (t.isIgnored) return;
     const key = monthKey(t.createdAt);
     if (!out[key]) {
       out[key] = { totalSpend: 0, totalIncome: 0, byCategory: {}, byAccount: {} };
@@ -199,6 +230,12 @@ export const useEPurseStore = create(
                            // never re-read an SMS that was already processed
       lastCompactedAt: null,
 
+      /** Persisted: blocks inbox re-import after user deletes / ignores an SMS-backed txn. */
+      suppressedSmsIds: [],
+
+      /** Persisted: last assigned manual reference number (next txn → IdM + zero-padded). */
+      manualTxnSeq: 0,
+
       hasOnboarded: false,
       smsPermissionGranted: false,
 
@@ -226,16 +263,26 @@ export const useEPurseStore = create(
         })),
 
       // ----- transactions ------------------------------------------------
-      /** Manual entry from the FAB. */
+      /** Manual entry from the FAB. IDs: `IdM0001`, `IdM0002`, … (persisted counter). */
       addTransaction: (txn) =>
         set((s) => {
+          if (!txn?.amount || txn.amount <= 0 || txn.amount > MAX_ALLOWED_AMOUNT) {
+            return s;
+          }
+          const manualSeq = s.manualTxnSeq || 0;
+          const useProvidedId = !!txn.id;
+          const nextSeq = useProvidedId ? manualSeq : manualSeq + 1;
+          const id =
+            txn.id ||
+            `IdM${String(nextSeq).padStart(4, '0')}`;
           const newTxn = {
-            id: `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id,
             createdAt: new Date().toISOString(),
             isSplit: false,
             splitWith: [],
             source: 'manual',
             ...txn,
+            id,
           };
           // Manual entries are allowed without category — caller picks one.
           const { accounts: nextAccounts, account } = ensureAccountForParsed(s.accounts, newTxn);
@@ -243,6 +290,7 @@ export const useEPurseStore = create(
           return {
             transactions: [newTxn, ...s.transactions],
             accounts: applyDelta(nextAccounts, account?.id, newTxn),
+            ...(useProvidedId ? {} : { manualTxnSeq: nextSeq }),
           };
         }),
 
@@ -268,13 +316,14 @@ export const useEPurseStore = create(
         const added = [];
 
         parsedTxns.forEach((txn, idx) => {
+          if (!txn?.amount || txn.amount <= 0 || txn.amount > MAX_ALLOWED_AMOUNT) return;
           const smsId = smsBaseId
             ? (parsedTxns.length > 1 ? `${smsBaseId}:${idx + 1}` : smsBaseId)
             : null;
 
           const candidate = { ...txn };
           if (smsId) candidate.smsId = smsId;
-          if (isDuplicate(nextTransactions, candidate, smsId)) return;
+          if (isDuplicate(nextTransactions, candidate, smsId, state.suppressedSmsIds || [])) return;
 
           const { accounts: accountsWithMatch, account } = ensureAccountForParsed(nextAccounts, candidate);
           candidate.accountId = account?.id || null;
@@ -292,6 +341,20 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
+          // Already reversed when ignored — only drop the row.
+          if (txn.isIgnored) {
+            return {
+              transactions: s.transactions.filter((t) => t.id !== id),
+              accounts: s.accounts,
+              ...(txn.smsId
+                ? {
+                    suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
+                      txn.smsId,
+                    ]),
+                  }
+                : {}),
+            };
+          }
           const reverse = {
             ...txn,
             type: txn.type === TRANSACTION_TYPES.DEBIT
@@ -301,6 +364,57 @@ export const useEPurseStore = create(
           return {
             transactions: s.transactions.filter((t) => t.id !== id),
             accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            ...(txn.smsId
+              ? {
+                  suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
+                    txn.smsId,
+                  ]),
+                }
+              : {}),
+          };
+        }),
+
+      /** Reverse account effect and mark ignored — excluded from all totals/lists. */
+      ignoreTransaction: (id) =>
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === id);
+          if (!txn || txn.isIgnored) return s;
+          const reverse = {
+            ...txn,
+            type: txn.type === TRANSACTION_TYPES.DEBIT
+              ? TRANSACTION_TYPES.CREDIT
+              : TRANSACTION_TYPES.DEBIT,
+          };
+          return {
+            transactions: s.transactions.map((t) =>
+              t.id === id ? { ...t, isIgnored: true } : t
+            ),
+            accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            ...(txn.smsId
+              ? {
+                  suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
+                    txn.smsId,
+                  ]),
+                }
+              : {}),
+          };
+        }),
+
+      /** Undo ignore — re-apply balances, counts, and allow SMS dedup via smsId again. */
+      unignoreTransaction: (id) =>
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === id);
+          if (!txn || !txn.isIgnored) return s;
+          const nextAccounts = applyDelta(s.accounts, txn.accountId, txn);
+          const suppressedSmsIds = txn.smsId
+            ? (s.suppressedSmsIds || []).filter((sid) => sid !== txn.smsId)
+            : s.suppressedSmsIds || [];
+          return {
+            transactions: s.transactions.map((t) =>
+              t.id === id ? { ...t, isIgnored: false } : t
+            ),
+            accounts: nextAccounts,
+            ...(txn.smsId ? { suppressedSmsIds } : {}),
           };
         }),
 
@@ -340,10 +454,14 @@ export const useEPurseStore = create(
       // ----- lent / borrowed --------------------------------------------
       addLentBorrowed: (entry) =>
         set((s) => ({
-          lentBorrowed: [
-            { id: `lb_${Date.now()}`, date: new Date().toISOString(), ...entry },
-            ...s.lentBorrowed,
-          ],
+          ...(entry?.amount > 0 && entry.amount <= MAX_ALLOWED_AMOUNT
+            ? {
+                lentBorrowed: [
+                  { id: `lb_${Date.now()}`, date: new Date().toISOString(), ...entry },
+                  ...s.lentBorrowed,
+                ],
+              }
+            : {}),
         })),
 
       settleLentBorrowed: (id) =>
@@ -387,6 +505,11 @@ export const useEPurseStore = create(
           const toAggregate = [];
           s.transactions.forEach((t) => {
             const ts = new Date(t.createdAt).getTime();
+            // Ignored txns never contribute to aggregates; drop once past raw retention.
+            if (t.isIgnored) {
+              if (ts >= rawCutoff) stillRaw.push(t);
+              return;
+            }
             if (ts >= rawCutoff) stillRaw.push(t);
             else toAggregate.push(t);
           });
@@ -426,19 +549,19 @@ export const useEPurseStore = create(
       getTotalLent: () =>
         get().lentBorrowed.filter((l) => l.kind === 'lent').reduce((s, l) => s + l.amount, 0) +
         get().transactions
-          .filter((t) => t.categoryId === 'lent')
+          .filter((t) => !t.isIgnored && t.categoryId === 'lent')
           .reduce((s, t) => s + (t.amount || 0), 0) -
         get().transactions
-          .filter((t) => t.categoryId === 'lent_settled')
+          .filter((t) => !t.isIgnored && t.categoryId === 'lent_settled')
           .reduce((s, t) => s + (t.amount || 0), 0),
 
       getTotalBorrowed: () =>
         get().lentBorrowed.filter((l) => l.kind === 'borrowed').reduce((s, l) => s + l.amount, 0) +
         get().transactions
-          .filter((t) => t.categoryId === 'borrowed')
+          .filter((t) => !t.isIgnored && t.categoryId === 'borrowed')
           .reduce((s, t) => s + (t.amount || 0), 0) -
         get().transactions
-          .filter((t) => t.categoryId === 'borrow_repaid')
+          .filter((t) => !t.isIgnored && t.categoryId === 'borrow_repaid')
           .reduce((s, t) => s + (t.amount || 0), 0),
 
       /**
@@ -447,7 +570,10 @@ export const useEPurseStore = create(
        */
       getMonthlySpend: (date = new Date()) => {
         const txns = get().transactions.filter(
-          (t) => t.type === TRANSACTION_TYPES.DEBIT && isSameMonth(t.createdAt, date)
+          (t) =>
+            !t.isIgnored &&
+            t.type === TRANSACTION_TYPES.DEBIT &&
+            isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
         return get().monthlyAggregates[monthKey(date)]?.totalSpend || 0;
@@ -455,7 +581,10 @@ export const useEPurseStore = create(
 
       getMonthlyIncome: (date = new Date()) => {
         const txns = get().transactions.filter(
-          (t) => t.type === TRANSACTION_TYPES.CREDIT && isSameMonth(t.createdAt, date)
+          (t) =>
+            !t.isIgnored &&
+            t.type === TRANSACTION_TYPES.CREDIT &&
+            isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
         return get().monthlyAggregates[monthKey(date)]?.totalIncome || 0;
@@ -470,7 +599,10 @@ export const useEPurseStore = create(
         const cats = get().categories;
         const month = monthKey(date);
         const raw = get().transactions.filter(
-          (t) => t.type === TRANSACTION_TYPES.DEBIT && isSameMonth(t.createdAt, date)
+          (t) =>
+            !t.isIgnored &&
+            t.type === TRANSACTION_TYPES.DEBIT &&
+            isSameMonth(t.createdAt, date)
         );
 
         let totals;
@@ -496,7 +628,7 @@ export const useEPurseStore = create(
 
       getRecentTransactions: (limit = 5) =>
         [...get().transactions]
-          .filter((t) => !t.isHidden)
+          .filter((t) => !t.isIgnored && !t.isHidden)
           .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
           .slice(0, limit),
 
@@ -512,6 +644,8 @@ export const useEPurseStore = create(
           lastSmsSync: null,
           lastSmsDate: null,
           lastCompactedAt: null,
+          suppressedSmsIds: [],
+          manualTxnSeq: 0,
           userName: '',
           hasOnboarded: false,
           smsPermissionGranted: false,
@@ -522,13 +656,14 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 4,
+      version: 6,
       migrate: (persistedState, version) => {
+        let state = persistedState ? { ...persistedState } : {};
+
         // Earlier versions seeded dummy accounts, transactions and IOUs.
-        // Wipe those so users coming from those builds start clean.
         if (!persistedState || version < 2) {
-          return {
-            ...(persistedState || {}),
+          state = {
+            ...state,
             accounts: [],
             transactions: [],
             lentBorrowed: [],
@@ -536,17 +671,37 @@ export const useEPurseStore = create(
             lastSmsSync: null,
             lastSmsDate: null,
             lastCompactedAt: null,
+            suppressedSmsIds: [],
+            manualTxnSeq: 0,
             // Keep userName/hasOnboarded/smsPermissionGranted if present so
             // the user isn't bounced back into onboarding after the wipe.
           };
         }
+
         if (version < 4) {
-          return {
-            ...persistedState,
-            categories: ensureRequiredCategories(persistedState.categories || []),
+          state = {
+            ...state,
+            categories: ensureRequiredCategories(state.categories || []),
           };
         }
-        return persistedState;
+
+        if (version < 5) {
+          state = {
+            ...state,
+            suppressedSmsIds: state.suppressedSmsIds ?? [],
+            lastSmsDate: state.lastSmsDate ?? null,
+          };
+        }
+
+        if (version < 6) {
+          const fromTxns = maxManualIdSuffixFromTransactions(state.transactions || []);
+          state = {
+            ...state,
+            manualTxnSeq: Math.max(state.manualTxnSeq ?? 0, fromTxns),
+          };
+        }
+
+        return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
@@ -557,6 +712,9 @@ export const useEPurseStore = create(
         lentBorrowed: state.lentBorrowed,
         smsAutoImport: state.smsAutoImport,
         lastSmsSync: state.lastSmsSync,
+        lastSmsDate: state.lastSmsDate,
+        suppressedSmsIds: state.suppressedSmsIds,
+        manualTxnSeq: state.manualTxnSeq,
         lastCompactedAt: state.lastCompactedAt,
         userName: state.userName,
         hasOnboarded: state.hasOnboarded,
@@ -580,6 +738,7 @@ function mergeAdd(a = {}, b = {}) {
 
 export const selectAccounts = (s) => s.accounts;
 export const selectTransactions = (s) => s.transactions;
-export const selectVisibleTransactions = (s) => s.transactions.filter((t) => !t.isHidden);
+export const selectVisibleTransactions = (s) =>
+  s.transactions.filter((t) => !t.isIgnored && !t.isHidden);
 export const selectCategories = (s) => s.categories;
 export const selectLentBorrowed = (s) => s.lentBorrowed;

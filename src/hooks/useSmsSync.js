@@ -4,11 +4,10 @@
 // Key design decisions (dedup strategy):
 //
 //   lastSmsDate cursor
-//     The store persists `lastSmsDate` = the max SMS `date` field (epoch ms)
-//     we have ever successfully ingested. On every sweep we filter the inbox
-//     to `date > lastSmsDate`, so we never re-read an already-processed
-//     message — even if the app restarts or the live listener already ingested
-//     it during a previous session.
+//     The store persists `lastSmsDate` (see `ePurseStore` partialize) = the max
+//     SMS `date` field (epoch ms) we have successfully swept. Each inbox query
+//     uses `date >= since` with `since = lastSmsDate`, so rows sharing that
+//     timestamp can appear again; dedup + `suppressedSmsIds` prevent replays.
 //
 //   smsId on every transaction
 //     Each inbox message carries Android's content-provider `_id` (a unique
