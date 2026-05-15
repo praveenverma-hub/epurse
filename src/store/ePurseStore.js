@@ -594,17 +594,99 @@ export const useEPurseStore = create(
             transactions: s.transactions.map((t) => {
               if (t.id !== id) return t;
               if (mustClearSplit) {
-                return {
-                  ...t,
-                  categoryId,
-                  isSplit: false,
-                  splitWith: [],
-                  myShareAmount: undefined,
-                };
+                return { ...t, categoryId, isSplit: false, splitWith: [], myShareAmount: undefined };
               }
               return { ...t, categoryId };
             }),
             lentBorrowed: lb,
+          };
+        }),
+
+      /**
+       * Change a transaction's category to lent/borrowed AND link it to a person.
+       * contactInfo: { person, phone? }
+       * Creates a lentBorrowed entry (with sourceTxnId) and applies the same
+       * auto-offset logic as addLentBorrowed so the per-person balance stays correct.
+       * If called for non-lent/borrow categories, falls back to plain category update.
+       */
+      updateTransactionCategoryWithContact: (id, categoryId, contactInfo) =>
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === id);
+          if (!txn) return s;
+
+          // Plain update for non-lent/borrow categories
+          if (!LB_OUTSTANDING_CATS.has(categoryId)) {
+            const hypothetical = { ...txn, categoryId };
+            const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
+            const lb = mustClearSplit ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id) : s.lentBorrowed;
+            return {
+              transactions: s.transactions.map((t) => {
+                if (t.id !== id) return t;
+                if (mustClearSplit) return { ...t, categoryId, isSplit: false, splitWith: [], myShareAmount: undefined };
+                return { ...t, categoryId };
+              }),
+              lentBorrowed: lb,
+            };
+          }
+
+          const now = new Date().toISOString();
+          const person = (contactInfo?.person || '').trim();
+          const phone  = contactInfo?.phone || null;
+          const kind   = categoryId === 'lent' ? 'lent' : 'borrowed';
+
+          // Remove any existing lb entry sourced from this transaction to avoid duplicates
+          let lbList = s.lentBorrowed.filter((l) => l.sourceTxnId !== id);
+
+          // Build the new entry then apply offset logic inline
+          const newAmount = txn.amount;
+          const personKey = phone || (person.toLowerCase());
+          const oppositeKind = kind === 'lent' ? 'borrowed' : 'lent';
+
+          const opposing = lbList.filter(
+            (l) =>
+              !l.settledAt &&
+              l.kind === oppositeKind &&
+              (l.phone && phone
+                ? l.phone === phone
+                : (l.person || '').trim().toLowerCase() === person.toLowerCase())
+          );
+
+          let remaining = newAmount;
+          if (opposing.length > 0) {
+            const sorted = [...opposing].sort((a, b) => new Date(a.date) - new Date(b.date));
+            for (const opp of sorted) {
+              if (remaining <= 0) break;
+              const idx = lbList.findIndex((l) => l.id === opp.id);
+              if (idx === -1) continue;
+              if (opp.amount <= remaining) {
+                remaining -= opp.amount;
+                lbList[idx] = { ...lbList[idx], settledAt: now, settledByOffset: true };
+              } else {
+                lbList[idx] = { ...lbList[idx], amount: opp.amount - remaining };
+                remaining = 0;
+              }
+            }
+          }
+
+          const newEntry = remaining > 0
+            ? [{
+                id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                kind,
+                person,
+                amount: remaining,
+                phone,
+                contactId: contactInfo?.contactId || null,
+                note: `From txn: ${txn.merchant || ''}`.trim(),
+                date: txn.createdAt || now,
+                sourceTxnId: id,
+              }]
+            : [];
+
+          return {
+            transactions: s.transactions.map((t) =>
+              t.id === id ? { ...t, categoryId } : t
+            ),
+            lentBorrowed: [...newEntry, ...lbList],
           };
         }),
 

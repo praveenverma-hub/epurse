@@ -30,6 +30,7 @@ import TransactionItem from '../components/TransactionItem';
 import AccountChip from '../components/AccountChip';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
@@ -65,6 +66,7 @@ const DashboardScreen = ({ navigation }) => {
   const lastSmsDate     = useEPurseStore((s) => s.lastSmsDate);
   const ingestMessage   = useEPurseStore((s) => s.ingestMessage);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
+  const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
@@ -74,6 +76,7 @@ const DashboardScreen = ({ navigation }) => {
   const [period, setPeriod]     = useState('M');
   const [refreshing, setRefreshing] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
+  const [lbLinkTxn, setLbLinkTxn] = useState(null);   // { txn, categoryId }
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
@@ -358,13 +361,35 @@ const DashboardScreen = ({ navigation }) => {
           updateTransactionCategory(activeTxn.id, categoryId);
           setActiveTxn(null);
         }}
+        onSelectLentBorrow={(categoryId) => {
+          if (!activeTxn) return;
+          const t = activeTxn;
+          setActiveTxn(null);
+          setLbLinkTxn({ txn: t, categoryId });
+        }}
         onToggleHidden={(hidden) => {
           if (!activeTxn) return;
-          setTransactionHidden(activeTxn.id, hidden);
+          const t = activeTxn;
           setActiveTxn(null);
+          setConfirm({
+            title: hidden ? 'Hide transaction?' : 'Show transaction?',
+            message: hidden
+              ? 'This transaction will be hidden from default views but still counted in totals.'
+              : 'This transaction will be visible again in default views.',
+            primaryText: hidden ? 'Hide' : 'Show',
+            destructive: hidden,
+            secondaryText: 'Cancel',
+            onSecondary: () => setConfirm(null),
+            onConfirm: () => {
+              setTransactionHidden(t.id, hidden);
+              setConfirm(null);
+            },
+          });
         }}
         onDelete={() => {
           if (!activeTxn) return;
+          const t = activeTxn;
+          setActiveTxn(null);
           setConfirm({
             title: 'Delete transaction?',
             message: 'This action cannot be undone.',
@@ -373,14 +398,15 @@ const DashboardScreen = ({ navigation }) => {
             secondaryText: 'Cancel',
             onSecondary: () => setConfirm(null),
             onConfirm: () => {
-              deleteTransaction(activeTxn.id);
-              setActiveTxn(null);
+              deleteTransaction(t.id);
               setConfirm(null);
             },
           });
         }}
         onIgnore={() => {
           if (!activeTxn) return;
+          const t = activeTxn;
+          setActiveTxn(null);
           setConfirm({
             title: 'Ignore transaction?',
             message:
@@ -390,14 +416,15 @@ const DashboardScreen = ({ navigation }) => {
             secondaryText: 'Cancel',
             onSecondary: () => setConfirm(null),
             onConfirm: () => {
-              ignoreTransaction(activeTxn.id);
-              setActiveTxn(null);
+              ignoreTransaction(t.id);
               setConfirm(null);
             },
           });
         }}
         onRestore={() => {
           if (!activeTxn) return;
+          const t = activeTxn;
+          setActiveTxn(null);
           setConfirm({
             title: 'Restore transaction?',
             message: 'This adds it back to balances, totals, and charts.',
@@ -406,12 +433,27 @@ const DashboardScreen = ({ navigation }) => {
             secondaryText: 'Cancel',
             onSecondary: () => setConfirm(null),
             onConfirm: () => {
-              unignoreTransaction(activeTxn.id);
-              setActiveTxn(null);
+              unignoreTransaction(t.id);
               setConfirm(null);
             },
           });
         }}
+      />
+
+      <LinkContactModal
+        visible={!!lbLinkTxn}
+        categoryId={lbLinkTxn?.categoryId}
+        onConfirm={(contactInfo) => {
+          if (!lbLinkTxn) return;
+          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          setLbLinkTxn(null);
+        }}
+        onSkip={() => {
+          if (!lbLinkTxn) return;
+          updateTransactionCategory(lbLinkTxn.txn.id, lbLinkTxn.categoryId);
+          setLbLinkTxn(null);
+        }}
+        onClose={() => setLbLinkTxn(null)}
       />
 
       <SplitConfigModal

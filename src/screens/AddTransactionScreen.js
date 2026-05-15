@@ -11,6 +11,7 @@ import {
   TextInput,
   ScrollView,
   TouchableOpacity,
+  Modal,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -40,6 +41,7 @@ const AddTransactionScreen = ({ navigation }) => {
   const [type, setType] = useState(TRANSACTION_TYPES.DEBIT);
   const [accountType, setAccountType] = useState(ACCOUNT_TYPES.CASH);
   const [categoryId, setCategoryId] = useState('food');
+  const [catPickerOpen, setCatPickerOpen] = useState(false);
   const [isSplit, setIsSplit] = useState(false);
   const [splitPicks, setSplitPicks] = useState([]);
   const [splitMode, setSplitMode] = useState('percent'); // 'percent' | 'amount'
@@ -223,39 +225,22 @@ const AddTransactionScreen = ({ navigation }) => {
               </Field>
 
               <Field label="Category">
-                <View style={styles.catGrid}>
-                  {categories.map((c) => (
+                {(() => {
+                  const activeCat = categories.find((c) => c.id === categoryId);
+                  return (
                     <TouchableOpacity
-                      key={c.id}
-                      onPress={() => {
-                        setCategoryId(c.id);
-                        const draft = { type, categoryId: c.id, isIgnored: false };
-                        if (!canSplitTransaction(draft)) {
-                          setIsSplit(false);
-                          setSplitPicks([]);
-                        }
-                      }}
-                      style={[
-                        styles.catPill,
-                        categoryId === c.id && {
-                          backgroundColor: c.color + '22',
-                          borderColor: c.color,
-                        },
-                      ]}
+                      style={[styles.catSelector, activeCat && { borderColor: activeCat.color }]}
+                      onPress={() => setCatPickerOpen(true)}
+                      activeOpacity={0.8}
                     >
-                      <Text style={{ fontSize: 16 }}>{c.emoji}</Text>
-                      <Text
-                        style={[
-                          styles.catText,
-                          categoryId === c.id && { color: c.color, fontWeight: '700' },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {c.name}
+                      <Text style={styles.catSelectorEmoji}>{activeCat?.emoji ?? '📌'}</Text>
+                      <Text style={[styles.catSelectorName, activeCat && { color: activeCat.color, fontWeight: '700' }]}>
+                        {activeCat?.name ?? 'Select category'}
                       </Text>
+                      <Text style={styles.catSelectorArrow}>›</Text>
                     </TouchableOpacity>
-                  ))}
-                </View>
+                  );
+                })()}
               </Field>
 
               <Field label="Note (optional)">
@@ -364,6 +349,51 @@ const AddTransactionScreen = ({ navigation }) => {
           )}
         </ScrollView>
       </SafeAreaView>
+      {/* Category bottom-sheet picker */}
+      <Modal
+        visible={catPickerOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setCatPickerOpen(false)}
+      >
+        <View style={styles.catModalBackdrop}>
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={() => setCatPickerOpen(false)}
+          />
+          <View style={styles.catModalSheet}>
+            <View style={styles.catModalHandle} />
+            <Text style={styles.catModalTitle}>Choose category</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {categories.map((c) => {
+                const active = categoryId === c.id;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.catModalRow, active && { backgroundColor: c.color + '18', borderColor: c.color, borderWidth: 1 }]}
+                    onPress={() => {
+                      setCategoryId(c.id);
+                      const draft = { type, categoryId: c.id, isIgnored: false };
+                      if (!canSplitTransaction(draft)) {
+                        setIsSplit(false);
+                        setSplitPicks([]);
+                      }
+                      setCatPickerOpen(false);
+                    }}
+                  >
+                    <Text style={styles.catModalEmoji}>{c.emoji}</Text>
+                    <Text style={[styles.catModalName, active && { color: c.color, fontWeight: '700' }]}>
+                      {c.name}
+                    </Text>
+                    {active && <Text style={[styles.catModalCheck, { color: c.color }]}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -477,24 +507,52 @@ const styles = StyleSheet.create({
   },
   segText: { ...typography.small, color: colors.textSecondary },
 
-  catGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  catPill: {
+  // Category inline selector (compact single row)
+  catSelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '47%',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
     backgroundColor: colors.card,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     borderWidth: 1,
     borderColor: colors.divider,
-    gap: 6,
+    gap: spacing.sm,
+    ...shadows.card,
   },
-  catText: { ...typography.small, color: colors.textSecondary, flex: 1 },
+  catSelectorEmoji: { fontSize: 20 },
+  catSelectorName: { flex: 1, ...typography.body, color: colors.textPrimary },
+  catSelectorArrow: { fontSize: 20, color: colors.textMuted },
+
+  // Category bottom-sheet modal
+  catModalBackdrop: { flex: 1, backgroundColor: '#0006', justifyContent: 'flex-end' },
+  catModalSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+    maxHeight: '70%',
+  },
+  catModalHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
+  catModalTitle: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.md },
+  catModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.background,
+  },
+  catModalEmoji: { fontSize: 20, marginRight: spacing.sm },
+  catModalName: { flex: 1, ...typography.body, color: colors.textPrimary },
+  catModalCheck: { fontWeight: '800', fontSize: 16 },
 
   splitToggle: {
     flexDirection: 'row',
