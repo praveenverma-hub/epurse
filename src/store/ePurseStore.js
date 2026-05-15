@@ -202,9 +202,14 @@ const isDuplicate = (transactions, parsed, smsId = null, suppressedSmsIds = []) 
   );
 };
 
+/** Lent/borrow category ids — excluded from normal spend/income totals. */
+const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+
 /**
  * Produce monthly aggregates from a list of transactions.
  * Returns `{ '2025-12': { totalSpend, totalIncome, byCategory, byAccount } }`.
+ * Lent/borrow categories are stored in byCategory for reference but excluded
+ * from totalSpend/totalIncome so they don't skew normal expense tracking.
  */
 const aggregate = (transactions) => {
   const out = {};
@@ -217,11 +222,12 @@ const aggregate = (transactions) => {
     const a = out[key];
     if (t.type === TRANSACTION_TYPES.DEBIT) {
       const spend = debitDisplayAmount(t);
-      a.totalSpend += spend;
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + spend;
+      if (!LB_ALL_CATS.has(t.categoryId)) a.totalSpend += spend;
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) - t.amount;
     } else if (t.type === TRANSACTION_TYPES.CREDIT) {
-      a.totalIncome += t.amount;
+      a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + t.amount;
+      if (!LB_ALL_CATS.has(t.categoryId)) a.totalIncome += t.amount;
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) + t.amount;
     }
   });
@@ -622,17 +628,77 @@ export const useEPurseStore = create(
         set((s) => ({ categories: s.categories.filter((c) => c.id !== id) })),
 
       // ----- lent / borrowed --------------------------------------------
+      /**
+       * Add a new lent/borrow entry, optionally linked to a contact.
+       * entry: { kind, person, amount, note, contactId?, phone? }
+       *
+       * Auto-offset logic: if the same person has an outstanding balance in the
+       * opposing direction, the new amount is applied against it first:
+       *   • New 'lent' ₹300, existing 'borrowed' ₹500 → borrowed reduced to ₹200
+       *   • New 'lent' ₹600, existing 'borrowed' ₹500 → borrowed fully settled, net lent = ₹100
+       *   • No opposing balance → entry added as-is
+       * Person matching: contactId (if present) → phone (if present) → name (lowercase)
+       */
       addLentBorrowed: (entry) =>
-        set((s) => ({
-          ...(entry?.amount > 0 && entry.amount <= MAX_ALLOWED_AMOUNT
-            ? {
-                lentBorrowed: [
-                  { id: `lb_${Date.now()}`, date: new Date().toISOString(), ...entry },
-                  ...s.lentBorrowed,
-                ],
-              }
-            : {}),
-        })),
+        set((s) => {
+          if (!entry?.amount || entry.amount <= 0 || entry.amount > MAX_ALLOWED_AMOUNT) return s;
+
+          const now = new Date().toISOString();
+          const personKey = entry.contactId || entry.phone || (entry.person || '').trim().toLowerCase();
+          const oppositeKind = entry.kind === 'lent' ? 'borrowed' : 'lent';
+
+          // Find unsettled opposing entries for the same person
+          const opposing = s.lentBorrowed.filter(
+            (l) =>
+              !l.settledAt &&
+              l.kind === oppositeKind &&
+              (l.contactId && entry.contactId
+                ? l.contactId === entry.contactId
+                : l.phone && entry.phone
+                ? l.phone === entry.phone
+                : (l.person || '').trim().toLowerCase() === (entry.person || '').trim().toLowerCase())
+          );
+
+          if (opposing.length === 0) {
+            // No offset — just add the new entry
+            return {
+              lentBorrowed: [
+                { id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry },
+                ...s.lentBorrowed,
+              ],
+            };
+          }
+
+          // Offset the new amount against opposing entries (oldest first)
+          const sorted = [...opposing].sort((a, b) => new Date(a.date) - new Date(b.date));
+          let remaining = entry.amount;
+          const updatedList = [...s.lentBorrowed];
+
+          for (const opp of sorted) {
+            if (remaining <= 0) break;
+            const idx = updatedList.findIndex((l) => l.id === opp.id);
+            if (idx === -1) continue;
+            if (opp.amount <= remaining) {
+              // Fully settle this opposing entry
+              remaining -= opp.amount;
+              updatedList[idx] = { ...updatedList[idx], settledAt: now, settledByOffset: true };
+            } else {
+              // Partially reduce — split: settle original, create remainder entry
+              remaining = 0;
+              updatedList[idx] = {
+                ...updatedList[idx],
+                amount: opp.amount - entry.amount,
+              };
+            }
+          }
+
+          // If there's a remaining amount after fully offsetting, add the new entry
+          const newEntries = remaining > 0
+            ? [{ id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry, amount: remaining }]
+            : [];
+
+          return { lentBorrowed: [...newEntries, ...updatedList] };
+        }),
 
       settleLentBorrowed: (id) =>
         set((s) => ({
@@ -765,12 +831,14 @@ export const useEPurseStore = create(
       /**
        * Monthly spend — uses raw transactions if any are present for that
        * month, otherwise falls back to the aggregate.
+       * Lent/borrow categories are excluded from spend totals.
        */
       getMonthlySpend: (date = new Date()) => {
         const txns = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.DEBIT &&
+            !LB_ALL_CATS.has(t.categoryId) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) {
@@ -784,6 +852,7 @@ export const useEPurseStore = create(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.CREDIT &&
+            !LB_ALL_CATS.has(t.categoryId) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
@@ -832,6 +901,37 @@ export const useEPurseStore = create(
           .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
           .slice(0, limit),
 
+      /**
+       * Returns per-person cumulative net balance across lentBorrowed entries.
+       * Groups by contactId > phone > lowercased name.
+       * Returns array of { personKey, person, contactId, phone, lent, borrowed, net, entries }
+       * sorted by absolute net (largest first).
+       */
+      getPersonBalances: () => {
+        const now = Date.now();
+        const ONE_YEAR = 365 * 24 * 60 * 60 * 1000;
+        const map = new Map();
+
+        get().lentBorrowed
+          .filter((l) => !l.settledAt || Date.now() - new Date(l.settledAt).getTime() < ONE_YEAR)
+          .forEach((l) => {
+            const key = l.contactId || l.phone || (l.person || '').trim().toLowerCase();
+            if (!map.has(key)) {
+              map.set(key, { personKey: key, person: l.person, contactId: l.contactId || null, phone: l.phone || null, lent: 0, borrowed: 0, entries: [] });
+            }
+            const rec = map.get(key);
+            if (!l.settledAt) {
+              if (l.kind === 'lent') rec.lent += l.amount;
+              else rec.borrowed += l.amount;
+            }
+            rec.entries.push(l);
+          });
+
+        return [...map.values()]
+          .map((r) => ({ ...r, net: r.lent - r.borrowed }))
+          .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+      },
+
       // ----- danger zone -------------------------------------------------
       resetAll: () =>
         set({
@@ -857,7 +957,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 7,
+      version: 8,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -906,6 +1006,18 @@ export const useEPurseStore = create(
           state = {
             ...state,
             contactsPermissionGranted: state.contactsPermissionGranted ?? false,
+          };
+        }
+
+        // v8: lentBorrowed entries gain optional contactId, phone fields — no data wipe needed
+        if (version < 8) {
+          state = {
+            ...state,
+            lentBorrowed: (state.lentBorrowed || []).map((l) => ({
+              contactId: null,
+              phone: null,
+              ...l,
+            })),
           };
         }
 

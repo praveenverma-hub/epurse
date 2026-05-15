@@ -44,8 +44,12 @@ const TIMEFRAMES = [
   { id: 'all',   label: 'All'   },
 ];
 
-const TransactionsScreen = ({ navigation }) => {
+// Map Dashboard D/W/M/Y keys to Transactions timeframe ids
+const PERIOD_TO_TIMEFRAME = { D: 'week', W: 'week', M: 'month', Y: 'year' };
+
+const TransactionsScreen = ({ navigation, route }) => {
   const transactions = useEPurseStore((s) => s.transactions);
+  const accounts     = useEPurseStore((s) => s.accounts);
   const categories   = useEPurseStore((s) => s.categories);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
@@ -55,8 +59,21 @@ const TransactionsScreen = ({ navigation }) => {
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
   const userName = useEPurseStore((s) => s.userName);
 
-  const [timeframe, setTimeframe] = useState('month'); // default per spec
-  const [filter, setFilter] = useState('all'); // 'all' | 'split' | 'hidden' | 'ignored' | category id
+  // Accept initial period from Dashboard D/W/M/Y toggle or account filter
+  const routePeriod    = route?.params?.initialPeriod;
+  const routeAccountId = route?.params?.accountId || null;
+
+  const initialTimeframe = routePeriod ? (PERIOD_TO_TIMEFRAME[routePeriod] || 'month') : 'month';
+
+  const [timeframe, setTimeframe] = useState(initialTimeframe);
+
+  // Multi-select filters: a Set of active filter keys.
+  // Special values: 'split' | 'hidden' | 'ignored' | category ids | 'acct:<accountId>'
+  // Empty set = show all (non-hidden, non-ignored) transactions.
+  const [activeFilters, setActiveFilters] = useState(() =>
+    routeAccountId ? new Set([`acct:${routeAccountId}`]) : new Set()
+  );
+
   const [advanced, setAdvanced] = useState({
     minAmount: '',
     maxAmount: '',
@@ -68,21 +85,30 @@ const TransactionsScreen = ({ navigation }) => {
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
 
+  const toggleFilter = (key) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   // Active filters list — used to render removable tag chips above the list.
   const activeAdvanced = useMemo(() => {
     const out = [];
     if (advanced.minAmount) out.push({ key: 'min', label: `> ${formatCurrency(advanced.minAmount)}` });
     if (advanced.maxAmount) out.push({ key: 'max', label: `< ${formatCurrency(advanced.maxAmount)}` });
-    if (advanced.query)     out.push({ key: 'query', label: `“${advanced.query}”` });
+    if (advanced.query)     out.push({ key: 'query', label: `”${advanced.query}”` });
     return out;
   }, [advanced]);
 
   /**
    * Returns the inclusive lower bound (epoch ms) for the selected timeframe.
-   * `null` means "no lower bound" (the All segment).
-   *
-   * Uses calendar-relative bounds where appropriate so "Year" maps to
-   * "this calendar year so far", not "last 365 days". Same idea for "Month".
+   * `null` means “no lower bound” (the All segment).
    */
   const timeframeMinMs = useMemo(() => {
     const now = new Date();
@@ -99,42 +125,42 @@ const TransactionsScreen = ({ navigation }) => {
     }
   }, [timeframe]);
 
+  // Derive filter buckets from the active filters Set
+  const filterMeta = useMemo(() => {
+    const showIgnored  = activeFilters.has('ignored');
+    const showHidden   = activeFilters.has('hidden');
+    const showSplit    = activeFilters.has('split');
+    const catIds       = [...activeFilters].filter((f) => !f.startsWith('acct:') && f !== 'ignored' && f !== 'hidden' && f !== 'split');
+    const acctIds      = [...activeFilters].filter((f) => f.startsWith('acct:')).map((f) => f.slice(5));
+    return { showIgnored, showHidden, showSplit, catIds, acctIds };
+  }, [activeFilters]);
+
   const data = useMemo(() => {
-    let res;
+    const { showIgnored, showHidden, showSplit, catIds, acctIds } = filterMeta;
 
-    if (filter === 'ignored') {
-      res = [...transactions]
-        .filter((t) => t.isIgnored)
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    let res = [...transactions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // Ignored / visible base
+    if (showIgnored) {
+      res = res.filter((t) => t.isIgnored);
     } else {
-      res = [...transactions]
-        .filter((t) => !t.isIgnored)
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-      // Hidden behaviour:
-      // - default views show visible transactions only
-      // - dedicated "Hidden" chip shows only hidden (non-ignored) transactions
-      if (filter === 'hidden') {
+      res = res.filter((t) => !t.isIgnored);
+      if (showHidden) {
         res = res.filter((t) => t.isHidden);
       } else {
         res = res.filter((t) => !t.isHidden);
       }
     }
 
-    // 1. Timeframe filter (defaults to current calendar month)
+    // 1. Timeframe filter
     if (timeframeMinMs != null) {
       res = res.filter((t) => new Date(t.createdAt).getTime() >= timeframeMinMs);
     }
 
-    // 2. Category / split chip
-    if (filter === 'split') res = res.filter((t) => t.isSplit);
-    else if (
-      filter !== 'all' &&
-      filter !== 'hidden' &&
-      filter !== 'ignored'
-    ) {
-      res = res.filter((t) => t.categoryId === filter);
-    }
+    // 2. Multi-select: split / category / account (AND logic across filter types, OR within same type)
+    if (showSplit) res = res.filter((t) => t.isSplit);
+    if (catIds.length > 0) res = res.filter((t) => catIds.includes(t.categoryId));
+    if (acctIds.length > 0) res = res.filter((t) => acctIds.includes(t.accountId));
 
     // 3. Advanced filters
     const min = parseFloat(advanced.minAmount);
@@ -152,7 +178,7 @@ const TransactionsScreen = ({ navigation }) => {
       );
     }
     return res;
-  }, [transactions, timeframeMinMs, filter, advanced]);
+  }, [transactions, timeframeMinMs, filterMeta, advanced]);
 
   const removeAdvanced = (key) => {
     setAdvanced((p) => ({
@@ -166,6 +192,12 @@ const TransactionsScreen = ({ navigation }) => {
 
   const clearAllAdvanced = () =>
     setAdvanced({ minAmount: '', maxAmount: '', query: '' });
+
+  // Label for an account filter chip
+  const acctLabel = (acctId) => {
+    const a = accounts.find((x) => x.id === acctId);
+    return a ? a.name : 'Account';
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -208,7 +240,7 @@ const TransactionsScreen = ({ navigation }) => {
         })}
       </View>
 
-      {/* ---------- Quick filter chips (single horizontal row) ---------- */}
+      {/* ---------- Quick filter chips (multi-select horizontal row) ---------- */}
       <View style={styles.filterScrollWrap}>
         <ScrollView
           horizontal
@@ -216,25 +248,42 @@ const TransactionsScreen = ({ navigation }) => {
           contentContainerStyle={styles.filterRow}
           keyboardShouldPersistTaps="handled"
         >
-          <FilterPill label="All"       active={filter === 'all'}   onPress={() => setFilter('all')} />
-          <FilterPill label="👥 Split"  active={filter === 'split'} onPress={() => setFilter('split')} />
+          {/* "All" clears all active filters */}
+          <FilterPill
+            label="All"
+            active={activeFilters.size === 0}
+            onPress={() => setActiveFilters(new Set())}
+          />
+          <FilterPill
+            label="👥 Split"
+            active={activeFilters.has('split')}
+            onPress={() => toggleFilter('split')}
+          />
           {categories.map((c) => (
             <FilterPill
               key={c.id}
               label={`${c.emoji} ${c.name}`}
-              active={filter === c.id}
-              onPress={() => setFilter(c.id)}
+              active={activeFilters.has(c.id)}
+              onPress={() => toggleFilter(c.id)}
+            />
+          ))}
+          {accounts.map((a) => (
+            <FilterPill
+              key={`acct:${a.id}`}
+              label={`🏦 ${a.name}`}
+              active={activeFilters.has(`acct:${a.id}`)}
+              onPress={() => toggleFilter(`acct:${a.id}`)}
             />
           ))}
           <FilterPill
             label="🙈 Hidden"
-            active={filter === 'hidden'}
-            onPress={() => setFilter('hidden')}
+            active={activeFilters.has('hidden')}
+            onPress={() => toggleFilter('hidden')}
           />
           <FilterPill
             label="🚫 Ignored"
-            active={filter === 'ignored'}
-            onPress={() => setFilter('ignored')}
+            active={activeFilters.has('ignored')}
+            onPress={() => toggleFilter('ignored')}
           />
         </ScrollView>
       </View>
@@ -250,6 +299,15 @@ const TransactionsScreen = ({ navigation }) => {
           ))}
           <TouchableOpacity onPress={clearAllAdvanced} style={styles.advClearBtn}>
             <Text style={styles.advClearText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {/* Active quick-filter summary when multiple are selected */}
+      {activeFilters.size > 1 && (
+        <View style={styles.advRow}>
+          <Text style={styles.advClearText}>{activeFilters.size} filters active · </Text>
+          <TouchableOpacity onPress={() => setActiveFilters(new Set())} style={styles.advClearBtn}>
+            <Text style={styles.advClearText}>Clear all</Text>
           </TouchableOpacity>
         </View>
       )}

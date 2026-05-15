@@ -79,6 +79,8 @@ const DashboardScreen = ({ navigation }) => {
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
 
   // ── Period-aware stats ────────────────────────────────────────────────────
+  const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+
   const periodStats = useMemo(() => {
     const startMs = periodStart(period);
     const now = new Date();
@@ -89,10 +91,13 @@ const DashboardScreen = ({ navigation }) => {
     );
     const visibleInPeriod = inPeriod.filter((t) => !t.isHidden);
 
-    const rawSpend  = inPeriod.filter((t) => t.type === TRANSACTION_TYPES.DEBIT)
-                               .reduce((s, t) => s + debitDisplayAmount(t), 0);
-    const rawIncome = inPeriod.filter((t) => t.type === TRANSACTION_TYPES.CREDIT)
-                               .reduce((s, t) => s + t.amount, 0);
+    // Exclude lent/borrow categories from normal spend/income
+    const rawSpend  = inPeriod
+                        .filter((t) => t.type === TRANSACTION_TYPES.DEBIT && !LB_CATS.has(t.categoryId))
+                        .reduce((s, t) => s + debitDisplayAmount(t), 0);
+    const rawIncome = inPeriod
+                        .filter((t) => t.type === TRANSACTION_TYPES.CREDIT && !LB_CATS.has(t.categoryId))
+                        .reduce((s, t) => s + t.amount, 0);
 
     // For the Year period we must also pull months older than raw retention
     // (3 months) from monthlyAggregates so the full year is covered.
@@ -271,7 +276,13 @@ const DashboardScreen = ({ navigation }) => {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.accountsRow}
         >
-          {accounts.map((a) => <AccountChip key={a.id} account={a} />)}
+          {accounts.map((a) => (
+            <AccountChip
+              key={a.id}
+              account={a}
+              onPress={() => navigation.navigate('Transactions', { accountId: a.id, initialPeriod: period })}
+            />
+          ))}
         </ScrollView>
 
         {/* Lent / Borrowed */}
@@ -288,7 +299,7 @@ const DashboardScreen = ({ navigation }) => {
           {/* Simulate SMS hidden — SMS permission is requested on first launch
           <QuickAction emoji="📩" label="Simulate"  onPress={onSimulateSMS} /> */}
           <QuickAction emoji="📊" label="Analytics" onPress={() => navigation.navigate('Analytics')} />
-          <QuickAction emoji="🧾" label="All txns"  onPress={() => navigation.navigate('Transactions')} />
+          <QuickAction emoji="🧾" label="All txns"  onPress={() => navigation.navigate('Transactions', { initialPeriod: period })} />
           <QuickAction emoji="🔬" label="Diagnose"  onPress={() => navigation.navigate('SmsDiagnostic')} />
         </View>
 
@@ -298,7 +309,7 @@ const DashboardScreen = ({ navigation }) => {
             Transactions · this {periodTitle}
             <Text style={styles.txnCount}> ({periodStats.count})</Text>
           </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Transactions')}>
+          <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>
             <Text style={styles.viewAll}>View all</Text>
           </TouchableOpacity>
         </View>

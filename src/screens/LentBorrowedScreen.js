@@ -8,6 +8,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,21 +29,23 @@ const TXN_CATEGORIES_BY_KIND = {
 };
 
 const EMPTY_TAGGED = { __empty: 'tagged' };
-const EMPTY_MANUAL = { __empty: 'manual' };
 
 const LentBorrowedScreen = ({ route, navigation }) => {
   const initialKind = route?.params?.kind || 'lent';
   const [kind, setKind] = useState(initialKind);
   const [person, setPerson] = useState('');
+  const [phone, setPhone] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
-  const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
+  const [expandedPerson, setExpandedPerson] = useState(null);
+  const [confirm, setConfirm] = useState(null);
 
   const all = useEPurseStore((s) => s.lentBorrowed);
   const transactions = useEPurseStore((s) => s.transactions);
   const categories = useEPurseStore((s) => s.categories);
   const addLentBorrowed = useEPurseStore((s) => s.addLentBorrowed);
   const settle = useEPurseStore((s) => s.settleLentBorrowed);
+  const getPersonBalances = useEPurseStore((s) => s.getPersonBalances);
 
   const catLabel = useCallback(
     (id) => categories.find((c) => c.id === id)?.name || id,
@@ -56,16 +59,21 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [transactions, kind]);
 
-  const manualList = useMemo(() => {
-    const cutoff = Date.now() - ONE_YEAR_MS;
-    return [...all]
-      .filter((l) => l.kind === kind)
-      .filter((l) => !l.settledAt || new Date(l.settledAt).getTime() >= cutoff)
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [all, kind]);
+  // Per-person cumulative balances for the current kind
+  const personBalances = useMemo(() => {
+    const allBalances = getPersonBalances();
+    return allBalances.filter((p) =>
+      kind === 'lent' ? p.lent > p.borrowed || p.lent > 0
+        : p.borrowed > p.lent || p.borrowed > 0
+    );
+  }, [getPersonBalances, all, kind]);
 
   const total = useMemo(() => {
-    const manualTotal = manualList.filter((l) => !l.settledAt).reduce((s, l) => s + l.amount, 0);
+    // From manual entries
+    const manualTotal = all
+      .filter((l) => l.kind === kind && !l.settledAt)
+      .reduce((s, l) => s + l.amount, 0);
+    // From tagged transactions
     const taggedBase = transactions
       .filter((t) => !t.isIgnored && t.categoryId === kind)
       .reduce((s, t) => s + (t.amount || 0), 0);
@@ -77,26 +85,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       )
       .reduce((s, t) => s + (t.amount || 0), 0);
     return manualTotal + taggedBase - taggedSettled;
-  }, [manualList, transactions, kind]);
-
-  const sections = useMemo(
-    () => [
-      {
-        key: 'tagged',
-        title: 'From transactions',
-        hint:
-          'Bank/SMS or manual transactions tagged here stay in your history beyond the usual 3-month raw window: open loans until settled; settled/repaid rows up to 1 year.',
-        data: taggedTransactions.length > 0 ? taggedTransactions : [EMPTY_TAGGED],
-      },
-      {
-        key: 'manual',
-        title: 'Manual notes',
-        hint: 'Settled items are kept up to one year, then removed. Open ones stay until you settle.',
-        data: manualList.length > 0 ? manualList : [EMPTY_MANUAL],
-      },
-    ],
-    [taggedTransactions, manualList]
-  );
+  }, [all, transactions, kind]);
 
   const grad = useMemo(
     () =>
@@ -109,70 +98,172 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const handleAdd = useCallback(() => {
     const n = parseFloat(amount);
     if (!person.trim() || !n || n <= 0) {
-      setConfirm({
-        title: 'Missing fields',
-        message: 'Add a person and a positive amount.',
-        primaryText: 'OK',
-        destructive: false,
-        secondaryText: undefined,
-        onSecondary: undefined,
-        onConfirm: () => setConfirm(null),
-      });
+      Alert.alert('Missing fields', 'Add a person name and a positive amount.');
       return;
     }
     if (n > MAX_ALLOWED_AMOUNT) {
-      setConfirm({
-        title: 'Amount too large',
-        message: 'Maximum allowed amount is ₹10,00,00,000 (10 crore).',
-        primaryText: 'OK',
-        destructive: false,
-        secondaryText: undefined,
-        onSecondary: undefined,
-        onConfirm: () => setConfirm(null),
-      });
+      Alert.alert('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
       return;
     }
-    addLentBorrowed({ kind, person: person.trim(), amount: n, note: note.trim() });
+    addLentBorrowed({
+      kind,
+      person: person.trim(),
+      amount: n,
+      note: note.trim(),
+      contactId: null,
+      phone: phone.trim() || null,
+    });
     setPerson('');
+    setPhone('');
     setAmount('');
     setNote('');
-  }, [kind, person, amount, note, addLentBorrowed]);
+  }, [kind, person, phone, amount, note, addLentBorrowed]);
+
+  const sections = useMemo(
+    () => [
+      {
+        key: 'tagged',
+        title: 'From transactions',
+        hint: 'Bank/SMS or manual transactions tagged here stay beyond the 3-month raw window.',
+        data: taggedTransactions.length > 0 ? taggedTransactions : [EMPTY_TAGGED],
+      },
+    ],
+    [taggedTransactions]
+  );
 
   const listHeaderEl = useMemo(
     () => (
-      <View style={styles.formCard}>
-        <Text style={styles.formTitle}>{kind === 'lent' ? 'Lend to someone' : 'Note a borrowed amount'}</Text>
-        <TextInput
-          value={person}
-          onChangeText={setPerson}
-          placeholder="Person name"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-        <TextInput
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-          placeholder="Amount"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="Note (optional)"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-        <GradientButton title="Add" onPress={handleAdd} colors={grad} style={{ marginTop: spacing.sm }} />
-      </View>
+      <>
+        {/* Add form */}
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>
+            {kind === 'lent' ? 'Lend to someone' : 'Note a borrowed amount'}
+          </Text>
+          <TextInput
+            value={person}
+            onChangeText={setPerson}
+            placeholder="Person name *"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+          />
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Phone number (optional, used to link)"
+            placeholderTextColor={colors.textMuted}
+            keyboardType="phone-pad"
+            style={styles.input}
+          />
+          <TextInput
+            value={amount}
+            onChangeText={setAmount}
+            keyboardType="decimal-pad"
+            placeholder="Amount *"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+          />
+          <TextInput
+            value={note}
+            onChangeText={setNote}
+            placeholder="Note (optional)"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+          />
+          <GradientButton title="Add" onPress={handleAdd} colors={grad} style={{ marginTop: spacing.sm }} />
+        </View>
+
+        {/* Per-person cumulative balance cards */}
+        {personBalances.length > 0 && (
+          <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.sm }}>
+            <Text style={styles.sectionTitle}>By person</Text>
+            <Text style={styles.sectionHint}>Net balance — tap to see individual entries</Text>
+            {personBalances.map((pb) => {
+              const net = pb.lent - pb.borrowed;
+              const netAbs = Math.abs(net);
+              const netLabel = net > 0 ? 'owes you' : net < 0 ? 'you owe' : 'settled';
+              const netColor = net > 0 ? colors.success : net < 0 ? colors.error || '#EF4444' : colors.textSecondary;
+              const isExpanded = expandedPerson === pb.personKey;
+              return (
+                <TouchableOpacity
+                  key={pb.personKey}
+                  style={styles.personCard}
+                  onPress={() => setExpandedPerson(isExpanded ? null : pb.personKey)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.personCardHeader}>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.name}>{pb.person}</Text>
+                      {pb.phone ? <Text style={styles.personPhone}>{pb.phone}</Text> : null}
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[styles.netAmount, { color: netColor }]}>
+                        {formatCurrency(netAbs)}
+                      </Text>
+                      <Text style={[styles.netLabel, { color: netColor }]}>{netLabel}</Text>
+                    </View>
+                    <Text style={styles.expandArrow}>{isExpanded ? '▲' : '▼'}</Text>
+                  </View>
+
+                  {isExpanded && (
+                    <View style={styles.personEntries}>
+                      {pb.entries
+                        .sort((a, b) => new Date(b.date) - new Date(a.date))
+                        .map((entry) => (
+                          <View key={entry.id} style={[styles.entryRow, entry.settledAt && styles.entrySettled]}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.entryNote}>
+                                {entry.note || (entry.kind === 'lent' ? 'Lent' : 'Borrowed')}
+                              </Text>
+                              <Text style={styles.entryDate}>
+                                {formatDate(entry.date)}
+                                {entry.settledAt ? ` · Settled ${formatDate(entry.settledAt)}` : ''}
+                              </Text>
+                            </View>
+                            <Text style={[styles.entryAmt, { color: entry.kind === 'lent' ? colors.success : '#EF4444' }]}>
+                              {entry.kind === 'lent' ? '+' : '−'} {formatCurrency(entry.amount)}
+                            </Text>
+                            {!entry.settledAt ? (
+                              <TouchableOpacity
+                                style={styles.settle}
+                                onPress={() => {
+                                  setConfirm({
+                                    title: kind === 'lent' ? 'Mark as settled?' : 'Mark as repaid?',
+                                    message: `${entry.person} · ${formatCurrency(entry.amount)}\n\nThis will move it to settled.`,
+                                    primaryText: kind === 'lent' ? 'Settle' : 'Mark repaid',
+                                    destructive: true,
+                                    secondaryText: 'Cancel',
+                                    onSecondary: () => setConfirm(null),
+                                    onConfirm: () => { settle(entry.id); setConfirm(null); },
+                                  });
+                                }}
+                              >
+                                <Text style={styles.settleText}>Settle</Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <View style={styles.settledPill}>
+                                <Text style={styles.settledPillText}>Settled</Text>
+                              </View>
+                            )}
+                          </View>
+                        ))}
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </>
     ),
-    [kind, person, amount, note, handleAdd, grad]
+    [kind, person, phone, amount, note, handleAdd, grad, personBalances, expandedPerson, settle]
   );
 
   const renderSectionHeader = useCallback(
     ({ section }) => (
-      <View style={styles.sectionHeader}>
+      <View style={styles.sectionHeaderWrap}>
         <Text style={styles.sectionTitle}>{section.title}</Text>
         <Text style={styles.sectionHint}>{section.hint}</Text>
       </View>
@@ -190,12 +281,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       if (item.__empty === 'tagged') {
         return (
           <Text style={styles.emptyBlock}>
-            Nothing tagged yet. Change a transaction’s category on the Transactions tab.
+            Nothing tagged yet. Change a transaction's category on the Transactions tab.
           </Text>
         );
-      }
-      if (item.__empty === 'manual') {
-        return <Text style={styles.emptyBlock}>No manual entries. Add someone in the form above ↑</Text>;
       }
       if (section.key === 'tagged') {
         const t = item;
@@ -217,50 +305,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           </View>
         );
       }
-      const rowItem = item;
-      return (
-        <View style={[styles.row, rowItem.settledAt && styles.rowSettled]}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{rowItem.person.charAt(0).toUpperCase()}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.name}>{rowItem.person}</Text>
-            <Text style={styles.note}>
-              {rowItem.note ? rowItem.note + ' · ' : ''}
-              {formatDate(rowItem.date)}
-              {rowItem.settledAt ? ` · Settled ${formatDate(rowItem.settledAt)}` : ''}
-            </Text>
-          </View>
-          <Text style={styles.amt}>{formatCurrency(rowItem.amount)}</Text>
-          {!rowItem.settledAt ? (
-            <TouchableOpacity
-              style={styles.settle}
-              onPress={() => {
-                setConfirm({
-                  title: kind === 'lent' ? 'Mark as settled?' : 'Mark as repaid?',
-                  message: `${rowItem.person} · ${formatCurrency(rowItem.amount)}\n\nThis will move it to the settled list.`,
-                  primaryText: kind === 'lent' ? 'Settle' : 'Mark repaid',
-                  destructive: true,
-                  secondaryText: 'Cancel',
-                  onSecondary: () => setConfirm(null),
-                  onConfirm: () => {
-                    settle(rowItem.id);
-                    setConfirm(null);
-                  },
-                });
-              }}
-            >
-              <Text style={styles.settleText}>Settle</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.settledPill}>
-              <Text style={styles.settledPillText}>Settled</Text>
-            </View>
-          )}
-        </View>
-      );
+      return null;
     },
-    [catLabel, settle, kind]
+    [catLabel]
   );
 
   return (
@@ -342,12 +389,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#FFFFFF22',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
   backText: { fontSize: 22, color: '#fff' },
   title: { color: '#fff', ...typography.h2 },
@@ -367,7 +411,7 @@ const styles = StyleSheet.create({
   formCard: {
     backgroundColor: colors.card,
     margin: spacing.lg,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     borderRadius: radius.lg,
     padding: spacing.lg,
     ...shadows.card,
@@ -383,79 +427,83 @@ const styles = StyleSheet.create({
     ...typography.body,
   },
 
-  sectionHeader: {
+  // Per-person cards
+  personCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    marginBottom: spacing.sm,
+    ...shadows.card,
+    overflow: 'hidden',
+  },
+  personCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  avatar: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.primary + '22',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarText: { color: colors.primary, fontWeight: '800', fontSize: 16 },
+  name: { ...typography.bodyBold, color: colors.textPrimary },
+  personPhone: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
+  netAmount: { ...typography.bodyBold, fontWeight: '800' },
+  netLabel: { ...typography.tiny, fontWeight: '600', marginTop: 1 },
+  expandArrow: { color: colors.textSecondary, fontSize: 10, marginLeft: 4 },
+
+  personEntries: {
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  entryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  entrySettled: { opacity: 0.65 },
+  entryNote: { ...typography.small, color: colors.textPrimary },
+  entryDate: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
+  entryAmt: { ...typography.bodyBold, fontWeight: '700' },
+
+  sectionHeaderWrap: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     backgroundColor: colors.background,
   },
   sectionTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
+    ...typography.h3, color: colors.textPrimary, marginBottom: spacing.xs,
   },
-  sectionHint: {
-    ...typography.tiny,
-    color: colors.textSecondary,
-  },
+  sectionHint: { ...typography.tiny, color: colors.textSecondary },
+
   emptyBlock: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
+    ...typography.body, color: colors.textSecondary,
+    textAlign: 'center', paddingVertical: spacing.lg, paddingHorizontal: spacing.lg,
   },
 
   txnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.card,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    ...shadows.card,
+    marginHorizontal: spacing.lg, marginBottom: spacing.sm,
+    borderRadius: radius.lg, padding: spacing.md, ...shadows.card,
   },
   txnMerchant: { ...typography.bodyBold, color: colors.textPrimary },
   txnMeta: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   txnAmount: { ...typography.bodyBold, fontWeight: '700', marginLeft: spacing.sm },
 
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    ...shadows.card,
-  },
-  rowSettled: { opacity: 0.88 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary + '22',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
-  },
-  avatarText: { color: colors.primary, fontWeight: '800', fontSize: 16 },
-  name: { ...typography.bodyBold, color: colors.textPrimary },
-  note: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  amt: { ...typography.bodyBold, color: colors.textPrimary, marginRight: spacing.sm },
   settle: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.primary + '15',
-    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs,
+    backgroundColor: colors.primary + '15', borderRadius: radius.pill,
   },
   settleText: { color: colors.primary, ...typography.tiny, fontWeight: '700' },
   settledPill: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.textMuted + '22',
-    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs,
+    backgroundColor: colors.textMuted + '22', borderRadius: radius.pill,
   },
   settledPillText: { color: colors.textSecondary, ...typography.tiny, fontWeight: '700' },
 });

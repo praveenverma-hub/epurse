@@ -223,7 +223,7 @@ const AddTransactionScreen = ({ navigation }) => {
               </Field>
 
               <Field label="Category">
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.catGrid}>
                   {categories.map((c) => (
                     <TouchableOpacity
                       key={c.id}
@@ -249,12 +249,13 @@ const AddTransactionScreen = ({ navigation }) => {
                           styles.catText,
                           categoryId === c.id && { color: c.color, fontWeight: '700' },
                         ]}
+                        numberOfLines={1}
                       >
                         {c.name}
                       </Text>
                     </TouchableOpacity>
                   ))}
-                </ScrollView>
+                </View>
               </Field>
 
               <Field label="Note (optional)">
@@ -476,19 +477,24 @@ const styles = StyleSheet.create({
   },
   segText: { ...typography.small, color: colors.textSecondary },
 
+  catGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   catPill: {
     flexDirection: 'row',
     alignItems: 'center',
+    width: '47%',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     backgroundColor: colors.card,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.divider,
-    marginRight: spacing.sm,
     gap: 6,
   },
-  catText: { ...typography.small, color: colors.textSecondary },
+  catText: { ...typography.small, color: colors.textSecondary, flex: 1 },
 
   splitToggle: {
     flexDirection: 'row',
