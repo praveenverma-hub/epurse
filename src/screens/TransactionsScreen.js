@@ -212,8 +212,11 @@ const TransactionsScreen = ({ navigation, route }) => {
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Transactions</Text>
-        <TouchableOpacity onPress={() => setModalOpen(true)} style={styles.filterBtn}>
-          <Text style={styles.filterBtnText}>+ Filter</Text>
+        <TouchableOpacity
+          onPress={() => setModalOpen(true)}
+          style={[styles.filterBtn, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
+        >
+          <Text style={[styles.filterBtnText, { color: theme.primary }]}>+ Filter</Text>
         </TouchableOpacity>
       </View>
 
@@ -297,9 +300,13 @@ const TransactionsScreen = ({ navigation, route }) => {
       {activeAdvanced.length > 0 && (
         <View style={styles.advRow}>
           {activeAdvanced.map((f) => (
-            <TouchableOpacity key={f.key} style={styles.advChip} onPress={() => removeAdvanced(f.key)}>
-              <Text style={styles.advChipText}>{f.label}</Text>
-              <Text style={styles.advChipX}> × </Text>
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.advChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
+              onPress={() => removeAdvanced(f.key)}
+            >
+              <Text style={[styles.advChipText, { color: theme.primary }]}>{f.label}</Text>
+              <Text style={[styles.advChipX, { color: theme.primary }]}> × </Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity onPress={clearAllAdvanced} style={styles.advClearBtn}>
@@ -632,11 +639,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
     borderRadius: radius.pill,
-    backgroundColor: colors.primary + '15',
     borderWidth: 1,
-    borderColor: colors.primary + '55',
   },
-  filterBtnText: { color: colors.primary, ...typography.small, fontWeight: '700' },
+  filterBtnText: { ...typography.small, fontWeight: '700' },
 
   // Timeframe segmented control — pill background, gradient on the active button.
   tfRow: {
@@ -711,15 +716,13 @@ const styles = StyleSheet.create({
   advChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary + '15',
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 4,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.primary + '55',
   },
-  advChipText: { color: colors.primary, ...typography.tiny, fontWeight: '700' },
-  advChipX:    { color: colors.primary, ...typography.bodyBold, marginLeft: 2 },
+  advChipText: { ...typography.tiny, fontWeight: '700' },
+  advChipX:    { ...typography.bodyBold, marginLeft: 2 },
   advClearBtn: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,

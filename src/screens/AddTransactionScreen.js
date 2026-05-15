@@ -258,7 +258,7 @@ const AddTransactionScreen = ({ navigation }) => {
               {canSplitHere ? (
                 <>
                   <TouchableOpacity
-                    style={[styles.splitToggle, isSplit && styles.splitToggleActive]}
+                    style={[styles.splitToggle, isSplit && { borderColor: theme.primary, borderWidth: 1 }]}
                     onPress={() => {
                       setIsSplit((v) => {
                         const next = !v;
@@ -274,18 +274,18 @@ const AddTransactionScreen = ({ navigation }) => {
                         Your share is tracked; others appear in Lent from this split.
                       </Text>
                     </View>
-                    <View style={[styles.checkbox, isSplit && styles.checkboxOn]}>
+                    <View style={[styles.checkbox, isSplit && { backgroundColor: theme.primary, borderColor: theme.primary }]}>
                       {isSplit && <Text style={styles.checkmark}>✓</Text>}
                     </View>
                   </TouchableOpacity>
 
                   {isSplit ? (
                     <TouchableOpacity
-                      style={styles.splitPickBtn}
+                      style={[styles.splitPickBtn, { borderColor: theme.primary + '44' }]}
                       onPress={() => setSplitModalOpen(true)}
                       activeOpacity={0.85}
                     >
-                      <Text style={styles.splitPickBtnTitle}>
+                      <Text style={[styles.splitPickBtnTitle, { color: theme.primary }]}>
                         {splitPicks.length === 0
                           ? 'Tap to choose people'
                           : `${splitPicks.length} friend${splitPicks.length === 1 ? '' : 's'} · equal split`}
@@ -423,16 +423,19 @@ const Tab = ({ label, active, onPress }) => {
   );
 };
 
-const Seg = ({ label, active, onPress }) => (
-  <TouchableOpacity
-    onPress={onPress}
-    style={[styles.seg, active && { backgroundColor: colors.primary + '15', borderColor: colors.primary }]}
-  >
-    <Text style={[styles.segText, active && { color: colors.primary, fontWeight: '700' }]}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-);
+const Seg = ({ label, active, onPress }) => {
+  const { primary } = useTheme();
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.seg, active && { backgroundColor: primary + '15', borderColor: primary }]}
+    >
+      <Text style={[styles.segText, active && { color: primary, fontWeight: '700' }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
@@ -567,7 +570,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     ...shadows.card,
   },
-  splitToggleActive: { borderColor: colors.primary, borderWidth: 1 },
+  splitToggleActive: {},
   splitEmoji: { fontSize: 22 },
   splitTitle: { ...typography.bodyBold, color: colors.textPrimary },
   splitHelp: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
@@ -580,7 +583,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  checkboxOn: {},
   checkmark: { color: '#fff', fontWeight: '700' },
 
   splitPickBtn: {
@@ -589,10 +592,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: colors.primary + '44',
+    borderWidth: 1,
     ...shadows.card,
   },
-  splitPickBtnTitle: { ...typography.bodyBold, color: colors.primary, fontWeight: '700' },
+  splitPickBtnTitle: { ...typography.bodyBold, fontWeight: '700' },
   splitPickBtnHint: { ...typography.tiny, color: colors.textSecondary, marginTop: 4 },
   splitUnavailable: {
     ...typography.small,

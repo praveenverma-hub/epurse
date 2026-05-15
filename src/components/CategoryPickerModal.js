@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 
 const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
 
@@ -29,6 +30,7 @@ const CategoryPickerModal = ({
   onDelete,
   onClose,
 }) => {
+  const theme = useTheme();
   const handleCategoryPress = (catId) => {
     // Intercept lent/borrow category selection so the caller can show
     // the contact-link step before committing the change.
@@ -55,17 +57,21 @@ const CategoryPickerModal = ({
               return (
                 <TouchableOpacity
                   key={cat.id}
-                  style={[styles.row, active && styles.rowActive, isLB && styles.rowLB]}
+                  style={[
+                    styles.row,
+                    active && { borderWidth: 1, borderColor: theme.primary + '88', backgroundColor: theme.primary + '12' },
+                    isLB && styles.rowLB,
+                  ]}
                   onPress={() => handleCategoryPress(cat.id)}
                 >
                   <Text style={styles.emoji}>{cat.emoji}</Text>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.rowLabel, active && styles.rowLabelActive]}>{cat.name}</Text>
+                    <Text style={[styles.rowLabel, active && { color: theme.primary, fontWeight: '700' }]}>{cat.name}</Text>
                     {isLB && (
                       <Text style={styles.lbHint}>Links to person · tracks balance</Text>
                     )}
                   </View>
-                  {active ? <Text style={styles.check}>✓</Text> : null}
+                  {active ? <Text style={{ color: theme.primary, fontWeight: '800' }}>✓</Text> : null}
                 </TouchableOpacity>
               );
             })}
@@ -133,11 +139,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     backgroundColor: colors.background,
   },
-  rowActive: {
-    borderWidth: 1,
-    borderColor: colors.primary + '88',
-    backgroundColor: colors.primary + '12',
-  },
   rowLB: {
     borderWidth: 1,
     borderColor: colors.success + '44',
@@ -145,9 +146,7 @@ const styles = StyleSheet.create({
   },
   emoji: { fontSize: 20, marginRight: spacing.sm },
   rowLabel: { flex: 1, ...typography.body, color: colors.textPrimary },
-  rowLabelActive: { color: colors.primary, fontWeight: '700' },
   lbHint: { ...typography.tiny, color: colors.success, marginTop: 2 },
-  check: { color: colors.primary, fontWeight: '800' },
   splitBillBtn: {
     marginTop: spacing.sm,
     borderRadius: radius.md,
