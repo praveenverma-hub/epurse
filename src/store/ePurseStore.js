@@ -624,7 +624,7 @@ export const useEPurseStore = create(
           if (!txn) return s;
 
           // Plain update for non-lent/borrow categories
-          if (!LB_OUTSTANDING_CATS.has(categoryId)) {
+          if (!LB_ALL_CATS.has(categoryId)) {
             const hypothetical = { ...txn, categoryId };
             const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
             const lb = mustClearSplit ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id) : s.lentBorrowed;
@@ -641,20 +641,30 @@ export const useEPurseStore = create(
           const now = new Date().toISOString();
           const person = (contactInfo?.person || '').trim();
           const phone  = contactInfo?.phone || null;
-          const kind   = categoryId === 'lent' ? 'lent' : 'borrowed';
+
+          // Semantics per category:
+          //   lent          → offset against existing 'borrowed'; excess is new 'lent'
+          //   borrowed       → offset against existing 'lent';     excess is new 'borrowed'
+          //   lent_settled   → offset against existing 'lent';     excess is new 'borrowed' (received > lent)
+          //   borrow_repaid  → offset against existing 'borrowed'; excess is new 'lent'     (paid > borrowed)
+          const LB_KIND_META = {
+            lent:          { offsetAgainst: 'borrowed', excessKind: 'lent'     },
+            borrowed:      { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
+            lent_settled:  { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
+            borrow_repaid: { offsetAgainst: 'borrowed', excessKind: 'lent'      },
+          };
+          const meta = LB_KIND_META[categoryId] || LB_KIND_META.borrowed;
 
           // Remove any existing lb entry sourced from this transaction to avoid duplicates
           let lbList = s.lentBorrowed.filter((l) => l.sourceTxnId !== id);
 
           // Build the new entry then apply offset logic inline
           const newAmount = txn.amount;
-          const personKey = phone || (person.toLowerCase());
-          const oppositeKind = kind === 'lent' ? 'borrowed' : 'lent';
 
           const opposing = lbList.filter(
             (l) =>
               !l.settledAt &&
-              l.kind === oppositeKind &&
+              l.kind === meta.offsetAgainst &&
               (l.phone && phone
                 ? l.phone === phone
                 : (l.person || '').trim().toLowerCase() === person.toLowerCase())
@@ -680,7 +690,7 @@ export const useEPurseStore = create(
           const newEntry = remaining > 0
             ? [{
                 id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                kind,
+                kind: meta.excessKind,
                 person,
                 amount: remaining,
                 phone,
@@ -736,13 +746,20 @@ export const useEPurseStore = create(
 
           const now = new Date().toISOString();
           const personKey = entry.contactId || entry.phone || (entry.person || '').trim().toLowerCase();
-          const oppositeKind = entry.kind === 'lent' ? 'borrowed' : 'lent';
+          // Semantics per kind (same table as updateTransactionCategoryWithContact):
+          const LB_KIND_META_ADD = {
+            lent:          { offsetAgainst: 'borrowed', excessKind: 'lent'     },
+            borrowed:      { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
+            lent_settled:  { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
+            borrow_repaid: { offsetAgainst: 'borrowed', excessKind: 'lent'      },
+          };
+          const addMeta = LB_KIND_META_ADD[entry.kind] || LB_KIND_META_ADD.borrowed;
 
-          // Find unsettled opposing entries for the same person
+          // Find unsettled entries to offset against for the same person
           const opposing = s.lentBorrowed.filter(
             (l) =>
               !l.settledAt &&
-              l.kind === oppositeKind &&
+              l.kind === addMeta.offsetAgainst &&
               (l.contactId && entry.contactId
                 ? l.contactId === entry.contactId
                 : l.phone && entry.phone
@@ -751,10 +768,10 @@ export const useEPurseStore = create(
           );
 
           if (opposing.length === 0) {
-            // No offset — just add the new entry
+            // No offset — just add the new entry with the resolved excessKind
             return {
               lentBorrowed: [
-                { id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry },
+                { id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry, kind: addMeta.excessKind },
                 ...s.lentBorrowed,
               ],
             };
@@ -774,18 +791,15 @@ export const useEPurseStore = create(
               remaining -= opp.amount;
               updatedList[idx] = { ...updatedList[idx], settledAt: now, settledByOffset: true };
             } else {
-              // Partially reduce — split: settle original, create remainder entry
+              // Partially reduce the opposing entry by the remaining amount
+              updatedList[idx] = { ...updatedList[idx], amount: opp.amount - remaining };
               remaining = 0;
-              updatedList[idx] = {
-                ...updatedList[idx],
-                amount: opp.amount - entry.amount,
-              };
             }
           }
 
-          // If there's a remaining amount after fully offsetting, add the new entry
+          // If there's a remaining amount after fully offsetting, add new entry with excessKind
           const newEntries = remaining > 0
-            ? [{ id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry, amount: remaining }]
+            ? [{ id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry, kind: addMeta.excessKind, amount: remaining }]
             : [];
 
           return { lentBorrowed: [...newEntries, ...updatedList] };
