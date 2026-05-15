@@ -26,6 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import TransactionItem from '../components/TransactionItem';
 import CategoryPickerModal from '../components/CategoryPickerModal';
@@ -49,6 +50,7 @@ const TIMEFRAMES = [
 const PERIOD_TO_TIMEFRAME = { D: 'week', W: 'week', M: 'month', Y: 'year' };
 
 const TransactionsScreen = ({ navigation, route }) => {
+  const theme = useTheme();
   const transactions = useEPurseStore((s) => s.transactions);
   const accounts     = useEPurseStore((s) => s.accounts);
   const categories   = useEPurseStore((s) => s.categories);
@@ -228,7 +230,7 @@ const TransactionsScreen = ({ navigation, route }) => {
             >
               {active ? (
                 <LinearGradient
-                  colors={[colors.gradientStart, colors.gradientEnd]}
+                  colors={[theme.gradientStart, theme.gradientEnd]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.tfBtnActiveBg}
@@ -503,19 +505,22 @@ const TransactionsScreen = ({ navigation, route }) => {
 // Subcomponents
 // =============================================================================
 
-const FilterPill = ({ label, active, onPress }) => (
-  <TouchableOpacity
-    onPress={onPress}
-    style={[styles.pill, active && { backgroundColor: colors.primary, borderColor: colors.primary }]}
-  >
-    <Text
-      numberOfLines={1}
-      style={[styles.pillText, active && { color: '#fff', fontWeight: '700' }]}
+const FilterPill = ({ label, active, onPress }) => {
+  const theme = useTheme();
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.pill, active && { backgroundColor: theme.primary, borderColor: theme.primary }]}
     >
-      {label}
-    </Text>
-  </TouchableOpacity>
-);
+      <Text
+        numberOfLines={1}
+        style={[styles.pillText, active && { color: '#fff', fontWeight: '700' }]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
 
 // ---- Filter modal (bottom sheet) -------------------------------------------
 const FilterModal = ({ visible, initial, onClose, onApply }) => {

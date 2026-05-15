@@ -2,20 +2,24 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { colors, radius, shadows, spacing } from '../constants/theme';
+import { radius, shadows, spacing } from '../constants/theme';
+import { useGradient } from '../hooks/useTheme';
 
-const FAB = ({ onPress, icon = '+' }) => (
-  <TouchableOpacity activeOpacity={0.9} style={styles.shadow} onPress={onPress}>
-    <LinearGradient
-      colors={[colors.gradientStart, colors.gradientEnd]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.fab}
-    >
-      <Text style={styles.icon}>{icon}</Text>
-    </LinearGradient>
-  </TouchableOpacity>
-);
+const FAB = ({ onPress, icon = '+' }) => {
+  const gradient = useGradient();
+  return (
+    <TouchableOpacity activeOpacity={0.9} style={styles.shadow} onPress={onPress}>
+      <LinearGradient
+        colors={gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.fab}
+      >
+        <Text style={styles.icon}>{icon}</Text>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+};
 
 const styles = StyleSheet.create({
   shadow: {

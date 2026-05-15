@@ -21,13 +21,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatCompact } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { TRANSACTION_TYPES } from '../constants/categories';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import TransactionItem from '../components/TransactionItem';
-import AccountChip from '../components/AccountChip';
+import AccountCard from '../components/AccountCard';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
@@ -56,6 +57,7 @@ const periodStart = (key) => {
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 const DashboardScreen = ({ navigation }) => {
+  const theme           = useTheme();
   const accounts        = useEPurseStore((s) => s.accounts);
   const transactions    = useEPurseStore((s) => s.transactions);
   const categories      = useEPurseStore((s) => s.categories);
@@ -194,7 +196,7 @@ const DashboardScreen = ({ navigation }) => {
 
       {/* ───── Gradient header ───── */}
       <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
+        colors={[theme.gradientStart, theme.gradientEnd]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
@@ -240,7 +242,7 @@ const DashboardScreen = ({ navigation }) => {
                   onPress={() => setPeriod(p.key)}
                   activeOpacity={0.75}
                 >
-                  <Text style={[styles.pillText, period === p.key && styles.pillTextActive]}>
+                  <Text style={[styles.pillText, period === p.key && [styles.pillTextActive, { color: theme.primary }]]}>
                     {p.label}
                   </Text>
                 </TouchableOpacity>
@@ -272,15 +274,17 @@ const DashboardScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
       >
-        {/* Account chips */}
+        {/* Account cards (CRED-style) */}
         <Text style={styles.sectionTitle}>Your accounts</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.accountsRow}
+          snapToInterval={296}   // card width 280 + marginRight 16 (spacing.md)
+          decelerationRate="fast"
         >
           {accounts.map((a) => (
-            <AccountChip
+            <AccountCard
               key={a.id}
               account={a}
               onPress={() => navigation.navigate('Transactions', { accountId: a.id, initialPeriod: period })}
@@ -313,7 +317,7 @@ const DashboardScreen = ({ navigation }) => {
             <Text style={styles.txnCount}> ({periodStats.count})</Text>
           </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>
-            <Text style={styles.viewAll}>View all</Text>
+            <Text style={[styles.viewAll, { color: theme.primary }]}>View all</Text>
           </TouchableOpacity>
         </View>
 
@@ -575,7 +579,7 @@ const styles = StyleSheet.create({
 
   sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
-  accountsRow: { paddingVertical: spacing.xs, paddingRight: spacing.lg },
+  accountsRow: { paddingTop: spacing.xs, paddingBottom: spacing.md, paddingRight: spacing.lg },
 
   // Quick actions
   quickActions: {

@@ -31,6 +31,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { DEFAULT_THEME_ID } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { isSameMonth, monthKey } from '../utils/format';
@@ -265,6 +266,10 @@ export const useEPurseStore = create(
       smsPermissionGranted: false,
       contactsPermissionGranted: false,
 
+      // Theme preferences
+      themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
+      darkMode: false,             // reserved for future dark-theme rollout
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -272,6 +277,10 @@ export const useEPurseStore = create(
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
+
+      // ----- theme setters ----------------------------------------------
+      setThemeId: (id) => set({ themeId: id || DEFAULT_THEME_ID }),
+      setDarkMode: (v) => set({ darkMode: !!v }),
 
       // ----- accounts ----------------------------------------------------
       addAccount: (account) =>
@@ -1032,6 +1041,8 @@ export const useEPurseStore = create(
           hasOnboarded: false,
           smsPermissionGranted: false,
           contactsPermissionGranted: false,
+          themeId: DEFAULT_THEME_ID,
+          darkMode: false,
         }),
     }),
     {
@@ -1039,7 +1050,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 8,
+      version: 9,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1103,6 +1114,15 @@ export const useEPurseStore = create(
           };
         }
 
+        // v9: theme preferences
+        if (version < 9) {
+          state = {
+            ...state,
+            themeId: state.themeId ?? DEFAULT_THEME_ID,
+            darkMode: state.darkMode ?? false,
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -1122,6 +1142,8 @@ export const useEPurseStore = create(
         hasOnboarded: state.hasOnboarded,
         smsPermissionGranted: state.smsPermissionGranted,
         contactsPermissionGranted: state.contactsPermissionGranted,
+        themeId: state.themeId,
+        darkMode: state.darkMode,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;

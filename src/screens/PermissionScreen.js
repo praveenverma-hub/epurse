@@ -45,6 +45,7 @@ import {
   typography,
   shadows,
 } from "../constants/theme";
+import { useTheme } from "../hooks/useTheme";
 
 const FEATURES = [
   {
@@ -84,6 +85,7 @@ const dots = StyleSheet.create({
 
 // =============================================================================
 export default function PermissionScreen({ navigation }) {
+  const theme = useTheme();
   const setHasOnboarded = useEPurseStore((s) => s.setHasOnboarded);
   const setSmsPermissionGranted = useEPurseStore(
     (s) => s.setSmsPermissionGranted,
@@ -560,7 +562,7 @@ export default function PermissionScreen({ navigation }) {
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <LinearGradient
-      colors={[colors.gradientStart, colors.gradientEnd]}
+      colors={[theme.gradientStart, theme.gradientEnd]}
       start={{ x: 0, y: 0 }}
       end={{ x: 0.6, y: 1 }}
       style={styles.root}

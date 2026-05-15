@@ -13,8 +13,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { THEMES } from '../constants/themes';
+import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import CategoryIcon from '../components/CategoryIcon';
 import {
@@ -32,6 +36,7 @@ const COLOR_PALETTE = [
 const EMOJI_PALETTE = ['🍔', '✈️', '💡', '🛍️', '🥦', '🎬', '💊', '💰', '🎓', '🎁', '🐶', '🚗'];
 
 const CategoriesScreen = ({ navigation }) => {
+  const theme = useTheme();
   const categories = useEPurseStore((s) => s.categories);
   const addCategory = useEPurseStore((s) => s.addCategory);
   const removeCategory = useEPurseStore((s) => s.removeCategory);
@@ -39,6 +44,8 @@ const CategoriesScreen = ({ navigation }) => {
   const smsAutoImport = useEPurseStore((s) => s.smsAutoImport);
   const setSmsAutoImport = useEPurseStore((s) => s.setSmsAutoImport);
   const lastSmsSync = useEPurseStore((s) => s.lastSmsSync);
+  const themeId = useEPurseStore((s) => s.themeId);
+  const setThemeId = useEPurseStore((s) => s.setThemeId);
 
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLOR_PALETTE[0]);
@@ -164,6 +171,39 @@ const CategoriesScreen = ({ navigation }) => {
           )}
         </View>
         ============= /Auto-import SMS ============= */}
+
+        {/* ── Theme picker ────────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>App theme</Text>
+          <Text style={styles.themeHint}>
+            Pick an accent — gradients, buttons and highlights update across the app.
+          </Text>
+          <View style={styles.themeRow}>
+            {Object.values(THEMES).map((t) => {
+              const active = themeId === t.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  onPress={() => setThemeId(t.id)}
+                  style={[styles.themeTile, active && { borderColor: t.primary, borderWidth: 2 }]}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={[t.gradientStart, t.gradientEnd]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.themeSwatch}
+                  >
+                    {active ? <Text style={styles.themeCheck}>✓</Text> : null}
+                  </LinearGradient>
+                  <Text style={[styles.themeLabel, active && { color: t.primary, fontWeight: '700' }]}>
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Add a custom category</Text>
@@ -340,6 +380,29 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusLabel: { ...typography.tiny, color: colors.textSecondary, flex: 1 },
+
+  // Theme picker
+  themeHint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md, marginTop: -spacing.xs },
+  themeRow: { flexDirection: 'row', gap: spacing.md, flexWrap: 'wrap' },
+  themeTile: {
+    alignItems: 'center',
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    gap: 6,
+    flexBasis: '22%',
+  },
+  themeSwatch: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.card,
+  },
+  themeCheck: { color: '#fff', fontSize: 24, fontWeight: '800' },
+  themeLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
 });
 
 export default CategoriesScreen;

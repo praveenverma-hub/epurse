@@ -23,6 +23,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import SplitConfigModal from '../components/SplitConfigModal';
 import { parseMessageDetailed } from '../utils/messageParser';
@@ -405,19 +406,22 @@ const Field = ({ label, children }) => (
   </View>
 );
 
-const Tab = ({ label, active, onPress }) => (
-  <TouchableOpacity onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
-    {active ? (
-      <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[StyleSheet.absoluteFill, { borderRadius: radius.pill }]}
-      />
-    ) : null}
-    <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-  </TouchableOpacity>
-);
+const Tab = ({ label, active, onPress }) => {
+  const theme = useTheme();
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
+      {active ? (
+        <LinearGradient
+          colors={[theme.gradientStart, theme.gradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[StyleSheet.absoluteFill, { borderRadius: radius.pill }]}
+        />
+      ) : null}
+      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+};
 
 const Seg = ({ label, active, onPress }) => (
   <TouchableOpacity

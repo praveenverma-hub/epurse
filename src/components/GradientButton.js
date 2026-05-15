@@ -2,18 +2,23 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { radius, spacing, typography, shadows } from '../constants/theme';
+import { useGradient, useTheme } from '../hooks/useTheme';
 
 const GradientButton = ({
   title,
   onPress,
   loading,
   disabled,
-  colors: gColors = [colors.gradientStart, colors.gradientEnd],
+  colors: gColors,   // optional override (e.g. green/purple for lent/borrow)
   style,
   textStyle,
   icon,
 }) => {
+  const themeGradient = useGradient();
+  const palette = useTheme();
+  const finalGradient = gColors || themeGradient;
+
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -22,7 +27,7 @@ const GradientButton = ({
       style={[styles.shadow, { opacity: disabled ? 0.6 : 1 }, style]}
     >
       <LinearGradient
-        colors={gColors}
+        colors={finalGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.btn}
@@ -32,7 +37,7 @@ const GradientButton = ({
         ) : (
           <>
             {icon}
-            <Text style={[styles.text, textStyle]}>{title}</Text>
+            <Text style={[styles.text, { color: palette.textOnGradient }, textStyle]}>{title}</Text>
           </>
         )}
       </LinearGradient>
@@ -51,11 +56,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     gap: spacing.sm,
   },
-  text: {
-    color: colors.textOnGradient,
-    ...typography.bodyBold,
-    fontWeight: '700',
-  },
+  text: { ...typography.bodyBold, fontWeight: '700' },
 });
 
 export default GradientButton;
