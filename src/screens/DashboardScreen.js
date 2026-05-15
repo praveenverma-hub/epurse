@@ -335,7 +335,13 @@ const DashboardScreen = ({ navigation }) => {
               key={t.id}
               txn={t}
               onPress={() => navigation.navigate('Transactions', { focusId: t.id })}
-              onPressCategory={() => setActiveTxn(t)}
+              onPressCategory={() => {
+                if (t.lbLocked) {
+                  setConfirm({ title: 'Category locked', message: 'This transaction is linked to a lent/borrow record and cannot be re-categorised.', primaryText: 'OK' });
+                  return;
+                }
+                setActiveTxn(t);
+              }}
               onPressSplitChip={() => setSplitDetailsTxn(t)}
             />
           ))
@@ -454,7 +460,7 @@ const DashboardScreen = ({ navigation }) => {
         }}
         onSkip={() => {
           if (!lbLinkTxn) return;
-          updateTransactionCategory(lbLinkTxn.txn.id, lbLinkTxn.categoryId);
+          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
           setLbLinkTxn(null);
         }}
         onClose={() => setLbLinkTxn(null)}

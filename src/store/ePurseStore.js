@@ -516,6 +516,7 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === txnId);
           if (!txn) return s;
+          if (txn.lbLocked) return s; // LB-tagged transactions cannot be split
           const lb = s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
           const clearSplit = {
             isSplit: false,
@@ -574,6 +575,8 @@ export const useEPurseStore = create(
             id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
             kind: 'lent',
             person: (o.name || 'Friend').trim(),
+            contactId: o.contactId || null,
+            phone: o.phone || null,
             amount: Number(o.shareAmount) || 0,
             note: `Split · ${txn.merchant || 'Expense'}`,
             date: txn.createdAt,
@@ -594,6 +597,7 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
+          if (txn.lbLocked) return s; // LB-linked transactions cannot be re-categorised
           const hypothetical = { ...txn, categoryId };
           const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
           const lb = mustClearSplit
@@ -612,16 +616,16 @@ export const useEPurseStore = create(
         }),
 
       /**
-       * Change a transaction's category to lent/borrowed AND link it to a person.
-       * contactInfo: { person, phone? }
-       * Creates a lentBorrowed entry (with sourceTxnId) and applies the same
-       * auto-offset logic as addLentBorrowed so the per-person balance stays correct.
-       * If called for non-lent/borrow categories, falls back to plain category update.
+       * Change a transaction's category to any LB kind and link it to a person.
+       * contactInfo: { person, phone?, contactId? }
+       * Creates one lentBorrowed entry with kind=categoryId and locks the transaction.
+       * Falls back to plain category update for non-LB categories.
        */
       updateTransactionCategoryWithContact: (id, categoryId, contactInfo) =>
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
+          if (txn.lbLocked) return s; // LB-linked transactions cannot be re-categorised
 
           // Plain update for non-lent/borrow categories
           if (!LB_ALL_CATS.has(categoryId)) {
@@ -642,70 +646,33 @@ export const useEPurseStore = create(
           const person = (contactInfo?.person || '').trim();
           const phone  = contactInfo?.phone || null;
 
-          // Semantics per category:
-          //   lent          → offset against existing 'borrowed'; excess is new 'lent'
-          //   borrowed       → offset against existing 'lent';     excess is new 'borrowed'
-          //   lent_settled   → offset against existing 'lent';     excess is new 'borrowed' (received > lent)
-          //   borrow_repaid  → offset against existing 'borrowed'; excess is new 'lent'     (paid > borrowed)
-          const LB_KIND_META = {
-            lent:          { offsetAgainst: 'borrowed', excessKind: 'lent'     },
-            borrowed:      { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
-            lent_settled:  { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
-            borrow_repaid: { offsetAgainst: 'borrowed', excessKind: 'lent'      },
+          // Remove any prior lb entries for this transaction (split entries or earlier tagging)
+          const lbList = s.lentBorrowed.filter((l) => l.sourceTxnId !== id);
+
+          // LB and split are mutually exclusive — clear split if set
+          const splitClear = txn.isSplit
+            ? { isSplit: false, splitWith: [], myShareAmount: undefined }
+            : {};
+
+          // One simple entry per transaction — kind mirrors categoryId exactly.
+          // Balance is always net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid.
+          const newEntry = {
+            id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            kind: categoryId,
+            person,
+            amount: txn.amount,
+            phone,
+            contactId: contactInfo?.contactId || null,
+            note: `From txn: ${txn.merchant || ''}`.trim(),
+            date: txn.createdAt || now,
+            sourceTxnId: id,
           };
-          const meta = LB_KIND_META[categoryId] || LB_KIND_META.borrowed;
-
-          // Remove any existing lb entry sourced from this transaction to avoid duplicates
-          let lbList = s.lentBorrowed.filter((l) => l.sourceTxnId !== id);
-
-          // Build the new entry then apply offset logic inline
-          const newAmount = txn.amount;
-
-          const opposing = lbList.filter(
-            (l) =>
-              !l.settledAt &&
-              l.kind === meta.offsetAgainst &&
-              (l.phone && phone
-                ? l.phone === phone
-                : (l.person || '').trim().toLowerCase() === person.toLowerCase())
-          );
-
-          let remaining = newAmount;
-          if (opposing.length > 0) {
-            const sorted = [...opposing].sort((a, b) => new Date(a.date) - new Date(b.date));
-            for (const opp of sorted) {
-              if (remaining <= 0) break;
-              const idx = lbList.findIndex((l) => l.id === opp.id);
-              if (idx === -1) continue;
-              if (opp.amount <= remaining) {
-                remaining -= opp.amount;
-                lbList[idx] = { ...lbList[idx], settledAt: now, settledByOffset: true };
-              } else {
-                lbList[idx] = { ...lbList[idx], amount: opp.amount - remaining };
-                remaining = 0;
-              }
-            }
-          }
-
-          const newEntry = remaining > 0
-            ? [{
-                id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                kind: meta.excessKind,
-                person,
-                amount: remaining,
-                phone,
-                contactId: contactInfo?.contactId || null,
-                note: `From txn: ${txn.merchant || ''}`.trim(),
-                date: txn.createdAt || now,
-                sourceTxnId: id,
-              }]
-            : [];
 
           return {
             transactions: s.transactions.map((t) =>
-              t.id === id ? { ...t, categoryId } : t
+              t.id === id ? { ...t, ...splitClear, categoryId, lbLocked: true } : t
             ),
-            lentBorrowed: [...newEntry, ...lbList],
+            lentBorrowed: [newEntry, ...lbList],
           };
         }),
 
@@ -730,87 +697,56 @@ export const useEPurseStore = create(
 
       // ----- lent / borrowed --------------------------------------------
       /**
-       * Add a new lent/borrow entry, optionally linked to a contact.
-       * entry: { kind, person, amount, note, contactId?, phone? }
-       *
-       * Auto-offset logic: if the same person has an outstanding balance in the
-       * opposing direction, the new amount is applied against it first:
-       *   • New 'lent' ₹300, existing 'borrowed' ₹500 → borrowed reduced to ₹200
-       *   • New 'lent' ₹600, existing 'borrowed' ₹500 → borrowed fully settled, net lent = ₹100
-       *   • No opposing balance → entry added as-is
-       * Person matching: contactId (if present) → phone (if present) → name (lowercase)
+       * Add a manual lent/borrow entry.
+       * entry: { kind, person, amount, note?, contactId?, phone? }
+       * kind can be 'lent', 'borrowed', 'lent_settled', or 'borrow_repaid'.
+       * Balance is calculated additively: net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid
        */
       addLentBorrowed: (entry) =>
         set((s) => {
           if (!entry?.amount || entry.amount <= 0 || entry.amount > MAX_ALLOWED_AMOUNT) return s;
-
-          const now = new Date().toISOString();
-          const personKey = entry.contactId || entry.phone || (entry.person || '').trim().toLowerCase();
-          // Semantics per kind (same table as updateTransactionCategoryWithContact):
-          const LB_KIND_META_ADD = {
-            lent:          { offsetAgainst: 'borrowed', excessKind: 'lent'     },
-            borrowed:      { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
-            lent_settled:  { offsetAgainst: 'lent',     excessKind: 'borrowed'  },
-            borrow_repaid: { offsetAgainst: 'borrowed', excessKind: 'lent'      },
+          return {
+            lentBorrowed: [
+              {
+                id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                date: new Date().toISOString(),
+                ...entry,
+              },
+              ...s.lentBorrowed,
+            ],
           };
-          const addMeta = LB_KIND_META_ADD[entry.kind] || LB_KIND_META_ADD.borrowed;
-
-          // Find unsettled entries to offset against for the same person
-          const opposing = s.lentBorrowed.filter(
-            (l) =>
-              !l.settledAt &&
-              l.kind === addMeta.offsetAgainst &&
-              (l.contactId && entry.contactId
-                ? l.contactId === entry.contactId
-                : l.phone && entry.phone
-                ? l.phone === entry.phone
-                : (l.person || '').trim().toLowerCase() === (entry.person || '').trim().toLowerCase())
-          );
-
-          if (opposing.length === 0) {
-            // No offset — just add the new entry with the resolved excessKind
-            return {
-              lentBorrowed: [
-                { id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry, kind: addMeta.excessKind },
-                ...s.lentBorrowed,
-              ],
-            };
-          }
-
-          // Offset the new amount against opposing entries (oldest first)
-          const sorted = [...opposing].sort((a, b) => new Date(a.date) - new Date(b.date));
-          let remaining = entry.amount;
-          const updatedList = [...s.lentBorrowed];
-
-          for (const opp of sorted) {
-            if (remaining <= 0) break;
-            const idx = updatedList.findIndex((l) => l.id === opp.id);
-            if (idx === -1) continue;
-            if (opp.amount <= remaining) {
-              // Fully settle this opposing entry
-              remaining -= opp.amount;
-              updatedList[idx] = { ...updatedList[idx], settledAt: now, settledByOffset: true };
-            } else {
-              // Partially reduce the opposing entry by the remaining amount
-              updatedList[idx] = { ...updatedList[idx], amount: opp.amount - remaining };
-              remaining = 0;
-            }
-          }
-
-          // If there's a remaining amount after fully offsetting, add new entry with excessKind
-          const newEntries = remaining > 0
-            ? [{ id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, date: now, ...entry, kind: addMeta.excessKind, amount: remaining }]
-            : [];
-
-          return { lentBorrowed: [...newEntries, ...updatedList] };
         }),
 
+      /**
+       * Manually settle a 'lent' or 'borrowed' entry in full.
+       * Creates a counterpart 'lent_settled'/'borrow_repaid' entry and marks
+       * the original with settledAt to prevent double-settling.
+       */
       settleLentBorrowed: (id) =>
-        set((s) => ({
-          lentBorrowed: s.lentBorrowed.map((l) =>
-            l.id === id ? { ...l, settledAt: new Date().toISOString() } : l
-          ),
-        })),
+        set((s) => {
+          const entry = s.lentBorrowed.find((l) => l.id === id);
+          if (!entry || entry.settledAt) return s;
+          if (entry.kind !== 'lent' && entry.kind !== 'borrowed') return s;
+          const now = new Date().toISOString();
+          const counterpartKind = entry.kind === 'lent' ? 'lent_settled' : 'borrow_repaid';
+          const counterpart = {
+            id: `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            kind: counterpartKind,
+            person: entry.person,
+            phone: entry.phone || null,
+            contactId: entry.contactId || null,
+            amount: entry.amount,
+            note: 'Manual settlement',
+            date: now,
+            sourceSettledId: id,
+          };
+          return {
+            lentBorrowed: [
+              counterpart,
+              ...s.lentBorrowed.map((l) => (l.id === id ? { ...l, settledAt: now } : l)),
+            ],
+          };
+        }),
 
       // ----- SMS sync flags ---------------------------------------------
       setSmsAutoImport: (val) => set({ smsAutoImport: !!val }),
@@ -912,26 +848,14 @@ export const useEPurseStore = create(
       getTotalBalance: () => get().accounts.reduce((sum, a) => sum + (a.balance || 0), 0),
 
       getTotalLent: () =>
-        get()
-          .lentBorrowed.filter((l) => l.kind === 'lent' && !l.settledAt)
-          .reduce((s, l) => s + l.amount, 0) +
-        get().transactions
-          .filter((t) => !t.isIgnored && t.categoryId === 'lent')
-          .reduce((s, t) => s + (t.amount || 0), 0) -
-        get().transactions
-          .filter((t) => !t.isIgnored && t.categoryId === 'lent_settled')
-          .reduce((s, t) => s + (t.amount || 0), 0),
+        get().getPersonBalances()
+          .filter((p) => p.net > 0)
+          .reduce((s, p) => s + p.net, 0),
 
       getTotalBorrowed: () =>
-        get()
-          .lentBorrowed.filter((l) => l.kind === 'borrowed' && !l.settledAt)
-          .reduce((s, l) => s + l.amount, 0) +
-        get().transactions
-          .filter((t) => !t.isIgnored && t.categoryId === 'borrowed')
-          .reduce((s, t) => s + (t.amount || 0), 0) -
-        get().transactions
-          .filter((t) => !t.isIgnored && t.categoryId === 'borrow_repaid')
-          .reduce((s, t) => s + (t.amount || 0), 0),
+        get().getPersonBalances()
+          .filter((p) => p.net < 0)
+          .reduce((s, p) => s + Math.abs(p.net), 0),
 
       /**
        * Monthly spend — uses raw transactions if any are present for that
@@ -1013,27 +937,34 @@ export const useEPurseStore = create(
        * sorted by absolute net (largest first).
        */
       getPersonBalances: () => {
-        const now = Date.now();
-        const ONE_YEAR = 365 * 24 * 60 * 60 * 1000;
         const map = new Map();
 
-        get().lentBorrowed
-          .filter((l) => !l.settledAt || Date.now() - new Date(l.settledAt).getTime() < ONE_YEAR)
-          .forEach((l) => {
-            const key = l.contactId || l.phone || (l.person || '').trim().toLowerCase();
-            if (!map.has(key)) {
-              map.set(key, { personKey: key, person: l.person, contactId: l.contactId || null, phone: l.phone || null, lent: 0, borrowed: 0, entries: [] });
-            }
-            const rec = map.get(key);
-            if (!l.settledAt) {
-              if (l.kind === 'lent') rec.lent += l.amount;
-              else rec.borrowed += l.amount;
-            }
-            rec.entries.push(l);
-          });
+        get().lentBorrowed.forEach((l) => {
+          const key = l.contactId || l.phone || (l.person || '').trim().toLowerCase();
+          if (!map.has(key)) {
+            map.set(key, {
+              personKey: key,
+              person: l.person,
+              contactId: l.contactId || null,
+              phone: l.phone || null,
+              lent: 0,
+              borrowed: 0,
+              entries: [],
+            });
+          }
+          const rec = map.get(key);
+          // Additive formula — every entry contributes to net:
+          //   net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid
+          if (l.kind === 'lent')          rec.lent     += l.amount;
+          if (l.kind === 'lent_settled')  rec.lent     -= l.amount;
+          if (l.kind === 'borrowed')      rec.borrowed += l.amount;
+          if (l.kind === 'borrow_repaid') rec.borrowed -= l.amount;
+          rec.entries.push(l);
+        });
 
         return [...map.values()]
           .map((r) => ({ ...r, net: r.lent - r.borrowed }))
+          .filter((r) => r.entries.length > 0)
           .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
       },
 
