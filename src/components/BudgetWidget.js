@@ -99,23 +99,39 @@ const BudgetWidget = ({ onPress }) => {
   const rColor = hasCap ? ringColorFor(pctVal, daysElapsedPct) : colors.divider;
   const status = statusLabelFor(pctVal, daysElapsedPct, hasCap);
 
-  // Top 2 breach categories
-  const breaches = Object.entries(perCategory)
-    .map(([catId, v]) => ({ catId, ...v }))
-    .filter((r) => r.pct >= 90)
-    .sort((a, b) => b.pct - a.pct)
-    .slice(0, 2);
-
   // If no total cap is set, fall back to summing budgeted category actuals so
   // the user still sees something meaningful in the headline.
   const headlineActual = hasCap ? total.actual : Object.values(perCategory).reduce((s, r) => s + r.actual, 0);
   const headlineCap    = hasCap ? total.cap    : Object.values(perCategory).reduce((s, r) => s + r.cap, 0);
 
-  // Top 3 categories by pct for the right column
+  // Top 6 categories by pct — shown in up to 2 columns on the right
   const topCatRows = Object.entries(perCategory)
     .map(([catId, v]) => ({ catId, ...v }))
     .sort((a, b) => b.pct - a.pct)
-    .slice(0, 3);
+    .slice(0, 6);
+
+  const hasCats = topCatRows.length > 0;
+  // Split into two columns if there are more than 3 categories
+  const colA = topCatRows.slice(0, Math.ceil(topCatRows.length / 2));
+  const colB = topCatRows.slice(Math.ceil(topCatRows.length / 2));
+
+  const renderCatRow = (b) => {
+    const cat = categoryById.get(b.catId);
+    if (!cat) return null;
+    const pctColor = b.pct >= 100 ? colors.danger : b.pct >= 85 ? colors.warning : colors.success;
+    return (
+      <View key={b.catId} style={styles.catRow}>
+        <Text style={styles.catEmoji}>{cat.emoji}</Text>
+        <View style={styles.catBarTrack}>
+          <View style={[styles.catBarFill, { width: `${Math.min(100, b.pct)}%`, backgroundColor: pctColor }]} />
+        </View>
+        <Text style={[styles.catPct, { color: pctColor }]}>{Math.round(b.pct)}%</Text>
+      </View>
+    );
+  };
+
+  // Track streak for the badge (need to know if any breaches exist)
+  const hasBreaches = topCatRows.some((r) => r.pct >= 90);
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
@@ -127,19 +143,9 @@ const BudgetWidget = ({ onPress }) => {
         </Text>
       </View>
 
-      {/* Body — ring | numbers | category column */}
+      {/* Body — amounts | ring (center) | category columns */}
       <View style={styles.bodyRow}>
-        {/* Ring */}
-        <View style={styles.ringWrap}>
-          <MiniRing pct={pctVal} color={rColor} />
-          <View style={styles.ringCenter}>
-            <Text style={[styles.ringPct, { color: rColor }]}>
-              {hasCap ? `${Math.round(pctVal)}%` : '—'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Amounts + status */}
+        {/* Left: amounts + status */}
         <View style={styles.numbersWrap}>
           <Text style={styles.amountActual}>{formatCompact(headlineActual)}</Text>
           <Text style={styles.amountCap}>
@@ -151,29 +157,29 @@ const BudgetWidget = ({ onPress }) => {
           </View>
         </View>
 
-        {/* Category % column */}
-        {topCatRows.length > 0 && (
-          <View style={styles.catColumn}>
-            {topCatRows.map((b) => {
-              const cat = categoryById.get(b.catId);
-              if (!cat) return null;
-              const pctColor = b.pct >= 100 ? colors.danger : b.pct >= 85 ? colors.warning : colors.success;
-              return (
-                <View key={b.catId} style={styles.catRow}>
-                  <Text style={styles.catEmoji}>{cat.emoji}</Text>
-                  <View style={styles.catBarTrack}>
-                    <View style={[styles.catBarFill, { width: `${Math.min(100, b.pct)}%`, backgroundColor: pctColor }]} />
-                  </View>
-                  <Text style={[styles.catPct, { color: pctColor }]}>{Math.round(b.pct)}%</Text>
-                </View>
-              );
-            })}
+        {/* Center: Ring */}
+        <View style={styles.ringWrap}>
+          <MiniRing pct={pctVal} color={rColor} />
+          <View style={styles.ringCenter}>
+            <Text style={[styles.ringPct, { color: rColor }]}>
+              {hasCap ? `${Math.round(pctVal)}%` : '—'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Right: category columns (1 or 2 sub-columns) */}
+        {hasCats && (
+          <View style={styles.catColumns}>
+            <View style={styles.catSubCol}>{colA.map(renderCatRow)}</View>
+            {colB.length > 0 && (
+              <View style={styles.catSubCol}>{colB.map(renderCatRow)}</View>
+            )}
           </View>
         )}
       </View>
 
       {/* Streak badge */}
-      {budgetStreak?.current >= 1 && breaches.length === 0 ? (
+      {budgetStreak?.current >= 1 && !hasBreaches ? (
         <View style={styles.streakRow}>
           <Text style={styles.streakEmoji}>🏆</Text>
           <Text style={styles.streakText}>{budgetStreak.current}-month streak under budget</Text>
@@ -253,10 +259,16 @@ const styles = StyleSheet.create({
   statusEmoji: { fontSize: 10 },
   statusLabel: { ...typography.tiny, fontWeight: '700' },
 
-  // ── Category % right column ──
-  catColumn: {
+  // ── Category % right side (1 or 2 sub-columns) ──
+  catColumns: {
+    flexDirection: 'row',
     gap: 6,
-    minWidth: 96,
+    flexShrink: 1,
+  },
+  catSubCol: {
+    gap: 6,
+    flexShrink: 1,
+    minWidth: 72,
   },
   catRow: {
     flexDirection: 'row',

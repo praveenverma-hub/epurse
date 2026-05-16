@@ -168,6 +168,36 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
     setLocalCats((prev) => prev.filter((c) => c.catId !== catId));
   }, []);
 
+  const resetLocalState = useCallback(() => {
+    if (budget) {
+      // Edit mode — revert to saved plan
+      setLocalCap(budget.totalCap ? String(budget.totalCap) : '');
+      setLocalCats(
+        Object.entries(budget.perCategory || {}).map(([catId, cap]) => ({
+          catId,
+          cap: String(cap),
+        }))
+      );
+    } else {
+      // Create mode — go back to defaults
+      const defaults = DEFAULT_CAT_KEYWORDS
+        .map((kw) => {
+          const cat = categories.find(
+            (c) => !EXCLUDE_CATS.has(c.id) && (
+              c.id.toLowerCase().includes(kw) ||
+              c.name.toLowerCase().includes(kw)
+            )
+          );
+          if (!cat) return null;
+          return { catId: cat.id, cap: '' };
+        })
+        .filter(Boolean)
+        .filter((item, idx, arr) => arr.findIndex((x) => x.catId === item.catId) === idx);
+      setLocalCap('');
+      setLocalCats(defaults);
+    }
+  }, [budget, categories, EXCLUDE_CATS]);
+
   const savePlan = useCallback(() => {
     const capNum = parseInt(localCap.replace(/\D/g, ''), 10);
     setBudgetTotalCap(Number.isFinite(capNum) ? capNum : null);
@@ -366,9 +396,7 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
             <Text style={styles.modalTitle}>
               {budget ? 'Edit Plan' : `${monthName} Plan`}
             </Text>
-            <TouchableOpacity onPress={savePlan} style={styles.modalSaveBtn} activeOpacity={0.8}>
-              <Text style={[styles.modalSaveBtnText, { color: theme.primary }]}>Save</Text>
-            </TouchableOpacity>
+            <View style={{ width: 40 }} />
           </View>
 
           <ScrollView
@@ -451,14 +479,23 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Save button */}
-            <TouchableOpacity
-              style={[styles.savePlanBtn, { backgroundColor: theme.primary }]}
-              onPress={savePlan}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.savePlanBtnText}>Save Plan</Text>
-            </TouchableOpacity>
+            {/* Action row — Reset (narrow) + Save Plan (wide) */}
+            <View style={styles.modalActionRow}>
+              <TouchableOpacity
+                style={styles.resetModalBtn}
+                onPress={resetLocalState}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.resetModalBtnText, { color: colors.danger }]}>Reset</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.savePlanBtn, { backgroundColor: theme.primary }]}
+                onPress={savePlan}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.savePlanBtnText}>Save Plan</Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={{ height: 40 }} />
           </ScrollView>
@@ -690,11 +727,9 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
     backgroundColor: colors.card,
   },
-  modalClose:       { padding: spacing.sm },
-  modalCloseText:   { fontSize: 18, color: colors.textSecondary },
-  modalTitle:       { ...typography.h3, color: colors.textPrimary },
-  modalSaveBtn:     { padding: spacing.sm },
-  modalSaveBtnText: { ...typography.bodyBold, fontWeight: '700', fontSize: 15 },
+  modalClose:     { padding: spacing.sm },
+  modalCloseText: { fontSize: 18, color: colors.textSecondary },
+  modalTitle:     { ...typography.h3, color: colors.textPrimary },
 
   modalScroll:    { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   modalSection:   { marginBottom: spacing.xl },
@@ -750,10 +785,25 @@ const styles = StyleSheet.create({
   },
   addCatBtnText: { ...typography.bodyBold, fontWeight: '700' },
 
+  modalActionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  resetModalBtn: {
+    paddingVertical: spacing.md + 4,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.danger + '66',
+    backgroundColor: colors.danger + '0D',
+  },
+  resetModalBtnText: { ...typography.bodyBold, fontWeight: '700', fontSize: 15 },
   savePlanBtn: {
+    flex: 1,
     paddingVertical: spacing.md + 4,
     borderRadius: radius.lg, alignItems: 'center',
-    marginTop: spacing.sm,
     ...shadows.elevated,
   },
   savePlanBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800', fontSize: 17 },
