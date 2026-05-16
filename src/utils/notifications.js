@@ -5,6 +5,9 @@ import { Platform } from 'react-native';
 // so changing channel settings (sound, importance, vibration) requires a new id.
 export const CHANNEL_ID = 'payment_reminders_v2';
 
+// Separate channel for budget alerts so users can mute one without the other.
+export const BUDGET_CHANNEL_ID = 'budget_alerts';
+
 // Call once at app startup — no permission required
 export function configureNotificationHandler() {
   Notifications.setNotificationHandler({
@@ -67,4 +70,78 @@ export async function cancelScheduledNotification(notificationId) {
   try {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
   } catch (_) {}
+}
+
+// ─── Budget alerts ────────────────────────────────────────────────────────────
+
+export async function setupBudgetAlertChannel() {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(BUDGET_CHANNEL_ID, {
+    name: 'Budget Alerts',
+    description: 'Heads-up when you cross a category or total budget cap',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 200, 250],
+    lightColor: '#EF4444',
+    sound: 'default',
+    enableLights: true,
+    enableVibrate: true,
+    showBadge: true,
+  });
+}
+
+/**
+ * Fire an immediate notification when a budget cap is crossed.
+ *   scope: 'category' | 'total'
+ *   categoryName?: string (for scope='category')
+ *   actual, cap: numbers — the spend that triggered the breach
+ * Silently no-ops if permission isn't granted (we don't prompt here — the
+ * borrow reminder flow already asks, and the budget breach is a follow-up).
+ */
+export async function fireBudgetBreachNotification({ scope, categoryName, actual, cap }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+
+  const overshoot = Math.max(0, (actual || 0) - (cap || 0));
+  const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
+  const actualFmt = `₹${Math.round(actual).toLocaleString('en-IN')}`;
+  const capFmt    = `₹${Math.round(cap).toLocaleString('en-IN')}`;
+  const overFmt   = `₹${Math.round(overshoot).toLocaleString('en-IN')}`;
+
+  const title = scope === 'total'
+    ? `🚨 ${monthName} budget crossed`
+    : `🚨 ${categoryName} budget crossed`;
+  const body = scope === 'total'
+    ? `${actualFmt} of ${capFmt} — ${overFmt} over your ${monthName} cap`
+    : `${actualFmt} of ${capFmt} — ${overFmt} over your ${monthName} cap`;
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.HIGH,
+      ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger: null, // fires immediately
+  });
+}
+
+/**
+ * Fires a soft mid-cycle nudge notification. Same channel as budget breaches
+ * but with a friendlier tone (passed in as title/body from the store action).
+ * No-ops without notification permission.
+ */
+export async function fireMidmonthNudgeNotification({ title, body }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger: null,
+  });
 }

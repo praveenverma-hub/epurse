@@ -28,6 +28,8 @@ import { formatCurrency, formatCompact } from '../utils/format';
 import { TRANSACTION_TYPES, ACCOUNT_TYPES } from '../constants/categories';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
+import BudgetWidget from '../components/BudgetWidget';
+import CelebrationModal from '../components/CelebrationModal';
 import TransactionItem from '../components/TransactionItem';
 import AccountCard from '../components/AccountCard';
 import AddAccountModal from '../components/AddAccountModal';
@@ -78,6 +80,8 @@ const DashboardScreen = ({ navigation }) => {
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
   const addAccount          = useEPurseStore((s) => s.addAccount);
   const deleteAccount       = useEPurseStore((s) => s.deleteAccount);
+  const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
+  const clearPendingCelebration = useEPurseStore((s) => s.clearPendingCelebration);
 
   const [period, setPeriod]     = useState('M');
   const [refreshing, setRefreshing] = useState(false);
@@ -379,6 +383,9 @@ const DashboardScreen = ({ navigation }) => {
           onPressBorrowed={() => navigation.navigate('LentBorrowed', { kind: 'borrowed' })}
         />
 
+        {/* Monthly budget — empty CTA or active progress */}
+        <BudgetWidget onPress={() => navigation.navigate('Budget')} />
+
         {/* Quick actions */}
         <View style={styles.quickActions}>
           <QuickAction emoji="💸" label="Add"       onPress={() => navigation.navigate('AddTransaction')} />
@@ -386,7 +393,9 @@ const DashboardScreen = ({ navigation }) => {
           <QuickAction emoji="📩" label="Simulate"  onPress={onSimulateSMS} /> */}
           <QuickAction emoji="📊" label="Analytics" onPress={() => navigation.navigate('Analytics')} />
           <QuickAction emoji="🧾" label="All txns"  onPress={() => navigation.navigate('Transactions', { initialPeriod: period })} />
-          <QuickAction emoji="🔬" label="Diagnose"  onPress={() => navigation.navigate('SmsDiagnostic')} />
+          <QuickAction emoji="🎯" label="Plan"      onPress={() => navigation.navigate('Budget')} />
+          {/* Diagnose hidden for now — kept in code for future debugging
+          <QuickAction emoji="🔬" label="Diagnose"  onPress={() => navigation.navigate('SmsDiagnostic')} /> */}
         </View>
 
         {/* Period transactions */}
@@ -583,6 +592,16 @@ const DashboardScreen = ({ navigation }) => {
         visible={addAccountVisible}
         onClose={() => setAddAccountVisible(false)}
         onAdd={(acct) => addAccount(acct)}
+      />
+
+      {/* Monthly wrap-up celebration — shown after rollover snapshots a month */}
+      <CelebrationModal
+        visible={!!pendingCelebration}
+        onClose={clearPendingCelebration}
+        onPlanNext={() => {
+          clearPendingCelebration();
+          navigation.navigate('Budget');
+        }}
       />
     </View>
   );

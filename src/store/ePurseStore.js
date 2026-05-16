@@ -35,6 +35,7 @@ import { DEFAULT_THEME_ID } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { isSameMonth, monthKey } from '../utils/format';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification } from '../utils/notifications';
 import {
   computeEqualSplit,
   computePercentSplit,
@@ -276,6 +277,28 @@ export const useEPurseStore = create(
       // Notification IDs: { [personKey]: notificationId }  — used to cancel/update reminders
       notificationIds: {},
 
+      // ─── Budget plan ────────────────────────────────────────────────────────
+      // `budget` is null until the user sets a plan. When set:
+      //   { monthKey, totalCap, perCategory: { [categoryId]: cap }, startDay, createdAt, lastEditedAt }
+      // `budgetHistory` keyed by month: { [YYYY-MM]: { totalCap, perCategory, totalActual, status, overshoot } }
+      // `budgetStreak` tracks consecutive under-budget months for the gamification layer.
+      budget: null,
+      budgetHistory: {},
+      budgetStreak: { current: 0, best: 0, lastResetMonth: null },
+
+      // Per-month dedup so we only fire one breach notification per category
+      // (and one for the overall total) — { '2026-05': ['shopping', '__total__'] }
+      budgetBreachNotified: {},
+
+      // When a month rollover commits a snapshot, we stash the result here so the
+      // dashboard can pop a celebration modal on the user's next visit. Cleared
+      // after the modal is dismissed.
+      //   { monthKey, totalActual, totalCap, status, overshoot, streakAfter, savedAmount }
+      pendingCelebration: null,
+
+      // Per-cycle dedup for the mid-month nudge (one notification per cycle).
+      lastMidmonthNudgeMonth: null,
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -295,6 +318,268 @@ export const useEPurseStore = create(
           const next = { ...s.notificationIds };
           delete next[personKey];
           return { notificationIds: next };
+        }),
+
+      // ─── Budget actions ─────────────────────────────────────────────────────
+      /** Bulk set / replace the active plan. Accepts { totalCap, perCategory }. */
+      setBudget: (plan) =>
+        set((s) => {
+          const nowIso = new Date().toISOString();
+          return {
+            budget: {
+              monthKey: monthKey(new Date()),
+              totalCap: plan?.totalCap ?? null,
+              perCategory: plan?.perCategory ? { ...plan.perCategory } : {},
+              startDay: 1, // calendar month for Phase 1 — settings hook later
+              createdAt: s.budget?.createdAt || nowIso,
+              lastEditedAt: nowIso,
+            },
+          };
+        }),
+
+      /** Upsert one category cap. Creates the plan record if it doesn't exist yet. */
+      updateBudgetCategory: (categoryId, cap) =>
+        set((s) => {
+          const nowIso = new Date().toISOString();
+          const current = s.budget || {
+            monthKey: monthKey(new Date()),
+            totalCap: null,
+            perCategory: {},
+            startDay: 1,
+            createdAt: nowIso,
+            lastEditedAt: nowIso,
+          };
+          return {
+            budget: {
+              ...current,
+              perCategory: { ...current.perCategory, [categoryId]: Number(cap) || 0 },
+              lastEditedAt: nowIso,
+            },
+          };
+        }),
+
+      removeBudgetCategory: (categoryId) =>
+        set((s) => {
+          if (!s.budget) return s;
+          const next = { ...s.budget.perCategory };
+          delete next[categoryId];
+          // Also clear the dedup mark so re-adding later can re-fire a breach.
+          const currentMonth = s.budget.monthKey;
+          const breachMonth  = (s.budgetBreachNotified?.[currentMonth] || [])
+            .filter((id) => id !== categoryId);
+          return {
+            budget: { ...s.budget, perCategory: next, lastEditedAt: new Date().toISOString() },
+            budgetBreachNotified: { ...s.budgetBreachNotified, [currentMonth]: breachMonth },
+          };
+        }),
+
+      setBudgetTotalCap: (cap) =>
+        set((s) => {
+          const nowIso = new Date().toISOString();
+          const current = s.budget || {
+            monthKey: monthKey(new Date()),
+            totalCap: null,
+            perCategory: {},
+            startDay: 1,
+            createdAt: nowIso,
+            lastEditedAt: nowIso,
+          };
+          return {
+            budget: { ...current, totalCap: cap == null ? null : Number(cap) || 0, lastEditedAt: nowIso },
+          };
+        }),
+
+      clearBudget: () => set({ budget: null, budgetBreachNotified: {} }),
+
+      /** Dismisses the celebration modal — called when the user closes it. */
+      clearPendingCelebration: () => set({ pendingCelebration: null }),
+
+      /**
+       * Fires the mid-cycle nudge notification once per cycle.
+       * Conditions: budget exists, today >= day 15, not already nudged this cycle.
+       * Copy depends on current usage so the message feels useful, not spammy.
+       *
+       * Called from BudgetNudgeBoot in App.js on launch + foreground.
+       */
+      maybeFireMidmonthNudge: () => {
+        const s = get();
+        if (!s.budget) return;
+        const now = new Date();
+        if (now.getDate() < 15) return;
+
+        const currentMonth = monthKey(now);
+        if (s.lastMidmonthNudgeMonth === currentMonth) return;
+
+        const usage = s.getBudgetUsage();
+        if (!usage || usage.total.cap == null) return; // skip without a total cap
+
+        // Mark first so failure to fire doesn't keep retrying every foreground
+        set({ lastMidmonthNudgeMonth: currentMonth });
+
+        const pct = usage.total.pct;
+        const daysPct = usage.daysElapsedPct;
+        let tone, body;
+        if (pct >= 85) {
+          tone = '🚨';
+          body = `You're at ${Math.round(pct)}% of your budget with ${usage.daysLeftInMonth} day${usage.daysLeftInMonth === 1 ? '' : 's'} to go. Tighten up?`;
+        } else if (pct > daysPct + 5) {
+          tone = '⚠';
+          body = `You're at ${Math.round(pct)}% of your budget — slightly ahead of pace. Slow down a bit?`;
+        } else {
+          tone = '👌';
+          body = `You're at ${Math.round(pct)}% of your budget. Nice pace — keep it up.`;
+        }
+        const monthName = now.toLocaleDateString('en-IN', { month: 'long' });
+
+        // Fire-and-forget — runs through the same budget_alerts channel
+        fireMidmonthNudgeNotification({
+          title: `${tone} ${monthName} check-in`,
+          body,
+        }).catch(() => {});
+      },
+
+      /**
+       * Returns how many consecutive recent cycles a category stayed under its
+       * cap. Walks backward from the most recent history month. Stops at first
+       * breach or missing entry. Used to render mastery badges (⭐ at 3, 🥇 at 6).
+       */
+      getCategoryMastery: (categoryId) => {
+        const s = get();
+        if (!categoryId || !s.budgetHistory) return 0;
+        const keys = Object.keys(s.budgetHistory).sort().reverse();
+        let streak = 0;
+        for (const k of keys) {
+          const entry = s.budgetHistory[k];
+          const cat = entry?.perCategory?.[categoryId];
+          if (!cat) break;                // category wasn't budgeted that month
+          if (cat.actual > cat.cap) break; // broke
+          streak += 1;
+        }
+        return streak;
+      },
+
+      /**
+       * Fires a one-shot push notification when a category (and/or the total
+       * cap) is freshly breached this month. Dedups via `budgetBreachNotified`
+       * so the user gets at most one alert per category per month.
+       *
+       * Called from addTransaction / ingestMessage after the state commits.
+       * Safe no-op when budget is null, category isn't in the plan, or it's
+       * already been notified this month.
+       */
+      checkBudgetBreach: (categoryId) => {
+        const s = get();
+        if (!s.budget) return;
+
+        // Recompute usage fresh from the updated state
+        const usage = s.getBudgetUsage();
+        if (!usage) return;
+
+        const month        = usage.monthKey;
+        const notifiedList = s.budgetBreachNotified?.[month] || [];
+        const toMark       = [];
+
+        // ── Category-level breach ─────────────────────────────────────────
+        if (categoryId && s.budget.perCategory[categoryId] != null) {
+          const cat = usage.perCategory[categoryId];
+          if (cat?.over && !notifiedList.includes(categoryId)) {
+            toMark.push(categoryId);
+            const meta = s.categories.find((c) => c.id === categoryId);
+            // Fire-and-forget — don't block the action on permission/network
+            fireBudgetBreachNotification({
+              scope: 'category',
+              categoryName: meta?.name || 'Category',
+              actual: cat.actual,
+              cap: cat.cap,
+            }).catch(() => {});
+          }
+        }
+
+        // ── Total-level breach ────────────────────────────────────────────
+        if (s.budget.totalCap != null && usage.total.over && !notifiedList.includes('__total__')) {
+          toMark.push('__total__');
+          fireBudgetBreachNotification({
+            scope: 'total',
+            actual: usage.total.actual,
+            cap: usage.total.cap,
+          }).catch(() => {});
+        }
+
+        if (toMark.length === 0) return;
+
+        set((cur) => ({
+          budgetBreachNotified: {
+            ...cur.budgetBreachNotified,
+            [month]: [...(cur.budgetBreachNotified?.[month] || []), ...toMark],
+          },
+        }));
+      },
+
+      /**
+       * Snapshot the previous month's plan + actuals into history when the
+       * calendar month rolls over. Updates streak based on under/over status.
+       * Safe to call repeatedly — no-op if budget is still on the current month.
+       */
+      rolloverBudgetIfNeeded: () =>
+        set((s) => {
+          if (!s.budget) return s;
+          const currentMonth = monthKey(new Date());
+          if (s.budget.monthKey === currentMonth) return s;
+
+          const prevMonth = s.budget.monthKey;
+          const prevAgg   = s.monthlyAggregates[prevMonth];
+          const perCategorySnapshot = {};
+          Object.entries(s.budget.perCategory).forEach(([catId, cap]) => {
+            perCategorySnapshot[catId] = { cap, actual: prevAgg?.byCategory?.[catId] || 0 };
+          });
+
+          const totalActual = prevAgg?.totalSpend || 0;
+          const totalCap    = s.budget.totalCap;
+          const status      = totalCap != null
+            ? (totalActual <= totalCap ? 'under' : 'over')
+            : null;
+          const overshoot   = (totalCap != null && totalActual > totalCap) ? (totalActual - totalCap) : 0;
+
+          const historyEntry = { totalCap, perCategory: perCategorySnapshot, totalActual, status, overshoot };
+
+          // Streak math — only meaningful when a total cap was set
+          const streak = s.budgetStreak || { current: 0, best: 0, lastResetMonth: null };
+          let { current, best, lastResetMonth } = streak;
+          if (status === 'under') {
+            current += 1;
+            if (current > best) best = current;
+          } else if (status === 'over') {
+            current = 0;
+            lastResetMonth = prevMonth;
+          }
+
+          // Stash a celebration record so the dashboard can pop a modal on next
+          // visit. We do this even on 'over' months so the user gets a gentle
+          // wrap-up (no shaming copy — that's handled in the modal).
+          const savedAmount = (totalCap != null && totalActual <= totalCap)
+            ? totalCap - totalActual
+            : 0;
+          const pendingCelebration = {
+            monthKey:     prevMonth,
+            totalCap,
+            totalActual,
+            status,
+            overshoot,
+            savedAmount,
+            streakAfter:  current,
+            perCategory:  perCategorySnapshot,
+          };
+
+          return {
+            budget: { ...s.budget, monthKey: currentMonth, lastEditedAt: new Date().toISOString() },
+            budgetHistory: { ...s.budgetHistory, [prevMonth]: historyEntry },
+            budgetStreak: { current, best, lastResetMonth },
+            // Drop old months' dedup — keep only the new (current) month
+            budgetBreachNotified: { [currentMonth]: [] },
+            pendingCelebration,
+            // Reset mid-month nudge dedup for the new cycle
+            lastMidmonthNudgeMonth: null,
+          };
         }),
 
       // ----- accounts ----------------------------------------------------
@@ -324,7 +609,7 @@ export const useEPurseStore = create(
 
       // ----- transactions ------------------------------------------------
       /** Manual entry from the FAB. IDs: `IdM0001`, `IdM0002`, … (persisted counter). */
-      addTransaction: (txn) =>
+      addTransaction: (txn) => {
         set((s) => {
           if (!txn?.amount || txn.amount <= 0 || txn.amount > MAX_ALLOWED_AMOUNT) {
             return s;
@@ -411,7 +696,10 @@ export const useEPurseStore = create(
             lentBorrowed: nextLent,
             ...(useProvidedId ? {} : { manualTxnSeq: nextSeq }),
           };
-        }),
+        });
+        // Budget breach detection runs after the state commits — fire-and-forget.
+        if (txn?.categoryId) get().checkBudgetBreach(txn.categoryId);
+      },
 
       /**
        * Single canonical SMS / notification ingestion path.
@@ -453,6 +741,12 @@ export const useEPurseStore = create(
 
         if (added.length === 0) return null;
         set({ transactions: nextTransactions, accounts: nextAccounts });
+
+        // Check budget breach for each unique category affected by this ingest.
+        const affectedCats = new Set();
+        added.forEach((t) => { if (t.categoryId) affectedCats.add(t.categoryId); });
+        affectedCats.forEach((catId) => get().checkBudgetBreach(catId));
+
         return added[0];
       },
 
@@ -969,6 +1263,111 @@ export const useEPurseStore = create(
           .slice(0, limit),
 
       /**
+       * Live current-month budget usage. Returns null if no plan is set.
+       * Actuals are computed from the transactions list directly so they're
+       * always in sync with edits / deletes / ignores. Excludes lent/borrow
+       * categories from totalActual to match how the dashboard reports spend.
+       */
+      getBudgetUsage: () => {
+        const s = get();
+        if (!s.budget) return null;
+
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+        const byCategory = {};
+        let totalActual = 0;
+        s.transactions.forEach((t) => {
+          if (t.isIgnored) return;
+          if (new Date(t.createdAt).getTime() < monthStart) return;
+          if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+          const spend = debitDisplayAmount(t);
+          byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + spend;
+          if (!LB_ALL_CATS.has(t.categoryId)) totalActual += spend;
+        });
+
+        const totalCap = s.budget.totalCap;
+        const perCategory = {};
+        Object.entries(s.budget.perCategory).forEach(([catId, cap]) => {
+          const actual = byCategory[catId] || 0;
+          perCategory[catId] = {
+            cap,
+            actual,
+            pct:       cap > 0 ? (actual / cap) * 100 : 0,
+            remaining: Math.max(0, cap - actual),
+            over:      actual > cap,
+            overshoot: Math.max(0, actual - cap),
+          };
+        });
+
+        const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const dayOfMonth     = now.getDate();
+        const daysLeftInMonth = lastDayOfMonth - dayOfMonth;
+        const daysElapsedPct  = (dayOfMonth / lastDayOfMonth) * 100;
+
+        return {
+          monthKey: monthKey(now),
+          total: {
+            cap: totalCap,
+            actual: totalActual,
+            pct: totalCap > 0 ? (totalActual / totalCap) * 100 : 0,
+            remaining: totalCap != null ? Math.max(0, totalCap - totalActual) : null,
+            over: totalCap != null && totalActual > totalCap,
+            overshoot: (totalCap != null && totalActual > totalCap) ? (totalActual - totalCap) : 0,
+          },
+          perCategory,
+          daysLeftInMonth,
+          daysElapsedPct,
+          dayOfMonth,
+          lastDayOfMonth,
+        };
+      },
+
+      /**
+       * Average monthly spend for a category over the last N months, drawn from
+       * monthlyAggregates. Returns 0 if there's no historical data.
+       * Used to seed budget suggestions in the form.
+       */
+      getCategoryAverage: (categoryId, months = 3) => {
+        const s = get();
+        const now = new Date();
+        let total = 0;
+        let count = 0;
+        for (let i = 1; i <= months; i++) {
+          const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const key = monthKey(d);
+          const agg = s.monthlyAggregates[key];
+          if (agg && agg.byCategory && agg.byCategory[categoryId] != null) {
+            total += agg.byCategory[categoryId];
+            count += 1;
+          }
+        }
+        return count > 0 ? Math.round(total / count) : 0;
+      },
+
+      /** Top N categories by historical avg spend — used to seed empty-form suggestions. */
+      getTopCategoriesByAverage: (limit = 6) => {
+        const s = get();
+        const now = new Date();
+        const totals = {};
+        const counts = {};
+        for (let i = 1; i <= 3; i++) {
+          const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const agg = s.monthlyAggregates[monthKey(d)];
+          if (!agg?.byCategory) continue;
+          Object.entries(agg.byCategory).forEach(([catId, amt]) => {
+            if (LB_ALL_CATS.has(catId)) return;
+            totals[catId] = (totals[catId] || 0) + amt;
+            counts[catId] = (counts[catId] || 0) + 1;
+          });
+        }
+        return Object.entries(totals)
+          .map(([catId, total]) => ({ categoryId: catId, average: Math.round(total / counts[catId]) }))
+          .sort((a, b) => b.average - a.average)
+          .slice(0, limit);
+      },
+
+      /**
        * Returns per-person cumulative net balance across lentBorrowed entries.
        * Groups by contactId > phone > lowercased name.
        * Returns array of { personKey, person, contactId, phone, lent, borrowed, net, entries }
@@ -1027,6 +1426,12 @@ export const useEPurseStore = create(
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
           notificationIds: {},
+          budget: null,
+          budgetHistory: {},
+          budgetStreak: { current: 0, best: 0, lastResetMonth: null },
+          budgetBreachNotified: {},
+          pendingCelebration: null,
+          lastMidmonthNudgeMonth: null,
         }),
     }),
     {
@@ -1034,7 +1439,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 11,
+      version: 12,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1163,6 +1568,20 @@ export const useEPurseStore = create(
           };
         }
 
+        // v12: seed budget feature defaults so existing users have a place
+        // for the plan/history/streak/breach-dedup/celebration/nudge state after upgrading.
+        if (version < 12) {
+          state = {
+            ...state,
+            budget:                 state.budget                 ?? null,
+            budgetHistory:          state.budgetHistory          ?? {},
+            budgetStreak:           state.budgetStreak           ?? { current: 0, best: 0, lastResetMonth: null },
+            budgetBreachNotified:   state.budgetBreachNotified   ?? {},
+            pendingCelebration:     state.pendingCelebration     ?? null,
+            lastMidmonthNudgeMonth: state.lastMidmonthNudgeMonth ?? null,
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -1185,6 +1604,12 @@ export const useEPurseStore = create(
         themeId: state.themeId,
         darkMode: state.darkMode,
         notificationIds: state.notificationIds,
+        budget: state.budget,
+        budgetHistory: state.budgetHistory,
+        budgetStreak: state.budgetStreak,
+        budgetBreachNotified: state.budgetBreachNotified,
+        pendingCelebration: state.pendingCelebration,
+        lastMidmonthNudgeMonth: state.lastMidmonthNudgeMonth,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;

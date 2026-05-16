@@ -35,6 +35,9 @@ const AddTransactionScreen = ({ navigation }) => {
   const accounts = useEPurseStore((s) => s.accounts);
   const addTransaction = useEPurseStore((s) => s.addTransaction);
   const ingestMessage = useEPurseStore((s) => s.ingestMessage);
+  const budget = useEPurseStore((s) => s.budget);
+  const transactions = useEPurseStore((s) => s.transactions);
+  const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
 
   // manual fields
   const [amount, setAmount] = useState('');
@@ -82,6 +85,33 @@ const AddTransactionScreen = ({ navigation }) => {
     categoryId,
     isIgnored: false,
   });
+
+  // ── Budget breach preview ──
+  // Recompute usage on demand so the chip stays live as amount / category / type changes.
+  // Returns null in the "no warning needed" path so the chip is hidden.
+  const breachPreview = useMemo(() => {
+    if (type !== TRANSACTION_TYPES.DEBIT) return null;
+    if (!budget?.perCategory?.[categoryId]) return null;
+    const proposed = parseFloat(amount) || 0;
+    if (proposed <= 0) return null;
+
+    const usage = getBudgetUsage();
+    const cat = usage?.perCategory?.[categoryId];
+    if (!cat) return null;
+
+    const projectedActual = cat.actual + proposed;
+    const projectedPct = cat.cap > 0 ? (projectedActual / cat.cap) * 100 : 0;
+    if (projectedPct < 90) return null;
+
+    return {
+      cap: cat.cap,
+      actualBefore: cat.actual,
+      projectedActual,
+      projectedPct,
+      over: projectedActual > cat.cap,
+      overshoot: Math.max(0, projectedActual - cat.cap),
+    };
+  }, [type, categoryId, amount, budget, transactions, getBudgetUsage]);
 
   const handleSave = () => {
     const num = parseFloat(amount);
@@ -245,17 +275,41 @@ const AddTransactionScreen = ({ navigation }) => {
                 {(() => {
                   const activeCat = categories.find((c) => c.id === categoryId);
                   return (
-                    <TouchableOpacity
-                      style={[styles.catSelector, activeCat && { borderColor: activeCat.color }]}
-                      onPress={() => setCatPickerOpen(true)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.catSelectorEmoji}>{activeCat?.emoji ?? '📌'}</Text>
-                      <Text style={[styles.catSelectorName, activeCat && { color: activeCat.color, fontWeight: '700' }]}>
-                        {activeCat?.name ?? 'Select category'}
-                      </Text>
-                      <Text style={styles.catSelectorArrow}>›</Text>
-                    </TouchableOpacity>
+                    <>
+                      <TouchableOpacity
+                        style={[styles.catSelector, activeCat && { borderColor: activeCat.color }]}
+                        onPress={() => setCatPickerOpen(true)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.catSelectorEmoji}>{activeCat?.emoji ?? '📌'}</Text>
+                        <Text style={[styles.catSelectorName, activeCat && { color: activeCat.color, fontWeight: '700' }]}>
+                          {activeCat?.name ?? 'Select category'}
+                        </Text>
+                        <Text style={styles.catSelectorArrow}>›</Text>
+                      </TouchableOpacity>
+
+                      {/* Budget breach preview — amber at 90-100%, red over 100% */}
+                      {breachPreview ? (
+                        <View
+                          style={[
+                            styles.breachChip,
+                            breachPreview.over ? styles.breachChipOver : styles.breachChipWarn,
+                          ]}
+                        >
+                          <Text style={styles.breachIcon}>{breachPreview.over ? '🚨' : '⚠'}</Text>
+                          <Text
+                            style={[
+                              styles.breachText,
+                              { color: breachPreview.over ? '#991B1B' : '#92400E' },
+                            ]}
+                          >
+                            {breachPreview.over
+                              ? `Puts you ₹${Math.round(breachPreview.overshoot).toLocaleString('en-IN')} over your ${activeCat?.name} budget`
+                              : `You'll be at ${Math.round(breachPreview.projectedPct)}% of your ${activeCat?.name} budget after this`}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </>
                   );
                 })()}
               </Field>
@@ -604,6 +658,22 @@ const styles = StyleSheet.create({
   },
 
   smsHelp: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
+
+  // Inline budget breach preview shown beneath the category selector
+  breachChip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginTop: spacing.sm,
+  },
+  breachChipWarn: { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' },
+  breachChipOver: { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' },
+  breachIcon: { fontSize: 14, lineHeight: 18 },
+  breachText: { ...typography.small, flex: 1, fontWeight: '600', lineHeight: 18 },
 });
 
 export default AddTransactionScreen;
