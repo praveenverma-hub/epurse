@@ -18,13 +18,14 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatCompact } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
-import { TRANSACTION_TYPES } from '../constants/categories';
+import { TRANSACTION_TYPES, ACCOUNT_TYPES } from '../constants/categories';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import TransactionItem from '../components/TransactionItem';
@@ -36,7 +37,7 @@ import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
 import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
-
+import Svg, { Path, Circle, Line } from 'react-native-svg';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -78,6 +79,7 @@ const DashboardScreen = ({ navigation }) => {
   const [period, setPeriod]     = useState('M');
   const [refreshing, setRefreshing] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
+  const [balancesVisible, setBalancesVisible] = useState(false);
   const [lbLinkTxn, setLbLinkTxn] = useState(null);   // { txn, categoryId }
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
@@ -179,6 +181,38 @@ const DashboardScreen = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 600);
   }, []);
 
+  // Bank / credit cards appear last in the horizontal scroller for privacy.
+  const SENSITIVE_TYPES = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD]);
+  const sortedAccounts = useMemo(() => {
+    const other = accounts.filter((a) => !SENSITIVE_TYPES.has(a.type));
+    const sensitive = accounts.filter((a) => SENSITIVE_TYPES.has(a.type));
+    return [...other, ...sensitive];
+  }, [accounts]);
+
+  const handleToggleBalances = useCallback(async () => {
+    if (balancesVisible) {
+      setBalancesVisible(false);
+      return;
+    }
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
+      if (hasHardware && isEnrolled) {
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Verify to reveal balances',
+          cancelLabel: 'Cancel',
+          fallbackLabel: 'Use PIN',
+          disableDeviceFallback: false,
+        });
+        if (!result.success) return;
+      }
+      // No biometrics enrolled — reveal directly
+    } catch (_) {
+      // Auth unavailable — reveal directly
+    }
+    setBalancesVisible(true);
+  }, [balancesVisible]);
+
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     if (h < 12) return 'Good morning';
@@ -275,18 +309,29 @@ const DashboardScreen = ({ navigation }) => {
         }
       >
         {/* Account cards (CRED-style) */}
-        <Text style={styles.sectionTitle}>Your accounts</Text>
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Your accounts</Text>
+          <TouchableOpacity
+            onPress={handleToggleBalances}
+            style={styles.eyeBtn}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <EyeIcon open={balancesVisible} color={theme.primary} size={20} />
+          </TouchableOpacity>
+        </View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.accountsRow}
-          snapToInterval={296}   // card width 280 + marginRight 16 (spacing.md)
+          snapToInterval={296}
           decelerationRate="fast"
         >
-          {accounts.map((a) => (
+          {sortedAccounts.map((a) => (
             <AccountCard
               key={a.id}
               account={a}
+              showBalance={balancesVisible}
               onPress={() => navigation.navigate('Transactions', { accountId: a.id, initialPeriod: period })}
             />
           ))}
@@ -583,7 +628,19 @@ const styles = StyleSheet.create({
   body: { flex: 1, marginTop: -spacing.lg },
   bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
 
-  sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  sectionTitle: { ...typography.h3, color: colors.textPrimary },
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
   accountsRow: { paddingTop: spacing.xs, paddingBottom: spacing.md, paddingRight: spacing.lg },
 
@@ -625,5 +682,49 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: spacing.xs,
   },
 });
+
+// ── Eye / Eye-off SVG icon (Feather-style, theme-aware) ───────────────────────
+const EyeIcon = ({ open = true, color = '#000', size = 20 }) => {
+  const s = size;
+  return (
+    <Svg width={s} height={s} viewBox="0 0 24 24" fill="none">
+      {open ? (
+        <>
+          <Path
+            d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
+            stroke={color}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Circle
+            cx="12"
+            cy="12"
+            r="3"
+            stroke={color}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </>
+      ) : (
+        <>
+          <Path
+            d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+            stroke={color}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Line
+            x1="1" y1="1" x2="23" y2="23"
+            stroke={color}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </>
+      )}
+    </Svg>
+  );
+};
 
 export default DashboardScreen;

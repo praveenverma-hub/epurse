@@ -1,11 +1,5 @@
 // =============================================================================
 // AccountCard — CRED-style realistic credit-card view used in the dashboard.
-// -----------------------------------------------------------------------------
-// • Picks one of N gradient palettes deterministically from account.id so
-//   each card stays the same colour across renders but different cards differ.
-// • Renders a subtle SVG glow + chip + contactless-wave decoration so it feels
-//   like a real card and not just a coloured rectangle.
-// • Brand row maps account.type → label (BANK / CREDIT / WALLET / CASH).
 // =============================================================================
 
 import React, { useMemo } from 'react';
@@ -17,8 +11,6 @@ import { radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCompact } from '../utils/format';
 import { ACCOUNT_TYPES } from '../constants/categories';
 
-// ---- Gradient palettes (account-specific, NOT app-theme) -------------------
-// We rotate through these so each account gets a visually distinct card.
 const CARD_PALETTES = [
   { start: '#1F1147', end: '#5B247A',  glow: '#9D4EDD' },  // deep violet (default)
   { start: '#0F2027', end: '#2C5364',  glow: '#56CCF2' },  // teal slate
@@ -44,7 +36,8 @@ const TYPE_EMOJI = {
   [ACCOUNT_TYPES.CASH]:        '💵',
 };
 
-// ---- Hash helper to pick a stable palette per account ---------------------
+const BALANCE_SENSITIVE_TYPES = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD]);
+
 const paletteFor = (account) => {
   const str = String(account?.id || account?.mask || account?.name || '');
   let h = 0;
@@ -52,7 +45,6 @@ const paletteFor = (account) => {
   return CARD_PALETTES[h % CARD_PALETTES.length];
 };
 
-// ---- Mask helper -----------------------------------------------------------
 const maskedNumber = (account) => {
   const m = (account?.mask || '').replace(/\D/g, '');
   if (!m) return '•••• •••• •••• ••••';
@@ -60,12 +52,16 @@ const maskedNumber = (account) => {
   return `•••• •••• •••• ${last4}`;
 };
 
-// ---- Component -------------------------------------------------------------
-const AccountCard = ({ account, onPress, width = 280, height = 170 }) => {
+const AccountCard = ({ account, onPress, showBalance = true, width = 280, height = 170 }) => {
   const palette = useMemo(() => paletteFor(account), [account?.id]);
   const Wrapper = onPress ? TouchableOpacity : View;
   const label   = TYPE_LABEL[account.type] || 'CARD';
   const emoji   = TYPE_EMOJI[account.type] || '💳';
+  const isSensitive = BALANCE_SENSITIVE_TYPES.has(account.type);
+  const balanceHidden = isSensitive && !showBalance;
+
+  // Bank name: prefer account.bankName, fall back to account.name without the mask suffix
+  const bankName = account.bankName || null;
 
   return (
     <Wrapper
@@ -79,7 +75,6 @@ const AccountCard = ({ account, onPress, width = 280, height = 170 }) => {
         end={{ x: 1, y: 1 }}
         style={[styles.card, { width, height }]}
       >
-        {/* SVG decorative layer: subtle glow + contactless wave */}
         <Svg
           width={width}
           height={height}
@@ -94,25 +89,24 @@ const AccountCard = ({ account, onPress, width = 280, height = 170 }) => {
             </RadialGradient>
           </Defs>
           <Rect x="0" y="0" width={width} height={height} fill="url(#glow)" />
-
-          {/* Decorative arc — bottom-right corner curve */}
           <Path
             d={`M ${width - 80} ${height} Q ${width} ${height - 40}, ${width} ${height - 90}`}
-            stroke="#FFFFFF22"
-            strokeWidth="1.5"
-            fill="none"
+            stroke="#FFFFFF22" strokeWidth="1.5" fill="none"
           />
           <Path
             d={`M ${width - 40} ${height} Q ${width} ${height - 20}, ${width} ${height - 60}`}
-            stroke="#FFFFFF14"
-            strokeWidth="1"
-            fill="none"
+            stroke="#FFFFFF14" strokeWidth="1" fill="none"
           />
         </Svg>
 
-        {/* ── Top row: brand label + emoji ── */}
+        {/* ── Top row: brand label + bank name + emoji ── */}
         <View style={styles.topRow}>
-          <Text style={styles.brand}>{label}</Text>
+          <View>
+            <Text style={styles.brand}>{label}</Text>
+            {bankName ? (
+              <Text style={styles.bankName}>{bankName}</Text>
+            ) : null}
+          </View>
           <Text style={styles.brandEmoji}>{emoji}</Text>
         </View>
 
@@ -121,7 +115,6 @@ const AccountCard = ({ account, onPress, width = 280, height = 170 }) => {
           <Svg width={32} height={24} viewBox="0 0 32 24">
             <Rect x="0" y="0" width="32" height="24" rx="4" ry="4" fill="#E8C766" />
             <Rect x="0" y="0" width="32" height="24" rx="4" ry="4" fill="#D4B14A" opacity="0.4" />
-            {/* Chip grid lines */}
             <Path d="M0 6 L32 6" stroke="#B58E2F" strokeWidth="0.8" />
             <Path d="M0 12 L32 12" stroke="#B58E2F" strokeWidth="0.8" />
             <Path d="M0 18 L32 18" stroke="#B58E2F" strokeWidth="0.8" />
@@ -148,7 +141,11 @@ const AccountCard = ({ account, onPress, width = 280, height = 170 }) => {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.label}>BALANCE</Text>
-            <Text style={styles.balance}>{formatCompact(account.balance)}</Text>
+            {balanceHidden ? (
+              <Text style={styles.balanceMasked}>••••••</Text>
+            ) : (
+              <Text style={styles.balance}>{formatCompact(account.balance)}</Text>
+            )}
           </View>
         </View>
       </LinearGradient>
@@ -156,7 +153,6 @@ const AccountCard = ({ account, onPress, width = 280, height = 170 }) => {
   );
 };
 
-// ---- Styles ----------------------------------------------------------------
 const styles = StyleSheet.create({
   shadow: { borderRadius: radius.lg, ...shadows.elevated },
   card: {
@@ -168,13 +164,20 @@ const styles = StyleSheet.create({
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   brand: {
     color: '#FFFFFFE6',
     ...typography.tiny,
     fontWeight: '800',
     letterSpacing: 2,
+  },
+  bankName: {
+    color: '#FFFFFFCC',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    marginTop: 2,
   },
   brandEmoji: { fontSize: 18 },
 
@@ -216,6 +219,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginTop: 2,
+  },
+  balanceMasked: {
+    color: '#FFFFFF99',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginTop: 4,
   },
 });
 

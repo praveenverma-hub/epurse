@@ -44,6 +44,8 @@
     </dict>
     <key>NSContactsUsageDescription</key>
     <string>ePurse uses your contacts so you can pick friends when splitting an expense.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>ePurse uses Face ID to protect your account balances.</string>
     <key>NSUserNotificationsUsageDescription</key>
     <string>ePurse uses notifications to detect financial messages and auto-categorise them.</string>
     <key>UILaunchStoryboardName</key>

@@ -95,8 +95,9 @@ const maxManualIdSuffixFromTransactions = (transactions = []) => {
 const matchAccount = (accounts, parsed) => {
   if (!parsed) return null;
   if (parsed.accountMask) {
-    const m = accounts.find((a) => a.mask === parsed.accountMask);
-    if (m) return m;
+    // Specific mask given — only match by mask, never fall back to type.
+    // A type-only fallback would attach the txn to a different card of the same type.
+    return accounts.find((a) => a.mask === parsed.accountMask) || null;
   }
   return accounts.find((a) => a.type === parsed.accountType) || null;
 };
@@ -129,10 +130,12 @@ const ensureAccountForParsed = (accounts, parsed) => {
     [ACCOUNT_TYPES.WALLET]: '#10B981',
     [ACCOUNT_TYPES.CASH]: '#F59E0B',
   };
+  const bankLabel = parsed.bankName || parsed.accountType;
   const auto = {
     id: `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     type: parsed.accountType,
-    name: `${parsed.accountType} ··${parsed.accountMask}`,
+    name: `${bankLabel} ··${parsed.accountMask}`,
+    bankName: parsed.bankName || null,
     mask: parsed.accountMask,
     balance: 0,
     color: colorByType[parsed.accountType] || '#6B7280',

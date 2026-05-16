@@ -3,12 +3,13 @@ import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radius, shadows, spacing } from '../constants/theme';
-import { useGradient } from '../hooks/useTheme';
+import { useGradient, useTheme } from '../hooks/useTheme';
 
 const FAB = ({ onPress, icon = '+' }) => {
   const gradient = useGradient();
+  const { primary } = useTheme();
   return (
-    <TouchableOpacity activeOpacity={0.9} style={styles.shadow} onPress={onPress}>
+    <TouchableOpacity activeOpacity={0.9} style={[styles.shadow, { shadowColor: primary }]} onPress={onPress}>
       <LinearGradient
         colors={gradient}
         start={{ x: 0, y: 0 }}

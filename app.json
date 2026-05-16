@@ -22,7 +22,8 @@
       "bundleIdentifier": "com.epurse.app",
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "ePurse uses notifications to detect financial messages and auto-categorise them.",
-        "NSContactsUsageDescription": "ePurse uses your contacts so you can pick friends when splitting an expense."
+        "NSContactsUsageDescription": "ePurse uses your contacts so you can pick friends when splitting an expense.",
+        "NSFaceIDUsageDescription": "ePurse uses Face ID to protect your account balances."
       }
     },
     "android": {
@@ -34,7 +35,9 @@
       "permissions": [
         "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS",
-        "android.permission.READ_CONTACTS"
+        "android.permission.READ_CONTACTS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {

@@ -52,6 +52,63 @@ const BANK_WALLET_SENDER_KEYS = [
   'freecharge', 'frech', 'mobikwik', 'bhim', 'olamoney',
 ];
 
+// Ordered list: first match wins. Keys match substrings of normalized sender ID.
+const SENDER_KEY_TO_BANK = [
+  ['hdfc',       'HDFC Bank'],
+  ['icici',      'ICICI Bank'],
+  ['axis',       'Axis Bank'],
+  ['kotak',      'Kotak Bank'],
+  ['idfc',       'IDFC Bank'],
+  ['indusind',   'IndusInd Bank'],
+  ['indus',      'IndusInd Bank'],
+  ['federal',    'Federal Bank'],
+  ['rbl',        'RBL Bank'],
+  ['csb',        'CSB Bank'],
+  ['aubank',     'AU Small Finance Bank'],
+  ['ausmfi',     'AU Small Finance Bank'],
+  ['bandhan',    'Bandhan Bank'],
+  ['yesbank',    'Yes Bank'],
+  ['yesbnk',     'Yes Bank'],
+  ['sbi',        'SBI'],
+  ['pnb',        'PNB'],
+  ['boi',        'Bank of India'],
+  ['bob',        'Bank of Baroda'],
+  ['canbnk',     'Canara Bank'],
+  ['canbk',      'Canara Bank'],
+  ['unionbk',    'Union Bank'],
+  ['indianbk',   'Indian Bank'],
+  ['indbnk',     'Indian Bank'],
+  ['centbk',     'Central Bank'],
+  ['iobbnk',     'IOB'],
+  ['paytm',      'Paytm'],
+  ['pytm',       'Paytm'],
+  ['phonepe',    'PhonePe'],
+  ['phpe',       'PhonePe'],
+  ['gpay',       'Google Pay'],
+  ['googlepay',  'Google Pay'],
+  ['amazonpay',  'Amazon Pay'],
+  ['ampay',      'Amazon Pay'],
+  ['jiomny',     'JioMoney'],
+  ['airpay',     'Airtel Payments'],
+  ['airtpay',    'Airtel Payments'],
+  ['mobikwik',   'MobiKwik'],
+  ['freecharge', 'FreeCharge'],
+  ['frech',      'FreeCharge'],
+  ['bhim',       'BHIM UPI'],
+  ['olamoney',   'Ola Money'],
+  ['finopay',    'Fino Payments Bank'],
+  ['fino',       'Fino Payments Bank'],
+];
+
+const getBankName = (sender) => {
+  if (!sender) return null;
+  const s = sender.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const [key, name] of SENDER_KEY_TO_BANK) {
+    if (s.includes(key)) return name;
+  }
+  return null;
+};
+
 // =============================================================================
 // Gate 1b — Body account-reference regex (fallback when sender is unknown)
 // If body has an account / card reference AND a basic debit/credit word,
@@ -412,6 +469,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
     type: inferredTypeFromFirstVerb,
     accountType,
     accountMask,
+    bankName: getBankName(opts.sender),
     merchant: merchant || (inferredTypeFromFirstVerb === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'),
     categoryId,
     note,
@@ -437,6 +495,7 @@ function buildTransaction({
   type,
   accountType,
   accountMask,
+  bankName,
   merchant,
   categoryId,
   note,
@@ -448,6 +507,7 @@ function buildTransaction({
     type,
     accountType,
     accountMask,
+    bankName:    bankName || null,
     merchant,
     categoryId,
     note,
