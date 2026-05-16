@@ -195,6 +195,11 @@ const DashboardScreen = ({ navigation }) => {
   const periodTitle = PERIODS.find((p) => p.key === period)?.title ?? 'period';
   const periodNet = periodStats.income - periodStats.spend;
 
+  // Exact label for the transactions section header
+  const txnSectionLabel = period === 'M'
+    ? new Date().toLocaleDateString('en-IN', { month: 'long' })
+    : `this ${periodTitle}`;
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
@@ -296,7 +301,7 @@ const DashboardScreen = ({ navigation }) => {
         {/* Period transactions */}
         <View style={styles.recentHeader}>
           <Text style={styles.sectionTitle}>
-            Transactions · this {periodTitle}
+            Transactions · {txnSectionLabel}
             <Text style={styles.txnCount}> ({periodStats.count})</Text>
           </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>

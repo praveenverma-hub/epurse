@@ -111,21 +111,25 @@ const BudgetWidget = ({ onPress }) => {
   const headlineActual = hasCap ? total.actual : Object.values(perCategory).reduce((s, r) => s + r.actual, 0);
   const headlineCap    = hasCap ? total.cap    : Object.values(perCategory).reduce((s, r) => s + r.cap, 0);
 
+  // Top 3 categories by pct for the right column
+  const topCatRows = Object.entries(perCategory)
+    .map(([catId, v]) => ({ catId, ...v }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 3);
+
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
-      {/* Header row */}
+      {/* Header */}
       <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.headerTitle}>🎯 {monthName} Budget</Text>
-          <Text style={styles.headerSub}>
-            {daysLeftInMonth === 0 ? 'Last day of month' : `${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'} left`}
-          </Text>
-        </View>
-        <Text style={[styles.openLink, { color: theme.primary }]}>View →</Text>
+        <Text style={styles.headerTitle}>🎯 {monthName} Budget</Text>
+        <Text style={styles.headerSub}>
+          {daysLeftInMonth === 0 ? 'Last day' : `${daysLeftInMonth}d left`}
+        </Text>
       </View>
 
-      {/* Body — ring + numbers */}
+      {/* Body — ring | numbers | category column */}
       <View style={styles.bodyRow}>
+        {/* Ring */}
         <View style={styles.ringWrap}>
           <MiniRing pct={pctVal} color={rColor} />
           <View style={styles.ringCenter}>
@@ -135,42 +139,44 @@ const BudgetWidget = ({ onPress }) => {
           </View>
         </View>
 
+        {/* Amounts + status */}
         <View style={styles.numbersWrap}>
           <Text style={styles.amountActual}>{formatCompact(headlineActual)}</Text>
           <Text style={styles.amountCap}>
-            {headlineCap > 0 ? `of ${formatCompact(headlineCap)}` : 'spent this month'}
+            {headlineCap > 0 ? `of ${formatCompact(headlineCap)}` : 'spent'}
           </Text>
           <View style={[styles.statusPill, { backgroundColor: status.color + '15' }]}>
             <Text style={styles.statusEmoji}>{status.emoji}</Text>
             <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
           </View>
         </View>
+
+        {/* Category % column */}
+        {topCatRows.length > 0 && (
+          <View style={styles.catColumn}>
+            {topCatRows.map((b) => {
+              const cat = categoryById.get(b.catId);
+              if (!cat) return null;
+              const pctColor = b.pct >= 100 ? colors.danger : b.pct >= 85 ? colors.warning : colors.success;
+              return (
+                <View key={b.catId} style={styles.catRow}>
+                  <Text style={styles.catEmoji}>{cat.emoji}</Text>
+                  <View style={styles.catBarTrack}>
+                    <View style={[styles.catBarFill, { width: `${Math.min(100, b.pct)}%`, backgroundColor: pctColor }]} />
+                  </View>
+                  <Text style={[styles.catPct, { color: pctColor }]}>{Math.round(b.pct)}%</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
       </View>
 
-      {/* Breach chips OR streak praise */}
-      {breaches.length > 0 ? (
-        <View style={styles.breachList}>
-          {breaches.map((b) => {
-            const cat = categoryById.get(b.catId);
-            if (!cat) return null;
-            const chipColor = b.pct >= 100 ? colors.danger : colors.warning;
-            return (
-              <View key={b.catId} style={[styles.breachChip, { borderColor: chipColor + '55', backgroundColor: chipColor + '10' }]}>
-                <Text style={styles.breachEmoji}>{cat.emoji}</Text>
-                <Text style={[styles.breachName, { color: colors.textPrimary }]} numberOfLines={1}>
-                  {cat.name}
-                </Text>
-                <Text style={[styles.breachPct, { color: chipColor }]}>{Math.round(b.pct)}%</Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : budgetStreak?.current >= 1 ? (
+      {/* Streak badge */}
+      {budgetStreak?.current >= 1 && breaches.length === 0 ? (
         <View style={styles.streakRow}>
           <Text style={styles.streakEmoji}>🏆</Text>
-          <Text style={styles.streakText}>
-            {budgetStreak.current}-month streak under budget
-          </Text>
+          <Text style={styles.streakText}>{budgetStreak.current}-month streak under budget</Text>
         </View>
       ) : null}
     </TouchableOpacity>
@@ -216,13 +222,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   headerTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
-  headerSub:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  openLink:    { ...typography.small, fontWeight: '700' },
+  headerSub:   { ...typography.tiny, color: colors.textSecondary },
 
   bodyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   ringWrap: { position: 'relative', width: 56, height: 56 },
   ringCenter: {
@@ -233,7 +238,7 @@ const styles = StyleSheet.create({
   ringPct: { fontSize: 12, fontWeight: '800' },
 
   numbersWrap: { flex: 1, gap: 2 },
-  amountActual: { fontSize: 20, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.3 },
+  amountActual: { fontSize: 18, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.3 },
   amountCap: { ...typography.tiny, color: colors.textSecondary },
   statusPill: {
     flexDirection: 'row',
@@ -248,26 +253,26 @@ const styles = StyleSheet.create({
   statusEmoji: { fontSize: 10 },
   statusLabel: { ...typography.tiny, fontWeight: '700' },
 
-  // ── Breach chips ──
-  breachList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  // ── Category % right column ──
+  catColumn: {
     gap: 6,
-    marginTop: spacing.sm + 2,
+    minWidth: 96,
   },
-  breachChip: {
+  catRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    maxWidth: '48%',
   },
-  breachEmoji: { fontSize: 12 },
-  breachName:  { ...typography.tiny, fontWeight: '600', flexShrink: 1 },
-  breachPct:   { ...typography.tiny, fontWeight: '700' },
+  catEmoji:    { fontSize: 11 },
+  catBarTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: colors.divider,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  catBarFill: { height: '100%', borderRadius: 2 },
+  catPct:     { fontSize: 10, fontWeight: '700', minWidth: 28, textAlign: 'right' },
 
   // ── Streak row ──
   streakRow: {

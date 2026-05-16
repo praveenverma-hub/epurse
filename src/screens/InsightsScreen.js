@@ -16,13 +16,13 @@ import BudgetScreen    from './BudgetScreen';
 import AnalyticsScreen from './AnalyticsScreen';
 
 const INNER_TABS = [
-  { key: 'budget',    label: 'Budget' },
   { key: 'analytics', label: 'Analytics' },
+  { key: 'budget',    label: 'Budget' },
 ];
 
 export default function InsightsScreen({ navigation }) {
   const theme = useTheme();
-  const [activeTab, setActiveTab] = useState('budget');
+  const [activeTab, setActiveTab] = useState('analytics');
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -58,10 +58,10 @@ export default function InsightsScreen({ navigation }) {
       </LinearGradient>
 
       {/* Sub-screen content — headers suppressed */}
-      {activeTab === 'budget' ? (
-        <BudgetScreen navigation={navigation} headerless />
-      ) : (
+      {activeTab === 'analytics' ? (
         <AnalyticsScreen navigation={navigation} headerless />
+      ) : (
+        <BudgetScreen navigation={navigation} headerless />
       )}
     </View>
   );

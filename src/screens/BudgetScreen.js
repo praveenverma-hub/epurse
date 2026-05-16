@@ -1,28 +1,39 @@
 // =============================================================================
-// BudgetScreen
-// -----------------------------------------------------------------------------
-// One screen, two stacked sections:
-//   1. Progress view (visible only when a plan exists) — big ring + category bars
-//   2. Edit form (always visible) — total cap + budgeted rows + suggestions
-// Auto-saves on every change. No "Save" button.
+// BudgetScreen — Monthly budget tracker.
+//
+// Layout (when a plan exists):
+//   • Hero card — horizontal ring + amounts + status (attractive, no clutter)
+//   • Per-category progress rows
+//   • "Edit Plan" button opens the plan modal
+//
+// Layout (no plan):
+//   • Illustrated empty state with "Create Plan" CTA
+//
+// Plan Modal (create or edit):
+//   • Total budget input
+//   • Category rows (defaults: Food, Travel, Bills, Shopping on first create)
+//   • "+ Add Category" via bottom sheet picker
+//   • "Save Plan" button — persists to store on tap
 // =============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, KeyboardAvoidingView, Platform,
+  TextInput, KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 import CenterModal from '../components/CenterModal';
+import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 // ── Progress ring SVG ─────────────────────────────────────────────────────────
-const ProgressRing = ({ pct, size = 180, strokeWidth = 14, color, trackColor, children }) => {
+const ProgressRing = ({ pct, size = 140, strokeWidth = 12, color, trackColor, children }) => {
   const r = (size - strokeWidth) / 2;
   const c = 2 * Math.PI * r;
   const dashOffset = c - (Math.min(pct, 100) / 100) * c;
@@ -46,25 +57,28 @@ const ProgressRing = ({ pct, size = 180, strokeWidth = 14, color, trackColor, ch
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-// On-track vs slow vs over status, based on actual % vs days-elapsed %.
 const computeStatus = (pct, daysElapsedPct, hasCap) => {
-  if (!hasCap)              return { key: 'neutral', label: 'No total cap',  color: colors.textMuted, emoji: '·' };
-  if (pct >= 100)           return { key: 'over',    label: 'Over budget',  color: colors.danger,  emoji: '🚨' };
-  if (pct > daysElapsedPct + 10) return { key: 'slow', label: 'Over pace',  color: colors.danger,  emoji: '⚠' };
-  if (pct > daysElapsedPct + 5)  return { key: 'slow', label: 'Slow down',  color: colors.warning, emoji: '⚠' };
-  return { key: 'on',       label: 'On track',     color: colors.success, emoji: '✅' };
+  if (!hasCap)                    return { key: 'neutral', label: 'No total cap',  color: colors.textMuted,  emoji: '·' };
+  if (pct >= 100)                 return { key: 'over',    label: 'Over budget',   color: colors.danger,     emoji: '🚨' };
+  if (pct > daysElapsedPct + 10)  return { key: 'slow',    label: 'Over pace',     color: colors.danger,     emoji: '⚠' };
+  if (pct > daysElapsedPct + 5)   return { key: 'slow',    label: 'Slow down',     color: colors.warning,    emoji: '⚠' };
+  return                                 { key: 'on',      label: 'On track',      color: colors.success,    emoji: '✅' };
 };
 
 const ringColor = (pct, daysElapsedPct) => {
-  if (pct >= 100) return colors.danger;
+  if (pct >= 100)                return colors.danger;
   if (pct > daysElapsedPct + 10) return colors.danger;
   if (pct > daysElapsedPct + 5)  return colors.warning;
   return colors.success;
 };
 
+// Category IDs (or name keywords) shown by default when creating a new plan
+const DEFAULT_CAT_KEYWORDS = ['food', 'travel', 'bill', 'shopping'];
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 const BudgetScreen = ({ navigation, headerless = false }) => {
-  const theme = useTheme();
+  const theme    = useTheme();
+  const gradient = useGradient();
 
   const budget                = useEPurseStore((s) => s.budget);
   const transactions          = useEPurseStore((s) => s.transactions);
@@ -76,82 +90,99 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
   const clearBudget           = useEPurseStore((s) => s.clearBudget);
   const getBudgetUsage        = useEPurseStore((s) => s.getBudgetUsage);
   const getCategoryAverage    = useEPurseStore((s) => s.getCategoryAverage);
-  const getTopCategoriesByAverage = useEPurseStore((s) => s.getTopCategoriesByAverage);
   const getCategoryMastery    = useEPurseStore((s) => s.getCategoryMastery);
-  const budgetHistory         = useEPurseStore((s) => s.budgetHistory);
 
-  const [confirm,    setConfirm]    = useState(null); // { title, message, primaryText, onConfirm }
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirm,         setConfirm]         = useState(null);
+  const [planModalVisible, setPlanModalVisible] = useState(false);
+
+  // Local state for the plan modal
+  const [localCap,         setLocalCap]         = useState('');
+  const [localCats,        setLocalCats]         = useState([]); // [{ catId, cap: string }]
+  const [localPickerOpen,  setLocalPickerOpen]   = useState(false);
 
   // Recomputes when budget OR transactions change so actuals stay live
   const usage = useMemo(() => getBudgetUsage(), [budget, transactions, getBudgetUsage]);
 
-  // Category lookup for emoji / name / color
   const categoryById = useMemo(() => {
     const map = new Map();
     categories.forEach((c) => map.set(c.id, c));
     return map;
   }, [categories]);
 
-  // Budgeted categories (rows in the edit list)
   const budgetedIds = useMemo(() => Object.keys(budget?.perCategory || {}), [budget]);
 
-  // Suggestions = top categories by 3-mo avg that aren't already budgeted,
-  // excluding LB / non-expense categories
+  const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
+
   const EXCLUDE_CATS = useMemo(() => new Set([
     'lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'salary', 'transfer',
   ]), []);
-  const suggestions = useMemo(() => {
-    const tops = getTopCategoriesByAverage(8);
-    return tops
-      .filter((s) => !budgetedIds.includes(s.categoryId) && !EXCLUDE_CATS.has(s.categoryId))
-      .slice(0, 6);
-  }, [getTopCategoriesByAverage, budgetedIds, EXCLUDE_CATS, budget]);
 
-  // 3-month total avg (sum of category averages) — used as a quick "use suggested" total
-  const totalAvg = useMemo(() => {
-    return getTopCategoriesByAverage(50)
-      .filter((s) => !EXCLUDE_CATS.has(s.categoryId))
-      .reduce((acc, s) => acc + s.average, 0);
-  }, [getTopCategoriesByAverage, EXCLUDE_CATS]);
+  // ── Modal handlers ────────────────────────────────────────────────────────
+  const openCreateModal = useCallback(() => {
+    const defaults = DEFAULT_CAT_KEYWORDS
+      .map((kw) => {
+        const cat = categories.find(
+          (c) => !EXCLUDE_CATS.has(c.id) && (
+            c.id.toLowerCase().includes(kw) ||
+            c.name.toLowerCase().includes(kw)
+          )
+        );
+        if (!cat) return null;
+        const avg = getCategoryAverage(cat.id, 3);
+        return { catId: cat.id, cap: avg > 0 ? String(Math.round(avg)) : '' };
+      })
+      .filter(Boolean)
+      .filter((item, idx, arr) => arr.findIndex((x) => x.catId === item.catId) === idx);
+    setLocalCap('');
+    setLocalCats(defaults);
+    setPlanModalVisible(true);
+  }, [categories, getCategoryAverage, EXCLUDE_CATS]);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleTotalCapChange = useCallback((text) => {
-    const num = parseInt(text.replace(/\D/g, ''), 10);
-    setBudgetTotalCap(Number.isFinite(num) ? num : null);
-  }, [setBudgetTotalCap]);
+  const openEditModal = useCallback(() => {
+    setLocalCap(budget?.totalCap ? String(budget.totalCap) : '');
+    setLocalCats(
+      Object.entries(budget?.perCategory || {}).map(([catId, cap]) => ({
+        catId,
+        cap: String(cap),
+      }))
+    );
+    setPlanModalVisible(true);
+  }, [budget]);
 
-  const handleCategoryCapChange = useCallback((catId, text) => {
-    const num = parseInt(text.replace(/\D/g, ''), 10);
-    updateBudgetCategory(catId, Number.isFinite(num) ? num : 0);
-  }, [updateBudgetCategory]);
+  const handleLocalCatCapChange = useCallback((catId, text) => {
+    setLocalCats((prev) =>
+      prev.map((c) => c.catId === catId ? { ...c, cap: text.replace(/\D/g, '') } : c)
+    );
+  }, []);
 
-  const handleRemoveCategory = useCallback((catId) => {
-    const cat = categoryById.get(catId);
-    setConfirm({
-      title: `Remove ${cat?.name || 'category'} from plan?`,
-      message: 'You can add it back anytime.',
-      primaryText: 'Remove',
-      destructive: true,
-      secondaryText: 'Cancel',
-      onSecondary: () => setConfirm(null),
-      onConfirm: () => { removeBudgetCategory(catId); setConfirm(null); },
-    });
-  }, [categoryById, removeBudgetCategory]);
-
-  const handleAddSuggestion = useCallback((s) => {
-    updateBudgetCategory(s.categoryId, s.average);
-  }, [updateBudgetCategory]);
-
-  const handleAddCategory = useCallback((catId) => {
+  const handleLocalAddCat = useCallback((catId) => {
     const avg = getCategoryAverage(catId, 3);
-    updateBudgetCategory(catId, avg > 0 ? avg : 1000);
-    setPickerOpen(false);
-  }, [getCategoryAverage, updateBudgetCategory]);
+    setLocalCats((prev) => [
+      ...prev,
+      { catId, cap: avg > 0 ? String(Math.round(avg)) : '' },
+    ]);
+    setLocalPickerOpen(false);
+  }, [getCategoryAverage]);
 
-  const handleUseSuggestedTotal = useCallback(() => {
-    if (totalAvg > 0) setBudgetTotalCap(Math.round(totalAvg * 1.05));
-  }, [totalAvg, setBudgetTotalCap]);
+  const handleLocalRemoveCat = useCallback((catId) => {
+    setLocalCats((prev) => prev.filter((c) => c.catId !== catId));
+  }, []);
+
+  const savePlan = useCallback(() => {
+    const capNum = parseInt(localCap.replace(/\D/g, ''), 10);
+    setBudgetTotalCap(Number.isFinite(capNum) ? capNum : null);
+    // Remove categories that are no longer in the plan
+    const newIds = new Set(localCats.map((c) => c.catId));
+    Object.keys(budget?.perCategory || {}).forEach((catId) => {
+      if (!newIds.has(catId)) removeBudgetCategory(catId);
+    });
+    // Add / update
+    localCats.forEach(({ catId, cap }) => {
+      const num = parseInt(cap, 10);
+      updateBudgetCategory(catId, Number.isFinite(num) ? num : 0);
+    });
+    setPlanModalVisible(false);
+  }, [localCap, localCats, budget, setBudgetTotalCap, removeBudgetCategory, updateBudgetCategory]);
 
   const handleResetPlan = useCallback(() => {
     setConfirm({
@@ -165,245 +196,320 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
     });
   }, [clearBudget]);
 
+  // Categories available to add in the modal (not yet in local list)
+  const localPickerCategories = useMemo(() => {
+    const addedIds = new Set(localCats.map((c) => c.catId));
+    return categories.filter((c) => !addedIds.has(c.id) && !EXCLUDE_CATS.has(c.id));
+  }, [categories, localCats, EXCLUDE_CATS]);
+
   // ── Progress section ─────────────────────────────────────────────────────
   const renderProgress = () => {
     if (!usage) return null;
     const { total, perCategory, daysElapsedPct, daysLeftInMonth } = usage;
-    const hasCap  = total.cap != null && total.cap > 0;
-    const pctVal  = hasCap ? total.pct : 0;
-    const status  = computeStatus(pctVal, daysElapsedPct, hasCap);
-    const rColor  = hasCap ? ringColor(pctVal, daysElapsedPct) : colors.divider;
+    const hasCap   = total.cap != null && total.cap > 0;
+    const pctVal   = hasCap ? total.pct : 0;
+    const status   = computeStatus(pctVal, daysElapsedPct, hasCap);
+    const rColor   = hasCap ? ringColor(pctVal, daysElapsedPct) : colors.divider;
 
-    // Sort: breaches first (descending by pct), then everything else
+    const paceText = hasCap && total.remaining != null && daysLeftInMonth > 0
+      ? `₹${Math.max(0, Math.round(total.remaining / Math.max(1, daysLeftInMonth))).toLocaleString('en-IN')}/day`
+      : '';
+
     const rows = budgetedIds
       .map((catId) => ({ catId, ...(perCategory[catId] || { cap: 0, actual: 0, pct: 0, remaining: 0, over: false }) }))
       .sort((a, b) => b.pct - a.pct);
 
-    // Pace microcopy — "₹X/day for N days"
-    let paceText = '';
-    if (hasCap && total.remaining != null && daysLeftInMonth > 0) {
-      const perDay = Math.max(0, Math.round(total.remaining / Math.max(1, daysLeftInMonth)));
-      paceText = `₹${perDay.toLocaleString('en-IN')}/day for ${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'}`;
-    }
-
     return (
       <>
-        {/* Hero ring card */}
-        <View style={styles.ringCard}>
-          <ProgressRing
-            pct={pctVal}
-            size={180}
-            strokeWidth={14}
-            color={rColor}
-            trackColor={colors.divider}
-          >
-            <Text style={[styles.ringPct, { color: rColor }]}>
-              {hasCap ? `${Math.round(pctVal)}%` : '—'}
-            </Text>
-            <Text style={styles.ringActual}>{formatCompact(total.actual)}</Text>
-            {hasCap ? (
-              <Text style={styles.ringOfCap}>of {formatCompact(total.cap)}</Text>
-            ) : (
-              <Text style={styles.ringOfCap}>spent</Text>
-            )}
-          </ProgressRing>
-
-          <View style={styles.ringMeta}>
-            <View style={styles.statusPill}>
-              <Text style={styles.statusEmoji}>{status.emoji}</Text>
-              <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
-            </View>
-            <Text style={styles.daysLeft}>
-              {daysLeftInMonth === 0 ? 'Last day of month' : `${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'} left`}
-            </Text>
-            {paceText ? <Text style={styles.paceText}>⚡ {paceText}</Text> : null}
-          </View>
-
-          {/* Streak badge — only if there's actually a streak */}
-          {budgetStreak?.current >= 1 ? (
-            <View style={styles.streakBadge}>
-              <Text style={styles.streakEmoji}>🏆</Text>
-              <Text style={styles.streakText}>
-                {budgetStreak.current} month{budgetStreak.current === 1 ? '' : 's'} under budget
+        {/* ── Hero card ── */}
+        <View style={styles.heroCard}>
+          {/* Top bar */}
+          <View style={styles.heroTop}>
+            <View>
+              <Text style={styles.heroMonth}>{monthName}</Text>
+              <Text style={styles.heroDays}>
+                {daysLeftInMonth === 0 ? 'Last day' : `${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'} left`}
               </Text>
             </View>
-          ) : null}
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              {budgetStreak?.current >= 1 ? (
+                <View style={styles.streakBadge}>
+                  <Text style={styles.streakEmoji}>🏆</Text>
+                  <Text style={styles.streakText}>{budgetStreak.current}mo</Text>
+                </View>
+              ) : null}
+              <TouchableOpacity style={[styles.editPlanBtn, { borderColor: theme.primary }]} onPress={openEditModal} activeOpacity={0.75}>
+                <Text style={[styles.editPlanText, { color: theme.primary }]}>Edit Plan</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Ring + info */}
+          <View style={styles.heroBody}>
+            <ProgressRing pct={pctVal} size={140} strokeWidth={12} color={rColor} trackColor={colors.divider}>
+              <Text style={[styles.ringPct, { color: rColor }]}>
+                {hasCap ? `${Math.round(pctVal)}%` : '—'}
+              </Text>
+              {hasCap && (
+                <Text style={styles.ringLabel}>used</Text>
+              )}
+            </ProgressRing>
+
+            <View style={styles.heroInfo}>
+              <Text style={styles.heroActual}>{formatCompact(total.actual)}</Text>
+              <Text style={styles.heroCap}>
+                {hasCap ? `of ${formatCompact(total.cap)}` : 'spent this month'}
+              </Text>
+              <View style={[styles.statusPill, { backgroundColor: status.color + '18' }]}>
+                <Text style={styles.statusEmoji}>{status.emoji}</Text>
+                <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
+              </View>
+              {paceText ? (
+                <Text style={styles.paceText}>⚡ {paceText} · {daysLeftInMonth}d left</Text>
+              ) : null}
+              {hasCap && total.remaining != null ? (
+                <Text style={[styles.remainText, { color: total.remaining < 0 ? colors.danger : colors.success }]}>
+                  {total.remaining < 0
+                    ? `₹${Math.abs(Math.round(total.remaining)).toLocaleString('en-IN')} over`
+                    : `₹${Math.round(total.remaining).toLocaleString('en-IN')} remaining`}
+                </Text>
+              ) : null}
+            </View>
+          </View>
         </View>
 
-        {/* Per-category progress */}
+        {/* ── Per-category rows ── */}
         {rows.length > 0 ? (
-          <>
+          <View style={styles.catSection}>
             <Text style={styles.sectionTitle}>By category</Text>
-            <View style={styles.progressList}>
-              {rows.map((r) => {
-                const cat = categoryById.get(r.catId);
-                if (!cat) return null;
-                const barColor =
-                  r.pct >= 100 ? colors.danger :
-                  r.pct >= 90  ? colors.warning :
-                                 cat.color;
-                const mastery = getCategoryMastery(r.catId);
-                const masteryEmoji = mastery >= 6 ? '🥇' : mastery >= 3 ? '⭐' : null;
-                return (
-                  <View key={r.catId} style={styles.progressRow}>
-                    <View style={styles.progressHeader}>
-                      <Text style={styles.progressEmoji}>{cat.emoji}</Text>
-                      <Text style={styles.progressName} numberOfLines={1}>{cat.name}</Text>
-                      {masteryEmoji ? (
-                        <Text style={styles.masteryBadge}>{masteryEmoji}</Text>
-                      ) : null}
-                      <Text style={styles.progressAmt}>
-                        {formatCompact(r.actual)}
-                        <Text style={styles.progressAmtMuted}> / {formatCompact(r.cap)}</Text>
-                      </Text>
-                    </View>
-                    <View style={styles.barTrack}>
-                      <View style={[styles.barFill, { width: `${Math.min(100, r.pct)}%`, backgroundColor: barColor }]} />
-                    </View>
-                    <View style={styles.progressFooter}>
-                      <Text style={[styles.progressPct, { color: barColor }]}>
-                        {Math.round(r.pct)}%
-                      </Text>
-                      <Text style={styles.progressSub}>
-                        {r.over
-                          ? `₹${r.overshoot.toLocaleString('en-IN')} over`
-                          : `₹${r.remaining.toLocaleString('en-IN')} left`}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </>
-        ) : null}
-
-        <View style={styles.sectionDivider} />
-      </>
-    );
-  };
-
-  // ── Edit form section ────────────────────────────────────────────────────
-  const renderEditForm = () => (
-    <>
-      <Text style={styles.sectionTitle}>{budget ? 'Edit plan' : 'Create plan'}</Text>
-
-      {/* Total cap */}
-      <Text style={styles.fieldLabel}>Total monthly cap</Text>
-      <View style={styles.amountInputWrap}>
-        <Text style={styles.amountPrefix}>₹</Text>
-        <TextInput
-          value={budget?.totalCap ? String(budget.totalCap) : ''}
-          onChangeText={handleTotalCapChange}
-          placeholder="50,000"
-          placeholderTextColor={colors.textMuted}
-          keyboardType="numeric"
-          style={styles.amountInput}
-        />
-      </View>
-      {totalAvg > 0 ? (
-        <TouchableOpacity onPress={handleUseSuggestedTotal} style={styles.suggestionLink}>
-          <Text style={styles.suggestionLinkText}>
-            3-mo avg total: ₹{Math.round(totalAvg).toLocaleString('en-IN')}
-          </Text>
-          <Text style={[styles.suggestionUseBtn, { color: theme.primary }]}>Use +5%</Text>
-        </TouchableOpacity>
-      ) : null}
-
-      {/* Budgeted rows */}
-      <View style={styles.editSection}>
-        <Text style={styles.subSectionTitle}>
-          Budgeted {budgetedIds.length > 0 ? `(${budgetedIds.length})` : ''}
-        </Text>
-        {budgetedIds.length === 0 ? (
-          <View style={styles.emptyHint}>
-            <Text style={styles.emptyHintText}>
-              Pick categories below to start budgeting. You can change amounts anytime.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.editList}>
-            {budgetedIds.map((catId) => {
-              const cat = categoryById.get(catId);
+            {rows.map((r) => {
+              const cat = categoryById.get(r.catId);
               if (!cat) return null;
-              const cap = budget?.perCategory?.[catId] || 0;
+              const barColor =
+                r.pct >= 100 ? colors.danger :
+                r.pct >= 85  ? colors.warning :
+                               cat.color ?? colors.info;
+              const mastery = getCategoryMastery(r.catId);
+              const masteryEmoji = mastery >= 6 ? '🥇' : mastery >= 3 ? '⭐' : null;
               return (
-                <View key={catId} style={styles.editRow}>
-                  <Text style={styles.editEmoji}>{cat.emoji}</Text>
-                  <Text style={styles.editName} numberOfLines={1}>{cat.name}</Text>
-                  <View style={styles.editAmountWrap}>
-                    <Text style={styles.editAmountPrefix}>₹</Text>
-                    <TextInput
-                      value={String(cap)}
-                      onChangeText={(t) => handleCategoryCapChange(catId, t)}
-                      placeholder="0"
-                      placeholderTextColor={colors.textMuted}
-                      keyboardType="numeric"
-                      style={styles.editAmountInput}
-                    />
+                <View key={r.catId} style={styles.catCard}>
+                  <View style={styles.catCardTop}>
+                    <Text style={styles.catEmoji}>{cat.emoji}</Text>
+                    <Text style={styles.catName} numberOfLines={1}>{cat.name}</Text>
+                    {masteryEmoji ? <Text style={styles.masteryBadge}>{masteryEmoji}</Text> : null}
+                    <View style={{ flex: 1 }} />
+                    <Text style={[styles.catPct, { color: barColor }]}>{Math.round(r.pct)}%</Text>
                   </View>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveCategory(catId)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={styles.editRemove}
-                  >
-                    <Text style={styles.editRemoveText}>✕</Text>
-                  </TouchableOpacity>
+                  <View style={styles.barTrack}>
+                    <View style={[styles.barFill, { width: `${Math.min(100, r.pct)}%`, backgroundColor: barColor }]} />
+                  </View>
+                  <View style={styles.catCardBot}>
+                    <Text style={styles.catActual}>{formatCompact(r.actual)}</Text>
+                    <Text style={styles.catCapLabel}>{`/ ${formatCompact(r.cap)}`}</Text>
+                    <View style={{ flex: 1 }} />
+                    <Text style={[styles.catRemain, { color: r.over ? colors.danger : colors.textSecondary }]}>
+                      {r.over
+                        ? `₹${Math.round(r.overshoot ?? 0).toLocaleString('en-IN')} over`
+                        : `₹${Math.round(r.remaining ?? 0).toLocaleString('en-IN')} left`}
+                    </Text>
+                  </View>
                 </View>
               );
             })}
           </View>
-        )}
-      </View>
+        ) : null}
 
-      {/* Suggestions */}
-      {suggestions.length > 0 ? (
-        <View style={styles.editSection}>
-          <Text style={styles.subSectionTitle}>Suggested · based on last 3 months</Text>
-          <View style={styles.editList}>
-            {suggestions.map((s) => {
-              const cat = categoryById.get(s.categoryId);
-              if (!cat) return null;
-              return (
-                <TouchableOpacity
-                  key={s.categoryId}
-                  style={styles.suggestionRow}
-                  onPress={() => handleAddSuggestion(s)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={styles.editEmoji}>{cat.emoji}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.editName} numberOfLines={1}>{cat.name}</Text>
-                    <Text style={styles.suggestionAvg}>avg ₹{s.average.toLocaleString('en-IN')}/mo</Text>
-                  </View>
-                  <View style={[styles.addBadge, { backgroundColor: theme.primary + '18', borderColor: theme.primary }]}>
-                    <Text style={[styles.addBadgeText, { color: theme.primary }]}>+ Add</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
+        {/* Reset link */}
+        <TouchableOpacity onPress={handleResetPlan} style={styles.resetLink} activeOpacity={0.7}>
+          <Text style={[styles.resetLinkText, { color: colors.danger }]}>Reset plan</Text>
+        </TouchableOpacity>
+      </>
+    );
+  };
 
-      {/* Add any other category */}
+  // ── Empty state ──────────────────────────────────────────────────────────
+  const renderEmpty = () => (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyEmoji}>📋</Text>
+      <Text style={styles.emptyTitle}>No plan yet</Text>
+      <Text style={styles.emptySub}>
+        Set a monthly budget and track your spending in real time.
+      </Text>
       <TouchableOpacity
-        style={styles.addOtherBtn}
-        onPress={() => setPickerOpen(true)}
-        activeOpacity={0.75}
+        style={[styles.createBtn, { backgroundColor: theme.primary }]}
+        onPress={openCreateModal}
+        activeOpacity={0.85}
       >
-        <Text style={[styles.addOtherPlus, { color: theme.primary }]}>+</Text>
-        <Text style={styles.addOtherText}>Add other category</Text>
+        <Text style={styles.createBtnText}>Create {monthName} Plan</Text>
       </TouchableOpacity>
-    </>
+    </View>
   );
 
-  // ── Category picker modal ────────────────────────────────────────────────
-  const pickerCategories = useMemo(() => {
-    return categories.filter(
-      (c) => !budgetedIds.includes(c.id) && !EXCLUDE_CATS.has(c.id)
-    );
-  }, [categories, budgetedIds, EXCLUDE_CATS]);
+  // ── Plan Modal ───────────────────────────────────────────────────────────
+  const renderPlanModal = () => (
+    <Modal
+      visible={planModalVisible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setPlanModalVisible(false)}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1, backgroundColor: colors.background }}
+      >
+        <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+          {/* Modal header */}
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setPlanModalVisible(false)} style={styles.modalClose}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>
+              {budget ? 'Edit Plan' : `${monthName} Plan`}
+            </Text>
+            <TouchableOpacity onPress={savePlan} style={styles.modalSaveBtn} activeOpacity={0.8}>
+              <Text style={[styles.modalSaveBtnText, { color: theme.primary }]}>Save</Text>
+            </TouchableOpacity>
+          </View>
 
+          <ScrollView
+            contentContainerStyle={styles.modalScroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Total budget */}
+            <View style={styles.modalSection}>
+              <Text style={styles.modalFieldLabel}>Total monthly budget</Text>
+              <View style={styles.totalInputWrap}>
+                <Text style={styles.totalInputPrefix}>₹</Text>
+                <TextInput
+                  value={localCap}
+                  onChangeText={(t) => setLocalCap(t.replace(/\D/g, ''))}
+                  placeholder="50,000"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  style={styles.totalInput}
+                  autoFocus={!budget}
+                />
+              </View>
+              <Text style={styles.totalInputHint}>
+                Leave blank to track only by category
+              </Text>
+            </View>
+
+            {/* Category rows */}
+            <View style={styles.modalSection}>
+              <Text style={styles.modalFieldLabel}>
+                Categories {localCats.length > 0 ? `(${localCats.length})` : ''}
+              </Text>
+
+              {localCats.length === 0 ? (
+                <View style={styles.modalEmptyHint}>
+                  <Text style={styles.modalEmptyText}>
+                    Add categories below to track individual budgets.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.catList}>
+                  {localCats.map(({ catId, cap }) => {
+                    const cat = categoryById.get(catId);
+                    if (!cat) return null;
+                    return (
+                      <View key={catId} style={styles.catInputRow}>
+                        <Text style={styles.catInputEmoji}>{cat.emoji}</Text>
+                        <Text style={styles.catInputName} numberOfLines={1}>{cat.name}</Text>
+                        <View style={styles.catAmountWrap}>
+                          <Text style={styles.catAmountPrefix}>₹</Text>
+                          <TextInput
+                            value={cap}
+                            onChangeText={(t) => handleLocalCatCapChange(catId, t)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textMuted}
+                            keyboardType="numeric"
+                            style={styles.catAmountInput}
+                          />
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => handleLocalRemoveCat(catId)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.catRemoveBtn}
+                        >
+                          <Text style={styles.catRemoveText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Add category button */}
+              <TouchableOpacity
+                style={[styles.addCatBtn, { borderColor: theme.primary + '66' }]}
+                onPress={() => setLocalPickerOpen(true)}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.addCatBtnText, { color: theme.primary }]}>+ Add Category</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Save button */}
+            <TouchableOpacity
+              style={[styles.savePlanBtn, { backgroundColor: theme.primary }]}
+              onPress={savePlan}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.savePlanBtnText}>Save Plan</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </SafeAreaView>
+
+        {/* Category picker bottom sheet (inside modal) */}
+        {localPickerOpen && (
+          <TouchableOpacity
+            style={styles.pickerBackdrop}
+            activeOpacity={1}
+            onPress={() => setLocalPickerOpen(false)}
+          >
+            <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
+              <View style={styles.pickerHandle} />
+              <Text style={styles.pickerTitle}>Add category</Text>
+              <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+                {localPickerCategories.length === 0 ? (
+                  <Text style={styles.pickerEmpty}>All categories are already added.</Text>
+                ) : (
+                  localPickerCategories.map((c) => {
+                    const avg = getCategoryAverage(c.id, 3);
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
+                        style={styles.pickerRow}
+                        onPress={() => handleLocalAddCat(c.id)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.pickerEmoji}>{c.emoji}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.pickerName}>{c.name}</Text>
+                          {avg > 0 ? (
+                            <Text style={styles.pickerAvg}>avg ₹{avg.toLocaleString('en-IN')}/mo</Text>
+                          ) : (
+                            <Text style={styles.pickerAvg}>no history yet</Text>
+                          )}
+                        </View>
+                        <Text style={[styles.pickerArrow, { color: theme.primary }]}>›</Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
+  // ── Main render ──────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -416,71 +522,21 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
               <Text style={styles.backText}>←</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>
-              {new Date().toLocaleDateString('en-IN', { month: 'long' })} Budget
-            </Text>
-            {budget ? (
-              <TouchableOpacity onPress={handleResetPlan} style={styles.resetBtn}>
-                <Text style={[styles.resetText, { color: colors.danger }]}>Reset</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={{ width: 60 }} />
-            )}
+            <Text style={styles.title}>{monthName} Budget</Text>
+            <View style={{ width: 60 }} />
           </View>
         )}
 
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[styles.scroll, headerless && { paddingBottom: TAB_BAR_HEIGHT + 24 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {budget ? renderProgress() : null}
-          {renderEditForm()}
-          <View style={{ height: 80 }} />
+          {budget ? renderProgress() : renderEmpty()}
         </ScrollView>
       </SafeAreaView>
 
-      {/* Category picker bottom sheet */}
-      {pickerOpen ? (
-        <TouchableOpacity
-          style={styles.pickerBackdrop}
-          activeOpacity={1}
-          onPress={() => setPickerOpen(false)}
-        >
-          <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
-            <View style={styles.pickerHandle} />
-            <Text style={styles.pickerTitle}>Add category to plan</Text>
-            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
-              {pickerCategories.length === 0 ? (
-                <Text style={styles.pickerEmpty}>All available categories are already budgeted.</Text>
-              ) : (
-                pickerCategories.map((c) => {
-                  const avg = getCategoryAverage(c.id, 3);
-                  return (
-                    <TouchableOpacity
-                      key={c.id}
-                      style={styles.pickerRow}
-                      onPress={() => handleAddCategory(c.id)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.editEmoji}>{c.emoji}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.editName}>{c.name}</Text>
-                        {avg > 0 ? (
-                          <Text style={styles.suggestionAvg}>avg ₹{avg.toLocaleString('en-IN')}/mo</Text>
-                        ) : (
-                          <Text style={styles.suggestionAvg}>no history yet</Text>
-                        )}
-                      </View>
-                      <Text style={[styles.pickerArrow, { color: theme.primary }]}>›</Text>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      ) : null}
+      {renderPlanModal()}
 
       <CenterModal
         visible={!!confirm}
@@ -497,8 +553,11 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
   );
 };
 
+export default BudgetScreen;
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  // Header
+  // ── Screen header ──
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -514,265 +573,218 @@ const styles = StyleSheet.create({
     ...shadows.card,
   },
   backText: { fontSize: 22, color: colors.textPrimary },
-  title: { ...typography.h2, color: colors.textPrimary },
-  resetBtn: { paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
-  resetText: { ...typography.bodyBold, fontWeight: '700' },
+  title:    { ...typography.h2, color: colors.textPrimary },
 
-  scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
+  scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl + 24 },
 
-  // Ring card
-  ringCard: {
+  // ── Hero card ──
+  heroCard: {
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     padding: spacing.lg,
-    alignItems: 'center',
     marginBottom: spacing.lg,
-    ...shadows.card,
+    ...shadows.elevated,
   },
-  ringCenter: { position: 'absolute', alignItems: 'center' },
-  ringPct: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  ringActual: { ...typography.bodyBold, color: colors.textPrimary, marginTop: 4 },
-  ringOfCap: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-
-  ringMeta: { alignItems: 'center', marginTop: spacing.md, gap: 6 },
-  statusPill: {
+  heroTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    backgroundColor: colors.background,
-    borderRadius: radius.pill,
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
   },
-  statusEmoji: { fontSize: 13 },
-  statusLabel: { ...typography.small, fontWeight: '700' },
-  daysLeft: { ...typography.small, color: colors.textSecondary },
-  paceText: { ...typography.tiny, color: colors.textPrimary, fontWeight: '600', marginTop: 2 },
-
+  heroMonth: { ...typography.h2, color: colors.textPrimary },
+  heroDays:  { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   streakBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.md, paddingVertical: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: '#FEF3C7',
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
     borderRadius: radius.pill,
     borderWidth: 1, borderColor: '#FDE68A',
   },
-  streakEmoji: { fontSize: 14 },
-  streakText: { ...typography.small, color: '#92400E', fontWeight: '700' },
+  streakEmoji: { fontSize: 11 },
+  streakText:  { fontSize: 11, color: '#92400E', fontWeight: '700' },
+  editPlanBtn: {
+    paddingHorizontal: spacing.md, paddingVertical: 6,
+    borderRadius: radius.pill, borderWidth: 1.5,
+  },
+  editPlanText: { fontSize: 13, fontWeight: '700' },
 
-  // Per-category progress
-  sectionTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    marginTop: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  progressList: { gap: spacing.md },
-  progressRow: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    ...shadows.card,
-  },
-  progressHeader: {
+  heroBody: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: 8,
+    gap: spacing.lg,
   },
-  progressEmoji: { fontSize: 18 },
-  progressName: { flex: 1, ...typography.bodyBold, color: colors.textPrimary },
-  masteryBadge: { fontSize: 14, marginRight: 6 },
-  progressAmt: { ...typography.small, color: colors.textPrimary, fontWeight: '700' },
-  progressAmtMuted: { color: colors.textSecondary, fontWeight: '400' },
+  ringCenter: { position: 'absolute', alignItems: 'center' },
+  ringPct:    { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
+  ringLabel:  { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
 
-  barTrack: {
-    height: 8,
-    backgroundColor: colors.divider,
-    borderRadius: 4,
-    overflow: 'hidden',
+  heroInfo: { flex: 1, gap: 4 },
+  heroActual: { fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
+  heroCap:    { ...typography.small, color: colors.textSecondary },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderRadius: radius.pill, alignSelf: 'flex-start',
+    marginTop: 4,
   },
-  barFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  progressFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-  },
-  progressPct: { ...typography.tiny, fontWeight: '700' },
-  progressSub: { ...typography.tiny, color: colors.textSecondary },
+  statusEmoji: { fontSize: 12 },
+  statusLabel: { ...typography.small, fontWeight: '700' },
+  paceText:    { ...typography.tiny, color: colors.textSecondary, marginTop: 4 },
+  remainText:  { ...typography.small, fontWeight: '700', marginTop: 2 },
 
-  sectionDivider: {
-    height: 1,
-    backgroundColor: colors.divider,
-    marginVertical: spacing.xl,
-  },
-
-  // Edit form
-  fieldLabel: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontWeight: '600',
+  // ── Category section ──
+  catSection: { gap: spacing.sm, marginBottom: spacing.lg },
+  sectionTitle: {
+    ...typography.h3, color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
-  amountInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    ...shadows.card,
-  },
-  amountPrefix: { fontSize: 22, color: colors.textSecondary, fontWeight: '600', marginRight: spacing.sm },
-  amountInput: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    fontSize: 24,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  suggestionLink: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xs,
-    paddingVertical: spacing.sm,
-  },
-  suggestionLinkText: { ...typography.tiny, color: colors.textSecondary },
-  suggestionUseBtn: { ...typography.small, fontWeight: '700' },
-
-  editSection: { marginTop: spacing.lg },
-  subSectionTitle: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontWeight: '700',
-    marginBottom: spacing.sm,
-  },
-
-  emptyHint: {
+  catCard: {
     backgroundColor: colors.card,
     borderRadius: radius.md,
     padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    borderStyle: 'dashed',
-  },
-  emptyHintText: { ...typography.small, color: colors.textSecondary, lineHeight: 19 },
-
-  editList: { gap: spacing.sm },
-  editRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
     ...shadows.card,
   },
-  editEmoji: { fontSize: 18 },
-  editName: { flex: 1, ...typography.bodyBold, color: colors.textPrimary },
-  editAmountWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    minWidth: 110,
+  catCardTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 8 },
+  catEmoji:     { fontSize: 18 },
+  catName:      { ...typography.bodyBold, color: colors.textPrimary, flexShrink: 1 },
+  masteryBadge: { fontSize: 13 },
+  catPct:       { fontSize: 13, fontWeight: '800' },
+  barTrack: {
+    height: 7, backgroundColor: colors.divider,
+    borderRadius: 4, overflow: 'hidden',
   },
-  editAmountPrefix: { fontSize: 14, color: colors.textSecondary, marginRight: 4 },
-  editAmountInput: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    paddingVertical: 2,
-  },
-  editRemove: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: colors.background,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  editRemoveText: { color: colors.textMuted, fontSize: 14, fontWeight: '700' },
+  barFill:  { height: '100%', borderRadius: 4 },
+  catCardBot: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 4 },
+  catActual:    { ...typography.small, color: colors.textPrimary, fontWeight: '700' },
+  catCapLabel:  { ...typography.small, color: colors.textSecondary },
+  catRemain:    { ...typography.tiny, fontWeight: '600' },
 
-  // Suggestions
-  suggestionRow: {
+  resetLink:     { alignSelf: 'center', paddingVertical: spacing.md },
+  resetLinkText: { ...typography.small, fontWeight: '700' },
+
+  // ── Empty state ──
+  emptyState: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+  },
+  emptyEmoji: { fontSize: 52 },
+  emptyTitle: { ...typography.h2, color: colors.textPrimary, textAlign: 'center' },
+  emptySub:   { ...typography.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 22 },
+  createBtn: {
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md + 4,
+    borderRadius: radius.lg,
+  },
+  createBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800', fontSize: 16 },
+
+  // ── Plan modal ──
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+    backgroundColor: colors.card,
+  },
+  modalClose:       { padding: spacing.sm },
+  modalCloseText:   { fontSize: 18, color: colors.textSecondary },
+  modalTitle:       { ...typography.h3, color: colors.textPrimary },
+  modalSaveBtn:     { padding: spacing.sm },
+  modalSaveBtnText: { ...typography.bodyBold, fontWeight: '700', fontSize: 15 },
+
+  modalScroll:    { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
+  modalSection:   { marginBottom: spacing.xl },
+  modalFieldLabel: {
+    ...typography.small, color: colors.textSecondary, fontWeight: '700',
+    marginBottom: spacing.sm,
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+
+  totalInputWrap: {
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.divider,
+    ...shadows.card,
   },
-  suggestionAvg: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  addBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
+  totalInputPrefix: { fontSize: 24, color: colors.textSecondary, fontWeight: '600', marginRight: spacing.sm },
+  totalInput: {
+    flex: 1, paddingVertical: spacing.md,
+    fontSize: 28, fontWeight: '800', color: colors.textPrimary,
   },
-  addBadgeText: { ...typography.tiny, fontWeight: '700' },
+  totalInputHint: { ...typography.tiny, color: colors.textMuted, marginTop: spacing.xs },
 
-  addOtherBtn: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    borderWidth: 1.5,
-    borderColor: colors.divider,
-    borderStyle: 'dashed',
-    borderRadius: radius.md,
+  catList:      { gap: spacing.sm, marginBottom: spacing.md },
+  catInputRow: {
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.card,
+    borderRadius: radius.md, padding: spacing.md, gap: spacing.sm,
+    ...shadows.card,
   },
-  addOtherPlus: { fontSize: 20, fontWeight: '700' },
-  addOtherText: { ...typography.bodyBold, color: colors.textPrimary },
+  catInputEmoji: { fontSize: 20 },
+  catInputName:  { flex: 1, ...typography.bodyBold, color: colors.textPrimary },
+  catAmountWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+  },
+  catAmountPrefix: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
+  catAmountInput: {
+    minWidth: 60, fontSize: 15, fontWeight: '700',
+    color: colors.textPrimary, textAlign: 'right',
+    paddingVertical: 0,
+  },
+  catRemoveBtn:  { padding: 4 },
+  catRemoveText: { fontSize: 14, color: colors.textSecondary },
 
-  // Picker
+  addCatBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderStyle: 'dashed',
+    borderRadius: radius.md, paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  addCatBtnText: { ...typography.bodyBold, fontWeight: '700' },
+
+  savePlanBtn: {
+    paddingVertical: spacing.md + 4,
+    borderRadius: radius.lg, alignItems: 'center',
+    marginTop: spacing.sm,
+    ...shadows.elevated,
+  },
+  savePlanBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800', fontSize: 17 },
+
+  // ── Category picker (in modal) ──
   pickerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#00000066',
+    backgroundColor: '#00000060',
     justifyContent: 'flex-end',
   },
   pickerSheet: {
     backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xl + 8,
-    ...shadows.elevated,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   pickerHandle: {
     width: 40, height: 4, borderRadius: 2,
-    backgroundColor: colors.divider,
-    alignSelf: 'center',
-    marginBottom: spacing.md,
+    backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md,
   },
-  pickerTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
-  pickerEmpty: {
-    ...typography.small,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    paddingVertical: spacing.xl,
-  },
+  pickerTitle:  { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
   pickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     paddingVertical: spacing.md,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
   },
+  pickerEmoji: { fontSize: 22 },
+  pickerName:  { ...typography.bodyBold, color: colors.textPrimary },
+  pickerAvg:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   pickerArrow: { fontSize: 22, fontWeight: '300' },
+  pickerEmpty: { ...typography.small, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl },
 });
-
-export default BudgetScreen;
