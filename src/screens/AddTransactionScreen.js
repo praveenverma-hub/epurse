@@ -30,6 +30,7 @@ import { parseMessageDetailed } from '../utils/messageParser';
 import { canSplitTransaction } from '../utils/split';
 
 const AddTransactionScreen = ({ navigation }) => {
+  const theme = useTheme();
   const categories = useEPurseStore((s) => s.categories);
   const addTransaction = useEPurseStore((s) => s.addTransaction);
   const ingestMessage = useEPurseStore((s) => s.ingestMessage);

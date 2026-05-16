@@ -900,6 +900,7 @@ export const useEPurseStore = create(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.DEBIT &&
+            !LB_ALL_CATS.has(t.categoryId) &&
             isSameMonth(t.createdAt, date)
         );
 
@@ -914,11 +915,16 @@ export const useEPurseStore = create(
         } else {
           const agg = get().monthlyAggregates[month];
           if (!agg) return [];
-          totals = agg.byCategory || {};
+          // byCategory may include LB entries from historical aggregation — strip them
+          totals = {};
+          Object.entries(agg.byCategory || {}).forEach(([catId, val]) => {
+            if (!LB_ALL_CATS.has(catId)) totals[catId] = val;
+          });
           grandTotal = agg.totalSpend || 1;
         }
 
         return cats
+          .filter((c) => !LB_ALL_CATS.has(c.id))
           .map((c) => ({ ...c, total: totals[c.id] || 0, percent: ((totals[c.id] || 0) / grandTotal) * 100 }))
           .filter((c) => c.total > 0)
           .sort((a, b) => b.total - a.total);

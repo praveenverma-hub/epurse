@@ -27,6 +27,8 @@ const ENTRY_LABEL = {
   borrow_repaid: 'Repaid',
 };
 
+const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
+
 // +/- direction for net contribution to "they owe me" balance
 const isPositiveEntry = (kind) => kind === 'lent' || kind === 'borrow_repaid';
 
@@ -73,10 +75,27 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     setNote('');
   }, [kind, person, phone, amount, note, addLentBorrowed]);
 
-  // Per-person balances: lent tab shows net > 0, borrowed tab shows net < 0
+  // Per-person balances: lent tab shows net > 0, borrowed tab shows net < 0.
+  // Also include recently-settled (net === 0) persons for up to 3 months.
   const personBalances = useMemo(() => {
-    const all = getPersonBalances();
-    return all.filter((p) => kind === 'lent' ? p.net > 0 : p.net < 0);
+    const nowMs = Date.now();
+    const allBalances = getPersonBalances();
+    const active = allBalances.filter((p) => kind === 'lent' ? p.net > 0 : p.net < 0);
+    const recentlySettled = allBalances.filter((p) => {
+      if (p.net !== 0 || !p.entries.length) return false;
+      const mostRecent = Math.max(
+        ...p.entries.map((e) => {
+          const d = new Date(e.date).getTime();
+          const s = e.settledAt ? new Date(e.settledAt).getTime() : 0;
+          return Math.max(d, s);
+        })
+      );
+      if (nowMs - mostRecent > THREE_MONTHS_MS) return false;
+      const hasLent = p.entries.some((e) => e.kind === 'lent');
+      const hasBorrowed = p.entries.some((e) => e.kind === 'borrowed');
+      return kind === 'lent' ? hasLent : (hasBorrowed && !hasLent);
+    });
+    return [...active, ...recentlySettled];
   }, [getPersonBalances, all, kind]);
 
   // Total for the header
@@ -97,6 +116,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   const renderPersonCard = useCallback(
     ({ item: pb }) => {
+      const isFullySettled = pb.net === 0;
       const netAbs = Math.abs(pb.net);
       const netLabel = pb.net > 0 ? 'owes you' : 'you owe';
       const netColor = pb.net > 0 ? colors.success : '#EF4444';
@@ -108,30 +128,38 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
       return (
         <TouchableOpacity
-          style={styles.personCard}
+          style={[styles.personCard, isFullySettled && styles.personCardSettled]}
           onPress={() => setExpandedPerson(isExpanded ? null : pb.personKey)}
           activeOpacity={0.85}
         >
           <View style={styles.personCardHeader}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
+            <View style={[styles.avatar, isFullySettled && styles.avatarSettled]}>
+              <Text style={[styles.avatarText, isFullySettled && styles.avatarTextSettled]}>
                 {(pb.person || '?').charAt(0).toUpperCase()}
               </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.name}>{pb.person || 'Unknown'}</Text>
+              <Text style={[styles.name, isFullySettled && styles.nameSettled]}>
+                {pb.person || 'Unknown'}
+              </Text>
               {pb.phone ? (
                 <Text style={styles.personPhone}>{pb.phone}</Text>
               ) : null}
             </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={[styles.netAmount, { color: netColor }]}>
-                {formatCurrency(netAbs)}
-              </Text>
-              <Text style={[styles.netLabel, { color: netColor }]}>
-                {netLabel}
-              </Text>
-            </View>
+            {isFullySettled ? (
+              <View style={styles.settledBadge}>
+                <Text style={styles.settledBadgeText}>✓ Settled</Text>
+              </View>
+            ) : (
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[styles.netAmount, { color: netColor }]}>
+                  {formatCurrency(netAbs)}
+                </Text>
+                <Text style={[styles.netLabel, { color: netColor }]}>
+                  {netLabel}
+                </Text>
+              </View>
+            )}
             <Text style={styles.expandArrow}>{isExpanded ? '▲' : '▼'}</Text>
           </View>
 
@@ -449,6 +477,11 @@ const styles = StyleSheet.create({
     ...shadows.card,
     overflow: 'hidden',
   },
+  personCardSettled: {
+    opacity: 0.72,
+    borderWidth: 1,
+    borderColor: colors.success + '33',
+  },
   personCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -463,8 +496,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarSettled: { backgroundColor: colors.success + '18' },
   avatarText: { color: colors.primary, fontWeight: '800', fontSize: 16 },
+  avatarTextSettled: { color: colors.success },
   name: { ...typography.bodyBold, color: colors.textPrimary },
+  nameSettled: { color: colors.textSecondary },
   personPhone: {
     ...typography.tiny,
     color: colors.textSecondary,
@@ -473,6 +509,19 @@ const styles = StyleSheet.create({
   netAmount: { ...typography.bodyBold, fontWeight: '800' },
   netLabel: { ...typography.tiny, fontWeight: '600', marginTop: 1 },
   expandArrow: { color: colors.textSecondary, fontSize: 10, marginLeft: 4 },
+  settledBadge: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    backgroundColor: colors.success + '18',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.success + '44',
+  },
+  settledBadgeText: {
+    color: colors.success,
+    ...typography.tiny,
+    fontWeight: '700',
+  },
 
   entriesScroll: {
     maxHeight: ENTRY_ROW_HEIGHT * ENTRIES_MAX_VISIBLE,
