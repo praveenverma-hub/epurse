@@ -63,7 +63,7 @@ const ringColor = (pct, daysElapsedPct) => {
 };
 
 // ── Screen ────────────────────────────────────────────────────────────────────
-const BudgetScreen = ({ navigation }) => {
+const BudgetScreen = ({ navigation, headerless = false }) => {
   const theme = useTheme();
 
   const budget                = useEPurseStore((s) => s.budget);
@@ -409,23 +409,25 @@ const BudgetScreen = ({ navigation }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: colors.background }}
     >
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backText}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>
-            {new Date().toLocaleDateString('en-IN', { month: 'long' })} Budget
-          </Text>
-          {budget ? (
-            <TouchableOpacity onPress={handleResetPlan} style={styles.resetBtn}>
-              <Text style={[styles.resetText, { color: colors.danger }]}>Reset</Text>
+      <SafeAreaView style={{ flex: 1 }} edges={headerless ? [] : ['top']}>
+        {/* Header — hidden when embedded inside InsightsScreen */}
+        {!headerless && (
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+              <Text style={styles.backText}>←</Text>
             </TouchableOpacity>
-          ) : (
-            <View style={{ width: 60 }} />
-          )}
-        </View>
+            <Text style={styles.title}>
+              {new Date().toLocaleDateString('en-IN', { month: 'long' })} Budget
+            </Text>
+            {budget ? (
+              <TouchableOpacity onPress={handleResetPlan} style={styles.resetBtn}>
+                <Text style={[styles.resetText, { color: colors.danger }]}>Reset</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 60 }} />
+            )}
+          </View>
+        )}
 
         <ScrollView
           contentContainerStyle={styles.scroll}

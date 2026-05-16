@@ -147,7 +147,7 @@ export default function PermissionScreen({ navigation }) {
 
   const finishOnboarding = useCallback(() => {
     setHasOnboarded(true);
-    navigation.replace("Dashboard");
+    navigation.replace("Main");
   }, [setHasOnboarded, navigation]);
 
   // ── Inbox sweep with live progress ─────────────────────────────────────────

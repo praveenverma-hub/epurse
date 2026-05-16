@@ -17,22 +17,21 @@ import {
   StatusBar, RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import * as LocalAuthentication from 'expo-local-authentication';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, formatCompact } from '../utils/format';
+import { formatCompact } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
-import { TRANSACTION_TYPES, ACCOUNT_TYPES } from '../constants/categories';
+import { TRANSACTION_TYPES } from '../constants/categories';
+import { useTabBarScroll } from '../hooks/useTabBarScroll';
+import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import BudgetWidget from '../components/BudgetWidget';
 import CelebrationModal from '../components/CelebrationModal';
 import TransactionItem from '../components/TransactionItem';
-import AccountCard from '../components/AccountCard';
-import AddAccountModal from '../components/AddAccountModal';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
@@ -40,7 +39,6 @@ import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
 import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
-import Svg, { Path, Circle, Line } from 'react-native-svg';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -62,7 +60,6 @@ const periodStart = (key) => {
 // ── Main screen ───────────────────────────────────────────────────────────────
 const DashboardScreen = ({ navigation }) => {
   const theme           = useTheme();
-  const accounts        = useEPurseStore((s) => s.accounts);
   const transactions    = useEPurseStore((s) => s.transactions);
   const categories      = useEPurseStore((s) => s.categories);
   const monthlyAggs     = useEPurseStore((s) => s.monthlyAggregates);
@@ -70,7 +67,6 @@ const DashboardScreen = ({ navigation }) => {
   const borrowed        = useEPurseStore((s) => s.getTotalBorrowed());
   const userName        = useEPurseStore((s) => s.userName);
   const lastSmsDate     = useEPurseStore((s) => s.lastSmsDate);
-  const ingestMessage   = useEPurseStore((s) => s.ingestMessage);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
@@ -78,20 +74,19 @@ const DashboardScreen = ({ navigation }) => {
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
-  const addAccount          = useEPurseStore((s) => s.addAccount);
-  const deleteAccount       = useEPurseStore((s) => s.deleteAccount);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
   const clearPendingCelebration = useEPurseStore((s) => s.clearPendingCelebration);
+
+  const { onScroll, scrollEventThrottle } = useTabBarScroll();
+  const insets = useSafeAreaInsets();
 
   const [period, setPeriod]     = useState('M');
   const [refreshing, setRefreshing] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
-  const [balancesVisible, setBalancesVisible] = useState(false);
   const [lbLinkTxn, setLbLinkTxn] = useState(null);   // { txn, categoryId }
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
-  const [addAccountVisible, setAddAccountVisible] = useState(false);
 
   // ── Period-aware stats ────────────────────────────────────────────────────
   const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
@@ -189,41 +184,6 @@ const DashboardScreen = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 600);
   }, []);
 
-  // Display order: Cash → Wallet → Credit Card → Bank
-  const TYPE_ORDER = {
-    [ACCOUNT_TYPES.CASH]:        0,
-    [ACCOUNT_TYPES.WALLET]:      1,
-    [ACCOUNT_TYPES.CREDIT_CARD]: 2,
-    [ACCOUNT_TYPES.BANK]:        3,
-  };
-  const sortedAccounts = useMemo(
-    () => [...accounts].sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9)),
-    [accounts]
-  );
-
-  const handleToggleBalances = useCallback(async () => {
-    if (balancesVisible) {
-      setBalancesVisible(false);
-      return;
-    }
-    try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
-      if (hasHardware && isEnrolled) {
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: 'Verify to reveal balances',
-          cancelLabel: 'Cancel',
-          fallbackLabel: 'Use PIN',
-          disableDeviceFallback: false,
-        });
-        if (!result.success) return;
-      }
-      // No biometrics enrolled — reveal directly
-    } catch (_) {
-      // Auth unavailable — reveal directly
-    }
-    setBalancesVisible(true);
-  }, [balancesVisible]);
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -316,65 +276,12 @@ const DashboardScreen = ({ navigation }) => {
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={scrollEventThrottle}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
       >
-        {/* Account cards (CRED-style) */}
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Your accounts</Text>
-          <TouchableOpacity
-            onPress={handleToggleBalances}
-            style={styles.eyeBtn}
-            activeOpacity={0.7}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <EyeIcon open={balancesVisible} color={theme.primary} size={16} />
-          </TouchableOpacity>
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.accountsScroll}
-          contentContainerStyle={styles.accountsRow}
-          snapToInterval={296}
-          decelerationRate="fast"
-        >
-          {sortedAccounts.map((a) => (
-            <AccountCard
-              key={a.id}
-              account={a}
-              showBalance={balancesVisible}
-              holderName={userName}
-              onPress={() => navigation.navigate('Transactions', { accountId: a.id, initialPeriod: period })}
-              onDelete={() =>
-                setConfirm({
-                  title: 'Remove account?',
-                  message: `Remove "${a.name}" from your accounts?\n\nTransactions linked to this account will be kept but unlinked.`,
-                  primaryText: 'Remove',
-                  destructive: true,
-                  secondaryText: 'Cancel',
-                  onSecondary: () => setConfirm(null),
-                  onConfirm: () => {
-                    deleteAccount(a.id);
-                    setConfirm(null);
-                  },
-                })
-              }
-            />
-          ))}
-
-          {/* Add Account card */}
-          <TouchableOpacity
-            style={styles.addCardPlaceholder}
-            onPress={() => setAddAccountVisible(true)}
-            activeOpacity={0.75}
-          >
-            <Text style={styles.addCardPlus}>+</Text>
-            <Text style={styles.addCardLabel}>Add{'\n'}Account</Text>
-          </TouchableOpacity>
-        </ScrollView>
-
         {/* Lent / Borrowed */}
         <LentBorrowedWidget
           lent={lent}
@@ -384,19 +291,7 @@ const DashboardScreen = ({ navigation }) => {
         />
 
         {/* Monthly budget — empty CTA or active progress */}
-        <BudgetWidget onPress={() => navigation.navigate('Budget')} />
-
-        {/* Quick actions */}
-        <View style={styles.quickActions}>
-          <QuickAction emoji="💸" label="Add"       onPress={() => navigation.navigate('AddTransaction')} />
-          {/* Simulate SMS hidden — SMS permission is requested on first launch
-          <QuickAction emoji="📩" label="Simulate"  onPress={onSimulateSMS} /> */}
-          <QuickAction emoji="📊" label="Analytics" onPress={() => navigation.navigate('Analytics')} />
-          <QuickAction emoji="🧾" label="All txns"  onPress={() => navigation.navigate('Transactions', { initialPeriod: period })} />
-          <QuickAction emoji="🎯" label="Plan"      onPress={() => navigation.navigate('Budget')} />
-          {/* Diagnose hidden for now — kept in code for future debugging
-          <QuickAction emoji="🔬" label="Diagnose"  onPress={() => navigation.navigate('SmsDiagnostic')} /> */}
-        </View>
+        <BudgetWidget onPress={() => navigation.navigate('Insights')} />
 
         {/* Period transactions */}
         <View style={styles.recentHeader}>
@@ -435,10 +330,10 @@ const DashboardScreen = ({ navigation }) => {
           ))
         )}
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: TAB_BAR_HEIGHT + 80 }} />
       </ScrollView>
 
-      <FAB onPress={() => navigation.navigate('AddTransaction')} />
+      <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
 
       <CategoryPickerModal
         visible={!!activeTxn}
@@ -588,19 +483,13 @@ const DashboardScreen = ({ navigation }) => {
         onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
 
-      <AddAccountModal
-        visible={addAccountVisible}
-        onClose={() => setAddAccountVisible(false)}
-        onAdd={(acct) => addAccount(acct)}
-      />
-
       {/* Monthly wrap-up celebration — shown after rollover snapshots a month */}
       <CelebrationModal
         visible={!!pendingCelebration}
         onClose={clearPendingCelebration}
         onPlanNext={() => {
           clearPendingCelebration();
-          navigation.navigate('Budget');
+          navigation.navigate('Insights');
         }}
       />
     </View>
@@ -608,13 +497,6 @@ const DashboardScreen = ({ navigation }) => {
 };
 
 // ── Quick action tile ─────────────────────────────────────────────────────────
-const QuickAction = ({ emoji, label, onPress }) => (
-  <TouchableOpacity style={styles.qa} activeOpacity={0.8} onPress={onPress}>
-    <Text style={styles.qaEmoji}>{emoji}</Text>
-    <Text style={styles.qaLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
@@ -687,61 +569,8 @@ const styles = StyleSheet.create({
   body: { flex: 1, marginTop: -spacing.lg },
   bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
 
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
   sectionTitle: { ...typography.h3, color: colors.textPrimary },
-  eyeBtn: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
-  accountsScroll: { marginHorizontal: -spacing.lg },
-  accountsRow: { paddingTop: 14, paddingBottom: spacing.md, paddingLeft: spacing.lg, paddingRight: spacing.lg },
-  addCardPlaceholder: {
-    width: 280,
-    height: 170,
-    borderRadius: radius.lg,
-    borderWidth: 2,
-    borderColor: colors.divider,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.card,
-    marginRight: spacing.md,
-    gap: spacing.xs,
-  },
-  addCardPlus: {
-    fontSize: 32,
-    color: colors.textSecondary,
-    fontWeight: '300',
-    lineHeight: 36,
-  },
-  addCardLabel: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-
-  // Quick actions
-  quickActions: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginTop: spacing.lg,
-    justifyContent: 'space-between',
-    ...shadows.card,
-  },
-  qa: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
-  qaEmoji: { fontSize: 22 },
-  qaLabel: { ...typography.tiny, color: colors.textSecondary, marginTop: 4, fontWeight: '600' },
 
   // Recent
   recentHeader: {
@@ -767,49 +596,5 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: spacing.xs,
   },
 });
-
-// ── Eye / Eye-off SVG icon (Feather-style, theme-aware) ───────────────────────
-const EyeIcon = ({ open = true, color = '#000', size = 20 }) => {
-  const s = size;
-  return (
-    <Svg width={s} height={s} viewBox="0 0 24 24" fill="none">
-      {open ? (
-        <>
-          <Path
-            d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
-            stroke={color}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <Circle
-            cx="12"
-            cy="12"
-            r="3"
-            stroke={color}
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </>
-      ) : (
-        <>
-          <Path
-            d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
-            stroke={color}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <Line
-            x1="1" y1="1" x2="23" y2="23"
-            stroke={color}
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </>
-      )}
-    </Svg>
-  );
-};
 
 export default DashboardScreen;

@@ -21,7 +21,7 @@ import { formatCurrency } from '../utils/format';
 
 const SCREEN_W = Dimensions.get('window').width;
 
-const AnalyticsScreen = ({ navigation }) => {
+const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
   const date = useMemo(() => {
     const d = new Date();
@@ -37,41 +37,64 @@ const AnalyticsScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[colors.gradientBlueStart, colors.gradientBlueEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <SafeAreaView edges={['top']}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Text style={styles.backText}>←</Text>
-            </TouchableOpacity>
-            <Text style={styles.title}>Analytics</Text>
-            <View style={{ width: 40 }} />
-          </View>
+      {!headerless ? (
+        <LinearGradient
+          colors={[colors.gradientBlueStart, colors.gradientBlueEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
+          <SafeAreaView edges={['top']}>
+            <View style={styles.headerRow}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                <Text style={styles.backText}>←</Text>
+              </TouchableOpacity>
+              <Text style={styles.title}>Analytics</Text>
+              <View style={{ width: 40 }} />
+            </View>
 
-          <View style={styles.monthSwitcher}>
+            <View style={styles.monthSwitcher}>
+              <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
+                <Text style={styles.arrow}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.monthLabel}>{monthLabel}</Text>
+              <TouchableOpacity
+                onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
+                disabled={monthOffset === 0}
+              >
+                <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <SummaryStat label="Spent" value={monthSpend} />
+              <SummaryStat label="Earned" value={monthIncome} />
+              <SummaryStat label="Net" value={monthIncome - monthSpend} />
+            </View>
+          </SafeAreaView>
+        </LinearGradient>
+      ) : (
+        /* headerless mode — compact light strip shown inside InsightsScreen */
+        <View style={styles.headerlessStrip}>
+          <View style={styles.monthSwitcherLight}>
             <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
-              <Text style={styles.arrow}>‹</Text>
+              <Text style={styles.arrowLight}>‹</Text>
             </TouchableOpacity>
-            <Text style={styles.monthLabel}>{monthLabel}</Text>
+            <Text style={styles.monthLabelLight}>{monthLabel}</Text>
             <TouchableOpacity
               onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
               disabled={monthOffset === 0}
             >
-              <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
+              <Text style={[styles.arrowLight, monthOffset === 0 && { opacity: 0.3 }]}>›</Text>
             </TouchableOpacity>
           </View>
-
-          <View style={styles.summaryRow}>
-            <SummaryStat label="Spent" value={monthSpend} />
-            <SummaryStat label="Earned" value={monthIncome} />
-            <SummaryStat label="Net" value={monthIncome - monthSpend} />
+          <View style={styles.summaryRowLight}>
+            <SummaryStatLight label="Spent"  value={monthSpend} />
+            <SummaryStatLight label="Earned" value={monthIncome} />
+            <SummaryStatLight label="Net"    value={monthIncome - monthSpend} />
           </View>
-        </SafeAreaView>
-      </LinearGradient>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.body}
@@ -119,6 +142,15 @@ const SummaryStat = ({ label, value }) => (
   <View style={styles.statBox}>
     <Text style={styles.statLabel}>{label}</Text>
     <Text style={styles.statValue}>{formatCurrency(value)}</Text>
+  </View>
+);
+
+const SummaryStatLight = ({ label, value }) => (
+  <View style={styles.statBoxLight}>
+    <Text style={styles.statLabelLight}>{label}</Text>
+    <Text style={[styles.statValueLight, value < 0 && { color: colors.danger }]}>
+      {formatCurrency(value)}
+    </Text>
   </View>
 );
 
@@ -286,6 +318,37 @@ const styles = StyleSheet.create({
   rowLabel: { flex: 1, ...typography.body, color: colors.textPrimary },
   rowAmount: { ...typography.bodyBold, color: colors.textPrimary, marginRight: spacing.md },
   rowPercent: { ...typography.small, color: colors.textSecondary, width: 36, textAlign: 'right' },
+
+  // Headerless mode — light background month/stats strip
+  headerlessStrip: {
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  monthSwitcherLight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  arrowLight:      { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
+  monthLabelLight: { color: colors.textPrimary, ...typography.bodyBold, fontWeight: '700' },
+  summaryRowLight: { flexDirection: 'row', gap: spacing.sm },
+  statBoxLight: {
+    flex: 1,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+  },
+  statLabelLight: { color: colors.textSecondary, ...typography.tiny },
+  statValueLight: { color: colors.textPrimary, ...typography.bodyBold, fontWeight: '700', marginTop: 2 },
 });
 
 export default AnalyticsScreen;

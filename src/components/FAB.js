@@ -5,11 +5,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { radius, shadows, spacing } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
 
-const FAB = ({ onPress, icon = '+' }) => {
+const FAB = ({ onPress, icon = '+', bottomInset = 0 }) => {
   const gradient = useGradient();
   const { primary } = useTheme();
   return (
-    <TouchableOpacity activeOpacity={0.9} style={[styles.shadow, { shadowColor: primary }]} onPress={onPress}>
+    <TouchableOpacity
+      activeOpacity={0.9}
+      style={[styles.shadow, { shadowColor: primary, bottom: spacing.xl + bottomInset }]}
+      onPress={onPress}
+    >
       <LinearGradient
         colors={gradient}
         start={{ x: 0, y: 0 }}
