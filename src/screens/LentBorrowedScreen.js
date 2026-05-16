@@ -19,6 +19,9 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { formatCurrency, formatDate } from '../utils/format';
 import GradientButton from '../components/GradientButton';
 import CenterModal from '../components/CenterModal';
+import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
+import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
+import Svg, { Path } from 'react-native-svg';
 
 const ENTRY_LABEL = {
   lent: 'Lent',
@@ -41,11 +44,15 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [note, setNote] = useState('');
   const [expandedPerson, setExpandedPerson] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [reminderTarget, setReminderTarget] = useState(null);       // WA reminder target
+  const [borrowReminderTarget, setBorrowReminderTarget] = useState(null); // push notification target
 
   const all = useEPurseStore((s) => s.lentBorrowed);
   const addLentBorrowed = useEPurseStore((s) => s.addLentBorrowed);
   const settle = useEPurseStore((s) => s.settleLentBorrowed);
   const getPersonBalances = useEPurseStore((s) => s.getPersonBalances);
+  const userName        = useEPurseStore((s) => s.userName);
+  const notificationIds = useEPurseStore((s) => s.notificationIds);
 
   const handleAdd = useCallback(() => {
     const n = parseFloat(amount);
@@ -160,6 +167,36 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 </Text>
               </View>
             )}
+            {!isFullySettled && pb.net > 0 ? (
+              <TouchableOpacity
+                style={styles.waBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  setReminderTarget(pb);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <WAIcon />
+              </TouchableOpacity>
+            ) : null}
+            {!isFullySettled && pb.net < 0 ? (
+              <TouchableOpacity
+                style={[
+                  styles.bellBtn,
+                  notificationIds[pb.personKey] && styles.bellBtnActive,
+                ]}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  setBorrowReminderTarget(pb);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <BellIconSvg
+                  size={14}
+                  color={notificationIds[pb.personKey] ? '#6366F1' : '#6366F188'}
+                />
+              </TouchableOpacity>
+            ) : null}
             <Text style={styles.expandArrow}>{isExpanded ? '▲' : '▼'}</Text>
           </View>
 
@@ -371,6 +408,21 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           onClose={() => setConfirm(null)}
           onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
         />
+
+        <WhatsAppReminderModal
+          visible={!!reminderTarget}
+          person={reminderTarget?.person}
+          phone={reminderTarget?.phone}
+          amount={reminderTarget?.net ?? 0}
+          senderName={userName}
+          onClose={() => setReminderTarget(null)}
+        />
+
+        <BorrowReminderModal
+          visible={!!borrowReminderTarget}
+          person={borrowReminderTarget}
+          onClose={() => setBorrowReminderTarget(null)}
+        />
       </View>
     </KeyboardAvoidingView>
   );
@@ -509,6 +561,32 @@ const styles = StyleSheet.create({
   netAmount: { ...typography.bodyBold, fontWeight: '800' },
   netLabel: { ...typography.tiny, fontWeight: '600', marginTop: 1 },
   expandArrow: { color: colors.textSecondary, fontSize: 10, marginLeft: 4 },
+  waBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#25D36618',
+    borderWidth: 1,
+    borderColor: '#25D36633',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
+  },
+  bellBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#6366F112',
+    borderWidth: 1,
+    borderColor: '#6366F130',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
+  },
+  bellBtnActive: {
+    backgroundColor: '#6366F128',
+    borderColor: '#6366F166',
+  },
   settledBadge: {
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 4,
@@ -576,5 +654,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+const WAIcon = ({ size = 17 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"
+      fill="#25D366"
+    />
+    <Path
+      d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.978-1.304A9.96 9.96 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.958 7.958 0 0 1-4.078-1.117l-.292-.173-3.03.794.808-2.951-.19-.303A7.96 7.96 0 0 1 4 12c0-4.418 3.582-8 8-8s8 3.582 8 8-3.582 8-8 8z"
+      fill="#25D366"
+    />
+  </Svg>
+);
 
 export default LentBorrowedScreen;

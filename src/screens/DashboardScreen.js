@@ -181,12 +181,11 @@ const DashboardScreen = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 600);
   }, []);
 
-  // Bank / credit cards appear last in the horizontal scroller for privacy.
-  const SENSITIVE_TYPES = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD]);
+  // Only bank accounts move to the end and have hidden balances.
   const sortedAccounts = useMemo(() => {
-    const other = accounts.filter((a) => !SENSITIVE_TYPES.has(a.type));
-    const sensitive = accounts.filter((a) => SENSITIVE_TYPES.has(a.type));
-    return [...other, ...sensitive];
+    const nonBank = accounts.filter((a) => a.type !== ACCOUNT_TYPES.BANK);
+    const bank    = accounts.filter((a) => a.type === ACCOUNT_TYPES.BANK);
+    return [...nonBank, ...bank];
   }, [accounts]);
 
   const handleToggleBalances = useCallback(async () => {
@@ -317,7 +316,7 @@ const DashboardScreen = ({ navigation }) => {
             activeOpacity={0.7}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <EyeIcon open={balancesVisible} color={theme.primary} size={20} />
+            <EyeIcon open={balancesVisible} color={theme.primary} size={16} />
           </TouchableOpacity>
         </View>
         <ScrollView
@@ -636,8 +635,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { ...typography.h3, color: colors.textPrimary },
   eyeBtn: {
-    width: 32,
-    height: 32,
+    width: 24,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },

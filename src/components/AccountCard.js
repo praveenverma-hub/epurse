@@ -36,7 +36,7 @@ const TYPE_EMOJI = {
   [ACCOUNT_TYPES.CASH]:        '💵',
 };
 
-const BALANCE_SENSITIVE_TYPES = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD]);
+const BALANCE_SENSITIVE_TYPES = new Set([ACCOUNT_TYPES.BANK]);
 
 const paletteFor = (account) => {
   const str = String(account?.id || account?.mask || account?.name || '');

@@ -7,10 +7,20 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './src/navigation/AppNavigator';
 import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
+import { configureNotificationHandler, setupAndroidChannel } from './src/utils/notifications';
 
 // =============================================================================
 // Background workers — mounted once at the root, render nothing.
 // =============================================================================
+
+/** Sets up push notification handler + Android channel once at startup. */
+function NotificationBoot() {
+  useEffect(() => {
+    configureNotificationHandler();
+    setupAndroidChannel();
+  }, []);
+  return null;
+}
 
 /** Boots the Android SMS listener while a real permission is held. */
 function SmsSyncBoot() {
@@ -42,6 +52,7 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style="light" />
+        <NotificationBoot />
         <SmsSyncBoot />
         <CompactionBoot />
         <AppNavigator />

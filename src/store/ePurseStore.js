@@ -273,6 +273,9 @@ export const useEPurseStore = create(
       themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
       darkMode: false,             // reserved for future dark-theme rollout
 
+      // Notification IDs: { [personKey]: notificationId }  — used to cancel/update reminders
+      notificationIds: {},
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -284,6 +287,15 @@ export const useEPurseStore = create(
       // ----- theme setters ----------------------------------------------
       setThemeId: (id) => set({ themeId: id || DEFAULT_THEME_ID }),
       setDarkMode: (v) => set({ darkMode: !!v }),
+
+      setNotificationId: (personKey, id) =>
+        set((s) => ({ notificationIds: { ...s.notificationIds, [personKey]: id } })),
+      clearNotificationId: (personKey) =>
+        set((s) => {
+          const next = { ...s.notificationIds };
+          delete next[personKey];
+          return { notificationIds: next };
+        }),
 
       // ----- accounts ----------------------------------------------------
       addAccount: (account) =>
@@ -997,6 +1009,7 @@ export const useEPurseStore = create(
           contactsPermissionGranted: false,
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
+          notificationIds: {},
         }),
     }),
     {
@@ -1004,7 +1017,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 9,
+      version: 10,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1075,6 +1088,44 @@ export const useEPurseStore = create(
             themeId: state.themeId ?? DEFAULT_THEME_ID,
             darkMode: state.darkMode ?? false,
           };
+        }
+
+        // v10: fix mis-linked transactions caused by the old type-fallback in
+        // matchAccount. Any transaction whose accountMask doesn't match its
+        // linked account's mask gets re-linked to the correct account
+        // (matched by mask). Creates a new account entry when needed.
+        if (version < 10) {
+          const accounts = [...(state.accounts || [])];
+          const accountById = new Map(accounts.map((a) => [a.id, a]));
+          const colorByType = {
+            [ACCOUNT_TYPES.BANK]: '#1E40AF',
+            [ACCOUNT_TYPES.CREDIT_CARD]: '#6D28D9',
+            [ACCOUNT_TYPES.WALLET]: '#10B981',
+            [ACCOUNT_TYPES.CASH]: '#F59E0B',
+          };
+          const transactions = (state.transactions || []).map((t) => {
+            if (!t.accountMask) return t;
+            const linkedAccount = t.accountId ? accountById.get(t.accountId) : null;
+            if (linkedAccount && linkedAccount.mask === t.accountMask) return t;
+            // Find an account with the correct mask
+            let correct = accounts.find((a) => a.mask === t.accountMask);
+            if (!correct) {
+              // Create a new account for this mask
+              correct = {
+                id: `acct_migrate_${t.accountMask}_${Math.random().toString(36).slice(2, 6)}`,
+                type: t.accountType || ACCOUNT_TYPES.BANK,
+                name: `${t.accountType || 'BANK'} ··${t.accountMask}`,
+                bankName: null,
+                mask: t.accountMask,
+                balance: 0,
+                color: colorByType[t.accountType] || '#6B7280',
+              };
+              accounts.push(correct);
+              accountById.set(correct.id, correct);
+            }
+            return { ...t, accountId: correct.id };
+          });
+          state = { ...state, accounts, transactions };
         }
 
         return state;
