@@ -313,6 +313,15 @@ export const useEPurseStore = create(
           ),
         })),
 
+      deleteAccount: (accountId) =>
+        set((s) => ({
+          accounts: s.accounts.filter((a) => a.id !== accountId),
+          // Unlink transactions that were attached to this account
+          transactions: s.transactions.map((t) =>
+            t.accountId === accountId ? { ...t, accountId: null } : t
+          ),
+        })),
+
       // ----- transactions ------------------------------------------------
       /** Manual entry from the FAB. IDs: `IdM0001`, `IdM0002`, … (persisted counter). */
       addTransaction: (txn) =>

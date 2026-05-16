@@ -2,11 +2,13 @@
 // WhatsAppReminderModal — 5 themed SVG banners + WA deep-link reminder
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ScrollView, Linking, Alert,
+  TextInput, ScrollView, Linking, Alert, Dimensions,
 } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
+import * as MediaLibrary from 'expo-media-library';
 import Svg, {
   Path, Circle, Rect, Ellipse,
   Defs, LinearGradient as SvgGradient, Stop,
@@ -16,6 +18,15 @@ import Svg, {
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
+
+// ── Screen dimensions ─────────────────────────────────────────────────────────
+const SCREEN_W = Dimensions.get('window').width;
+const SCREEN_H = Dimensions.get('window').height;
+// Sheet height: fixed so flex: 1 on the inner ScrollView is unambiguous
+const SHEET_H  = Math.min(Math.round(SCREEN_H * 0.88), 700);
+// Banner fills the sheet content area (sheet has spacing.lg padding on each side)
+const BANNER_W = SCREEN_W - spacing.lg * 2;
+const BANNER_H = Math.round(BANNER_W * (110 / 320));
 
 // ── Phone normalisation ───────────────────────────────────────────────────────
 const normalisePhone = (raw) => {
@@ -371,10 +382,12 @@ const WhatsAppIcon = ({ size = 18, color = '#25D366' }) => (
 // =============================================================================
 const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onClose }) => {
   const theme = useTheme();
+  const bannerRef = useRef(null);
   const [themeId, setThemeId]     = useState('friendly');
   const [dueDateKey, setDueDateKey] = useState(null);
   const [customDate, setCustomDate] = useState('');
   const [msgOverride, setMsgOverride] = useState(null);
+  const [bannerSaved, setBannerSaved] = useState(false);
 
   const activeTheme = REMINDER_THEMES.find((t) => t.id === themeId) || REMINDER_THEMES[0];
 
@@ -399,6 +412,7 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
       setCustomDate('');
       setMsgOverride(null);
       setThemeId('friendly');
+      setBannerSaved(false);
     }
   }, [visible]);
 
@@ -408,19 +422,45 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
   }, [themeId]);
 
   const handleSend = useCallback(async () => {
+    // 1. Capture the banner and save to gallery so the user can attach it in WhatsApp
+    let bannerCaptured = false;
+    try {
+      const uri = await captureRef(bannerRef, { format: 'jpg', quality: 0.92 });
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status === 'granted') {
+        await MediaLibrary.saveToLibraryAsync(uri);
+        setBannerSaved(true);
+        bannerCaptured = true;
+      }
+    } catch (_) {
+      // Capture failure is non-fatal — proceed to open WA without the image
+    }
+
+    // 2. Build WhatsApp URL with pre-filled message text
     const encoded   = encodeURIComponent(message);
     const phoneNorm = normalisePhone(phone);
     const url = phoneNorm
       ? `https://wa.me/${phoneNorm}?text=${encoded}`
       : `https://wa.me/?text=${encoded}`;
+
     const canOpen = await Linking.canOpenURL(url).catch(() => false);
     if (!canOpen) {
       Alert.alert('WhatsApp not found', 'Make sure WhatsApp is installed, then try again.', [{ text: 'OK' }]);
       return;
     }
-    await Linking.openURL(url);
-    onClose();
-  }, [message, phone, onClose]);
+
+    // 3. Show attach hint if we saved the banner, then open WA
+    if (bannerCaptured) {
+      Alert.alert(
+        '📸 Banner saved to gallery!',
+        'In WhatsApp, tap the 📎 (attachment) button and pick the banner from your gallery to send it along with the message.',
+        [{ text: 'Open WhatsApp', onPress: () => { Linking.openURL(url); onClose(); } }]
+      );
+    } else {
+      await Linking.openURL(url);
+      onClose();
+    }
+  }, [message, phone, bannerRef, onClose]);
 
   const DUE_OPTIONS = [
     { key: 'today', label: 'Today' },
@@ -436,7 +476,7 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
 
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { height: SHEET_H }]}>
           <View style={styles.handle} />
 
           {/* ── Top info row ── */}
@@ -455,9 +495,13 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
 
           <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 
-            {/* ── Banner preview (full-width) ── */}
-            <View style={styles.bannerWrap}>
-              <Banner w="100%" h={110} />
+            {/* ── Banner preview (captured by ViewShot for gallery save) ── */}
+            <View
+              ref={bannerRef}
+              style={[styles.bannerWrap, { width: BANNER_W, height: BANNER_H }]}
+              collapsable={false}
+            >
+              <Banner w={BANNER_W} h={BANNER_H} />
               {/* Text overlay on banner */}
               <View style={styles.bannerOverlay} pointerEvents="none">
                 <View style={[styles.bannerLabelPill, { backgroundColor: activeTheme.labelBg + 'EE' }]}>
@@ -543,6 +587,13 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
 
           </ScrollView>
 
+          {/* ── Gallery hint ── */}
+          <View style={styles.galleryHint}>
+            <Text style={styles.galleryHintText}>
+              📸 Banner will be saved to your gallery — attach it in WhatsApp using the 📎 button
+            </Text>
+          </View>
+
           {/* ── Send button ── */}
           <TouchableOpacity style={styles.sendBtn} onPress={handleSend} activeOpacity={0.85}>
             <WhatsAppIcon size={18} color="#fff" />
@@ -571,7 +622,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: spacing.lg,
     paddingBottom: spacing.xl,
-    maxHeight: '92%',
   },
   handle: {
     width: 40, height: 4, borderRadius: 2,
@@ -587,7 +637,7 @@ const styles = StyleSheet.create({
   phoneHint: { ...typography.tiny, color: colors.textSecondary, marginBottom: spacing.sm },
   noPhoneHint: { ...typography.tiny, color: colors.textMuted, fontStyle: 'italic', marginBottom: spacing.sm },
 
-  scroll: { flex: 1 },
+  scroll: { flex: 1, minHeight: 0 },
   scrollContent: { paddingBottom: spacing.sm },
 
   bannerWrap: {
@@ -661,6 +711,22 @@ const styles = StyleSheet.create({
   },
   msgText: { ...typography.body, color: colors.textPrimary, lineHeight: 22 },
 
+  galleryHint: {
+    backgroundColor: '#25D36610',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#25D36630',
+  },
+  galleryHintText: {
+    ...typography.tiny,
+    color: '#25D366',
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: spacing.sm, backgroundColor: '#25D366',

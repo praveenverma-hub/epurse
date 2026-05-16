@@ -30,6 +30,7 @@ import { TRANSACTION_TYPES, ACCOUNT_TYPES } from '../constants/categories';
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import TransactionItem from '../components/TransactionItem';
 import AccountCard from '../components/AccountCard';
+import AddAccountModal from '../components/AddAccountModal';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
@@ -75,6 +76,8 @@ const DashboardScreen = ({ navigation }) => {
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
+  const addAccount          = useEPurseStore((s) => s.addAccount);
+  const deleteAccount       = useEPurseStore((s) => s.deleteAccount);
 
   const [period, setPeriod]     = useState('M');
   const [refreshing, setRefreshing] = useState(false);
@@ -84,6 +87,7 @@ const DashboardScreen = ({ navigation }) => {
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
+  const [addAccountVisible, setAddAccountVisible] = useState(false);
 
   // ── Period-aware stats ────────────────────────────────────────────────────
   const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
@@ -181,12 +185,17 @@ const DashboardScreen = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 600);
   }, []);
 
-  // Only bank accounts move to the end and have hidden balances.
-  const sortedAccounts = useMemo(() => {
-    const nonBank = accounts.filter((a) => a.type !== ACCOUNT_TYPES.BANK);
-    const bank    = accounts.filter((a) => a.type === ACCOUNT_TYPES.BANK);
-    return [...nonBank, ...bank];
-  }, [accounts]);
+  // Display order: Cash → Wallet → Credit Card → Bank
+  const TYPE_ORDER = {
+    [ACCOUNT_TYPES.CASH]:        0,
+    [ACCOUNT_TYPES.WALLET]:      1,
+    [ACCOUNT_TYPES.CREDIT_CARD]: 2,
+    [ACCOUNT_TYPES.BANK]:        3,
+  };
+  const sortedAccounts = useMemo(
+    () => [...accounts].sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9)),
+    [accounts]
+  );
 
   const handleToggleBalances = useCallback(async () => {
     if (balancesVisible) {
@@ -331,9 +340,34 @@ const DashboardScreen = ({ navigation }) => {
               key={a.id}
               account={a}
               showBalance={balancesVisible}
+              holderName={userName}
               onPress={() => navigation.navigate('Transactions', { accountId: a.id, initialPeriod: period })}
+              onDelete={() =>
+                setConfirm({
+                  title: 'Remove account?',
+                  message: `Remove "${a.name}" from your accounts?\n\nTransactions linked to this account will be kept but unlinked.`,
+                  primaryText: 'Remove',
+                  destructive: true,
+                  secondaryText: 'Cancel',
+                  onSecondary: () => setConfirm(null),
+                  onConfirm: () => {
+                    deleteAccount(a.id);
+                    setConfirm(null);
+                  },
+                })
+              }
             />
           ))}
+
+          {/* Add Account card */}
+          <TouchableOpacity
+            style={styles.addCardPlaceholder}
+            onPress={() => setAddAccountVisible(true)}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.addCardPlus}>+</Text>
+            <Text style={styles.addCardLabel}>Add{'\n'}Account</Text>
+          </TouchableOpacity>
         </ScrollView>
 
         {/* Lent / Borrowed */}
@@ -543,6 +577,12 @@ const DashboardScreen = ({ navigation }) => {
         onClose={() => setConfirm(null)}
         onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
+
+      <AddAccountModal
+        visible={addAccountVisible}
+        onClose={() => setAddAccountVisible(false)}
+        onAdd={(acct) => addAccount(acct)}
+      />
     </View>
   );
 };
@@ -642,6 +682,31 @@ const styles = StyleSheet.create({
   },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
   accountsRow: { paddingTop: spacing.xs, paddingBottom: spacing.md, paddingRight: spacing.lg },
+  addCardPlaceholder: {
+    width: 280,
+    height: 170,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: colors.divider,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+    marginRight: spacing.md,
+    gap: spacing.xs,
+  },
+  addCardPlus: {
+    fontSize: 32,
+    color: colors.textSecondary,
+    fontWeight: '300',
+    lineHeight: 36,
+  },
+  addCardLabel: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 
   // Quick actions
   quickActions: {
