@@ -1,7 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-export const CHANNEL_ID = 'payment_reminders';
+// Bumped from `payment_reminders` — Android channels are immutable once created,
+// so changing channel settings (sound, importance, vibration) requires a new id.
+export const CHANNEL_ID = 'payment_reminders_v2';
 
 // Call once at app startup — no permission required
 export function configureNotificationHandler() {
@@ -14,15 +16,22 @@ export function configureNotificationHandler() {
   });
 }
 
-// Android 8+ requires a channel to display notifications
+// Android 8+ requires a channel to display notifications.
+// MAX importance + explicit sound is what makes the reminder pop as a heads-up
+// with sound + vibration even when the app is killed.
 export async function setupAndroidChannel() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'Payment Reminders',
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
+    description: 'Reminders to repay money you owe',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 400, 200, 400, 200, 400],
     lightColor: '#6366F1',
     sound: 'default',
+    enableLights: true,
+    enableVibrate: true,
+    showBadge: true,
+    bypassDnd: false,
   });
 }
 
@@ -43,6 +52,9 @@ export async function scheduleBorrowReminder({ personName, amount, triggerDate }
       title: '💸 Payment Reminder',
       body: `You owe ₹${amount.toLocaleString('en-IN')} to ${personName}`,
       sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.MAX,
+      vibrate: [0, 400, 200, 400, 200, 400],
+      sticky: false,
       ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
     },
     trigger: { seconds: secondsFromNow },
