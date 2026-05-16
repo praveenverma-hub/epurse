@@ -395,11 +395,19 @@ export const useEPurseStore = create(
             delete newTxn.myShareAmount;
           }
 
-          const { accounts: nextAccounts, account } = ensureAccountForParsed(s.accounts, newTxn);
-          newTxn.accountId = account?.id || null;
+          // If an explicit accountId was passed (manual form selection), use it directly.
+          // Otherwise run the auto-detect/create logic.
+          let resolvedAccountId = newTxn.accountId || null;
+          let resolvedAccounts = s.accounts;
+          if (!resolvedAccountId) {
+            const { accounts: ensured, account } = ensureAccountForParsed(s.accounts, newTxn);
+            resolvedAccountId = account?.id || null;
+            resolvedAccounts = ensured;
+            newTxn.accountId = resolvedAccountId;
+          }
           return {
             transactions: [newTxn, ...s.transactions],
-            accounts: applyDelta(nextAccounts, account?.id, newTxn),
+            accounts: applyDelta(resolvedAccounts, resolvedAccountId, newTxn),
             lentBorrowed: nextLent,
             ...(useProvidedId ? {} : { manualTxnSeq: nextSeq }),
           };
@@ -1026,7 +1034,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 10,
+      version: 11,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1137,6 +1145,24 @@ export const useEPurseStore = create(
           state = { ...state, accounts, transactions };
         }
 
+        // v11: recompute every account balance by replaying all non-ignored
+        // transactions. Fixes balances that drifted due to v10 re-linking,
+        // manually-added accounts, or any other historic inconsistency.
+        if (version < 11) {
+          const accounts = [...(state.accounts || [])];
+          const transactions = state.transactions || [];
+          const balanceMap = new Map(accounts.map((a) => [a.id, 0]));
+          for (const t of transactions) {
+            if (t.isIgnored || !t.accountId) continue;
+            const sign = t.type === TRANSACTION_TYPES.DEBIT ? -1 : 1;
+            balanceMap.set(t.accountId, (balanceMap.get(t.accountId) || 0) + sign * t.amount);
+          }
+          state = {
+            ...state,
+            accounts: accounts.map((a) => ({ ...a, balance: balanceMap.get(a.id) ?? 0 })),
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -1158,6 +1184,7 @@ export const useEPurseStore = create(
         contactsPermissionGranted: state.contactsPermissionGranted,
         themeId: state.themeId,
         darkMode: state.darkMode,
+        notificationIds: state.notificationIds,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;

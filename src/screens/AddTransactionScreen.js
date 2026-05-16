@@ -32,16 +32,19 @@ import { canSplitTransaction } from '../utils/split';
 const AddTransactionScreen = ({ navigation }) => {
   const theme = useTheme();
   const categories = useEPurseStore((s) => s.categories);
+  const accounts = useEPurseStore((s) => s.accounts);
   const addTransaction = useEPurseStore((s) => s.addTransaction);
   const ingestMessage = useEPurseStore((s) => s.ingestMessage);
-
-  const [mode, setMode] = useState('manual'); // 'manual' | 'sms'
 
   // manual fields
   const [amount, setAmount] = useState('');
   const [merchant, setMerchant] = useState('');
   const [type, setType] = useState(TRANSACTION_TYPES.DEBIT);
-  const [accountType, setAccountType] = useState(ACCOUNT_TYPES.CASH);
+  const defaultAccountId = useMemo(() => {
+    const cash = accounts.find((a) => a.type === ACCOUNT_TYPES.CASH);
+    return cash?.id || accounts[0]?.id || null;
+  }, [accounts]);
+  const [accountId, setAccountId] = useState(null); // null = use defaultAccountId
   const [categoryId, setCategoryId] = useState('food');
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const [isSplit, setIsSplit] = useState(false);
@@ -52,8 +55,10 @@ const AddTransactionScreen = ({ navigation }) => {
   const [splitModalOpen, setSplitModalOpen] = useState(false);
   const [note, setNote] = useState('');
 
-  // sms field
+  // sms field (kept for future use)
   const [smsBody, setSmsBody] = useState('');
+
+  const resolvedAccountId = accountId ?? defaultAccountId;
 
   const splitDraftTxn = useMemo(
     () => ({
@@ -100,7 +105,7 @@ const AddTransactionScreen = ({ navigation }) => {
     addTransaction({
       amount: num,
       type,
-      accountType,
+      accountId: resolvedAccountId,
       categoryId,
       merchant: merchant.trim(),
       note: note.trim(),
@@ -167,14 +172,10 @@ const AddTransactionScreen = ({ navigation }) => {
           <View style={{ width: 40 }} />
         </View>
 
-        <View style={styles.tabs}>
-          <Tab label="Manual" active={mode === 'manual'} onPress={() => setMode('manual')} />
-          <Tab label="From SMS" active={mode === 'sms'} onPress={() => setMode('sms')} />
-        </View>
+        {/* SMS tab hidden — kept for future use */}
 
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          {mode === 'manual' ? (
-            <>
+          <>
               <Field label="Amount (₹) · Max 10 crore">
                 <TextInput
                   value={amount}
@@ -210,9 +211,23 @@ const AddTransactionScreen = ({ navigation }) => {
 
               <Field label="Account">
                 <View style={styles.segRow}>
-                  {Object.values(ACCOUNT_TYPES).map((a) => (
-                    <Seg key={a} label={a} active={accountType === a} onPress={() => setAccountType(a)} />
-                  ))}
+                  {accounts.map((a) => {
+                    const emoji = { bank: '🏦', credit_card: '💳', wallet: '👛', cash: '💵' }[a.type] ?? '💳';
+                    const shortName = a.bankName
+                      ? a.bankName
+                      : a.mask
+                      ? `${a.name.split('··')[0].trim()} ··${a.mask.slice(-4)}`
+                      : a.name;
+                    const isActive = (accountId ?? defaultAccountId) === a.id;
+                    return (
+                      <Seg
+                        key={a.id}
+                        label={`${emoji} ${shortName}`}
+                        active={isActive}
+                        onPress={() => setAccountId(a.id)}
+                      />
+                    );
+                  })}
                 </View>
               </Field>
 
@@ -331,24 +346,7 @@ const AddTransactionScreen = ({ navigation }) => {
                   setSplitModalOpen(false);
                 }}
               />
-            </>
-          ) : (
-            <>
-              <Text style={styles.smsHelp}>
-                Paste a bank or wallet SMS below. We'll detect the amount, account and merchant
-                automatically.
-              </Text>
-              <TextInput
-                value={smsBody}
-                onChangeText={setSmsBody}
-                placeholder="e.g. Rs.450 debited from A/c xx1234 to SWIGGY..."
-                placeholderTextColor={colors.textMuted}
-                multiline
-                style={[styles.input, { minHeight: 160, textAlignVertical: 'top' }]}
-              />
-              <GradientButton title="Parse & save" onPress={handleParseSMS} style={{ marginTop: spacing.xl }} />
-            </>
-          )}
+          </>
         </ScrollView>
       </SafeAreaView>
       {/* Category bottom-sheet picker */}

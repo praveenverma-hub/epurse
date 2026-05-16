@@ -331,6 +331,7 @@ const DashboardScreen = ({ navigation }) => {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.accountsScroll}
           contentContainerStyle={styles.accountsRow}
           snapToInterval={296}
           decelerationRate="fast"
@@ -681,7 +682,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
-  accountsRow: { paddingTop: spacing.xs, paddingBottom: spacing.md, paddingRight: spacing.lg },
+  accountsScroll: { marginHorizontal: -spacing.lg },
+  accountsRow: { paddingTop: 14, paddingBottom: spacing.md, paddingLeft: spacing.lg, paddingRight: spacing.lg },
   addCardPlaceholder: {
     width: 280,
     height: 170,

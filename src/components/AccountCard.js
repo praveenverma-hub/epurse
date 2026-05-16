@@ -53,13 +53,17 @@ const maskedNumber = (account) => {
   return `•••• •••• •••• ${last4}`;
 };
 
+const TYPE_LABEL_SET = new Set(Object.values(TYPE_SUBTITLE));
+
 // Derives a display bank name from bankName field or account name
 const deriveBankName = (account) => {
   if (account.bankName) return account.bankName.toUpperCase();
   if (!account.name) return null;
   // "HDFC ··4567" → "HDFC", "Cash" → null, "UPI Wallet" → "UPI"
   if (account.name.includes('··')) {
-    return account.name.split('··')[0].trim().toUpperCase() || null;
+    const derived = account.name.split('··')[0].trim().toUpperCase() || null;
+    if (!derived || TYPE_LABEL_SET.has(derived)) return null;
+    return derived;
   }
   // For CASH / WALLET with a plain name, show the name as the "bank"
   if (account.type === ACCOUNT_TYPES.CASH || account.type === ACCOUNT_TYPES.WALLET) {
