@@ -30,6 +30,7 @@ import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import BudgetWidget from '../components/BudgetWidget';
+import DailyQueueStack from '../components/DailyQueueStack';
 import CelebrationModal from '../components/CelebrationModal';
 import TransactionItem from '../components/TransactionItem';
 import FAB from '../components/FAB';
@@ -297,6 +298,9 @@ const DashboardScreen = ({ navigation }) => {
 
         {/* Monthly budget — empty CTA or active progress */}
         <BudgetWidget onPress={() => navigation.navigate('Insights', { defaultTab: 'budget' })} />
+
+        {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
+        <DailyQueueStack />
 
         {/* Period transactions */}
         <View style={styles.recentHeader}>

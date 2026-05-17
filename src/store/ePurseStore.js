@@ -299,6 +299,12 @@ export const useEPurseStore = create(
       // Per-cycle dedup for the mid-month nudge (one notification per cycle).
       lastMidmonthNudgeMonth: null,
 
+      // ─── Daily Queue / XP ───────────────────────────────────────────────────
+      // `xp` accumulates across all-time approvals (10 XP per reviewed card).
+      // `reviewStreak` tracks consecutive calendar days with at least one review.
+      xp: 0,
+      reviewStreak: { current: 0, best: 0, lastReviewDate: null },
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -393,6 +399,42 @@ export const useEPurseStore = create(
 
       /** Dismisses the celebration modal — called when the user closes it. */
       clearPendingCelebration: () => set({ pendingCelebration: null }),
+
+      // ─── Daily Queue / XP actions ───────────────────────────────────────────
+      addXP: (amount) =>
+        set((s) => ({ xp: (s.xp || 0) + Math.max(0, Number(amount) || 0) })),
+
+      /**
+       * Mark a transaction as reviewed.
+       * Awards +10 XP and updates the daily review streak.
+       * No-op if already reviewed.
+       */
+      markReviewed: (id) =>
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === id);
+          if (!txn || txn.isReviewed) return s;
+
+          const newXp = (s.xp || 0) + 10;
+          const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+          const streak = s.reviewStreak || { current: 0, best: 0, lastReviewDate: null };
+          let { current, best } = streak;
+
+          if (streak.lastReviewDate !== todayStr) {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().slice(0, 10);
+            current = streak.lastReviewDate === yesterdayStr ? current + 1 : 1;
+            if (current > best) best = current;
+          }
+
+          return {
+            transactions: s.transactions.map((t) =>
+              t.id === id ? { ...t, isReviewed: true } : t
+            ),
+            xp: newXp,
+            reviewStreak: { current, best, lastReviewDate: todayStr },
+          };
+        }),
 
       /**
        * Fires the mid-cycle nudge notification once per cycle.
@@ -627,6 +669,7 @@ export const useEPurseStore = create(
             isSplit: false,
             splitWith: [],
             source: 'manual',
+            isReviewed: true, // manual entries are inherently reviewed by the user
             ...txnRest,
             id,
           };
@@ -728,7 +771,7 @@ export const useEPurseStore = create(
             ? (parsedTxns.length > 1 ? `${smsBaseId}:${idx + 1}` : smsBaseId)
             : null;
 
-          const candidate = { ...txn };
+          const candidate = { ...txn, isReviewed: false };
           if (smsId) candidate.smsId = smsId;
           if (isDuplicate(nextTransactions, candidate, smsId, state.suppressedSmsIds || [])) return;
 
@@ -1432,6 +1475,8 @@ export const useEPurseStore = create(
           budgetBreachNotified: {},
           pendingCelebration: null,
           lastMidmonthNudgeMonth: null,
+          xp: 0,
+          reviewStreak: { current: 0, best: 0, lastReviewDate: null },
         }),
     }),
     {
@@ -1439,7 +1484,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 12,
+      version: 13,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1582,6 +1627,25 @@ export const useEPurseStore = create(
           };
         }
 
+        // v13: Daily Queue — add isReviewed to existing transactions.
+        // SMS transactions from the last 72 hours land as unreviewed so the
+        // queue isn't flooded; everything older (and all manual entries) is
+        // pre-marked reviewed. Seed xp and reviewStreak for new users.
+        if (version < 13) {
+          const cutoffMs = Date.now() - 3 * 24 * 60 * 60 * 1000; // 72 hours ago
+          state = {
+            ...state,
+            xp: state.xp ?? 0,
+            reviewStreak: state.reviewStreak ?? { current: 0, best: 0, lastReviewDate: null },
+            transactions: (state.transactions || []).map((t) => ({
+              ...t,
+              isReviewed: t.isReviewed !== undefined
+                ? t.isReviewed
+                : (t.source !== 'sms' || new Date(t.createdAt).getTime() < cutoffMs),
+            })),
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -1610,6 +1674,8 @@ export const useEPurseStore = create(
         budgetBreachNotified: state.budgetBreachNotified,
         pendingCelebration: state.pendingCelebration,
         lastMidmonthNudgeMonth: state.lastMidmonthNudgeMonth,
+        xp: state.xp,
+        reviewStreak: state.reviewStreak,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;
@@ -1633,3 +1699,13 @@ export const selectVisibleTransactions = (s) =>
   s.transactions.filter((t) => !t.isIgnored && !t.isHidden);
 export const selectCategories = (s) => s.categories;
 export const selectLentBorrowed = (s) => s.lentBorrowed;
+
+/**
+ * Unreviewed SMS transactions — the Daily Queue feed.
+ * Sorted newest-first so the most recent card is always on top.
+ * Excludes ignored transactions (balance already reversed — not actionable).
+ */
+export const selectUnreviewedQueue = (s) =>
+  s.transactions
+    .filter((t) => t.source === 'sms' && !t.isIgnored && !t.isReviewed)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
