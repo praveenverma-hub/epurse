@@ -76,35 +76,30 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           </SafeAreaView>
         </LinearGradient>
       ) : (
-        /* headerless mode — gradient strip matching InsightsScreen header theme */
-        <LinearGradient
-          colors={[theme.gradientStart, theme.gradientEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerlessStrip}
-        >
-          <View style={styles.monthSwitcher}>
+        /* headerless — plain strip, no gradient (InsightsScreen already provides one) */
+        <View style={styles.headerlessStrip}>
+          <View style={styles.monthSwitcherLight}>
             <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
-              <Text style={styles.arrow}>‹</Text>
+              <Text style={styles.arrowLight}>‹</Text>
             </TouchableOpacity>
-            <Text style={styles.monthLabel}>{monthLabel}</Text>
+            <Text style={styles.monthLabelLight}>{monthLabel}</Text>
             <TouchableOpacity
               onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
               disabled={monthOffset === 0}
             >
-              <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
+              <Text style={[styles.arrowLight, monthOffset === 0 && { opacity: 0.3 }]}>›</Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.summaryRow}>
-            <SummaryStat label="Spent"  value={monthSpend} />
-            <SummaryStat label="Earned" value={monthIncome} />
-            <SummaryStat label="Net"    value={monthIncome - monthSpend} />
+          <View style={styles.summaryRowLight}>
+            <SummaryStatLight label="Spent"  value={monthSpend} />
+            <SummaryStatLight label="Earned" value={monthIncome} />
+            <SummaryStatLight label="Net"    value={monthIncome - monthSpend} />
           </View>
-        </LinearGradient>
+        </View>
       )}
 
       <ScrollView
-        contentContainerStyle={[styles.body, headerless && { paddingTop: spacing.xl }]}
+        contentContainerStyle={[styles.body, headerless && { marginTop: 0, paddingTop: spacing.md }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Bar chart */}
@@ -149,6 +144,15 @@ const SummaryStat = ({ label, value }) => (
   <View style={styles.statBox}>
     <Text style={styles.statLabel}>{label}</Text>
     <Text style={styles.statValue}>{formatCurrency(value)}</Text>
+  </View>
+);
+
+const SummaryStatLight = ({ label, value }) => (
+  <View style={styles.statBoxLight}>
+    <Text style={styles.statLabelLight}>{label}</Text>
+    <Text style={[styles.statValueLight, value < 0 && { color: colors.danger }]}>
+      {formatCurrency(value)}
+    </Text>
   </View>
 );
 
@@ -317,14 +321,35 @@ const styles = StyleSheet.create({
   rowAmount: { ...typography.bodyBold, color: colors.textPrimary, marginRight: spacing.md },
   rowPercent: { ...typography.small, color: colors.textSecondary, width: 36, textAlign: 'right' },
 
-  // Headerless mode — gradient strip (reuses the same full-header styles above)
+  // Headerless mode — plain strip, no gradient
   headerlessStrip: {
+    backgroundColor: colors.background,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    paddingBottom: spacing.xl,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
+    paddingBottom: spacing.md,
   },
+  monthSwitcherLight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  arrowLight:      { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
+  monthLabelLight: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
+  summaryRowLight: { flexDirection: 'row', gap: spacing.sm },
+  statBoxLight: {
+    flex: 1,
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+  },
+  statLabelLight:  { ...typography.tiny, color: colors.textSecondary },
+  statValueLight:  { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 2 },
 });
 
 export default AnalyticsScreen;

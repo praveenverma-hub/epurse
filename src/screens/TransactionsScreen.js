@@ -231,7 +231,7 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" translucent={false} />
 
       {/* ── White top section ── */}
       <View style={styles.topSection}>
@@ -568,11 +568,11 @@ const FilterPill = ({ label, active, onPress }) => {
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={[styles.pill, active && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+      style={[styles.pill, active && { backgroundColor: theme.primary + '15', borderColor: theme.primary + '88' }]}
     >
       <Text
         numberOfLines={1}
-        style={[styles.pillText, active && { color: '#fff', fontWeight: '700' }]}
+        style={[styles.pillText, active && { color: theme.primary, fontWeight: '700' }]}
       >
         {label}
       </Text>
@@ -686,12 +686,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#FFFFFF',
     borderRadius: radius.xl,
     paddingHorizontal: spacing.lg,
     paddingVertical: Platform.OS === 'ios' ? 12 : 8,
     borderWidth: 1,
-    borderColor: '#E8E8E8',
+    borderColor: colors.divider,
   },
   searchInput: {
     flex: 1,
@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
   tfRow: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: colors.background,
+    backgroundColor: '#FFFFFF',
     borderRadius: radius.pill,
     padding: 4,
     borderWidth: 1,
@@ -785,6 +785,7 @@ const styles = StyleSheet.create({
   advRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
@@ -801,7 +802,7 @@ const styles = StyleSheet.create({
   advChipX:    { ...typography.bodyBold, marginLeft: 2 },
   advClearBtn: {
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingVertical: 0,
   },
   advClearText: { color: colors.textSecondary, ...typography.tiny, textDecorationLine: 'underline' },
 
