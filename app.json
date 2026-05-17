@@ -15,7 +15,15 @@
       "**/*"
     ],
     "plugins": [
-      "./plugins/withEPurseAndroid"
+      "./plugins/withEPurseAndroid",
+      [
+        "expo-navigation-bar",
+        {
+          "position": "relative",
+          "theme": "light",
+          "backgroundColor": "#FFFFFF"
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,

@@ -73,7 +73,7 @@ function BudgetRolloverBoot() {
 
 export default function App() {
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style="light" />
         <NotificationBoot />

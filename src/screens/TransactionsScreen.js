@@ -8,7 +8,7 @@
 // Active advanced filters render as removable tag chips above the list.
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -101,6 +102,17 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
+
+  useFocusEffect(
+    useCallback(() => {
+      StatusBar.setBarStyle('dark-content');
+      StatusBar.setBackgroundColor('#FFFFFF');
+      return () => {
+        StatusBar.setBarStyle('light-content');
+        StatusBar.setBackgroundColor('transparent');
+      };
+    }, []),
+  );
 
   const toggleFilter = (key) => {
     setActiveFilters((prev) => {
@@ -231,8 +243,6 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" translucent={false} />
-
       {/* ── White top section ── */}
       <View style={styles.topSection}>
         {/* Title row */}
