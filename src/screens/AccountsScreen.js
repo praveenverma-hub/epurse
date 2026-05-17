@@ -99,7 +99,7 @@ export default function AccountsScreen({ navigation }) {
                 <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.iconBtn} onPress={() => setAddAccountVisible(true)} activeOpacity={0.7}>
-                <Text style={[styles.iconBtnText, { fontSize: 22, fontWeight: '300' }]}>+</Text>
+                <Ionicons name="add" size={22} color="#fff" />
               </TouchableOpacity>
             </View>
           </View>
@@ -127,7 +127,7 @@ export default function AccountsScreen({ navigation }) {
               account={a}
               showBalance={a.type !== ACCOUNT_TYPES.BANK || balancesVisible}
               holderName={userName}
-              onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
+              // onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
               onDelete={() =>
                 setConfirm({
                   title: 'Remove account?',
@@ -142,14 +142,7 @@ export default function AccountsScreen({ navigation }) {
             />
           ))}
 
-          <TouchableOpacity
-            style={styles.addCardPlaceholder}
-            onPress={() => setAddAccountVisible(true)}
-            activeOpacity={0.75}
-          >
-            <Text style={styles.addCardPlus}>+</Text>
-            <Text style={styles.addCardLabel}>Add{'\n'}Account</Text>
-          </TouchableOpacity>
+          {/* Add-account card removed — use the + button in the header */}
         </ScrollView>
 
         {/* Flat account list */}

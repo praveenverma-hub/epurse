@@ -8,7 +8,7 @@
 // Active advanced filters render as removable tag chips above the list.
 // =============================================================================
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -20,9 +20,11 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
@@ -70,6 +72,16 @@ const TransactionsScreen = ({ navigation, route }) => {
   const initialTimeframe = routePeriod ? (PERIOD_TO_TIMEFRAME[routePeriod] || 'month') : 'month';
 
   const [timeframe, setTimeframe] = useState(initialTimeframe);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Re-apply account filter each time the tab is navigated with a new accountId param
+  useEffect(() => {
+    const accountId = route?.params?.accountId;
+    if (accountId) {
+      setActiveFilters(new Set([`acct:${accountId}`]));
+      setTimeframe('all');
+    }
+  }, [route?.params?.accountId]);
 
   // Multi-select filters: a Set of active filter keys.
   // Special values: 'split' | 'hidden' | 'ignored' | category ids | 'acct:<accountId>'
@@ -182,8 +194,21 @@ const TransactionsScreen = ({ navigation, route }) => {
           (t.note || '').toLowerCase().includes(q)
       );
     }
+
+    // Inline search bar — matches merchant, note, or amount
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const numericQ = q.replace(/[₹,\s]/g, '');
+      res = res.filter((t) => {
+        if ((t.merchant || '').toLowerCase().includes(q)) return true;
+        if ((t.note || '').toLowerCase().includes(q)) return true;
+        if (numericQ && String(debitDisplayAmount(t)).startsWith(numericQ)) return true;
+        return false;
+      });
+    }
+
     return res;
-  }, [transactions, timeframeMinMs, filterMeta, advanced]);
+  }, [transactions, timeframeMinMs, filterMeta, advanced, searchQuery]);
 
   const removeAdvanced = (key) => {
     setAdvanced((p) => ({
@@ -206,22 +231,43 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* ---------- Header ---------- */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Transactions</Text>
-        <TouchableOpacity
-          onPress={() => setModalOpen(true)}
-          style={[styles.filterBtn, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
-        >
-          <Text style={[styles.filterBtnText, { color: theme.primary }]}>+ Filter</Text>
-        </TouchableOpacity>
-      </View>
+      <StatusBar barStyle="dark-content" />
 
-      {/* ---------- Timeframe segmented control ---------- */}
-      <View style={styles.tfRow}>
+      {/* ── White top section (header + search + timeframe + chips) ── */}
+      <View style={styles.topSection}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Activity</Text>
+          <TouchableOpacity
+            onPress={() => setModalOpen(true)}
+            style={[styles.filterBtn, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
+          >
+            <Ionicons name="options-outline" size={14} color={theme.primary} style={{ marginRight: 4 }} />
+            <Text style={[styles.filterBtnText, { color: theme.primary }]}>Filter</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Search bar */}
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search merchant, amount…"
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && Platform.OS === 'android' && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Timeframe segmented control */}
+        <View style={styles.tfRow}>
         {TIMEFRAMES.map((tf) => {
           const active = timeframe === tf.id;
           return (
@@ -296,33 +342,33 @@ const TransactionsScreen = ({ navigation, route }) => {
         </ScrollView>
       </View>
 
-      {/* ---------- Active advanced filter chips ---------- */}
-      {activeAdvanced.length > 0 && (
-        <View style={styles.advRow}>
-          {activeAdvanced.map((f) => (
-            <TouchableOpacity
-              key={f.key}
-              style={[styles.advChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
-              onPress={() => removeAdvanced(f.key)}
-            >
-              <Text style={[styles.advChipText, { color: theme.primary }]}>{f.label}</Text>
-              <Text style={[styles.advChipX, { color: theme.primary }]}> × </Text>
+        {/* Active advanced filter chips */}
+        {activeAdvanced.length > 0 && (
+          <View style={styles.advRow}>
+            {activeAdvanced.map((f) => (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.advChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
+                onPress={() => removeAdvanced(f.key)}
+              >
+                <Text style={[styles.advChipText, { color: theme.primary }]}>{f.label}</Text>
+                <Text style={[styles.advChipX, { color: theme.primary }]}> × </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={clearAllAdvanced} style={styles.advClearBtn}>
+              <Text style={styles.advClearText}>Clear</Text>
             </TouchableOpacity>
-          ))}
-          <TouchableOpacity onPress={clearAllAdvanced} style={styles.advClearBtn}>
-            <Text style={styles.advClearText}>Clear</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      {/* Active quick-filter summary when multiple are selected */}
-      {activeFilters.size > 1 && (
-        <View style={styles.advRow}>
-          <Text style={styles.advClearText}>{activeFilters.size} filters active · </Text>
-          <TouchableOpacity onPress={() => setActiveFilters(new Set())} style={styles.advClearBtn}>
-            <Text style={styles.advClearText}>Clear all</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+          </View>
+        )}
+        {activeFilters.size > 1 && (
+          <View style={styles.advRow}>
+            <Text style={styles.advClearText}>{activeFilters.size} filters active · </Text>
+            <TouchableOpacity onPress={() => setActiveFilters(new Set())} style={styles.advClearBtn}>
+              <Text style={styles.advClearText}>Clear all</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>{/* end topSection */}
 
       {/* ---------- Transactions list ---------- */}
       <FlatList
@@ -618,30 +664,58 @@ const FilterModal = ({ visible, initial, onClose, onApply }) => {
 // =============================================================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+
+  // White top section wrapping header + search + timeframe + chips
+  topSection: {
+    backgroundColor: '#FFFFFF',
+    paddingBottom: spacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 4,
+    zIndex: 10,
+  },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: colors.card,
-    alignItems: 'center', justifyContent: 'center',
-    ...shadows.card,
-  },
-  backText: { fontSize: 22, color: colors.textPrimary },
   title: { ...typography.h2, color: colors.textPrimary },
 
   filterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
     borderRadius: radius.pill,
     borderWidth: 1,
   },
   filterBtnText: { ...typography.small, fontWeight: '700' },
+
+  // Search bar
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  searchInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.textPrimary,
+    paddingVertical: 0,
+  },
 
   // Timeframe segmented control — pill background, gradient on the active button.
   tfRow: {

@@ -17,6 +17,7 @@ export default function MainTabNavigator() {
       <Tab.Navigator
         tabBar={(props) => <AnimatedTabBar {...props} />}
         screenOptions={{ headerShown: false }}
+        backBehavior="history"
       >
         <Tab.Screen name="Dashboard"    component={DashboardScreen} />
         <Tab.Screen name="Transactions" component={TransactionsScreen} />

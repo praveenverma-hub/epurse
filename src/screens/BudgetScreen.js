@@ -565,7 +565,7 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
         )}
 
         <ScrollView
-          contentContainerStyle={[styles.scroll, headerless && { paddingBottom: TAB_BAR_HEIGHT + 24 }]}
+          contentContainerStyle={[styles.scroll, headerless && { paddingBottom: TAB_BAR_HEIGHT + 24, paddingTop: spacing.lg }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >

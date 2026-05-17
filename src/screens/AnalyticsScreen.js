@@ -104,7 +104,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       )}
 
       <ScrollView
-        contentContainerStyle={styles.body}
+        contentContainerStyle={[styles.body, headerless && { paddingTop: spacing.xl }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Bar chart */}
