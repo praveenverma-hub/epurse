@@ -305,6 +305,9 @@ export const useEPurseStore = create(
       xp: 0,
       reviewStreak: { current: 0, best: 0, lastReviewDate: null },
 
+      // Two-tier user-defined automation rules — keyed by SCREAMING_SNAKE_CASE merchant.
+      userCustomRules: {},
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -962,6 +965,20 @@ export const useEPurseStore = create(
           };
         }),
 
+      updateTwoTierCategory: (id, parentCategory, childCategory) =>
+        set((s) => ({
+          transactions: s.transactions.map((t) =>
+            t.id === id
+              ? { ...t, parentCategory, childCategory, userEdited: true, userEditedCategory: true }
+              : t
+          ),
+        })),
+
+      saveUserCustomRule: (rawMerchantKey, rule) =>
+        set((s) => ({
+          userCustomRules: { ...s.userCustomRules, [rawMerchantKey]: rule },
+        })),
+
       updateTransactionCategory: (id, categoryId) =>
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
@@ -1484,7 +1501,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 13,
+      version: 14,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1646,6 +1663,13 @@ export const useEPurseStore = create(
           };
         }
 
+        if (version < 14) {
+          state = {
+            ...state,
+            userCustomRules: state.userCustomRules ?? {},
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -1676,6 +1700,7 @@ export const useEPurseStore = create(
         lastMidmonthNudgeMonth: state.lastMidmonthNudgeMonth,
         xp: state.xp,
         reviewStreak: state.reviewStreak,
+        userCustomRules: state.userCustomRules,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;
