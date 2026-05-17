@@ -233,68 +233,69 @@ const TransactionsScreen = ({ navigation, route }) => {
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" />
 
-      {/* ── White top section (header + search + timeframe + chips) ── */}
+      {/* ── White top section ── */}
       <View style={styles.topSection}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Activity</Text>
-          <TouchableOpacity
-            onPress={() => setModalOpen(true)}
-            style={[styles.filterBtn, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
-          >
-            <Ionicons name="options-outline" size={14} color={theme.primary} style={{ marginRight: 4 }} />
-            <Text style={[styles.filterBtnText, { color: theme.primary }]}>Filter</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Title row */}
+        <Text style={styles.title}>Activity</Text>
 
-        {/* Search bar */}
+        {/* Search bar — icon on the right, Swiggy-style */}
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={16} color={colors.textSecondary} style={{ marginRight: spacing.sm }} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search merchant, amount…"
+            placeholder="Search by merchant or amount"
             placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
             returnKeyType="search"
             clearButtonMode="while-editing"
           />
-          {searchQuery.length > 0 && Platform.OS === 'android' && (
+          {searchQuery.length > 0 && Platform.OS === 'android' ? (
             <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
+          ) : (
+            <Ionicons name="search" size={18} color={colors.textSecondary} />
           )}
         </View>
 
-        {/* Timeframe segmented control */}
-        <View style={styles.tfRow}>
-        {TIMEFRAMES.map((tf) => {
-          const active = timeframe === tf.id;
-          return (
-            <TouchableOpacity
-              key={tf.id}
-              activeOpacity={0.85}
-              onPress={() => setTimeframe(tf.id)}
-              style={styles.tfBtn}
-            >
-              {active ? (
-                <LinearGradient
-                  colors={[theme.gradientStart, theme.gradientEnd]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.tfBtnActiveBg}
+        {/* Timeframe + filter button row */}
+        <View style={styles.tfFilterRow}>
+          <View style={styles.tfRow}>
+            {TIMEFRAMES.map((tf) => {
+              const active = timeframe === tf.id;
+              return (
+                <TouchableOpacity
+                  key={tf.id}
+                  activeOpacity={0.85}
+                  onPress={() => setTimeframe(tf.id)}
+                  style={styles.tfBtn}
                 >
-                  <Text style={styles.tfBtnTextActive}>{tf.label}</Text>
-                </LinearGradient>
-              ) : (
-                <Text style={styles.tfBtnText}>{tf.label}</Text>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+                  {active ? (
+                    <LinearGradient
+                      colors={[theme.gradientStart, theme.gradientEnd]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.tfBtnActiveBg}
+                    >
+                      <Text style={styles.tfBtnTextActive}>{tf.label}</Text>
+                    </LinearGradient>
+                  ) : (
+                    <Text style={styles.tfBtnText}>{tf.label}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity
+            onPress={() => setModalOpen(true)}
+            style={[styles.filterBtn, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
+          >
+            <Ionicons name="options-outline" size={14} color={theme.primary} />
+          </TouchableOpacity>
+        </View>
+      </View>{/* end topSection */}
 
-      {/* ---------- Quick filter chips (multi-select horizontal row) ---------- */}
+      {/* ── Gray area: filter chips ── */}
       <View style={styles.filterScrollWrap}>
         <ScrollView
           horizontal
@@ -302,7 +303,6 @@ const TransactionsScreen = ({ navigation, route }) => {
           contentContainerStyle={styles.filterRow}
           keyboardShouldPersistTaps="handled"
         >
-          {/* "All" clears all active filters */}
           <FilterPill
             label="All"
             active={activeFilters.size === 0}
@@ -342,33 +342,32 @@ const TransactionsScreen = ({ navigation, route }) => {
         </ScrollView>
       </View>
 
-        {/* Active advanced filter chips */}
-        {activeAdvanced.length > 0 && (
-          <View style={styles.advRow}>
-            {activeAdvanced.map((f) => (
-              <TouchableOpacity
-                key={f.key}
-                style={[styles.advChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
-                onPress={() => removeAdvanced(f.key)}
-              >
-                <Text style={[styles.advChipText, { color: theme.primary }]}>{f.label}</Text>
-                <Text style={[styles.advChipX, { color: theme.primary }]}> × </Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={clearAllAdvanced} style={styles.advClearBtn}>
-              <Text style={styles.advClearText}>Clear</Text>
+      {/* Active advanced filter chips */}
+      {activeAdvanced.length > 0 && (
+        <View style={styles.advRow}>
+          {activeAdvanced.map((f) => (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.advChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '55' }]}
+              onPress={() => removeAdvanced(f.key)}
+            >
+              <Text style={[styles.advChipText, { color: theme.primary }]}>{f.label}</Text>
+              <Text style={[styles.advChipX, { color: theme.primary }]}> × </Text>
             </TouchableOpacity>
-          </View>
-        )}
-        {activeFilters.size > 1 && (
-          <View style={styles.advRow}>
-            <Text style={styles.advClearText}>{activeFilters.size} filters active · </Text>
-            <TouchableOpacity onPress={() => setActiveFilters(new Set())} style={styles.advClearBtn}>
-              <Text style={styles.advClearText}>Clear all</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>{/* end topSection */}
+          ))}
+          <TouchableOpacity onPress={clearAllAdvanced} style={styles.advClearBtn}>
+            <Text style={styles.advClearText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {activeFilters.size > 1 && (
+        <View style={styles.advRow}>
+          <Text style={styles.advClearText}>{activeFilters.size} filters active · </Text>
+          <TouchableOpacity onPress={() => setActiveFilters(new Set())} style={styles.advClearBtn}>
+            <Text style={styles.advClearText}>Clear all</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ---------- Transactions list ---------- */}
       <FlatList
@@ -665,50 +664,34 @@ const FilterModal = ({ visible, initial, onClose, onApply }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
-  // White top section wrapping header + search + timeframe + chips
+  // White top section
   topSection: {
     backgroundColor: '#FFFFFF',
-    paddingBottom: spacing.xs,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 4,
-    zIndex: 10,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
   },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  title: {
+    ...typography.h2,
+    color: colors.textPrimary,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
   },
-  title: { ...typography.h2, color: colors.textPrimary },
 
-  filterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  filterBtnText: { ...typography.small, fontWeight: '700' },
-
-  // Search bar
+  // Search bar — icon on right
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+    marginBottom: spacing.md,
+    backgroundColor: '#F5F5F5',
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: '#E8E8E8',
   },
   searchInput: {
     flex: 1,
@@ -717,15 +700,33 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  // Timeframe segmented control — pill background, gradient on the active button.
-  tfRow: {
+  // Timeframe row + filter icon
+  tfFilterRow: {
     flexDirection: 'row',
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.card,
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xs,
+    gap: spacing.sm,
+  },
+  filterBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBtnText: { ...typography.small, fontWeight: '700' },
+
+  // Timeframe segmented control
+  tfRow: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: colors.background,
     borderRadius: radius.pill,
     padding: 4,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.divider,
   },
   tfBtn: {
     flex: 1,
@@ -752,17 +753,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  // Quick filter chips — single horizontal scrolling row, never wraps.
+  // Quick filter chips — sits on gray background below the white top section
   filterScrollWrap: {
-    height: 44,
-    marginBottom: spacing.xs,
-    overflow: 'hidden',   // clips any accidental vertical bleed
+    height: 52,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
   },
   filterRow: {
     paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    height: 44,           // match wrapper so ScrollView measures correctly
+    height: 52,
   },
   pill: {
     height: 32,
