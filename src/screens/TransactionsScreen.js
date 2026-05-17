@@ -58,6 +58,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const accounts     = useEPurseStore((s) => s.accounts);
   const categories   = useEPurseStore((s) => s.categories);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
+  const updateTwoTierCategory = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
@@ -422,6 +423,8 @@ const TransactionsScreen = ({ navigation, route }) => {
         visible={!!activeTxn}
         categories={categories}
         selectedCategoryId={activeTxn?.categoryId}
+        selectedParent={activeTxn?.parentCategory}
+        selectedChild={activeTxn?.childCategory}
         isHidden={!!activeTxn?.isHidden}
         isIgnored={!!activeTxn?.isIgnored}
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
@@ -432,6 +435,11 @@ const TransactionsScreen = ({ navigation, route }) => {
           setSplitTxn(t);
         }}
         onClose={() => setActiveTxn(null)}
+        onSelectTwoTier={(parentCategory, childCategory) => {
+          if (!activeTxn) return;
+          updateTwoTierCategory(activeTxn.id, parentCategory, childCategory);
+          setActiveTxn(null);
+        }}
         onSelectCategory={(categoryId) => {
           if (!activeTxn) return;
           updateTransactionCategory(activeTxn.id, categoryId);
