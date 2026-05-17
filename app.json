@@ -16,7 +16,6 @@
     ],
     "plugins": [
       "./plugins/withEPurseAndroid",
-      "react-native-reanimated",
       [
         "expo-navigation-bar",
         {
