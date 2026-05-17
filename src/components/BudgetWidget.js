@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   },
   ringPct: { fontSize: 12, fontWeight: '800' },
 
-  numbersWrap: { flex: 1, gap: 2 },
+  numbersWrap: { gap: 2 },
   amountActual: { fontSize: 18, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.3 },
   amountCap: { ...typography.tiny, color: colors.textSecondary },
   statusPill: {
@@ -263,12 +263,11 @@ const styles = StyleSheet.create({
   catColumns: {
     flexDirection: 'row',
     gap: 6,
-    flexShrink: 1,
+    flex: 1,
   },
   catSubCol: {
+    flex: 1,
     gap: 6,
-    flexShrink: 1,
-    minWidth: 72,
   },
   catRow: {
     flexDirection: 'row',

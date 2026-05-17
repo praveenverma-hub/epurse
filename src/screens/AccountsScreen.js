@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -95,7 +96,7 @@ export default function AccountsScreen({ navigation }) {
             </View>
             <View style={styles.headerActions}>
               <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
-                <Text style={styles.iconBtnText}>{balancesVisible ? '🙈' : '👁'}</Text>
+                <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.iconBtn} onPress={() => setAddAccountVisible(true)} activeOpacity={0.7}>
                 <Text style={[styles.iconBtnText, { fontSize: 22, fontWeight: '300' }]}>+</Text>
@@ -124,7 +125,7 @@ export default function AccountsScreen({ navigation }) {
             <AccountCard
               key={a.id}
               account={a}
-              showBalance={balancesVisible}
+              showBalance={a.type !== ACCOUNT_TYPES.BANK || balancesVisible}
               holderName={userName}
               onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
               onDelete={() =>
@@ -175,7 +176,9 @@ export default function AccountsScreen({ navigation }) {
                 <Text style={styles.listType}>{TYPE_LABEL[a.type] ?? a.type}</Text>
               </View>
               <Text style={[styles.listBalance, { color: (a.balance ?? 0) < 0 ? colors.danger : colors.textPrimary }]}>
-                {balancesVisible ? formatCurrency(a.balance ?? 0) : '••••'}
+                {(a.type !== ACCOUNT_TYPES.BANK || balancesVisible)
+                  ? formatCurrency(a.balance ?? 0)
+                  : '••••'}
               </Text>
             </TouchableOpacity>
           ))

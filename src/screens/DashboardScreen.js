@@ -296,7 +296,7 @@ const DashboardScreen = ({ navigation }) => {
         />
 
         {/* Monthly budget — empty CTA or active progress */}
-        <BudgetWidget onPress={() => navigation.navigate('Insights')} />
+        <BudgetWidget onPress={() => navigation.navigate('Insights', { defaultTab: 'budget' })} />
 
         {/* Period transactions */}
         <View style={styles.recentHeader}>

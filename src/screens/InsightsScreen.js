@@ -5,7 +5,7 @@
 // Sub-screens receive headerless=true so they skip their own nav headers.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,9 +20,18 @@ const INNER_TABS = [
   { key: 'budget',    label: 'Budget' },
 ];
 
-export default function InsightsScreen({ navigation }) {
+export default function InsightsScreen({ navigation, route }) {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState('analytics');
+
+  // Switch to the requested tab whenever this screen is focused
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      const defaultTab = route.params?.defaultTab;
+      if (defaultTab) setActiveTab(defaultTab);
+    });
+    return unsubscribe;
+  }, [navigation, route.params?.defaultTab]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

@@ -17,11 +17,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 
 const SCREEN_W = Dimensions.get('window').width;
 
 const AnalyticsScreen = ({ navigation, headerless = false }) => {
+  const theme = useTheme();
   const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
   const date = useMemo(() => {
     const d = new Date();
@@ -74,26 +76,31 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           </SafeAreaView>
         </LinearGradient>
       ) : (
-        /* headerless mode — compact light strip shown inside InsightsScreen */
-        <View style={styles.headerlessStrip}>
-          <View style={styles.monthSwitcherLight}>
+        /* headerless mode — gradient strip matching InsightsScreen header theme */
+        <LinearGradient
+          colors={[theme.gradientStart, theme.gradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerlessStrip}
+        >
+          <View style={styles.monthSwitcher}>
             <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
-              <Text style={styles.arrowLight}>‹</Text>
+              <Text style={styles.arrow}>‹</Text>
             </TouchableOpacity>
-            <Text style={styles.monthLabelLight}>{monthLabel}</Text>
+            <Text style={styles.monthLabel}>{monthLabel}</Text>
             <TouchableOpacity
               onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
               disabled={monthOffset === 0}
             >
-              <Text style={[styles.arrowLight, monthOffset === 0 && { opacity: 0.3 }]}>›</Text>
+              <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.summaryRowLight}>
-            <SummaryStatLight label="Spent"  value={monthSpend} />
-            <SummaryStatLight label="Earned" value={monthIncome} />
-            <SummaryStatLight label="Net"    value={monthIncome - monthSpend} />
+          <View style={styles.summaryRow}>
+            <SummaryStat label="Spent"  value={monthSpend} />
+            <SummaryStat label="Earned" value={monthIncome} />
+            <SummaryStat label="Net"    value={monthIncome - monthSpend} />
           </View>
-        </View>
+        </LinearGradient>
       )}
 
       <ScrollView
@@ -142,15 +149,6 @@ const SummaryStat = ({ label, value }) => (
   <View style={styles.statBox}>
     <Text style={styles.statLabel}>{label}</Text>
     <Text style={styles.statValue}>{formatCurrency(value)}</Text>
-  </View>
-);
-
-const SummaryStatLight = ({ label, value }) => (
-  <View style={styles.statBoxLight}>
-    <Text style={styles.statLabelLight}>{label}</Text>
-    <Text style={[styles.statValueLight, value < 0 && { color: colors.danger }]}>
-      {formatCurrency(value)}
-    </Text>
   </View>
 );
 
@@ -319,36 +317,14 @@ const styles = StyleSheet.create({
   rowAmount: { ...typography.bodyBold, color: colors.textPrimary, marginRight: spacing.md },
   rowPercent: { ...typography.small, color: colors.textSecondary, width: 36, textAlign: 'right' },
 
-  // Headerless mode — light background month/stats strip
+  // Headerless mode — gradient strip (reuses the same full-header styles above)
   headerlessStrip: {
-    backgroundColor: colors.card,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
   },
-  monthSwitcherLight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.background,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  arrowLight:      { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
-  monthLabelLight: { color: colors.textPrimary, ...typography.bodyBold, fontWeight: '700' },
-  summaryRowLight: { flexDirection: 'row', gap: spacing.sm },
-  statBoxLight: {
-    flex: 1,
-    backgroundColor: colors.background,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
-  },
-  statLabelLight: { color: colors.textSecondary, ...typography.tiny },
-  statValueLight: { color: colors.textPrimary, ...typography.bodyBold, fontWeight: '700', marginTop: 2 },
 });
 
 export default AnalyticsScreen;

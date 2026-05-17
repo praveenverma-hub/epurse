@@ -59,7 +59,7 @@ export default function AnimatedTabBar({ state, navigation }) {
           <TouchableOpacity key={route.key} onPress={onPress} activeOpacity={0.7} style={styles.tab}>
             <Ionicons
               name={isFocused ? cfg.icon : cfg.iconOutline}
-              size={21}
+              size={18}
               color={isFocused ? activeColor : colors.textSecondary}
             />
             <Text style={[styles.label, { color: isFocused ? activeColor : colors.textSecondary }]}>
