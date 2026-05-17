@@ -16,9 +16,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { selectTransactions } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
+import { getDailyCumulative, getMerchantBubbles, detectSubscriptions } from '../analytics/behavioralSelectors';
+import GhostLineChart from '../components/GhostLineChart';
+import HabitLeakMatrix from '../components/HabitLeakMatrix';
+import SubscriptionHeartbeat from '../components/SubscriptionHeartbeat';
 
 const SCREEN_W = Dimensions.get('window').width;
 
@@ -30,6 +35,11 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
     d.setMonth(d.getMonth() + monthOffset);
     return d;
   }, [monthOffset]);
+
+  const transactions = useEPurseStore(selectTransactions);
+  const dailyData = useMemo(() => getDailyCumulative(transactions, date), [transactions, date]);
+  const merchantBubbles = useMemo(() => getMerchantBubbles(transactions, date), [transactions, date]);
+  const allSubscriptions = useMemo(() => detectSubscriptions(transactions), [transactions]);
 
   const breakdown = useEPurseStore((s) => s.getCategoryBreakdown(date));
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
@@ -131,6 +141,25 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               <Text style={styles.rowPercent}>{c.percent.toFixed(0)}%</Text>
             </View>
           ))}
+        </View>
+
+        {/* ── Behavioral Insights ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📈 Spending Pace</Text>
+          <Text style={styles.sectionSubtitle}>Your trajectory vs last month — drag to compare any day.</Text>
+          <GhostLineChart data={dailyData} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>⚡ Habit Leaks</Text>
+          <Text style={styles.sectionSubtitle}>Frequency vs. spend — find the sneaky drains. Tap a bubble.</Text>
+          <HabitLeakMatrix bubbles={merchantBubbles} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>💓 Subscription Heartbeat</Text>
+          <Text style={styles.sectionSubtitle}>Recurring charges visualised as an EKG. Scroll to explore.</Text>
+          <SubscriptionHeartbeat subscriptions={allSubscriptions} date={date} />
         </View>
 
         <View style={{ height: 40 }} />
@@ -287,6 +316,13 @@ const styles = StyleSheet.create({
     ...shadows.card,
   },
   sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
+  sectionSubtitle: {
+    ...typography.small,
+    color: colors.textSecondary,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.md,
+    lineHeight: 18,
+  },
   empty: { ...typography.body, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
 
   barLabels: { flexDirection: 'row', marginTop: spacing.xs },
