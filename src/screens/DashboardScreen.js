@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { useRewardStore, levelFromXp, levelTitle } from '../store/useRewardStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
@@ -74,6 +75,9 @@ const DashboardScreen = ({ navigation }) => {
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
+  const xp               = useEPurseStore((s) => s.xp ?? 0);
+  const coins            = useRewardStore((s) => s.coins);
+  const level            = levelFromXp(xp);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
@@ -221,21 +225,17 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.userName}>{userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}</Text>
             </View>
-            {/* Settings icon — navigates directly to Categories.
-                Commented: previous Alert modal flow with SMS Diagnostic option:
-                onPress={() =>
-                  Alert.alert('Settings', '', [
-                    { text: '📂  Categories',    onPress: () => navigation.navigate('Categories') },
-                    { text: '🔬  SMS Diagnostic', onPress: () => navigation.navigate('SmsDiagnostic') },
-                    { text: 'Cancel', style: 'cancel' },
-                  ])
-                }
-            */}
             <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={() => navigation.navigate('Categories')}
+              style={styles.avatarBtn}
+              onPress={() => navigation.navigate('RewardShop')}
+              activeOpacity={0.8}
             >
-              <Text style={styles.iconText}>⚙</Text>
+              <Text style={styles.avatarInitial}>
+                {userName ? userName.charAt(0).toUpperCase() : '👤'}
+              </Text>
+              <View style={styles.levelBadge}>
+                <Text style={styles.levelBadgeText}>{level}</Text>
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -533,12 +533,32 @@ const styles = StyleSheet.create({
   },
   greeting:  { color: '#FFFFFFCC', ...typography.small },
   userName:  { color: '#fff', ...typography.h2, marginTop: 2 },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  avatarBtn: {
+    width: 42, height: 42, borderRadius: 21,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#FFFFFF22',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF44',
   },
-  iconText: { color: '#fff', fontSize: 20 },
+  avatarInitial: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  levelBadge: {
+    position: 'absolute',
+    bottom: -3, right: -3,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#7C3AED',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  levelBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+  },
 
   balanceBlock: { marginTop: spacing.lg },
   balanceLabel: { color: '#FFFFFFCC', ...typography.small },
