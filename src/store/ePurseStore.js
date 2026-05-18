@@ -421,6 +421,7 @@ export const useEPurseStore = create(
           const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
           const streak = s.reviewStreak || { current: 0, best: 0, lastReviewDate: null };
           let { current, best } = streak;
+          let isNewStreakDay = false;
 
           if (streak.lastReviewDate !== todayStr) {
             const yesterday = new Date();
@@ -428,7 +429,21 @@ export const useEPurseStore = create(
             const yesterdayStr = yesterday.toISOString().slice(0, 10);
             current = streak.lastReviewDate === yesterdayStr ? current + 1 : 1;
             if (current > best) best = current;
+            isNewStreakDay = true;
           }
+
+          // Reward economy: 5 coins per review, plus streak milestone bonuses.
+          // Lazy import to avoid circular dep at module load.
+          try {
+            const { useRewardStore } = require('./useRewardStore');
+            const awardCoins = useRewardStore.getState().awardCoins;
+            awardCoins(5);
+            if (isNewStreakDay) {
+              if (current === 3)  awardCoins(20);
+              if (current === 7)  awardCoins(50);
+              if (current === 30) awardCoins(200);
+            }
+          } catch {/* reward store not loaded yet — skip silently */}
 
           return {
             transactions: s.transactions.map((t) =>

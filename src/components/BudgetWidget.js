@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    marginTop: spacing.md,
+    marginTop: spacing.xl,
     ...shadows.card,
   },
   emptyLeft: {
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md + 2,
-    marginTop: spacing.md,
+    marginTop: spacing.xl,
     ...shadows.card,
   },
   headerRow: {

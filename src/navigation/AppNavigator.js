@@ -10,6 +10,7 @@ import AddTransactionScreen from '../screens/AddTransactionScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
+import RewardShop          from '../screens/RewardShop';
 
 const Stack = createNativeStackNavigator();
 
@@ -45,6 +46,11 @@ export default function AppNavigator() {
         <Stack.Screen name="Categories"    component={CategoriesScreen} />
         <Stack.Screen name="LentBorrowed"  component={LentBorrowedScreen} />
         <Stack.Screen name="SmsDiagnostic" component={SmsDiagnosticScreen} />
+        <Stack.Screen
+          name="RewardShop"
+          component={RewardShop}
+          options={{ animation: 'slide_from_right', contentStyle: { backgroundColor: '#0A0E1A' } }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

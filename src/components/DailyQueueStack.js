@@ -7,7 +7,8 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -243,7 +244,8 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
 // DailyQueueStack — container
 // =============================================================================
 const DailyQueueStack = () => {
-  const theme    = useTheme();
+  const theme      = useTheme();
+  const navigation = useNavigation();
   const queue    = useEPurseStore(selectUnreviewedQueue);
   const xp       = useEPurseStore((s) => s.xp || 0);
   const streak   = useEPurseStore((s) => s.reviewStreak || { current: 0, best: 0 });
@@ -315,21 +317,23 @@ const DailyQueueStack = () => {
     <View style={styles.container}>
       {/* ── Header ── */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>REVIEW QUEUE</Text>
-          {queue.length > 0 && (
+        <Text style={styles.headerTitle}>REVIEW QUEUE</Text>
+        <View style={styles.headerRow}>
+          {queue.length > 0 ? (
             <Text style={styles.headerSub}>
               {queue.length} transaction{queue.length !== 1 ? 's' : ''} to review
             </Text>
-          )}
-        </View>
-
-        {/* XP + streak pill */}
-        <View style={styles.xpPill}>
-          <Text style={styles.xpPillText}>⚡ {xp} XP</Text>
-          {streak.current > 0 && (
-            <Text style={styles.streakText}> · 🔥 {streak.current}d</Text>
-          )}
+          ) : <View />}
+          <TouchableOpacity
+            style={styles.xpPill}
+            onPress={() => navigation.navigate('RewardShop')}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.xpPillText}>⚡ {xp} XP</Text>
+            {streak.current > 0 && (
+              <Text style={styles.streakText}> · 🔥 {streak.current}d</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -392,14 +396,19 @@ const DailyQueueStack = () => {
 const styles = StyleSheet.create({
   container: {
     marginBottom: spacing.md,
+    marginTop: spacing.xl,
+
   },
 
   // ── Header ──
   header: {
+    marginBottom: spacing.sm,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.sm,
+    marginTop: 4,
   },
   headerTitle: {
     ...typography.tiny,
@@ -411,7 +420,6 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.textPrimary,
     fontWeight: '600',
-    marginTop: 2,
   },
   xpPill: {
     flexDirection: 'row',
