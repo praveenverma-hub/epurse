@@ -5,12 +5,13 @@
 import React, { useState, useCallback } from 'react';
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ScrollView, Alert,
+  TextInput, ScrollView,
 } from 'react-native';
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { ACCOUNT_TYPES } from '../constants/categories';
+import { useToast } from './Toast';
 
 const TYPE_OPTIONS = [
   { key: ACCOUNT_TYPES.CASH,        label: 'Cash',        emoji: '💵' },
@@ -24,6 +25,7 @@ const NEEDS_BANK = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD, ACCOU
 
 const AddAccountModal = ({ visible, onClose, onAdd }) => {
   const theme = useTheme();
+  const toast = useToast();
 
   const [selectedType, setSelectedType] = useState(ACCOUNT_TYPES.BANK);
   const [bankName, setBankName]     = useState('');
@@ -50,11 +52,11 @@ const AddAccountModal = ({ visible, onClose, onAdd }) => {
 
     // Validation
     if (NEEDS_MASK.has(typeKey) && last4.length !== 4) {
-      Alert.alert('Missing info', 'Please enter the last 4 digits of your card/account.');
+      toast.warning('Missing info', 'Please enter the last 4 digits of your card/account.');
       return;
     }
     if (NEEDS_BANK.has(typeKey) && !bank && !custName) {
-      Alert.alert('Missing info', 'Please enter a bank or wallet name.');
+      toast.warning('Missing info', 'Please enter a bank or wallet name.');
       return;
     }
 

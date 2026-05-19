@@ -8,6 +8,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
 import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChannel } from './src/utils/notifications';
+import { ToastProvider } from './src/components/Toast';
 
 // =============================================================================
 // Background workers — mounted once at the root, render nothing.
@@ -75,12 +76,14 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar style="light" />
-        <NotificationBoot />
-        <SmsSyncBoot />
-        <CompactionBoot />
-        <BudgetRolloverBoot />
-        <AppNavigator />
+        <ToastProvider>
+          <StatusBar style="light" />
+          <NotificationBoot />
+          <SmsSyncBoot />
+          <CompactionBoot />
+          <BudgetRolloverBoot />
+          <AppNavigator />
+        </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

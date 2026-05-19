@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Alert, Dimensions, LayoutAnimation,
+  ScrollView, Dimensions, LayoutAnimation,
   Platform, UIManager,
 } from 'react-native';
 import Svg, {
@@ -22,6 +22,7 @@ import {
   cancelScheduledNotification,
 } from '../utils/notifications';
 import { useEPurseStore } from '../store/ePurseStore';
+import { useToast } from './Toast';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -123,6 +124,7 @@ const relativeLabel = (offset) => {
 
 // ── Main modal ────────────────────────────────────────────────────────────────
 const BorrowReminderModal = ({ visible, person, onClose }) => {
+  const toast = useToast();
   const theme = useTheme();
   const [selectedKey, setSelectedKey] = useState(null);
   const [hour,        setHour]        = useState(9);
@@ -178,7 +180,7 @@ const BorrowReminderModal = ({ visible, person, onClose }) => {
     if (!triggerDate || isPast || !personKey) return;
     const granted = await requestNotificationPermissions();
     if (!granted) {
-      Alert.alert('Permission Required', 'Allow notifications in your device settings to set reminders.', [{ text: 'OK' }]);
+      toast.warning('Permission required', 'Allow notifications in your device settings to set reminders.');
       return;
     }
     if (existingId) await cancelScheduledNotification(existingId);
@@ -188,7 +190,7 @@ const BorrowReminderModal = ({ visible, person, onClose }) => {
       setSelectedKey(null);
       onClose();
     } catch (_) {
-      Alert.alert('Failed', 'Could not schedule the reminder. Please try again.');
+      toast.error('Reminder failed', 'Could not schedule the reminder. Please try again.');
     }
   }, [triggerDate, isPast, personKey, existingId, person, netAbs, setNotificationId, onClose]);
 

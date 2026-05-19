@@ -24,7 +24,6 @@ import {
   Platform,
   ActivityIndicator,
   Linking,
-  Alert,
   TextInput,
   KeyboardAvoidingView,
 } from "react-native";
@@ -46,6 +45,7 @@ import {
   shadows,
 } from "../constants/theme";
 import { useTheme } from "../hooks/useTheme";
+import CenterModal from "../components/CenterModal";
 
 const FEATURES = [
   {
@@ -104,6 +104,7 @@ export default function PermissionScreen({ navigation }) {
   const [name, setName] = useState(storedName || "");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(null); // { current, total, label }
+  const [confirm, setConfirm] = useState(null);
 
   // ── Entrance animation ─────────────────────────────────────────────────────
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -237,18 +238,14 @@ export default function PermissionScreen({ navigation }) {
       setSmsPermissionGranted(false);
 
       if (neverAskAgain) {
-        Alert.alert(
-          "Enable SMS in Settings",
-          "SMS permission was blocked. Open Settings → Apps → ePurse → Permissions → SMS and set to Allow.",
-          [
-            { text: "Open Settings", onPress: () => Linking.openSettings() },
-            {
-              text: "Skip",
-              style: "cancel",
-              onPress: () => handleAllowContacts(),
-            },
-          ],
-        );
+        setConfirm({
+          title:         "Enable SMS in Settings",
+          message:       "SMS permission was blocked. Open Settings → Apps → ePurse → Permissions → SMS and set to Allow.",
+          primaryText:   "Open Settings",
+          secondaryText: "Skip",
+          onConfirm:     () => { setConfirm(null); Linking.openSettings(); },
+          onSecondary:   () => { setConfirm(null); handleAllowContacts(); },
+        });
       } else {
         await handleAllowContacts();
       }
@@ -263,14 +260,14 @@ export default function PermissionScreen({ navigation }) {
   const handleAllowContacts = async () => {
     const { granted, canAskAgain } = await requestContactsPermissionMeta();
     if (!granted && !canAskAgain) {
-      Alert.alert(
-        "Enable contacts in Settings",
-        "Contacts permission was blocked. Open Settings and allow Contacts for ePurse.",
-        [
-          { text: "Not now", style: "cancel", onPress: handleSkipContacts },
-          { text: "Open Settings", onPress: () => Linking.openSettings() },
-        ],
-      );
+      setConfirm({
+        title:         "Enable contacts in Settings",
+        message:       "Contacts permission was blocked. Open Settings and allow Contacts for ePurse.",
+        primaryText:   "Open Settings",
+        secondaryText: "Not now",
+        onConfirm:     () => { setConfirm(null); Linking.openSettings(); },
+        onSecondary:   () => { setConfirm(null); handleSkipContacts(); },
+      });
       return;
     }
     setContactsPermissionGranted(granted);
@@ -578,6 +575,18 @@ export default function PermissionScreen({ navigation }) {
           </Text>
         </SafeAreaView>
       </KeyboardAvoidingView>
+
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        secondaryText={confirm?.secondaryText}
+        destructive={!!confirm?.destructive}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+        onSecondary={confirm?.onSecondary || (() => setConfirm(null))}
+        onClose={() => setConfirm(null)}
+      />
     </LinearGradient>
   );
 }

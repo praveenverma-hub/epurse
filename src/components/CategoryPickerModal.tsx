@@ -276,7 +276,17 @@ const CategoryPickerModal: React.FC<Props> = ({
                           backgroundColor: colors.success + '10',
                         },
                       ]}
-                      onPress={() => onSelectCategory(cat.id)}
+                      onPress={() => {
+                        // Settlement categories ALSO need the contact-link
+                        // flow (you settled WITH someone). Fall back to the
+                        // plain category select if the host didn't provide
+                        // the LB callback — best-effort behaviour.
+                        if (onSelectLentBorrow) {
+                          onSelectLentBorrow(cat.id);
+                        } else {
+                          onSelectCategory(cat.id);
+                        }
+                      }}
                       activeOpacity={0.72}
                     >
                       <Text style={styles.rowEmoji}>{cat.emoji}</Text>

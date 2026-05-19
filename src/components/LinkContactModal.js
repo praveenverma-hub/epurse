@@ -119,8 +119,17 @@ const LinkContactModal = ({
     onConfirm({ person: selected.name, phone: selected.phone, contactId: selected.id });
   }, [selected, onConfirm]);
 
-  const isLent = categoryId === 'lent' || categoryId === 'lent_settled';
-  const title  = isLent ? 'Who did you lend to?' : 'Who did you borrow from?';
+  // Distinct copy per variant so the settlement flow doesn't ask the wrong
+  // question ("Who did you lend to?" makes no sense for the closing-out step).
+  const title = (() => {
+    switch (categoryId) {
+      case 'lent':          return 'Who did you lend to?';
+      case 'borrowed':      return 'Who did you borrow from?';
+      case 'lent_settled':  return 'Who repaid the loan?';
+      case 'borrow_repaid': return 'Who did you repay?';
+      default:              return 'Link a contact';
+    }
+  })();
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

@@ -15,7 +15,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Platform, Linking, Alert,
+  ActivityIndicator, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +28,7 @@ import {
 import { parseMessageDetailed } from '../utils/messageParser';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
+import CenterModal from '../components/CenterModal';
 
 const STATUS = { idle: 'idle', running: 'running', done: 'done', error: 'error' };
 
@@ -42,6 +43,7 @@ export default function SmsDiagnosticScreen({ navigation }) {
   const [rawMessages, setRawMessages] = useState([]);
   const [parsedCount, setParsedCount] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
+  const [confirm, setConfirm] = useState(null);
 
   const addLog = useCallback((level, text) => {
     setLog((prev) => [...prev, { level, text, ts: new Date().toLocaleTimeString() }]);
@@ -84,10 +86,13 @@ export default function SmsDiagnosticScreen({ navigation }) {
           addLog('info', '✅ Permission granted just now');
         } else if (neverAskAgain) {
           addLog('error', 'Permission permanently denied. Enable in: Settings → Apps → ePurse → Permissions → SMS');
-          Alert.alert('Open Settings?', 'SMS is permanently denied. Open app settings to fix it.', [
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            { text: 'Cancel', style: 'cancel' },
-          ]);
+          setConfirm({
+            title:         'Open Settings?',
+            message:       'SMS is permanently denied. Open app settings to fix it.',
+            primaryText:   'Open Settings',
+            secondaryText: 'Cancel',
+            onConfirm:     () => { setConfirm(null); Linking.openSettings(); },
+          });
           setStatus(STATUS.error);
           return;
         } else {
@@ -299,6 +304,18 @@ export default function SmsDiagnosticScreen({ navigation }) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        secondaryText={confirm?.secondaryText}
+        destructive={!!confirm?.destructive}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+        onSecondary={() => setConfirm(null)}
+        onClose={() => setConfirm(null)}
+      />
     </View>
   );
 }

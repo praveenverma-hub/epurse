@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   Switch,
   Platform,
   Linking,
@@ -21,6 +20,8 @@ import { THEMES } from '../constants/themes';
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import CategoryIcon from '../components/CategoryIcon';
+import CenterModal from '../components/CenterModal';
+import { useToast } from '../components/Toast';
 import {
   smsSupported,
   hasSmsPermission,
@@ -47,6 +48,13 @@ const CategoriesScreen = ({ navigation }) => {
   const themeId = useEPurseStore((s) => s.themeId);
   const setThemeId = useEPurseStore((s) => s.setThemeId);
 
+  const toast = useToast();
+  /**
+   * Centralised confirm dialog driver. Shape:
+   *   { title, message, primaryText, destructive?, onConfirm, secondaryText? }
+   * Setting non-null mounts <CenterModal>; setting null hides it.
+   */
+  const [confirm, setConfirm] = useState(null);
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLOR_PALETTE[0]);
   const [emoji, setEmoji] = useState(EMOJI_PALETTE[0]);
@@ -70,16 +78,16 @@ const CategoriesScreen = ({ navigation }) => {
       return;
     }
     if (Platform.OS !== 'android') {
-      Alert.alert(
+      toast.info(
         'Not supported on iOS',
-        'Apple does not allow third-party apps to read SMS. The simulated and paste flows still work everywhere.'
+        'Apple does not allow third-party apps to read SMS. The simulated and paste flows still work everywhere.',
       );
       return;
     }
     if (!smsSupported) {
-      Alert.alert(
+      toast.warning(
         'Native module missing',
-        'SMS auto-import requires a custom dev build. Run `npx expo run:android` (or build via EAS) — Expo Go cannot read SMS.'
+        'SMS auto-import requires a custom dev build. Run `npx expo run:android` (or build via EAS) — Expo Go cannot read SMS.',
       );
       return;
     }
@@ -88,22 +96,22 @@ const CategoriesScreen = ({ navigation }) => {
       setSmsAutoImport(true);
       setPermGranted(true);
     } else if (neverAskAgain) {
-      Alert.alert(
-        'Permission blocked',
-        'You previously selected "Don\'t ask again". Open system settings to grant SMS access.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open settings', onPress: () => Linking.openSettings() },
-        ]
-      );
+      // Two-button confirm — needs a CenterModal, not a toast.
+      setConfirm({
+        title:         'Permission blocked',
+        message:       'You previously selected "Don\'t ask again". Open system settings to grant SMS access.',
+        primaryText:   'Open settings',
+        secondaryText: 'Cancel',
+        onConfirm:     () => { setConfirm(null); Linking.openSettings(); },
+      });
     } else {
-      Alert.alert('Permission denied', 'You can enable it later from this screen.');
+      toast.info('Permission denied', 'You can enable it later from this screen.');
     }
   };
 
   const handleAdd = () => {
     if (!name.trim()) {
-      Alert.alert('Missing name', 'Give the category a name first.');
+      toast.warning('Missing name', 'Give the category a name first.');
       return;
     }
     addCategory({ name: name.trim(), color, emoji });
@@ -111,10 +119,14 @@ const CategoriesScreen = ({ navigation }) => {
   };
 
   const handleDelete = (cat) => {
-    Alert.alert('Delete category?', `Remove "${cat.name}"? Existing transactions will keep their tag.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => removeCategory(cat.id) },
-    ]);
+    setConfirm({
+      title:         'Delete category?',
+      message:       `Remove "${cat.name}"? Existing transactions will keep their tag.`,
+      primaryText:   'Delete',
+      secondaryText: 'Cancel',
+      destructive:   true,
+      onConfirm:     () => { setConfirm(null); removeCategory(cat.id); },
+    });
   };
 
   return (
@@ -263,15 +275,32 @@ const CategoriesScreen = ({ navigation }) => {
         <TouchableOpacity
           style={styles.dangerBtn}
           onPress={() =>
-            Alert.alert('Reset everything?', 'This will replace data with seed values.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Reset', style: 'destructive', onPress: resetAll },
-            ])
+            setConfirm({
+              title:         'Reset everything?',
+              message:       'This will replace data with seed values.',
+              primaryText:   'Reset',
+              secondaryText: 'Cancel',
+              destructive:   true,
+              onConfirm:     () => { setConfirm(null); resetAll(); },
+            })
           }
         >
           <Text style={styles.dangerText}>Reset all data</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Confirmation dialog — driven by `confirm` state. */}
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        secondaryText={confirm?.secondaryText}
+        destructive={!!confirm?.destructive}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+        onSecondary={() => setConfirm(null)}
+        onClose={() => setConfirm(null)}
+      />
     </SafeAreaView>
   );
 };

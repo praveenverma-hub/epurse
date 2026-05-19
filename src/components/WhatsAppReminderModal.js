@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ScrollView, Linking, Alert, Dimensions,
+  TextInput, ScrollView, Linking, Dimensions,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
@@ -18,6 +18,8 @@ import Svg, {
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
+import { useToast } from './Toast';
+import CenterModal from './CenterModal';
 
 // ── Screen dimensions ─────────────────────────────────────────────────────────
 const SCREEN_W = Dimensions.get('window').width;
@@ -382,12 +384,14 @@ const WhatsAppIcon = ({ size = 18, color = '#25D366' }) => (
 // =============================================================================
 const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onClose }) => {
   const theme = useTheme();
+  const toast = useToast();
   const bannerRef = useRef(null);
   const [themeId, setThemeId]     = useState('friendly');
   const [dueDateKey, setDueDateKey] = useState(null);
   const [customDate, setCustomDate] = useState('');
   const [msgOverride, setMsgOverride] = useState(null);
   const [bannerSaved, setBannerSaved] = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   const activeTheme = REMINDER_THEMES.find((t) => t.id === themeId) || REMINDER_THEMES[0];
 
@@ -445,22 +449,27 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
 
     const canOpen = await Linking.canOpenURL(url).catch(() => false);
     if (!canOpen) {
-      Alert.alert('WhatsApp not found', 'Make sure WhatsApp is installed, then try again.', [{ text: 'OK' }]);
+      toast.error('WhatsApp not found', 'Make sure WhatsApp is installed, then try again.');
       return;
     }
 
     // 3. Show attach hint if we saved the banner, then open WA
     if (bannerCaptured) {
-      Alert.alert(
-        '📸 Banner saved to gallery!',
-        'In WhatsApp, tap the 📎 (attachment) button and pick the banner from your gallery to send it along with the message.',
-        [{ text: 'Open WhatsApp', onPress: () => { Linking.openURL(url); onClose(); } }]
-      );
+      setConfirm({
+        title:       '📸 Banner saved to gallery!',
+        message:     'In WhatsApp, tap the 📎 (attachment) button and pick the banner from your gallery to send it along with the message.',
+        primaryText: 'Open WhatsApp',
+        onConfirm:   () => {
+          setConfirm(null);
+          Linking.openURL(url);
+          onClose();
+        },
+      });
     } else {
       await Linking.openURL(url);
       onClose();
     }
-  }, [message, phone, bannerRef, onClose]);
+  }, [message, phone, bannerRef, onClose, toast]);
 
   const DUE_OPTIONS = [
     { key: 'today', label: 'Today' },
@@ -606,6 +615,18 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
           </TouchableOpacity>
         </View>
       </View>
+
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        secondaryText={confirm?.secondaryText}
+        destructive={!!confirm?.destructive}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+        onSecondary={() => setConfirm(null)}
+        onClose={() => setConfirm(null)}
+      />
     </Modal>
   );
 };

@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -44,6 +43,7 @@ const GradientButton: React.FC<{
   icon?: React.ReactNode;
 }> = GradientButtonBase as any;
 import SplitConfigModal from '../components/SplitConfigModal';
+import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { canSplitTransaction, SPLIT_BLOCKED_CATEGORY_IDS } from '../utils/split';
 import { PARENT_CATEGORIES, ParentCat, ChildCat } from '../constants/twoTierCategories';
@@ -203,6 +203,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   const budget         = useEPurseStore((s: any) => s.budget);
   const transactions   = useEPurseStore((s: any) => s.transactions);
   const getBudgetUsage = useEPurseStore((s: any) => s.getBudgetUsage);
+  const toast          = useToast();
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [amount,         setAmount]         = useState('');
@@ -245,6 +246,17 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
     type === TRANSACTION_TYPES.DEBIT &&
     !LB_BLOCKED_CHILDREN.has(childCategory) &&
     !SPLIT_BLOCKED_CATEGORY_IDS.has(legacyCategoryId);
+
+  /**
+   * Split is only meaningful once the user has supplied enough context for
+   * the modal to compute shares: a non-zero amount, a merchant label, and a
+   * resolved child category (which in turn implies a parent).
+   */
+  const splitReady =
+    canSplitHere &&
+    (parseFloat(amount) || 0) > 0 &&
+    merchant.trim().length > 0 &&
+    !!childCategory;
 
   const splitDraftTxn = useMemo(
     () => ({
@@ -327,28 +339,31 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   const handleSave = () => {
     const num = parseFloat(amount);
     if (!num || num <= 0) {
-      Alert.alert('Invalid amount', 'Please enter an amount greater than zero.');
+      toast.warning('Invalid amount', 'Please enter an amount greater than zero.');
       return;
     }
     if (num > MAX_ALLOWED_AMOUNT) {
-      Alert.alert('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
+      toast.error('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
       return;
     }
     if (!merchant.trim()) {
-      Alert.alert('Missing merchant', 'Please enter who you paid / received from.');
+      toast.warning('Missing merchant', 'Please enter who you paid / received from.');
       return;
     }
     if (!parentCategory) {
-      Alert.alert('Missing category', 'Please select a category.');
+      toast.warning('Missing category', 'Please select a category.');
       return;
     }
     if (!childCategory) {
-      Alert.alert('Missing sub-category', `Tap "${parentCategory}" to expand and pick a sub-category.`);
+      toast.warning(
+        'Missing sub-category',
+        `Tap "${parentCategory}" to expand and pick a sub-category.`,
+      );
       return;
     }
     const wantSplit = isSplit && canSplitHere;
     if (wantSplit && splitPicks.length === 0) {
-      Alert.alert('Choose people', 'Pick at least one person to split this expense with.');
+      toast.warning('Choose people', 'Pick at least one person to split this expense with.');
       return;
     }
     addTransaction({
@@ -386,29 +401,32 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
 
   const handleParseSMS = () => {
     if (!smsBody.trim()) {
-      Alert.alert('Empty message', 'Paste an SMS to parse.');
+      toast.warning('Empty message', 'Paste an SMS to parse.');
       return;
     }
     const diagnostic = parseMessageDetailed(smsBody.trim());
     if (!diagnostic?.ok) {
-      Alert.alert('Could not parse', diagnostic?.error?.message || 'Message format not recognised.');
+      toast.error(
+        'Could not parse',
+        diagnostic?.error?.message || 'Message format not recognised.',
+      );
       return;
     }
     const parsedItems = (diagnostic as any).transactions || [diagnostic.transaction];
     if (parsedItems.some((item: any) => (item?.amount || 0) > MAX_ALLOWED_AMOUNT)) {
-      Alert.alert('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
+      toast.error('Amount too large', 'Maximum allowed amount is ₹10,00,00,000 (10 crore).');
       return;
     }
     const parsed = ingestMessage(smsBody.trim());
     if (!parsed) {
-      Alert.alert('Not added', 'Looks like this SMS was already imported (duplicate).');
+      toast.info('Not added', 'Looks like this SMS was already imported (duplicate).');
       return;
     }
-    Alert.alert(
+    toast.success(
       'Transaction added',
       `${parsed.merchant} — ₹${parsed.amount} (${parsed.parentCategory ?? parsed.categoryId})`,
-      [{ text: 'OK', onPress: () => navigation.goBack() }],
     );
+    navigation.goBack();
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -564,54 +582,58 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
               />
             </Field>
 
-            {/* ── Split ───────────────────────────────────────────── */}
+            {/* ── Split ───────────────────────────────────────────────────
+                Behaviour:
+                • Row is disabled (greyed, non-interactive) until amount,
+                  merchant, and child category are all set.
+                • Tapping the enabled row immediately opens the picker modal
+                  — no second tap. Re-tapping while open is a no-op.
+                • Unchecking clears picks and resets share state.            */}
             {canSplitHere ? (
-              <>
-                <TouchableOpacity
+              <TouchableOpacity
+                style={[
+                  styles.splitToggle,
+                  isSplit && { borderColor: theme.primary, borderWidth: 1 },
+                  !splitReady && !isSplit && { opacity: 0.5 },
+                ]}
+                disabled={!splitReady && !isSplit}
+                activeOpacity={0.85}
+                onPress={() => {
+                  if (isSplit) {
+                    // Uncheck — wipe shares.
+                    setIsSplit(false);
+                    setSplitPicks([]);
+                    setMySplitPercent(null);
+                    setMySplitAmount(null);
+                    return;
+                  }
+                  // Check — flip flag AND open the picker in the same gesture.
+                  setIsSplit(true);
+                  setSplitModalOpen(true);
+                }}
+              >
+                <Text style={styles.splitEmoji}>👥</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.splitTitle}>
+                    {isSplit && splitPicks.length > 0
+                      ? `Split with ${splitPicks.length} friend${splitPicks.length === 1 ? '' : 's'}`
+                      : 'Split with friends?'}
+                  </Text>
+                  <Text style={styles.splitHelp}>
+                    {splitReady || isSplit
+                      ? 'Your share is tracked; others appear in Lent from this split.'
+                      : 'Fill amount, merchant, and category first to enable split.'}
+                  </Text>
+                </View>
+                <View
                   style={[
-                    styles.splitToggle,
-                    isSplit && { borderColor: theme.primary, borderWidth: 1 },
+                    styles.checkbox,
+                    isSplit && { backgroundColor: theme.primary, borderColor: theme.primary },
                   ]}
-                  onPress={() => {
-                    setIsSplit((v) => {
-                      const next = !v;
-                      if (!next) setSplitPicks([]);
-                      return next;
-                    });
-                  }}
                 >
-                  <Text style={styles.splitEmoji}>👥</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.splitTitle}>Split with friends?</Text>
-                    <Text style={styles.splitHelp}>
-                      Your share is tracked; others appear in Lent from this split.
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.checkbox,
-                      isSplit && { backgroundColor: theme.primary, borderColor: theme.primary },
-                    ]}
-                  >
-                    {isSplit && <Text style={styles.checkmark}>✓</Text>}
-                  </View>
-                </TouchableOpacity>
-
-                {isSplit ? (
-                  <TouchableOpacity
-                    style={[styles.splitPickBtn, { borderColor: theme.primary + '44' }]}
-                    onPress={() => setSplitModalOpen(true)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={[styles.splitPickBtnTitle, { color: theme.primary }]}>
-                      {splitPicks.length === 0
-                        ? 'Tap to choose people'
-                        : `${splitPicks.length} friend${splitPicks.length === 1 ? '' : 's'} · equal split`}
-                    </Text>
-                    <Text style={styles.splitPickBtnHint}>Uses your contacts</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </>
+                  {isSplit && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+              </TouchableOpacity>
             ) : (
               <Text style={styles.splitUnavailable}>
                 Split is available for expenses only (not income or lend / borrow categories).
@@ -627,7 +649,17 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             <SplitConfigModal
               visible={splitModalOpen}
               transaction={splitDraftTxn}
-              onClose={() => setSplitModalOpen(false)}
+              onClose={() => {
+                setSplitModalOpen(false);
+                // If the user closes the picker without ever confirming
+                // anyone, snap the checkbox back to OFF — the toggle should
+                // never sit in a "checked but no friends" limbo.
+                if (splitPicks.length === 0) {
+                  setIsSplit(false);
+                  setMySplitPercent(null);
+                  setMySplitAmount(null);
+                }
+              }}
               onApply={(others: any, meta: any) => {
                 if (!others?.length) {
                   setSplitPicks([]);

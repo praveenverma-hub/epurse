@@ -8,7 +8,6 @@ import {
   TextInput,
   ActivityIndicator,
   Platform,
-  Alert,
   Linking,
 } from 'react-native';
 
@@ -16,6 +15,8 @@ import { colors, radius, spacing, typography } from '../constants/theme';
 import GradientButton from './GradientButton';
 import { formatCurrency } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
+import { useToast } from './Toast';
+import CenterModal from './CenterModal';
 import {
   fetchContactsForPicker,
   getContactsPermissionStatus,
@@ -27,6 +28,8 @@ import {
  * `onApply(others, meta)` where meta = { mode: 'percent'|'amount', myPercent?: number, myAmount?: number }
  */
 const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(null);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
@@ -247,27 +250,28 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
     if (granted) {
       loadContacts();
     } else if (!canAskAgain || Platform.OS === 'ios') {
-      Alert.alert(
-        'Contacts access',
-        'Enable Contacts for ePurse in Settings to pick people for splits.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Settings', onPress: () => Linking.openSettings() },
-        ]
-      );
+      setConfirm({
+        title:         'Contacts access',
+        message:       'Enable Contacts for ePurse in Settings to pick people for splits.',
+        primaryText:   'Settings',
+        secondaryText: 'Cancel',
+        onConfirm:     () => { setConfirm(null); Linking.openSettings(); },
+      });
     }
   };
 
   const handleApply = () => {
     const others = Array.from(selected.values());
     if (others.length === 0) {
-      Alert.alert('Pick someone', 'Select at least one person to split with.');
+      toast.warning('Pick someone', 'Select at least one person to split with.');
       return;
     }
     if (!valid) {
-      Alert.alert(
+      toast.warning(
         mode === 'percent' ? 'Fix percentages' : 'Fix amounts',
-        mode === 'percent' ? 'Your % shares must add up to 100.' : 'Your ₹ shares must add up to the total amount.'
+        mode === 'percent'
+          ? 'Your % shares must add up to 100.'
+          : 'Your ₹ shares must add up to the total amount.',
       );
       return;
     }
@@ -511,6 +515,18 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        secondaryText={confirm?.secondaryText}
+        destructive={!!confirm?.destructive}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+        onSecondary={() => setConfirm(null)}
+        onClose={() => setConfirm(null)}
+      />
     </Modal>
   );
 };

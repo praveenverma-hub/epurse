@@ -8,7 +8,6 @@
 
 import React, { useEffect, useMemo } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StatusBar,
@@ -45,6 +44,7 @@ import {
   levelProgressPct,
 } from '../config/rewardConfig';
 import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
+import { useToast } from '../components/Toast';
 
 // ─── Dark-mode palette (screen-scoped) ───────────────────────────────────────
 
@@ -262,6 +262,7 @@ interface ShopCardProps {
 const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins }) => {
   const purchaseItem     = useRewardStore((s) => s.purchaseItem);
   const toggleItemActive = useRewardStore((s) => s.toggleItemActive);
+  const toast            = useToast();
 
   const isLocked = currentLevel < item.minLevelRequirement;
 
@@ -285,7 +286,10 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins })
         already_owned:      'Already in your inventory.',
         unknown_item:       'Unknown item.',
       };
-      Alert.alert('Cannot purchase', messages[result.reason ?? 'unknown_item']);
+      toast.warning(
+        'Cannot purchase',
+        messages[result.reason ?? 'unknown_item'],
+      );
       return;
     }
     hapticSuccess();
