@@ -43,6 +43,7 @@ const GradientButton: React.FC<{
   icon?: React.ReactNode;
 }> = GradientButtonBase as any;
 import SplitConfigModal from '../components/SplitConfigModal';
+import LinkContactModal from '../components/LinkContactModal';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { canSplitTransaction, SPLIT_BLOCKED_CATEGORY_IDS } from '../utils/split';
@@ -77,6 +78,10 @@ const CHILD_TO_LEGACY: Record<string, string> = {
 
 // Children that block split (same set as SPLIT_BLOCKED_CATEGORY_IDS, two-tier side)
 const LB_BLOCKED_CHILDREN = new Set(['Lent', 'Borrowed']);
+
+// LB categoryIds whose save flow must prompt for a contact (so the lent/borrow
+// books stay in sync). Mirrors the store's LB_ALL_CATS.
+const LB_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
 
 // ─── AddTxnParentRow (local accordion component) ─────────────────────────────
 
@@ -222,6 +227,8 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   const [splitModalOpen, setSplitModalOpen] = useState(false);
   const [note,           setNote]           = useState('');
   const [smsBody,        setSmsBody]        = useState('');
+  // LB contact-picker state — opened mid-save when an LB category is chosen.
+  const [lbPickerOpen,   setLbPickerOpen]   = useState(false);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
   const defaultAccountId = useMemo(() => {
@@ -336,6 +343,50 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
     }
   };
 
+  /**
+   * Commit the transaction to the store. Pulled out of `handleSave` so the
+   * LB contact-picker flow can call it AFTER the user picks a contact
+   * (passing the contactInfo through so the store can spawn an LB entry).
+   */
+  const commitTransaction = (contactInfo?: { person: string; phone: string | null; contactId: string | null }) => {
+    const num = parseFloat(amount);
+    const wantSplit = isSplit && canSplitHere;
+    addTransaction({
+      amount: num,
+      type,
+      accountId: resolvedAccountId,
+      categoryId:      legacyCategoryId,
+      parentCategory,
+      childCategory,
+      merchant:        merchant.trim(),
+      cleanMerchant:   merchant.trim(),
+      rawMerchant:     merchant.trim(),
+      note:            note.trim(),
+      isReviewed:      true,
+      source:          'manual',
+      isSplit:         wantSplit,
+      splitOthers: wantSplit
+        ? splitMode === 'amount'
+          ? splitPicks.map((p) => ({
+              contactId:   p.contactId,
+              name:        p.name,
+              shareAmount: Number(p.shareAmount) || 0,
+            }))
+          : splitPicks
+        : undefined,
+      ...(wantSplit && splitMode === 'percent' && typeof mySplitPercent === 'number'
+        ? { myPercent: mySplitPercent }
+        : {}),
+      ...(wantSplit && splitMode === 'amount' && typeof mySplitAmount === 'number'
+        ? { myShareAmount: mySplitAmount }
+        : {}),
+      // Pass contactInfo through so the store can spawn the matching LB
+      // entry alongside the transaction. Ignored when categoryId is not LB.
+      ...(contactInfo ? { contactInfo } : {}),
+    });
+    navigation.goBack();
+  };
+
   const handleSave = () => {
     const num = parseFloat(amount);
     if (!num || num <= 0) {
@@ -366,37 +417,17 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
       toast.warning('Choose people', 'Pick at least one person to split this expense with.');
       return;
     }
-    addTransaction({
-      amount: num,
-      type,
-      accountId: resolvedAccountId,
-      categoryId:      legacyCategoryId,
-      parentCategory,
-      childCategory,
-      merchant:        merchant.trim(),
-      cleanMerchant:   merchant.trim(),
-      rawMerchant:     merchant.trim(),
-      note:            note.trim(),
-      isReviewed:      true,
-      source:          'manual',
-      isSplit:         wantSplit,
-      splitOthers: wantSplit
-        ? splitMode === 'amount'
-          ? splitPicks.map((p) => ({
-              contactId:   p.contactId,
-              name:        p.name,
-              shareAmount: Number(p.shareAmount) || 0,
-            }))
-          : splitPicks
-        : undefined,
-      ...(wantSplit && splitMode === 'percent' && typeof mySplitPercent === 'number'
-        ? { myPercent: mySplitPercent }
-        : {}),
-      ...(wantSplit && splitMode === 'amount' && typeof mySplitAmount === 'number'
-        ? { myShareAmount: mySplitAmount }
-        : {}),
-    });
-    navigation.goBack();
+
+    // LB categories (lent / borrowed / lent_settled / borrow_repaid) must
+    // also link to a contact — otherwise the lent/borrow ledger drifts.
+    // Split-mode transactions already carry per-friend records, so the
+    // contact picker is skipped there.
+    if (LB_CATEGORY_IDS.has(legacyCategoryId) && !wantSplit) {
+      setLbPickerOpen(true);
+      return;
+    }
+
+    commitTransaction();
   };
 
   const handleParseSMS = () => {
@@ -681,6 +712,27 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
                 }
                 setSplitModalOpen(false);
               }}
+            />
+
+            <LinkContactModal
+              visible={lbPickerOpen}
+              categoryId={legacyCategoryId}
+              onConfirm={(contactInfo: any) => {
+                setLbPickerOpen(false);
+                commitTransaction({
+                  person:    contactInfo?.person || '',
+                  phone:     contactInfo?.phone || null,
+                  contactId: contactInfo?.contactId || null,
+                });
+              }}
+              onSkip={() => {
+                setLbPickerOpen(false);
+                // Save without a contact — store leaves no LB entry, txn
+                // still lands in the list. User can attach a contact later
+                // via the re-categorise flow.
+                commitTransaction();
+              }}
+              onClose={() => setLbPickerOpen(false)}
             />
           </>
         </ScrollView>

@@ -656,7 +656,9 @@ export const useEPurseStore = create(
           const id =
             txn.id ||
             `IdM${String(nextSeq).padStart(4, '0')}`;
-          const { splitOthers, ...txnRest } = txn;
+          // contactInfo is consumed locally to spawn an LB entry — do not
+          // forward it onto the persisted transaction shape.
+          const { splitOthers, contactInfo, ...txnRest } = txn;
           const newTxn = {
             id,
             createdAt: new Date().toISOString(),
@@ -715,6 +717,30 @@ export const useEPurseStore = create(
             newTxn.isSplit = false;
             newTxn.splitWith = [];
             delete newTxn.myShareAmount;
+          }
+
+          // ─── LB entry creation ───────────────────────────────────────
+          // If the transaction's categoryId is an LB category AND a
+          // contactInfo was supplied by the caller (typically the
+          // AddTransactionScreen contact-picker flow), spawn the matching
+          // lentBorrowed row so totals stay in sync. The row is also
+          // marked lbLocked on the transaction to prevent later
+          // re-categorisation from drifting the books.
+          if (LB_ALL_CATS.has(newTxn.categoryId) && contactInfo && !newTxn.isSplit) {
+            const person = (contactInfo.person || '').trim();
+            const lbEntry = {
+              id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              kind:        newTxn.categoryId, // mirrors the txn's category
+              person,
+              amount:      newTxn.amount,
+              phone:       contactInfo.phone || null,
+              contactId:   contactInfo.contactId || null,
+              note:        `From txn: ${newTxn.merchant || ''}`.trim(),
+              date:        newTxn.createdAt,
+              sourceTxnId: newTxn.id,
+            };
+            nextLent = [lbEntry, ...nextLent];
+            newTxn.lbLocked = true;
           }
 
           // If an explicit accountId was passed (manual form selection), use it directly.
@@ -1420,37 +1446,108 @@ export const useEPurseStore = create(
 
       /**
        * Returns per-person cumulative net balance across lentBorrowed entries.
-       * Groups by contactId > phone > lowercased name.
-       * Returns array of { personKey, person, contactId, phone, lent, borrowed, net, entries }
-       * sorted by absolute net (largest first).
+       *
+       * Grouping uses UNION-FIND across THREE identifiers — contactId, normalised
+       * phone, and lowercased name — because legacy entries may carry only a
+       * subset of identifiers (e.g. an old manual "Lend to someone" form may
+       * have stored only `phone`, while a later settlement coming through the
+       * contact-picker carries both `phone` and `contactId`). Falling back to a
+       * single-priority key (the previous implementation) split such entries
+       * into separate "persons", causing settlements to appear as the OPPOSITE
+       * kind in totals (lent_settled with no matching prior `lent` makes net
+       * negative → contributes to "borrowed" total).
+       *
+       * Returns array of { personKey, person, contactId, phone, lent, borrowed,
+       * net, entries } sorted by absolute net (largest first).
        */
       getPersonBalances: () => {
-        const map = new Map();
+        const entries = get().lentBorrowed;
 
-        get().lentBorrowed.forEach((l) => {
-          const key = l.contactId || l.phone || (l.person || '').trim().toLowerCase();
-          if (!map.has(key)) {
-            map.set(key, {
-              personKey: key,
-              person: l.person,
-              contactId: l.contactId || null,
-              phone: l.phone || null,
-              lent: 0,
-              borrowed: 0,
-              entries: [],
-            });
+        // Normalise to canonical strings for matching. Strips non-digits from
+        // phone numbers so "+91 99999 12345" matches "9999912345".
+        const normPhone = (p) => {
+          const d = (p || '').replace(/\D/g, '');
+          return d.length ? d : null;
+        };
+        const normName  = (n) => {
+          const t = (n || '').trim().toLowerCase();
+          return t.length ? t : null;
+        };
+
+        // ─── Union-find over identifier tokens ──────────────────────────
+        // Each unique identifier (contactId/phone/name) is a node. Two
+        // identifiers from the same entry get unioned. Two entries that
+        // share any identifier are therefore in the same component.
+        const parent = new Map(); // token → its parent token
+        const makeSet = (x) => { if (!parent.has(x)) parent.set(x, x); };
+        const find = (x) => {
+          let r = x;
+          while (parent.get(r) !== r) r = parent.get(r);
+          // Path compression
+          let cur = x;
+          while (parent.get(cur) !== r) {
+            const next = parent.get(cur);
+            parent.set(cur, r);
+            cur = next;
           }
-          const rec = map.get(key);
-          // Additive formula — every entry contributes to net:
-          //   net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid
-          if (l.kind === 'lent')          rec.lent     += l.amount;
-          if (l.kind === 'lent_settled')  rec.lent     -= l.amount;
-          if (l.kind === 'borrowed')      rec.borrowed += l.amount;
-          if (l.kind === 'borrow_repaid') rec.borrowed -= l.amount;
-          rec.entries.push(l);
+          return r;
+        };
+        const union = (a, b) => {
+          const ra = find(a);
+          const rb = find(b);
+          if (ra !== rb) parent.set(ra, rb);
+        };
+
+        // First pass — register all tokens and link the ones that co-occur
+        // on the same entry. Use a per-entry fallback token so entries with
+        // zero identifiers still get a unique group.
+        const entryToken = new Array(entries.length);
+        entries.forEach((e, i) => {
+          const tokens = [];
+          if (e.contactId)               tokens.push(`cid:${e.contactId}`);
+          const ph = normPhone(e.phone); if (ph) tokens.push(`ph:${ph}`);
+          const nm = normName(e.person); if (nm) tokens.push(`nm:${nm}`);
+          if (tokens.length === 0) tokens.push(`anon:${i}`);
+
+          tokens.forEach(makeSet);
+          entryToken[i] = tokens[0];
+          // Union all tokens of this entry into one component.
+          for (let t = 1; t < tokens.length; t++) union(tokens[0], tokens[t]);
         });
 
-        return [...map.values()]
+        // ─── Second pass — aggregate per component root ────────────────
+        const groups = new Map(); // root token → record
+        entries.forEach((e, i) => {
+          const root = find(entryToken[i]);
+          if (!groups.has(root)) {
+            groups.set(root, {
+              personKey: root,
+              person:    e.person,
+              contactId: e.contactId || null,
+              phone:     e.phone || null,
+              lent:      0,
+              borrowed:  0,
+              entries:   [],
+            });
+          }
+          const rec = groups.get(root);
+          // Promote the richest contact info we've seen in this group.
+          if (e.contactId && !rec.contactId) rec.contactId = e.contactId;
+          if (e.phone && !rec.phone)         rec.phone     = e.phone;
+          if (e.person && (!rec.person || rec.person.length < e.person.length)) {
+            rec.person = e.person;
+          }
+
+          // Additive formula — every entry contributes to net:
+          //   net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid
+          if (e.kind === 'lent')          rec.lent     += e.amount;
+          if (e.kind === 'lent_settled')  rec.lent     -= e.amount;
+          if (e.kind === 'borrowed')      rec.borrowed += e.amount;
+          if (e.kind === 'borrow_repaid') rec.borrowed -= e.amount;
+          rec.entries.push(e);
+        });
+
+        return [...groups.values()]
           .map((r) => ({ ...r, net: r.lent - r.borrowed }))
           .filter((r) => r.entries.length > 0)
           .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
