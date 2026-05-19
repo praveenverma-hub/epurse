@@ -270,14 +270,6 @@ export const useEPurseStore = create(
       smsPermissionGranted: false,
       contactsPermissionGranted: false,
 
-      /**
-       * isFirstLaunch — true until the first-time Dashboard visit completes the
-       * welcome celebration. Flipped to false by the WelcomeStreakModal once
-       * its 4.5s dwell timer elapses, so it never replays on future launches.
-       */
-      isFirstLaunch: true,
-      setFirstLaunchDone: () => set({ isFirstLaunch: false }),
-
       // Theme preferences
       themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
       darkMode: false,             // reserved for future dark-theme rollout
@@ -411,54 +403,30 @@ export const useEPurseStore = create(
       /** Dismisses the celebration modal — called when the user closes it. */
       clearPendingCelebration: () => set({ pendingCelebration: null }),
 
-      // ─── Daily Queue / XP actions ───────────────────────────────────────────
-      addXP: (amount) =>
-        set((s) => ({ xp: (s.xp || 0) + Math.max(0, Number(amount) || 0) })),
+      // ─── Daily Queue actions ───────────────────────────────────────────────
+      // NOTE: Economy (RP/EPC/streak) lives entirely in useRewardStore. This
+      // store is responsible only for the txn.isReviewed flag flip. Callers
+      // who want to award the user must call useRewardStore.recordReview()
+      // explicitly — DailyQueueStack does this on each approval.
+      //
+      // Legacy `xp` field is kept on the persisted shape for transitional
+      // builds but no longer mutated; `addXP` is a no-op. Drop entirely once
+      // no on-device cohorts predate v3 of the reward store.
+      addXP: (_amount) => { /* deprecated — economy moved to useRewardStore */ },
 
       /**
        * Mark a transaction as reviewed.
-       * Awards +10 XP and updates the daily review streak.
-       * No-op if already reviewed.
+       * Pure state transition — does NOT touch RP/EPC/streak. No-op if
+       * already reviewed.
        */
       markReviewed: (id) =>
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn || txn.isReviewed) return s;
-
-          const newXp = (s.xp || 0) + 10;
-          const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-          const streak = s.reviewStreak || { current: 0, best: 0, lastReviewDate: null };
-          let { current, best } = streak;
-          let isNewStreakDay = false;
-
-          if (streak.lastReviewDate !== todayStr) {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().slice(0, 10);
-            current = streak.lastReviewDate === yesterdayStr ? current + 1 : 1;
-            if (current > best) best = current;
-            isNewStreakDay = true;
-          }
-
-          // Reward economy: 5 coins per review, plus streak milestone bonuses.
-          // Lazy import to avoid circular dep at module load.
-          try {
-            const { useRewardStore } = require('./useRewardStore');
-            const awardCoins = useRewardStore.getState().awardCoins;
-            awardCoins(5);
-            if (isNewStreakDay) {
-              if (current === 3)  awardCoins(20);
-              if (current === 7)  awardCoins(50);
-              if (current === 30) awardCoins(200);
-            }
-          } catch {/* reward store not loaded yet — skip silently */}
-
           return {
             transactions: s.transactions.map((t) =>
               t.id === id ? { ...t, isReviewed: true } : t
             ),
-            xp: newXp,
-            reviewStreak: { current, best, lastReviewDate: todayStr },
           };
         }),
 
@@ -1724,7 +1692,6 @@ export const useEPurseStore = create(
         xp: state.xp,
         reviewStreak: state.reviewStreak,
         userCustomRules: state.userCustomRules,
-        isFirstLaunch: state.isFirstLaunch,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;

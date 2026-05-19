@@ -34,12 +34,16 @@ import Animated, {
 import { useEPurseStore } from '../store/ePurseStore';
 import {
   useRewardStore,
-  levelFromXp,
-  xpForNextLevel,
-  levelProgressPct,
+  selectTotalRP,
+  selectEpcBalance,
+  selectLevel,
   levelTitle,
   type InventoryItem,
 } from '../store/useRewardStore';
+import {
+  rpForNextLevel,
+  levelProgressPct,
+} from '../config/rewardConfig';
 import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 
 // ─── Dark-mode palette (screen-scoped) ───────────────────────────────────────
@@ -72,15 +76,15 @@ interface Props {
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 const RewardShop: React.FC<Props> = ({ navigation }) => {
-  const xp        = useEPurseStore((s: any) => s.xp ?? 0);
   const userName  = useEPurseStore((s: any) => s.userName ?? '');
-  const coins     = useRewardStore((s) => s.coins);
+  const totalRP   = useRewardStore(selectTotalRP);
+  const coins     = useRewardStore(selectEpcBalance);
+  const level     = useRewardStore(selectLevel);
   const inventory = useRewardStore((s) => s.inventory);
 
-  const level         = useMemo(() => levelFromXp(xp),         [xp]);
-  const title         = useMemo(() => levelTitle(level),       [level]);
-  const nextThreshold = useMemo(() => xpForNextLevel(xp),      [xp]);
-  const pct           = useMemo(() => levelProgressPct(xp),    [xp]);
+  const title         = useMemo(() => levelTitle(level),         [level]);
+  const nextThreshold = useMemo(() => rpForNextLevel(totalRP),    [totalRP]);
+  const pct           = useMemo(() => levelProgressPct(totalRP),  [totalRP]);
 
   const initial = userName?.trim()?.charAt(0)?.toUpperCase() || '🙂';
   const display = userName?.trim() || 'Guest';
@@ -145,14 +149,14 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
               </View>
             </View>
 
-            {/* XP block */}
+            {/* RP block — next-level progress */}
             <View style={styles.xpBlock}>
               <View style={styles.xpRow}>
                 <Text style={styles.xpLabel}>NEXT LEVEL</Text>
                 <Text style={styles.xpPoints}>
-                  {xp.toLocaleString('en-IN')}
+                  {totalRP.toLocaleString('en-IN')}
                   <Text style={styles.xpPointsMuted}>
-                    {' '}/ {nextThreshold.toLocaleString('en-IN')} XP
+                    {' '}/ {nextThreshold.toLocaleString('en-IN')} RP
                   </Text>
                 </Text>
               </View>
@@ -168,7 +172,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.coinAmount}>
                   {coins.toLocaleString('en-IN')}
                 </Text>
-                <Text style={styles.coinLabel}>ePurse Coins Available</Text>
+                <Text style={styles.coinLabel}>EPC Balance</Text>
               </View>
             </View>
           </Animated.View>
@@ -178,8 +182,8 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.shopEyebrow}>CUSTOM WIDGETS</Text>
             <Text style={styles.shopHeading}>Make the dashboard yours</Text>
             <Text style={styles.shopSubtitle}>
-              Earn XP from reviewing transactions. Spend coins to unlock premium
-              hardware-accelerated visualisations.
+              Earn RP from reviewing transactions and keeping your Aware Run
+              alive. Spend EPC to unlock premium hardware-accelerated widgets.
             </Text>
           </View>
 
@@ -272,11 +276,11 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins })
   };
 
   const handleBuy = () => {
-    const result = purchaseItem(item.id, currentLevel);
+    const result = purchaseItem(item.id);
     if (!result.ok) {
       hapticError();
       const messages: Record<string, string> = {
-        insufficient_coins: `You need ${item.cost - currentCoins} more coins.`,
+        insufficient_funds: `You need ${item.cost - currentCoins} more EPC.`,
         level_locked:       `Reach Level ${item.minLevelRequirement} to unlock.`,
         already_owned:      'Already in your inventory.',
         unknown_item:       'Unknown item.',

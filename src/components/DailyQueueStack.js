@@ -1,9 +1,10 @@
 // =============================================================================
 // DailyQueueStack — swipeable SMS transaction review queue
 // -----------------------------------------------------------------------------
-// Right swipe  → approve  → +10 XP float animation
+// Right swipe  → approve  → recordReview() → +RP / +EPC drift animation
 // Left swipe   → category picker → mark reviewed after selection
 // Empty queue  → InboxZero celebration card
+// ⓘ icon       → opens QueueCapInfoSheet explaining the 20/day earning cap
 // =============================================================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,12 +25,18 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
+import {
+  useRewardStore,
+  selectTotalRP,
+  selectAwareStreak,
+} from '../store/useRewardStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
 import CategoryPickerModal from './CategoryPickerModal';
 import LinkContactModal from './LinkContactModal';
+import QueueCapInfoSheet from './QueueCapInfoSheet';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_H         = 152;
@@ -84,26 +91,25 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
   const translateX = useSharedValue(0);
   const rotate     = useSharedValue(0);
 
-  // +10 XP float
-  const xpOpacity = useSharedValue(0);
-  const xpY       = useSharedValue(0);
+  // Reward drift badge (+RP / +EPC). Label is set just-in-time from the
+  // recordReview() return payload so capped reviews can show the cap hint
+  // instead of fake award numbers.
+  const driftOpacity = useSharedValue(0);
+  const driftY       = useSharedValue(0);
+  const [driftLabel, setDriftLabel] = useState('');
 
-  const fireXPAnimation = useCallback(() => {
-    xpOpacity.value = withSequence(
-      withTiming(1,   { duration: 120 }),
-      withTiming(0,   { duration: 500 }),
+  const fireDriftAnimation = useCallback((label) => {
+    setDriftLabel(label);
+    driftOpacity.value = withSequence(
+      withTiming(1, { duration: 120 }),
+      withTiming(0, { duration: 500 }),
     );
-    xpY.value = withTiming(-56, { duration: 620 });
-  }, []);
-
-  const resetXP = useCallback(() => {
-    xpOpacity.value = 0;
-    xpY.value       = 0;
+    driftY.value = withTiming(-56, { duration: 620 });
   }, []);
 
   const handleApprove = useCallback(() => {
-    onApprove(txn.id);
-  }, [txn.id, onApprove]);
+    onApprove(txn.id, fireDriftAnimation);
+  }, [txn.id, onApprove, fireDriftAnimation]);
 
   const handlePickCategory = useCallback(() => {
     onPickCategory(txn);
@@ -127,7 +133,6 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
       const shouldReject  = dx < -SWIPE_THRESHOLD || vx < -SWIPE_VELOCITY;
 
       if (shouldApprove) {
-        runOnJS(fireXPAnimation)();
         translateX.value = withTiming(SCREEN_W * 1.6, { duration: 230 }, (done) => {
           if (done) runOnJS(handleApprove)();
         });
@@ -165,9 +170,9 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
       : 0,
   }));
 
-  const xpStyle = useAnimatedStyle(() => ({
-    opacity:   xpOpacity.value,
-    transform: [{ translateY: xpY.value }],
+  const driftStyle = useAnimatedStyle(() => ({
+    opacity:   driftOpacity.value,
+    transform: [{ translateY: driftY.value }],
   }));
 
   const cat = categories.find((c) => c.id === txn.categoryId);
@@ -230,10 +235,11 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
         </Animated.View>
       </GestureDetector>
 
-      {/* +10 XP float — only on top card */}
-      {isTop && (
-        <Animated.View style={[styles.xpBadge, xpStyle]} pointerEvents="none">
-          <Text style={styles.xpText}>+10 XP</Text>
+      {/* RP / EPC drift — only on the top card. Label is set just-in-time
+          based on the recordReview() return payload (cap-respecting). */}
+      {isTop && !!driftLabel && (
+        <Animated.View style={[styles.driftBadge, driftStyle]} pointerEvents="none">
+          <Text style={styles.driftText}>{driftLabel}</Text>
         </Animated.View>
       )}
     </View>
@@ -247,8 +253,9 @@ const DailyQueueStack = () => {
   const theme      = useTheme();
   const navigation = useNavigation();
   const queue    = useEPurseStore(selectUnreviewedQueue);
-  const xp       = useEPurseStore((s) => s.xp || 0);
-  const streak   = useEPurseStore((s) => s.reviewStreak || { current: 0, best: 0 });
+  const totalRP    = useRewardStore(selectTotalRP);
+  const awareStreak = useRewardStore(selectAwareStreak);
+  const recordReview = useRewardStore((s) => s.recordReview);
   const categories               = useEPurseStore((s) => s.categories);
   const markReviewed             = useEPurseStore((s) => s.markReviewed);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
@@ -257,6 +264,7 @@ const DailyQueueStack = () => {
   // Category picker state
   const [pickerTxn,  setPickerTxn]  = useState(null);
   const [lbLinkData, setLbLinkData] = useState(null); // { txn, categoryId }
+  const [showCapInfo, setShowCapInfo] = useState(false);
 
   // InboxZero: show celebration when user clears the last card this session
   const prevLenRef = useRef(queue.length);
@@ -271,9 +279,24 @@ const DailyQueueStack = () => {
     prevLenRef.current = queue.length;
   }, [queue.length]);
 
-  const handleApprove = useCallback((id) => {
+  /**
+   * Compose the queue-clear with the economy hit. `markReviewed` always
+   * fires so the card leaves the layout; `recordReview` decides whether to
+   * award RP/EPC (within daily cap) or show the cap hint. `fireDrift` is
+   * the SwipeableCard's per-card animation entry point — we hand it the
+   * pre-formatted label.
+   */
+  const handleApprove = useCallback((id, fireDrift) => {
+    const result = recordReview();
     markReviewed(id);
-  }, [markReviewed]);
+    if (fireDrift) {
+      if (result.counted) {
+        fireDrift(`+${result.rpAwarded} RP  ·  +${result.epcAwarded} EPC`);
+      } else if (result.message) {
+        fireDrift(result.message);
+      }
+    }
+  }, [markReviewed, recordReview]);
 
   const handlePickCategory = useCallback((txn) => {
     setPickerTxn(txn);
@@ -282,9 +305,10 @@ const DailyQueueStack = () => {
   const handleSelectCategory = useCallback((categoryId) => {
     if (!pickerTxn) return;
     updateTransactionCategory(pickerTxn.id, categoryId);
+    recordReview();
     markReviewed(pickerTxn.id);
     setPickerTxn(null);
-  }, [pickerTxn, updateTransactionCategory, markReviewed]);
+  }, [pickerTxn, updateTransactionCategory, markReviewed, recordReview]);
 
   const handleSelectLentBorrow = useCallback((categoryId) => {
     if (!pickerTxn) return;
@@ -296,9 +320,10 @@ const DailyQueueStack = () => {
   const handleLinkContact = useCallback((contactInfo) => {
     if (!lbLinkData) return;
     updateTransactionCategoryWithContact(lbLinkData.txn.id, lbLinkData.categoryId, contactInfo);
+    recordReview();
     markReviewed(lbLinkData.txn.id);
     setLbLinkData(null);
-  }, [lbLinkData, updateTransactionCategoryWithContact, markReviewed]);
+  }, [lbLinkData, updateTransactionCategoryWithContact, markReviewed, recordReview]);
 
   const handlePickerClose = useCallback(() => {
     setPickerTxn(null);
@@ -317,7 +342,19 @@ const DailyQueueStack = () => {
     <View style={styles.container}>
       {/* ── Header ── */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>REVIEW QUEUE</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>REVIEW QUEUE</Text>
+          <TouchableOpacity
+            style={styles.infoDot}
+            onPress={() => setShowCapInfo(true)}
+            activeOpacity={0.6}
+            accessibilityRole="button"
+            accessibilityLabel="Daily earning cap info"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.infoDotText}>ⓘ</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.headerRow}>
           {queue.length > 0 ? (
             <Text style={styles.headerSub}>
@@ -329,9 +366,9 @@ const DailyQueueStack = () => {
             onPress={() => navigation.navigate('RewardShop')}
             activeOpacity={0.75}
           >
-            <Text style={styles.xpPillText}>⚡ {xp} XP</Text>
-            {streak.current > 0 && (
-              <Text style={styles.streakText}> · 🔥 {streak.current}d</Text>
+            <Text style={styles.xpPillText}>⚡ {totalRP.toLocaleString('en-IN')} RP</Text>
+            {awareStreak > 0 && (
+              <Text style={styles.streakText}> · 🔥 {awareStreak}d</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -386,6 +423,12 @@ const DailyQueueStack = () => {
         onConfirm={handleLinkContact}
         onClose={handleLbClose}
       />
+
+      {/* ── Daily cap explainer ── */}
+      <QueueCapInfoSheet
+        visible={showCapInfo}
+        onClose={() => setShowCapInfo(false)}
+      />
     </View>
   );
 };
@@ -404,6 +447,11 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: spacing.sm,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           6,
+  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,6 +463,15 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '700',
     letterSpacing: 1.2,
+  },
+  infoDot: {
+    width: 18, height: 18,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  infoDotText: {
+    fontSize: 13,
+    color:    colors.textMuted,
+    fontWeight: '700',
   },
   headerSub: {
     ...typography.small,
@@ -521,8 +578,8 @@ const styles = StyleSheet.create({
   hintLeft:  { ...typography.tiny, color: colors.warning, fontWeight: '600' },
   hintRight: { ...typography.tiny, color: colors.success, fontWeight: '600' },
 
-  // +10 XP badge
-  xpBadge: {
+  // RP / EPC drift badge (was xpBadge)
+  driftBadge: {
     position: 'absolute',
     alignSelf: 'center',
     top: CARD_H / 2 - 24,
@@ -532,7 +589,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     zIndex: 99,
   },
-  xpText: {
+  driftText: {
     ...typography.bodyBold,
     color: '#fff',
     fontWeight: '800',

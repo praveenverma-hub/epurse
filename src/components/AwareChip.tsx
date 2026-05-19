@@ -39,7 +39,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useRewardStore, selectAwareStreak } from '../store/useRewardStore';
+import { REWARD_CONFIG } from '../config/rewardConfig';
 import LiveFlame from './LiveFlame';
 
 // ─── Public types ───────────────────────────────────────────────────────────
@@ -51,25 +52,18 @@ export interface AwareChipProps {
   style?:   ViewStyle;
 }
 
-interface StreakState {
-  /** Current consecutive review streak in days. */
-  current: number;
-}
+// ─── Constants (sourced from rewardConfig.ts) ───────────────────────────────
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
-const TIER_SWITCH_DAYS = 3;
-const PHASE_MS         = 3000;
-const FADE_MS          = 450;
+const TIER_SWITCH_DAYS = REWARD_CONFIG.CHIP_TIER2_DAYS;
+const PHASE_MS         = REWARD_CONFIG.CHIP_PHASE_MS;
+const FADE_MS          = REWARD_CONFIG.CHIP_FADE_MS;
 const SQUARE_SIZE      = 44;
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const AwareChip: React.FC<AwareChipProps> = ({ onPress, style }) => {
-  const streak: StreakState = useEPurseStore(
-    (s: any) => s.reviewStreak ?? { current: 0 },
-  );
-  const days = Math.max(0, Math.floor(streak.current));
+  const awareStreak = useRewardStore(selectAwareStreak);
+  const days        = Math.max(0, Math.floor(awareStreak));
 
   if (days < TIER_SWITCH_DAYS) {
     return <Tier1Capsule days={days} onPress={onPress} style={style} />;

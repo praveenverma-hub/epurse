@@ -11,7 +11,7 @@
 //   7. FAB
 // =============================================================================
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Animated, Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, RefreshControl,
@@ -19,8 +19,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useEPurseStore } from '../store/ePurseStore';
-import { levelFromXp } from '../store/useRewardStore';
+import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
+import {
+  useRewardStore,
+  selectLevel,
+} from '../store/useRewardStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
@@ -34,6 +37,7 @@ import BudgetWidget from '../components/BudgetWidget';
 import DailyQueueStack from '../components/DailyQueueStack';
 import AwareChip from '../components/AwareChip';
 import WelcomeStreakModal from '../components/WelcomeStreakModal';
+import CheckInBanner from '../components/CheckInBanner';
 import CelebrationModal from '../components/CelebrationModal';
 import TransactionItem from '../components/TransactionItem';
 import FAB from '../components/FAB';
@@ -77,8 +81,8 @@ const DashboardScreen = ({ navigation }) => {
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
-  const xp               = useEPurseStore((s) => s.xp ?? 0);
-  const level            = levelFromXp(xp);
+  const level            = useRewardStore(selectLevel);
+  const checkIn          = useRewardStore((s) => s.checkIn);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
@@ -193,6 +197,23 @@ const DashboardScreen = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 600);
   }, []);
 
+  // ── Aware Run check-in (hands-free) ──────────────────────────────────────
+  // Runs once on mount AND on every screen focus (foregrounding the app
+  // after the day rolls over still counts). checkIn() is idempotent within
+  // a calendar day, so re-firing on focus is safe. We pass the count of
+  // unreviewed transactions so the store can recognise a Zero-Spending Day.
+  useEffect(() => {
+    const sub = navigation.addListener('focus', () => {
+      const queueLen = selectUnreviewedQueue(useEPurseStore.getState()).length;
+      checkIn(queueLen);
+    });
+    // Fire once on initial mount as well (focus listener doesn't fire on the
+    // first render because the screen is already focused).
+    const queueLen = selectUnreviewedQueue(useEPurseStore.getState()).length;
+    checkIn(queueLen);
+    return sub;
+  }, [navigation, checkIn]);
+
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -213,6 +234,9 @@ const DashboardScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+
+      {/* Floating check-in banner — auto-shows on new-day launches. */}
+      <CheckInBanner />
 
       {/* ───── Gradient header ───── */}
       <LinearGradient

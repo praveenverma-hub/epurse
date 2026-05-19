@@ -32,21 +32,25 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import {
+  useRewardStore,
+  selectFirstLaunch,
+} from '../store/useRewardStore';
+import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
 import LiveFlame from './LiveFlame';
 import { hapticSuccess } from '../utils/haptics';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const DWELL_MS    = 4500;
+const DWELL_MS    = REWARD_CONFIG.WELCOME_DWELL_MS;
 const EXIT_MS     = 380;
 const SCREEN_H    = Dimensions.get('window').height;
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const WelcomeStreakModal: React.FC = () => {
-  const isFirstLaunch     = useEPurseStore((s: any) => s.isFirstLaunch);
-  const setFirstLaunchDone = useEPurseStore((s: any) => s.setFirstLaunchDone);
+  const isFirstLaunch      = useRewardStore(selectFirstLaunch);
+  const setFirstLaunchDone = useRewardStore((s) => s.setFirstLaunchDone);
 
   // Tracks whether the sheet is currently visible to the Modal host. We can't
   // unmount until the slide-down completes, so this gates the Modal directly.
@@ -149,16 +153,12 @@ const WelcomeStreakModal: React.FC = () => {
             <LiveFlame size={56} />
           </View>
 
-          <Text style={styles.headline}>🚀 Day 1 Aware Run Ignited!</Text>
+          <Text style={styles.headline}>{REWARD_COPY.WELCOME_HEADLINE}</Text>
 
-          <Text style={styles.description}>
-            Welcome to ePurse. Your spending awareness journey begins today.
-            Keep your Review Queue clean every day to earn coins, level up,
-            and unlock beautiful live widgets and premium workspace layouts!
-          </Text>
+          <Text style={styles.description}>{REWARD_COPY.WELCOME_DESCRIPTION}</Text>
 
           <Pressable style={styles.cta} onPress={dismissEarly}>
-            <Text style={styles.ctaText}>Got it</Text>
+            <Text style={styles.ctaText}>{REWARD_COPY.WELCOME_CTA}</Text>
           </Pressable>
         </Animated.View>
       </Animated.View>
