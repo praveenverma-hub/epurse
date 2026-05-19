@@ -6,7 +6,7 @@
 // Region C: 3 widget cards with locked / purchasable / owned-toggle states
 // =============================================================================
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -42,9 +42,11 @@ import {
 import {
   rpForNextLevel,
   levelProgressPct,
+  REWARD_COPY,
 } from '../config/rewardConfig';
 import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 import { useToast } from '../components/Toast';
+import InfoSheet from '../components/InfoSheet';
 
 // ─── Dark-mode palette (screen-scoped) ───────────────────────────────────────
 
@@ -85,6 +87,10 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
   const title         = useMemo(() => levelTitle(level),         [level]);
   const nextThreshold = useMemo(() => rpForNextLevel(totalRP),    [totalRP]);
   const pct           = useMemo(() => levelProgressPct(totalRP),  [totalRP]);
+
+  // Which definition sheet (if any) is currently open. Single state keeps
+  // them mutually exclusive — tapping RP closes EPC and vice-versa.
+  const [infoOpen, setInfoOpen] = useState<'rp' | 'epc' | null>(null);
 
   const initial = userName?.trim()?.charAt(0)?.toUpperCase() || '🙂';
   const display = userName?.trim() || 'Guest';
@@ -152,7 +158,20 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
             {/* RP block — next-level progress */}
             <View style={styles.xpBlock}>
               <View style={styles.xpRow}>
-                <Text style={styles.xpLabel}>NEXT LEVEL</Text>
+                <TouchableOpacity
+                  style={styles.labelWithInfo}
+                  onPress={() => {
+                    hapticLight();
+                    setInfoOpen('rp');
+                  }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="What are Reality Points"
+                >
+                  <Text style={styles.xpLabel}>NEXT LEVEL</Text>
+                  <Text style={styles.infoGlyph}>ⓘ</Text>
+                </TouchableOpacity>
                 <Text style={styles.xpPoints}>
                   {totalRP.toLocaleString('en-IN')}
                   <Text style={styles.xpPointsMuted}>
@@ -172,7 +191,20 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.coinAmount}>
                   {coins.toLocaleString('en-IN')}
                 </Text>
-                <Text style={styles.coinLabel}>EPC Balance</Text>
+                <TouchableOpacity
+                  style={styles.labelWithInfo}
+                  onPress={() => {
+                    hapticLight();
+                    setInfoOpen('epc');
+                  }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="What are ePurse Coins"
+                >
+                  <Text style={styles.coinLabel}>EPC Balance</Text>
+                  <Text style={styles.infoGlyph}>ⓘ</Text>
+                </TouchableOpacity>
               </View>
             </View>
           </Animated.View>
@@ -202,6 +234,30 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
           <View style={{ height: 32 }} />
         </ScrollView>
       </SafeAreaView>
+
+      {/* RP / EPC definition sheets — one component, two configurations.    */}
+      <InfoSheet
+        visible={infoOpen === 'rp'}
+        onClose={() => setInfoOpen(null)}
+        title={REWARD_COPY.RP_TITLE}
+        eyebrow={REWARD_COPY.RP_EYEBROW}
+        body={REWARD_COPY.RP_BODY}
+        bullets={[
+          { label: REWARD_COPY.RP_BULLET_EARN_LABEL,  value: REWARD_COPY.RP_BULLET_EARN_VALUE  },
+          { label: REWARD_COPY.RP_BULLET_LEVEL_LABEL, value: REWARD_COPY.RP_BULLET_LEVEL_VALUE },
+        ]}
+      />
+      <InfoSheet
+        visible={infoOpen === 'epc'}
+        onClose={() => setInfoOpen(null)}
+        title={REWARD_COPY.EPC_TITLE}
+        eyebrow={REWARD_COPY.EPC_EYEBROW}
+        body={REWARD_COPY.EPC_BODY}
+        bullets={[
+          { label: REWARD_COPY.EPC_BULLET_EARN_LABEL, value: REWARD_COPY.EPC_BULLET_EARN_VALUE },
+          { label: REWARD_COPY.EPC_BULLET_SAVE_LABEL, value: REWARD_COPY.EPC_BULLET_SAVE_VALUE },
+        ]}
+      />
     </View>
   );
 };
@@ -567,6 +623,18 @@ const styles = StyleSheet.create({
     fontWeight: '800' as const,
     color: D.textSec,
     letterSpacing: 1.2,
+  },
+  /** Wraps a section label + the (i) glyph so they tap together. */
+  labelWithInfo: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           6,
+  },
+  /** The (i) circle next to RP / EPC labels — tap opens InfoSheet. */
+  infoGlyph: {
+    fontSize:   13,
+    color:      D.textMuted,
+    fontWeight: '700' as const,
   },
   xpPoints: {
     fontSize: 12,

@@ -149,6 +149,29 @@ export const REWARD_COPY = {
   BANNER_RESET:          '🌅 New Aware Run started — back to Day 1.',
 
   CAP_REACHED_HINT:    'Daily earning cap reached — review keeps clearing!',
+
+  // ─── In-shop definitions (tapped via the (i) icons in the hero card) ────
+  RP_TITLE:       'Reality Points',
+  RP_EYEBROW:     'RP · Lifetime progress',
+  RP_BODY:
+    'Reality Points measure your lifetime financial-awareness progress. ' +
+    'Every reviewed transaction adds RP, and every 1 000 RP unlocks the ' +
+    'next Profile Level. Levels gate which premium widgets you can buy.',
+  RP_BULLET_EARN_LABEL:  'How you earn it',
+  RP_BULLET_EARN_VALUE:  '+10 RP per reviewed transaction · scales with your Aware Run multiplier.',
+  RP_BULLET_LEVEL_LABEL: 'Level math',
+  RP_BULLET_LEVEL_VALUE: 'Level = floor(Total RP / 1 000) + 1.',
+
+  EPC_TITLE:      'ePurse Coins',
+  EPC_EYEBROW:    'EPC · Spendable currency',
+  EPC_BODY:
+    'ePurse Coins are the currency you spend in the shop to unlock premium ' +
+    'widgets. They build slower than RP, so the choice of which widget to ' +
+    'buy actually matters.',
+  EPC_BULLET_EARN_LABEL:  'How you earn it',
+  EPC_BULLET_EARN_VALUE:  '+1 EPC per reviewed transaction · multiplier-boosted at Day 6+ and Day 16+.',
+  EPC_BULLET_SAVE_LABEL:  'Bonus path',
+  EPC_BULLET_SAVE_VALUE:  '+5 EPC on Zero-Spending check-in days (no SMS queue means a mindful day).',
 } as const;
 
 // ─── Derived helpers (pure, side-effect free) ────────────────────────────────

@@ -253,7 +253,30 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.userName}>{userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}</Text>
             </View>
             <View style={styles.headerRight}>
-              <AwareChip onPress={() => navigation.navigate('RewardShop')} />
+              <AwareChip
+                onPress={() => {
+                  // Trigger the celebration banner with intro copy explaining
+                  // what the Aware Run is. Synthetic NEW_DAY result reuses
+                  // the existing banner pipeline (confetti + sparkles) but
+                  // skips actual reward grants by zeroing out the awards.
+                  const streak = useEPurseStore.getState().reviewStreak?.current ?? 0;
+                  const awareStreak = Math.max(1, streak);
+                  useRewardStore.setState({
+                    lastCheckInResult: {
+                      type:       'NEW_DAY',
+                      rpAwarded:  0,
+                      epcAwarded: 0,
+                      newStreak:  awareStreak,
+                      multiplier: awareStreak >= 16 ? 1.5 : awareStreak >= 6 ? 1.2 : 1.0,
+                      message:    `🔥 Your Aware Run · Day ${awareStreak}`,
+                      subtitle:
+                        'Open the app every day to grow your streak. ' +
+                        'Day 6+ earns 1.2× RP · Day 16+ earns 1.5×.',
+                      ts: Date.now(),
+                    },
+                  });
+                }}
+              />
               <TouchableOpacity
                 style={styles.avatarBtn}
                 onPress={() => navigation.navigate('RewardShop')}

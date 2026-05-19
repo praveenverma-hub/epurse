@@ -61,6 +61,12 @@ export interface CheckInResult {
   multiplier:  number;
   /** Pre-formatted banner copy ready for direct display. */
   message:     string;
+  /**
+   * Optional descriptive line shown beneath the title. When present, the
+   * banner uses this instead of the auto-computed RP/EPC earnings tail —
+   * useful for non-award banners like the Aware Run intro tap.
+   */
+  subtitle?:   string;
   /** Timestamp the check-in was recorded (ms since epoch). */
   ts:          number;
 }
