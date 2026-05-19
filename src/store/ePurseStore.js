@@ -270,6 +270,14 @@ export const useEPurseStore = create(
       smsPermissionGranted: false,
       contactsPermissionGranted: false,
 
+      /**
+       * isFirstLaunch — true until the first-time Dashboard visit completes the
+       * welcome celebration. Flipped to false by the WelcomeStreakModal once
+       * its 4.5s dwell timer elapses, so it never replays on future launches.
+       */
+      isFirstLaunch: true,
+      setFirstLaunchDone: () => set({ isFirstLaunch: false }),
+
       // Theme preferences
       themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
       darkMode: false,             // reserved for future dark-theme rollout
@@ -1716,6 +1724,7 @@ export const useEPurseStore = create(
         xp: state.xp,
         reviewStreak: state.reviewStreak,
         userCustomRules: state.userCustomRules,
+        isFirstLaunch: state.isFirstLaunch,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;

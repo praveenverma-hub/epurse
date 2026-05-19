@@ -13,14 +13,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  Animated, Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { useRewardStore, levelFromXp, levelTitle } from '../store/useRewardStore';
+import { levelFromXp } from '../store/useRewardStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
@@ -32,6 +32,8 @@ import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import BudgetWidget from '../components/BudgetWidget';
 import DailyQueueStack from '../components/DailyQueueStack';
+import AwareChip from '../components/AwareChip';
+import WelcomeStreakModal from '../components/WelcomeStreakModal';
 import CelebrationModal from '../components/CelebrationModal';
 import TransactionItem from '../components/TransactionItem';
 import FAB from '../components/FAB';
@@ -76,7 +78,6 @@ const DashboardScreen = ({ navigation }) => {
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const xp               = useEPurseStore((s) => s.xp ?? 0);
-  const coins            = useRewardStore((s) => s.coins);
   const level            = levelFromXp(xp);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
@@ -93,6 +94,8 @@ const DashboardScreen = ({ navigation }) => {
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsSlide = useState(() => new Animated.Value(0))[0];
 
   // ── Period-aware stats ────────────────────────────────────────────────────
   const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
@@ -225,18 +228,25 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.userName}>{userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}</Text>
             </View>
-            <TouchableOpacity
-              style={styles.avatarBtn}
-              onPress={() => navigation.navigate('RewardShop')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.avatarInitial}>
-                {userName ? userName.charAt(0).toUpperCase() : '👤'}
-              </Text>
-              <View style={styles.levelBadge}>
-                <Text style={styles.levelBadgeText}>{level}</Text>
-              </View>
-            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              <AwareChip onPress={() => navigation.navigate('RewardShop')} />
+              <TouchableOpacity
+                style={styles.avatarBtn}
+                onPress={() => navigation.navigate('RewardShop')}
+                onLongPress={() => {
+                  setShowSettings(true);
+                  Animated.spring(settingsSlide, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.avatarInitial}>
+                  {userName ? userName.charAt(0).toUpperCase() : '👤'}
+                </Text>
+                <View style={styles.levelBadge}>
+                  <Text style={styles.levelBadgeText}>{level}</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Balance */}
@@ -509,6 +519,55 @@ const DashboardScreen = ({ navigation }) => {
           navigation.navigate('Insights');
         }}
       />
+
+      {/* Day-1 Aware Run welcome — auto-dismisses after 4.5s */}
+      <WelcomeStreakModal />
+
+      {/* ── Settings bottom sheet ── */}
+      <Modal
+        visible={showSettings}
+        transparent
+        animationType="none"
+        onRequestClose={() => {
+          Animated.timing(settingsSlide, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowSettings(false));
+        }}
+      >
+        <TouchableOpacity
+          style={styles.settingsBackdrop}
+          activeOpacity={1}
+          onPress={() => {
+            Animated.timing(settingsSlide, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowSettings(false));
+          }}
+        >
+          <Animated.View
+            style={[
+              styles.settingsSheet,
+              { transform: [{ translateY: settingsSlide.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] },
+            ]}
+          >
+            <View style={styles.settingsHandle} />
+            {[
+              { emoji: '📂', label: 'Categories', route: 'Categories' },
+              { emoji: '🔬', label: 'SMS Diagnostic', route: 'SmsDiagnostic' },
+            ].map(({ emoji, label, route }) => (
+              <TouchableOpacity
+                key={route}
+                style={styles.settingsRow}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setShowSettings(false);
+                  settingsSlide.setValue(0);
+                  navigation.navigate(route);
+                }}
+              >
+                <Text style={styles.settingsRowEmoji}>{emoji}</Text>
+                <Text style={styles.settingsRowLabel}>{label}</Text>
+                <Text style={styles.settingsRowChevron}>›</Text>
+              </TouchableOpacity>
+            ))}
+          </Animated.View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -533,6 +592,11 @@ const styles = StyleSheet.create({
   },
   greeting:  { color: '#FFFFFFCC', ...typography.small },
   userName:  { color: '#fff', ...typography.h2, marginTop: 2 },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           12,
+  },
   avatarBtn: {
     width: 42, height: 42, borderRadius: 21,
     alignItems: 'center', justifyContent: 'center',
@@ -632,6 +696,39 @@ const styles = StyleSheet.create({
     ...typography.small, color: colors.textSecondary,
     textAlign: 'center', marginTop: spacing.xs,
   },
+
+  // Settings sheet
+  settingsBackdrop: {
+    flex: 1,
+    backgroundColor: '#00000066',
+    justifyContent: 'flex-end',
+  },
+  settingsSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 36,
+    paddingTop: spacing.sm,
+    ...shadows.elevated,
+  },
+  settingsHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+    gap: spacing.md,
+  },
+  settingsRowEmoji: { fontSize: 20 },
+  settingsRowLabel: { flex: 1, ...typography.body, color: colors.textPrimary, fontWeight: '600' },
+  settingsRowChevron: { fontSize: 22, color: colors.textSecondary, fontWeight: '300' },
 });
 
 export default DashboardScreen;
