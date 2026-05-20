@@ -135,7 +135,7 @@ const buildDiamond = (cx: number, cy: number, r: number, size: number): SkPath =
 
 const CrystalPiggyVault: React.FC<CrystalPiggyVaultProps> = ({
   tier,
-  size     = 44,
+  size     = 40,
   animated = true,
   day,
 }) => {
@@ -216,7 +216,7 @@ const CrystalPiggyVault: React.FC<CrystalPiggyVaultProps> = ({
   return (
     <View style={styles.wrap}>
       {/* ── Piggy square ───────────────────────────────────────────────── */}
-      <View style={{ width: size, height: size, flexShrink: 0 }}>
+      <View style={{ width: size, height: size }}>
 
         {/* Layer 1: SVG frosted-glass piggy */}
         <PiggySvg
