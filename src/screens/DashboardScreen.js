@@ -41,6 +41,7 @@ import { selectAwareStreak } from '../store/useRewardStore';
 import WelcomeStreakModal from '../components/WelcomeStreakModal';
 import CheckInBanner from '../components/CheckInBanner';
 import CelebrationModal from '../components/CelebrationModal';
+import CCPaymentPromptModal from '../components/CCPaymentPromptModal';
 import TransactionItem from '../components/TransactionItem';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
@@ -592,6 +593,9 @@ const DashboardScreen = ({ navigation }) => {
 
       {/* Day-1 Aware Run welcome — auto-dismisses after 4.5s */}
       <WelcomeStreakModal />
+
+      {/* CC outstanding true-up prompt */}
+      <CCPaymentPromptModal />
 
       {/* ── Settings bottom sheet ── */}
       <Modal

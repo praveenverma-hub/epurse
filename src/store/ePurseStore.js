@@ -296,6 +296,11 @@ export const useEPurseStore = create(
       //   { monthKey, totalActual, totalCap, status, overshoot, streakAfter, savedAmount }
       pendingCelebration: null,
 
+      // Set when a CC payment SMS arrives on an untracked card.
+      // Shape: { amount, accountId, accountMask, bankName }
+      // Cleared by confirmCCTrueUp or dismissCCPaymentPrompt.
+      pendingCCPayment: null,
+
       // Per-cycle dedup for the mid-month nudge (one notification per cycle).
       lastMidmonthNudgeMonth: null,
 
@@ -773,9 +778,70 @@ export const useEPurseStore = create(
        *           regardless of timing.
        * Returns the parsed object, or null if not financial / duplicate.
        */
+      applyCCPayment: ({ amount, accountMask, bankName }) => {
+        if (!amount || amount <= 0 || amount > MAX_ALLOWED_AMOUNT) return null;
+        const state = get();
+        const pseudoTxn = {
+          amount,
+          type:        TRANSACTION_TYPES.CREDIT,
+          accountType: ACCOUNT_TYPES.CREDIT_CARD,
+          accountMask: accountMask || null,
+          bankName:    bankName    || null,
+        };
+        let { accounts: accountsWithMatch, account } =
+          ensureAccountForParsed([...state.accounts], pseudoTxn);
+        if (!account) return null;
+
+        if (!account.ccPaymentsTracked) {
+          // First payment on this card — ask user to confirm the true-up
+          // rather than silently resetting. Persist the new account row if
+          // it was just auto-created by ensureAccountForParsed.
+          set({
+            accounts: accountsWithMatch,
+            pendingCCPayment: {
+              amount,
+              accountId:   account.id,
+              accountMask: account.mask  || accountMask || null,
+              bankName:    account.bankName || bankName || null,
+            },
+          });
+          return { ccPayment: 'pending', accountId: account.id };
+        }
+
+        // Already tracking — apply the payment delta automatically.
+        const nextAccounts = applyDelta(accountsWithMatch, account.id, pseudoTxn);
+        set({ accounts: nextAccounts });
+        return { ccPayment: true, accountId: account.id, amount };
+      },
+
+      // User tapped "True-up to Zero" — zero out the CC account and start tracking.
+      confirmCCTrueUp: () => {
+        const { pendingCCPayment, accounts } = get();
+        if (!pendingCCPayment) return;
+        set({
+          accounts: accounts.map((a) =>
+            a.id === pendingCCPayment.accountId
+              ? { ...a, balance: 0, ccPaymentsTracked: true }
+              : a
+          ),
+          pendingCCPayment: null,
+        });
+      },
+
+      // User tapped "Skip" — discard without changing the account.
+      dismissCCPaymentPrompt: () => set({ pendingCCPayment: null }),
+
       ingestMessage: (rawMessage, opts = {}) => {
         const parsedResult = parseMessageDetailed(rawMessage, opts);
-        if (!parsedResult?.ok) return null;
+        if (!parsedResult?.ok) {
+          if (
+            parsedResult?.error?.code === 'credit_card_payment_notification' &&
+            parsedResult.ccPayment
+          ) {
+            get().applyCCPayment(parsedResult.ccPayment);
+          }
+          return null;
+        }
 
         const parsedTxns = parsedResult.transactions || [parsedResult.transaction];
         const smsBaseId = opts.smsId ? String(opts.smsId) : null;
@@ -1784,7 +1850,8 @@ export const useEPurseStore = create(
         budgetHistory: state.budgetHistory,
         budgetStreak: state.budgetStreak,
         budgetBreachNotified: state.budgetBreachNotified,
-        pendingCelebration: state.pendingCelebration,
+        pendingCelebration:    state.pendingCelebration,
+        pendingCCPayment:      state.pendingCCPayment      ?? null,
         lastMidmonthNudgeMonth: state.lastMidmonthNudgeMonth,
         xp: state.xp,
         reviewStreak: state.reviewStreak,

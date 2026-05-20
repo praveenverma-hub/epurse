@@ -89,6 +89,10 @@ const AccountCard = ({
   const balanceHidden  = isSensitive && !showBalance;
   const bankDisplay    = deriveBankName(account);
   const displayHolder  = holderName || account.name || 'Card Holder';
+  const isCreditCard       = account.type === ACCOUNT_TYPES.CREDIT_CARD;
+  const ccTrackingActive   = isCreditCard && !!account.ccPaymentsTracked;
+  const isFullyPaid        = ccTrackingActive && account.balance >= 0;
+  const outstanding        = ccTrackingActive ? Math.abs(account.balance) : null;
 
   return (
     <View style={{ position: 'relative', marginRight: spacing.md }}>
@@ -168,11 +172,19 @@ const AccountCard = ({
               <Text style={styles.name} numberOfLines={1}>{displayHolder}</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.label}>BALANCE</Text>
+              <Text style={styles.label}>
+                {ccTrackingActive ? 'OUTSTANDING' : 'BALANCE'}
+              </Text>
               {balanceHidden ? (
                 <Text style={styles.balanceMasked}>••••••</Text>
+              ) : isFullyPaid ? (
+                <View style={styles.fullyPaidBadge}>
+                  <Text style={styles.fullyPaidText}>FULLY PAID</Text>
+                </View>
               ) : (
-                <Text style={styles.balance}>{formatCompact(account.balance)}</Text>
+                <Text style={styles.balance}>
+                  {isCreditCard ? formatCompact(outstanding) : formatCompact(account.balance)}
+                </Text>
               )}
             </View>
           </View>
@@ -268,6 +280,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 3,
     marginTop: 4,
+  },
+  fullyPaidBadge: {
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#10B98133',
+    borderWidth: 1,
+    borderColor: '#10B98166',
+  },
+  fullyPaidText: {
+    color: '#6EE7B7',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.4,
   },
 
   deleteBtn: {

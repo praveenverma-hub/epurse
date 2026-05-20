@@ -172,7 +172,7 @@ const VPA_REGEX = /([a-zA-Z0-9._\-]{2,30}@[a-zA-Z]{2,15})/;
 
 // Payment acknowledgements for credit cards (not new spend/income transactions).
 const CC_PAYMENT_NOTIFICATION_REGEX =
-  /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?\s+has\s+been\s+received\s+on\s+your\b[\s\S]*\bcredit\s+card\b/i;
+  /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?[\s\S]{0,80}(?:has\s+been\s+received\s+on\s+your\b[\s\S]*\bcredit\s+card\b|was\s+credited\s+to\s+your\s+card\b|received\s+towards\s+your\b[\s\S]{0,30}\bcredit\s+card\b)/i;
 
 // =============================================================================
 // Helpers
@@ -356,7 +356,12 @@ export const parseMessageDetailed = (message, opts = {}) => {
 
   // Exclude card payment acknowledgement SMSes. The actual outgoing spend is
   // already captured from the source account debit message.
+  // We still extract amount + mask so the store can credit the CC account balance.
   if (CC_PAYMENT_NOTIFICATION_REGEX.test(text)) {
+    const amtMatch  = text.match(AMOUNT_REGEX);
+    const paidAmt   = toNumber(amtMatch?.[1] || amtMatch?.[2]);
+    const acctMatch = text.match(ACCOUNT_REGEX);
+    const rawMask   = acctMatch?.[1]?.replace(/[x*·•]/gi, '') || null;
     return {
       ok: false,
       error: {
@@ -364,6 +369,9 @@ export const parseMessageDetailed = (message, opts = {}) => {
         message:
           'Credit-card payment acknowledgement detected (notification only), so it was skipped.',
       },
+      ccPayment: paidAmt > 0
+        ? { amount: paidAmt, accountMask: rawMask ? rawMask.slice(-4) : null, bankName: getBankName(opts.sender) }
+        : null,
     };
   }
 
