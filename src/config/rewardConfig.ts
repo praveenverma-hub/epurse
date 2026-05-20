@@ -110,18 +110,17 @@ export const REWARD_CONFIG = {
     },
   ] as readonly ShopItemConfig[],
 
-  // UI tier thresholds ──────────────────────────────────────────────────────
-  /** AwareChip switches from horizontal capsule → compact square at this day. */
-  CHIP_TIER2_DAYS: 3,
-
   // Animation cadence ───────────────────────────────────────────────────────
   /** Floating check-in banner hold time before slide-out. */
   BANNER_VISIBLE_MS:   2500,
-  /** AwareChip cross-fade dwell on each face (flame ↔ number). */
-  CHIP_PHASE_MS:       3000,
-  CHIP_FADE_MS:        450,
   /** Welcome modal dwell on screen before auto-slide-down. */
   WELCOME_DWELL_MS:    4500,
+
+  // TODO: Review or remove once CrystalPiggyVault flow is confirmed stable.
+  //       These were consumed by AwareChip (now superseded by CrystalPiggyVault).
+  // CHIP_TIER2_DAYS: 3,   // day at which AwareChip switched from capsule → live square
+  // CHIP_PHASE_MS:   3000, // cross-fade dwell on each face (flame ↔ number)
+  // CHIP_FADE_MS:    450,  // cross-fade transition duration
 } as const;
 
 // ─── COPY (user-facing strings — never hard-coded in components) ─────────────
@@ -205,6 +204,24 @@ export const labelForStreak = (day: number): string => {
  */
 export const levelFromRP = (rp: number): number =>
   Math.floor(Math.max(0, rp) / REWARD_CONFIG.RP_PER_LEVEL) + 1;
+
+// ─── Crystal Piggy Vault tier mapping ──────────────────────────────────────
+
+/**
+ * Visual tiers for the Crystal Piggy Vault — the header-mounted streak asset
+ * that evolves with Aware Run progression. Tiers are *deliberately* less
+ * granular than the earnings-multiplier ladder: a vault should feel like a
+ * milestone shift, not a per-day color tweak.
+ */
+export type VaultTier = 'base' | 'streak' | 'premium';
+
+/** Map a streak day count to the vault's current visual tier. */
+export const vaultTierForStreak = (day: number): VaultTier => {
+  const safe = Math.max(0, Math.floor(day));
+  if (safe >= 16) return 'premium';
+  if (safe >= 3)  return 'streak';
+  return 'base';
+};
 
 /** RP earned within the current level (0 .. RP_PER_LEVEL-1). */
 export const rpInCurrentLevel = (rp: number): number =>

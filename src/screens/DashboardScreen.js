@@ -35,7 +35,9 @@ import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import BudgetWidget from '../components/BudgetWidget';
 import DailyQueueStack from '../components/DailyQueueStack';
-import AwareChip from '../components/AwareChip';
+import CrystalPiggyVault from '../components/CrystalPiggyVault';
+import { vaultTierForStreak } from '../config/rewardConfig';
+import { selectAwareStreak } from '../store/useRewardStore';
 import WelcomeStreakModal from '../components/WelcomeStreakModal';
 import CheckInBanner from '../components/CheckInBanner';
 import CelebrationModal from '../components/CelebrationModal';
@@ -82,7 +84,9 @@ const DashboardScreen = ({ navigation }) => {
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const level            = useRewardStore(selectLevel);
+  const awareStreak      = useRewardStore(selectAwareStreak);
   const checkIn          = useRewardStore((s) => s.checkIn);
+  const vaultTier        = vaultTierForStreak(awareStreak);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
@@ -100,6 +104,10 @@ const DashboardScreen = ({ navigation }) => {
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
   const [showSettings, setShowSettings] = useState(false);
   const settingsSlide = useState(() => new Animated.Value(0))[0];
+  // Dev-only: long-press vault to cycle tiers for visual preview.
+  // null means "use real tier from streak".
+  const [devVaultTier, setDevVaultTier] = useState(null);
+  const devVaultTimer = React.useRef(null);
 
   // ── Period-aware stats ────────────────────────────────────────────────────
   const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
@@ -253,30 +261,57 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.userName}>{userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}</Text>
             </View>
             <View style={styles.headerRight}>
-              <AwareChip
+              <TouchableOpacity
+                style={styles.vaultBtn}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Crystal Piggy Vault · ${awareStreak} day Aware Run · ${vaultTier} tier`}
                 onPress={() => {
-                  // Trigger the celebration banner with intro copy explaining
-                  // what the Aware Run is. Synthetic NEW_DAY result reuses
-                  // the existing banner pipeline (confetti + sparkles) but
-                  // skips actual reward grants by zeroing out the awards.
-                  const streak = useEPurseStore.getState().reviewStreak?.current ?? 0;
-                  const awareStreak = Math.max(1, streak);
+                  const safeStreak = Math.max(1, awareStreak);
                   useRewardStore.setState({
                     lastCheckInResult: {
                       type:       'NEW_DAY',
                       rpAwarded:  0,
                       epcAwarded: 0,
-                      newStreak:  awareStreak,
-                      multiplier: awareStreak >= 16 ? 1.5 : awareStreak >= 6 ? 1.2 : 1.0,
-                      message:    `🔥 Your Aware Run · Day ${awareStreak}`,
+                      newStreak:  safeStreak,
+                      multiplier: safeStreak >= 16 ? 1.5 : safeStreak >= 6 ? 1.2 : 1.0,
+                      message:    `🔥 Crystal Piggy Vault · Day ${safeStreak}`,
                       subtitle:
-                        'Open the app every day to grow your streak. ' +
-                        'Day 6+ earns 1.2× RP · Day 16+ earns 1.5×.',
+                        'Your vault evolves daily. Day 3 reveals streak ' +
+                        'crystals · Day 16+ unlocks the premium gold tier.',
                       ts: Date.now(),
                     },
                   });
                 }}
-              />
+                onLongPress={() => {
+                  // Cycle through all three visual tiers for inspection.
+                  // Resets to real streak tier after 8 seconds.
+                  const ORDER = ['base', 'streak', 'premium'];
+                  const current = devVaultTier ?? vaultTier;
+                  const next = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
+                  setDevVaultTier(next);
+                  clearTimeout(devVaultTimer.current);
+                  devVaultTimer.current = setTimeout(() => setDevVaultTier(null), 8000);
+                }}
+              >
+                <CrystalPiggyVault tier={devVaultTier ?? vaultTier} size={44} />
+                {(awareStreak > 0 || devVaultTier) ? (
+                  <View
+                    style={[
+                      styles.vaultBadge,
+                      (devVaultTier ?? vaultTier) === 'premium'
+                        ? styles.vaultBadgePremium
+                        : (devVaultTier ?? vaultTier) === 'streak'
+                        ? styles.vaultBadgeStreak
+                        : styles.vaultBadgeBase,
+                    ]}
+                  >
+                    <Text style={styles.vaultBadgeText}>
+                      {devVaultTier ? devVaultTier[0].toUpperCase() : awareStreak}
+                    </Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.avatarBtn}
                 onPress={() => navigation.navigate('RewardShop')}
@@ -669,6 +704,40 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 9,
     fontWeight: '800',
+  },
+
+  // ─── Crystal Piggy Vault (header-mounted Aware Run asset) ───────────
+  vaultBtn: {
+    width: 48, height: 48,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#FFFFFF14',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#FFFFFF22',
+  },
+  vaultBadge: {
+    position: 'absolute',
+    bottom: -4, right: -4,
+    minWidth: 18, height: 18, borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  vaultBadgeBase: {
+    backgroundColor: '#0F766E',
+  },
+  vaultBadgeStreak: {
+    backgroundColor: '#0E7490',
+  },
+  vaultBadgePremium: {
+    backgroundColor: '#B45309',
+  },
+  vaultBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: -0.2,
   },
 
   balanceBlock: { marginTop: spacing.lg },
