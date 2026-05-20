@@ -216,7 +216,7 @@ const CrystalPiggyVault: React.FC<CrystalPiggyVaultProps> = ({
   return (
     <View style={styles.wrap}>
       {/* ── Piggy square ───────────────────────────────────────────────── */}
-      <View style={{ width: size, height: size }}>
+      <View style={{ width: size, height: size, flexShrink: 0 }}>
 
         {/* Layer 1: SVG frosted-glass piggy */}
         <PiggySvg
@@ -293,11 +293,9 @@ const CrystalPiggyVault: React.FC<CrystalPiggyVaultProps> = ({
 
       {/* ── "Xd Aware" label pill ───────────────────────────────────────── */}
       {day !== undefined ? (
-        <View style={[styles.label, { backgroundColor: palette.labelBg }]}>
-          <Text style={[styles.labelText, { color: palette.labelText }]}>
-            {day}d{' '}Aware
-          </Text>
-        </View>
+        <Text style={[styles.labelText, { color: palette.labelText }]}>
+          {day}d{'\n'}Aware
+        </Text>
       ) : null}
     </View>
   );
@@ -309,18 +307,15 @@ export default CrystalPiggyVault;
 
 const styles = StyleSheet.create({
   wrap: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  label: {
-    paddingHorizontal: 6,
-    paddingVertical:   2,
-    borderRadius:      999,
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           6,
   },
   labelText: {
-    fontSize:      7,
+    fontSize:      8,
     fontWeight:    '800',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
+    lineHeight:    11,
   },
 });

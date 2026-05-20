@@ -296,7 +296,7 @@ const DashboardScreen = ({ navigation }) => {
               >
                 <CrystalPiggyVault
                   tier={devVaultTier ?? vaultTier}
-                  size={44}
+                  size={40}
                   day={awareStreak > 0 ? awareStreak : undefined}
                 />
               </TouchableOpacity>
@@ -699,7 +699,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
-    paddingVertical: 4,
+    paddingVertical: 1,
     backgroundColor: '#FFFFFF14',
     borderRadius: 14,
     borderWidth: 1,
