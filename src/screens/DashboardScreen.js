@@ -294,23 +294,11 @@ const DashboardScreen = ({ navigation }) => {
                   devVaultTimer.current = setTimeout(() => setDevVaultTier(null), 8000);
                 }}
               >
-                <CrystalPiggyVault tier={devVaultTier ?? vaultTier} size={44} />
-                {(awareStreak > 0 || devVaultTier) ? (
-                  <View
-                    style={[
-                      styles.vaultBadge,
-                      (devVaultTier ?? vaultTier) === 'premium'
-                        ? styles.vaultBadgePremium
-                        : (devVaultTier ?? vaultTier) === 'streak'
-                        ? styles.vaultBadgeStreak
-                        : styles.vaultBadgeBase,
-                    ]}
-                  >
-                    <Text style={styles.vaultBadgeText}>
-                      {devVaultTier ? devVaultTier[0].toUpperCase() : awareStreak}
-                    </Text>
-                  </View>
-                ) : null}
+                <CrystalPiggyVault
+                  tier={devVaultTier ?? vaultTier}
+                  size={44}
+                  day={awareStreak > 0 ? awareStreak : undefined}
+                />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.avatarBtn}
@@ -708,13 +696,17 @@ const styles = StyleSheet.create({
 
   // ─── Crystal Piggy Vault (header-mounted Aware Run asset) ───────────
   vaultBtn: {
-    width: 48, height: 48,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
     backgroundColor: '#FFFFFF14',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#FFFFFF22',
   },
+  // vaultBadge and tier variants kept below for reference — superseded by
+  // the "Xd Aware" label rendered inside CrystalPiggyVault.
   vaultBadge: {
     position: 'absolute',
     bottom: -4, right: -4,
