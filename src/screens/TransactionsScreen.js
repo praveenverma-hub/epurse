@@ -111,6 +111,10 @@ const TransactionsScreen = ({ navigation, route }) => {
       return () => {
         StatusBar.setBarStyle('light-content');
         StatusBar.setBackgroundColor('transparent');
+        // Reset search and filters when leaving the screen so the next visit starts clean.
+        setSearchQuery('');
+        setActiveFilters(new Set());
+        setAdvanced({ minAmount: '', maxAmount: '', query: '' });
       };
     }, []),
   );

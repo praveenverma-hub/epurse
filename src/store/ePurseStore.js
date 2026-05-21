@@ -31,6 +31,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { findParentByLabel } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
@@ -1049,13 +1050,24 @@ export const useEPurseStore = create(
         }),
 
       updateTwoTierCategory: (id, parentCategory, childCategory) =>
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id
-              ? { ...t, parentCategory, childCategory, userEdited: true, userEditedCategory: true }
-              : t
-          ),
-        })),
+        set((s) => {
+          const parentId = findParentByLabel(parentCategory)?.id;
+          return {
+            transactions: s.transactions.map((t) =>
+              t.id === id
+                ? {
+                    ...t,
+                    parentCategory,
+                    childCategory,
+                    // Keep categoryId in sync so TransactionItem renders the new category.
+                    ...(parentId ? { categoryId: parentId } : {}),
+                    userEdited: true,
+                    userEditedCategory: true,
+                  }
+                : t
+            ),
+          };
+        }),
 
       saveUserCustomRule: (rawMerchantKey, rule) =>
         set((s) => ({
@@ -1217,6 +1229,33 @@ export const useEPurseStore = create(
           };
         }),
 
+      // Settle the NET outstanding for a person in one shot.
+      // Creates a single lent_settled / borrow_repaid entry for exactly the net
+      // amount owed — avoids the per-entry settle bug where settling a full
+      // original entry amount flips the balance negative.
+      settlePersonBalance: (personKey) => {
+        const person = get().getPersonBalances().find((p) => p.personKey === personKey);
+        if (!person || person.net === 0) return;
+        const netAmt = Math.abs(person.net);
+        const kind   = person.net > 0 ? 'lent_settled' : 'borrow_repaid';
+        const now    = new Date().toISOString();
+        set((s) => ({
+          lentBorrowed: [
+            {
+              id:        `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              kind,
+              person:    person.person,
+              phone:     person.phone    || null,
+              contactId: person.contactId || null,
+              amount:    netAmt,
+              note:      'Manual settlement',
+              date:      now,
+            },
+            ...s.lentBorrowed,
+          ],
+        }));
+      },
+
       // ----- SMS sync flags ---------------------------------------------
       setSmsAutoImport: (val) => set({ smsAutoImport: !!val }),
       setLastSmsSync: (ts) => set({ lastSmsSync: ts || Date.now() }),
@@ -1274,13 +1313,21 @@ export const useEPurseStore = create(
               return;
             }
 
+            // Split transactions: keep raw for the full 90-day window so the
+            // lentBorrowed sourceTxnId references stay resolvable.
+            if (t.isSplit && ts >= rawCutoff) {
+              stillRaw.push(t);
+              return;
+            }
             if (ts >= rawCutoff) stillRaw.push(t);
             else toAggregate.push(t);
           });
 
           const lentBorrowedPruned = (s.lentBorrowed || []).filter((l) => {
-            if (!l.settledAt) return true;
-            return new Date(l.settledAt).getTime() >= now - LB_SETTLED_RETENTION_MS;
+            // Unsettled outstanding entries (lent/borrowed) kept forever.
+            if (l.kind === 'lent' || l.kind === 'borrowed') return true;
+            // Settlement entries (lent_settled / borrow_repaid) kept for 1 year from their date.
+            return new Date(l.date).getTime() >= now - LB_SETTLED_RETENTION_MS;
           });
 
           // Merge new aggregates into the existing map.

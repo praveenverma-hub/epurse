@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Contacts from 'expo-contacts';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
@@ -40,6 +41,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [kind, setKind] = useState(initialKind);
   const [person, setPerson] = useState('');
   const [phone, setPhone] = useState('');
+  const [contactId, setContactId] = useState(null);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [expandedPerson, setExpandedPerson] = useState(null);
@@ -48,9 +50,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [borrowReminderTarget, setBorrowReminderTarget] = useState(null); // push notification target
 
   const all = useEPurseStore((s) => s.lentBorrowed);
-  const addLentBorrowed = useEPurseStore((s) => s.addLentBorrowed);
-  const settle = useEPurseStore((s) => s.settleLentBorrowed);
-  const getPersonBalances = useEPurseStore((s) => s.getPersonBalances);
+  const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
+  const settlePersonBalance  = useEPurseStore((s) => s.settlePersonBalance);
+  const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   const userName        = useEPurseStore((s) => s.userName);
   const notificationIds = useEPurseStore((s) => s.notificationIds);
 
@@ -73,14 +75,42 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       person: person.trim(),
       amount: n,
       note: note.trim(),
-      contactId: null,
+      contactId: contactId ?? null,
       phone: phone.trim() || null,
     });
     setPerson('');
     setPhone('');
+    setContactId(null);
     setAmount('');
     setNote('');
-  }, [kind, person, phone, amount, note, addLentBorrowed]);
+  }, [kind, person, phone, contactId, amount, note, addLentBorrowed]);
+
+  const pickContact = useCallback(async () => {
+    const { status } = await Contacts.requestPermissionsAsync();
+    if (status !== 'granted') {
+      setConfirm({
+        title: 'Permission needed',
+        message: 'Allow contacts access so you can pick a phone number from your list.',
+        primaryText: 'OK',
+      });
+      return;
+    }
+    try {
+      const result = await Contacts.presentContactPickerAsync();
+      if (!result?.contact) return;
+      const c = result.contact;
+      if (c.phoneNumbers?.length) {
+        const raw = c.phoneNumbers[0].number || '';
+        setPhone(raw.replace(/[^\d+]/g, ''));
+        setContactId(c.id ?? null);
+      }
+      if (!person.trim() && c.name) {
+        setPerson(c.name);
+      }
+    } catch {
+      // user cancelled picker
+    }
+  }, [person]);
 
   // Per-person balances: lent tab shows net > 0, borrowed tab shows net < 0.
   // Also include recently-settled (net === 0) persons for up to 3 months.
@@ -206,13 +236,11 @@ const LentBorrowedScreen = ({ route, navigation }) => {
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
             >
-              {sortedEntries.map((entry) => {
+              {sortedEntries.map((entry, idx) => {
                 const positive = isPositiveEntry(entry.kind);
                 const entryColor = positive ? colors.success : '#EF4444';
                 const entrySign = positive ? '+' : '−';
-                const canSettle =
-                  !entry.settledAt &&
-                  (entry.kind === 'lent' || entry.kind === 'borrowed');
+                const isLast = idx === sortedEntries.length - 1;
 
                 return (
                   <View
@@ -230,42 +258,33 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                       </Text>
                       <Text style={styles.entryDate}>
                         {ENTRY_LABEL[entry.kind]} · {formatDate(entry.date)}
-                        {entry.settledAt
-                          ? ` · Settled ${formatDate(entry.settledAt)}`
-                          : ''}
                       </Text>
                     </View>
                     <Text style={[styles.entryAmt, { color: entryColor }]}>
                       {entrySign} {formatCurrency(entry.amount)}
                     </Text>
-                    {canSettle ? (
+                    {isLast && !isFullySettled ? (
                       <TouchableOpacity
-                        style={styles.settle}
+                        style={styles.settleNetBtn}
                         onPress={() =>
                           setConfirm({
-                            title:
-                              entry.kind === 'lent'
-                                ? 'Mark as settled?'
-                                : 'Mark as repaid?',
-                            message: `${entry.person} · ${formatCurrency(entry.amount)}\n\nThis creates a full settlement entry and cannot be undone.`,
-                            primaryText:
-                              entry.kind === 'lent' ? 'Settle' : 'Mark repaid',
+                            title: pb.net > 0 ? 'Mark as settled?' : 'Mark as repaid?',
+                            message:
+                              `${pb.person} · ${formatCurrency(netAbs)}\n\n` +
+                              `Settles the net outstanding of ${formatCurrency(netAbs)}.`,
+                            primaryText: pb.net > 0 ? 'Settle' : 'Mark repaid',
                             destructive: true,
                             secondaryText: 'Cancel',
                             onSecondary: () => setConfirm(null),
                             onConfirm: () => {
-                              settle(entry.id);
+                              settlePersonBalance(pb.personKey);
                               setConfirm(null);
                             },
                           })
                         }
                       >
-                        <Text style={styles.settleText}>Settle</Text>
+                        <Text style={styles.settleNetText}>Settle</Text>
                       </TouchableOpacity>
-                    ) : entry.settledAt ? (
-                      <View style={styles.settledPill}>
-                        <Text style={styles.settledPillText}>Settled</Text>
-                      </View>
                     ) : null}
                   </View>
                 );
@@ -275,7 +294,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       );
     },
-    [expandedPerson, settle]
+    [expandedPerson, settlePersonBalance, notificationIds]
   );
 
   const ListHeader = useMemo(
@@ -291,14 +310,19 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           placeholderTextColor={colors.textMuted}
           style={styles.input}
         />
-        <TextInput
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="Phone number (optional)"
-          placeholderTextColor={colors.textMuted}
-          keyboardType="phone-pad"
-          style={styles.input}
-        />
+        <View style={styles.phoneRow}>
+          <TextInput
+            value={phone}
+            onChangeText={(t) => { setPhone(t); setContactId(null); }}
+            placeholder="Phone number (optional)"
+            placeholderTextColor={colors.textMuted}
+            keyboardType="phone-pad"
+            style={[styles.input, styles.phoneInput]}
+          />
+          <TouchableOpacity style={styles.contactPickBtn} onPress={pickContact}>
+            <ContactPickIcon />
+          </TouchableOpacity>
+        </View>
         <TextInput
           value={amount}
           onChangeText={setAmount}
@@ -322,7 +346,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         />
       </View>
     ),
-    [kind, person, phone, amount, note, handleAdd, grad]
+    [kind, person, phone, contactId, amount, note, handleAdd, grad, pickContact]
   );
 
   const ListEmpty = useMemo(
@@ -520,6 +544,26 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     ...typography.body,
   },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  phoneInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  contactPickBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary + '18',
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // Per-person card
   personCard: {
@@ -621,6 +665,19 @@ const styles = StyleSheet.create({
   entryDate: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
   entryAmt: { ...typography.bodyBold, fontWeight: '700' },
 
+  settleNetBtn: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.success + '18',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.success + '44',
+  },
+  settleNetText: {
+    color: colors.success,
+    ...typography.tiny,
+    fontWeight: '700',
+  },
   settle: {
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: spacing.xs,
@@ -654,6 +711,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+const ContactPickIcon = ({ size = 18 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"
+      fill={colors.primary}
+    />
+  </Svg>
+);
 
 const WAIcon = ({ size = 17 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
