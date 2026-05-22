@@ -640,6 +640,19 @@ export const useEPurseStore = create(
           ),
         })),
 
+      // Absolute "anchor" set used by the AccountCard flip flow.
+      // For credit cards, also enables outstanding-balance tracking so the
+      // OUTSTANDING / FULLY PAID display kicks in.
+      setAccountAnchor: (accountId, newBalance) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) => {
+            if (a.id !== accountId) return a;
+            const next = { ...a, balance: newBalance };
+            if (a.type === ACCOUNT_TYPES.CREDIT_CARD) next.ccPaymentsTracked = true;
+            return next;
+          }),
+        })),
+
       deleteAccount: (accountId) =>
         set((s) => ({
           accounts: s.accounts.filter((a) => a.id !== accountId),

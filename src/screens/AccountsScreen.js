@@ -145,6 +145,16 @@ export default function AccountsScreen({ navigation }) {
           {/* Add-account card removed — use the + button in the header */}
         </ScrollView>
 
+        {/* Anchor-adjustment hint */}
+        {sortedAccounts.length > 0 ? (
+          <View style={styles.flipHint}>
+            <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
+            <Text style={styles.flipHintText}>
+              Tap the chip or balance on any card to adjust its balance.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Flat account list */}
         <Text style={styles.listTitle}>All accounts</Text>
         {sortedAccounts.length === 0 ? (
@@ -247,6 +257,25 @@ const styles = StyleSheet.create({
   },
   addCardPlus:  { fontSize: 32, color: colors.textSecondary, fontWeight: '300', lineHeight: 36 },
   addCardLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
+
+  flipHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+    ...shadows.card,
+  },
+  flipHintText: {
+    ...typography.tiny,
+    color: colors.textSecondary,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
 
   listTitle: {
     ...typography.h3,
