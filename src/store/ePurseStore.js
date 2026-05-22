@@ -807,26 +807,42 @@ export const useEPurseStore = create(
           ensureAccountForParsed([...state.accounts], pseudoTxn);
         if (!account) return null;
 
-        if (!account.ccPaymentsTracked) {
-          // First payment on this card — ask user to confirm the true-up
-          // rather than silently resetting. Persist the new account row if
-          // it was just auto-created by ensureAccountForParsed.
-          set({
-            accounts: accountsWithMatch,
-            pendingCCPayment: {
-              amount,
-              accountId:   account.id,
-              accountMask: account.mask  || accountMask || null,
-              bankName:    account.bankName || bankName || null,
-            },
-          });
-          return { ccPayment: 'pending', accountId: account.id };
-        }
+        // ── ALWAYS-ASK MODE ──────────────────────────────────────────────
+        // Every detected CC payment surfaces the prompt. User picks
+        // "True-up to Zero" → confirmCCTrueUp() OR "Skip" → balance unchanged.
+        set({
+          accounts: accountsWithMatch,
+          pendingCCPayment: {
+            amount,
+            accountId:   account.id,
+            accountMask: account.mask  || accountMask || null,
+            bankName:    account.bankName || bankName || null,
+          },
+        });
+        return { ccPayment: 'pending', accountId: account.id };
 
-        // Already tracking — apply the payment delta automatically.
-        const nextAccounts = applyDelta(accountsWithMatch, account.id, pseudoTxn);
-        set({ accounts: nextAccounts });
-        return { ccPayment: true, accountId: account.id, amount };
+        // ── PREVIOUS BEHAVIOUR (kept for re-enable) ──────────────────────
+        // Asked only on the FIRST payment per card, then auto-applied the
+        // delta on subsequent payments. Uncomment this block (and remove the
+        // unconditional set above) to restore it.
+        //
+        // if (!account.ccPaymentsTracked) {
+        //   set({
+        //     accounts: accountsWithMatch,
+        //     pendingCCPayment: {
+        //       amount,
+        //       accountId:   account.id,
+        //       accountMask: account.mask  || accountMask || null,
+        //       bankName:    account.bankName || bankName || null,
+        //     },
+        //   });
+        //   return { ccPayment: 'pending', accountId: account.id };
+        // }
+        //
+        // // Already tracking — apply the payment delta automatically.
+        // const nextAccounts = applyDelta(accountsWithMatch, account.id, pseudoTxn);
+        // set({ accounts: nextAccounts });
+        // return { ccPayment: true, accountId: account.id, amount };
       },
 
       // User tapped "True-up to Zero" — zero out the CC account and start tracking.
