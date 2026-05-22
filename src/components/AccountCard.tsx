@@ -19,6 +19,7 @@ import {
   Keyboard,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Rect, Defs, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
@@ -52,6 +53,7 @@ type Props = {
   onPress?: () => void;
   onDelete?: () => void;
   showBalance?: boolean;
+  active?: boolean;
   holderName?: string;
   width?: number;
   height?: number;
@@ -127,6 +129,7 @@ const AccountCard: React.FC<Props> = ({
   onPress,
   onDelete,
   showBalance = true,
+  active = true,
   holderName,
   width = 280,
   height = 170,
@@ -169,8 +172,31 @@ const AccountCard: React.FC<Props> = ({
   const [draft, setDraft] = useState('');
   const inputRef = useRef<TextInput>(null);
 
-  const flipToBack = () => {
+  // Flip back when the parent screen loses focus (user navigates away).
+  useEffect(() => {
+    if (!active && flipped) {
+      Keyboard.dismiss();
+      setDraft('');
+      setFlipped(false);
+      flip.value = withSpring(0, FLIP_SPRING);
+    }
+  }, [active, flipped, flip]);
+
+  const flipToBack = async () => {
     if (!canFlip) return;
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
+      if (hasHardware && isEnrolled) {
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Verify to adjust balance',
+          cancelLabel:   'Cancel',
+          fallbackLabel: 'Use PIN',
+          disableDeviceFallback: false,
+        });
+        if (!result.success) return;
+      }
+    } catch (_) {}
     setDraft('');
     setFlipped(true);
     flip.value = withSpring(180, FLIP_SPRING);

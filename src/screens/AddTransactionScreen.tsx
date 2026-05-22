@@ -621,50 +621,74 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
                   — no second tap. Re-tapping while open is a no-op.
                 • Unchecking clears picks and resets share state.            */}
             {canSplitHere ? (
-              <TouchableOpacity
-                style={[
-                  styles.splitToggle,
-                  isSplit && { borderColor: theme.primary, borderWidth: 1 },
-                  !splitReady && !isSplit && { opacity: 0.5 },
-                ]}
-                disabled={!splitReady && !isSplit}
-                activeOpacity={0.85}
-                onPress={() => {
-                  if (isSplit) {
-                    // Uncheck — wipe shares.
-                    setIsSplit(false);
-                    setSplitPicks([]);
-                    setMySplitPercent(null);
-                    setMySplitAmount(null);
-                    return;
-                  }
-                  // Check — flip flag AND open the picker in the same gesture.
-                  setIsSplit(true);
-                  setSplitModalOpen(true);
-                }}
-              >
-                <Text style={styles.splitEmoji}>👥</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.splitTitle}>
-                    {isSplit && splitPicks.length > 0
-                      ? `Split with ${splitPicks.length} friend${splitPicks.length === 1 ? '' : 's'}`
-                      : 'Split with friends?'}
-                  </Text>
-                  <Text style={styles.splitHelp}>
-                    {splitReady || isSplit
-                      ? 'Your share is tracked; others appear in Lent from this split.'
-                      : 'Fill amount, merchant, and category first to enable split.'}
-                  </Text>
+              isSplit && splitPicks.length > 0 ? (
+                /* ── Confirmed split: show who's in + edit/clear actions ── */
+                <View style={[styles.splitToggle, { borderColor: theme.primary, borderWidth: 1 }]}>
+                  <Text style={styles.splitEmoji}>👥</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.splitTitle}>
+                      Split with {splitPicks.length} friend{splitPicks.length === 1 ? '' : 's'}
+                    </Text>
+                    <View style={styles.splitAvatarRow}>
+                      {splitPicks.map((p: any, i: number) => (
+                        <View key={p.contactId ?? i} style={[styles.splitAvatar, { backgroundColor: theme.primary + '22', borderColor: theme.primary + '55' }]}>
+                          <Text style={[styles.splitAvatarText, { color: theme.primary }]}>
+                            {(p.name || '?').charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      ))}
+                      <Text style={styles.splitAvatarNames} numberOfLines={1}>
+                        {splitPicks.map((p: any) => p.name?.split(' ')[0] || '?').join(', ')}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Edit */}
+                  <TouchableOpacity
+                    style={styles.splitEditBtn}
+                    onPress={() => setSplitModalOpen(true)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+                  >
+                    <Text style={styles.splitEditIcon}>✏️</Text>
+                  </TouchableOpacity>
+                  {/* Clear */}
+                  <TouchableOpacity
+                    style={styles.splitClearBtn}
+                    onPress={() => {
+                      setIsSplit(false);
+                      setSplitPicks([]);
+                      setMySplitPercent(null);
+                      setMySplitAmount(null);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                  >
+                    <Text style={styles.splitClearIcon}>✕</Text>
+                  </TouchableOpacity>
                 </View>
-                <View
+              ) : (
+                /* ── Not yet split: standard toggle row ── */
+                <TouchableOpacity
                   style={[
-                    styles.checkbox,
-                    isSplit && { backgroundColor: theme.primary, borderColor: theme.primary },
+                    styles.splitToggle,
+                    !splitReady && { opacity: 0.5 },
                   ]}
+                  disabled={!splitReady}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setIsSplit(true);
+                    setSplitModalOpen(true);
+                  }}
                 >
-                  {isSplit && <Text style={styles.checkmark}>✓</Text>}
-                </View>
-              </TouchableOpacity>
+                  <Text style={styles.splitEmoji}>👥</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.splitTitle}>Split with friends?</Text>
+                    <Text style={styles.splitHelp}>
+                      {splitReady
+                        ? 'Your share is tracked; others appear in Lent from this split.'
+                        : 'Fill amount, merchant, and category first to enable split.'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )
             ) : (
               <Text style={styles.splitUnavailable}>
                 Split is available for expenses only (not income or lend / borrow categories).
@@ -1049,6 +1073,48 @@ const styles = StyleSheet.create({
     fontWeight: '500' as const,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  splitAvatarRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    marginTop: 6,
+    flexWrap: 'wrap' as const,
+  },
+  splitAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  splitAvatarText: {
+    fontSize: 11,
+    fontWeight: '800' as const,
+  },
+  splitAvatarNames: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  splitEditBtn: {
+    paddingHorizontal: 4,
+  },
+  splitEditIcon: { fontSize: 16 },
+  splitClearBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.danger + '18',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  splitClearIcon: {
+    fontSize: 10,
+    fontWeight: '800' as const,
+    color: colors.danger,
   },
   checkbox: {
     width: 22,

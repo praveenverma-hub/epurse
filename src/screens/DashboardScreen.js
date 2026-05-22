@@ -89,6 +89,7 @@ const DashboardScreen = ({ navigation }) => {
   const checkIn          = useRewardStore((s) => s.checkIn);
   const vaultTier        = vaultTierForStreak(awareStreak);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
+  const budget              = useEPurseStore((s) => s.budget);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
   const clearPendingCelebration = useEPurseStore((s) => s.clearPendingCelebration);
@@ -379,7 +380,7 @@ const DashboardScreen = ({ navigation }) => {
         />
 
         {/* Monthly budget — empty CTA or active progress */}
-        <BudgetWidget onPress={() => navigation.navigate('Insights', { defaultTab: 'budget' })} />
+        <BudgetWidget onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
 
         {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
         <DailyQueueStack />

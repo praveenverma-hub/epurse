@@ -22,9 +22,13 @@ const INNER_TABS = [
 
 export default function InsightsScreen({ navigation, route }) {
   const theme = useTheme();
-  const [activeTab, setActiveTab] = useState('analytics');
+  // Initialise directly from params so the correct tab renders on first paint.
+  const [activeTab, setActiveTab] = useState(
+    () => route.params?.defaultTab || 'analytics',
+  );
 
-  // Switch to the requested tab whenever this screen is focused
+  // Also handle re-focus (e.g. navigating back here from another screen with
+  // a different defaultTab, or the tab bar pressing the icon while open).
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       const defaultTab = route.params?.defaultTab;
@@ -70,7 +74,7 @@ export default function InsightsScreen({ navigation, route }) {
       {activeTab === 'analytics' ? (
         <AnalyticsScreen navigation={navigation} headerless />
       ) : (
-        <BudgetScreen navigation={navigation} headerless />
+        <BudgetScreen navigation={navigation} headerless openPlan={!!route.params?.openPlan} />
       )}
     </View>
   );

@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { useIsFocused } from '@react-navigation/native';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
@@ -39,6 +40,7 @@ const TYPE_LABEL = { bank: 'Bank', credit_card: 'Credit Card', wallet: 'Wallet',
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
+  const isFocused    = useIsFocused();
   const accounts     = useEPurseStore((s) => s.accounts);
   const userName     = useEPurseStore((s) => s.userName);
   const addAccount   = useEPurseStore((s) => s.addAccount);
@@ -125,6 +127,7 @@ export default function AccountsScreen({ navigation }) {
             <AccountCard
               key={a.id}
               account={a}
+              active={isFocused}
               showBalance={a.type !== ACCOUNT_TYPES.BANK || balancesVisible}
               holderName={userName}
               // onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
@@ -266,7 +269,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 2,
     backgroundColor: colors.card,
     borderRadius: radius.pill,
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
     marginTop: spacing.xs,
     ...shadows.card,
   },

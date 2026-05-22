@@ -16,7 +16,7 @@
 //   • "Save Plan" button — persists to store on tap
 // =============================================================================
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform, Modal,
@@ -76,7 +76,7 @@ const ringColor = (pct, daysElapsedPct) => {
 const DEFAULT_CAT_KEYWORDS = ['food', 'travel', 'bill', 'shopping'];
 
 // ── Screen ────────────────────────────────────────────────────────────────────
-const BudgetScreen = ({ navigation, headerless = false }) => {
+const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const theme    = useTheme();
   const gradient = useGradient();
 
@@ -137,6 +137,17 @@ const BudgetScreen = ({ navigation, headerless = false }) => {
     setLocalCats(defaults);
     setPlanModalVisible(true);
   }, [categories, getCategoryAverage, EXCLUDE_CATS]);
+
+  // Auto-open the create modal when arriving from the dashboard with no plan.
+  // Ref guard ensures it fires only once per mount even if deps change.
+  const didAutoOpen = useRef(false);
+  useEffect(() => {
+    if (openPlan && !budget && !didAutoOpen.current) {
+      didAutoOpen.current = true;
+      const t = setTimeout(openCreateModal, 120);
+      return () => clearTimeout(t);
+    }
+  }, [openPlan, budget, openCreateModal]);
 
   const openEditModal = useCallback(() => {
     setLocalCap(budget?.totalCap ? String(budget.totalCap) : '');
