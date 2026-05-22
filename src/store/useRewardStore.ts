@@ -95,20 +95,37 @@ export interface PurchaseResult {
 
 interface RewardState {
   // ── Economy (persisted) ───────────────────────────────────────────────
-  awareStreak:        number;
-  lastCheckedInDate:  string | null;
-  totalRP:            number;
-  epcBalance:         number;
-  dailyReviewedCount: number;
-  lastCapResetDate:   string | null;
-  inventory:          InventoryItem[];
-  isFirstLaunch:      boolean;
+  awareStreak:          number;
+  lastCheckedInDate:    string | null;
+  /** Date string (YYYY-MM-DD) of the last *yesterday* for which SAVINGS bonus
+   *  was awarded. Guards against double-claiming on multiple opens same day. */
+  lastClaimedBonusDate: string | null;
+  totalRP:              number;
+  epcBalance:           number;
+  dailyReviewedCount:   number;
+  lastCapResetDate:     string | null;
+  inventory:            InventoryItem[];
+  isFirstLaunch:        boolean;
 
   // ── Transient (NOT persisted) ─────────────────────────────────────────
   lastCheckInResult:  CheckInResult | null;
 
+  /**
+   * Set when SAVINGS is detected and the user hasn't claimed yet.
+   * Persisted so the sheet re-surfaces if the user kills the app before
+   * tapping Claim. Cleared by claimSavingsBonus().
+   */
+  pendingSavingsReward: {
+    rpAmount:  number;
+    epcAmount: number;
+    /** YYYY-MM-DD of the *previous* day this reward is for. */
+    forDate:   string;
+  } | null;
+
   // ── Actions ───────────────────────────────────────────────────────────
-  checkIn:                  (queuedTransactionCount: number) => CheckInResult;
+  checkIn:                  (yesterdayTransactionCount: number) => CheckInResult;
+  /** Credits pendingSavingsReward balances and clears the pending state. */
+  claimSavingsBonus:        () => void;
   recordReview:             () => ReviewResult;
   purchaseItem:             (id: WidgetId) => PurchaseResult;
   toggleItemActive:         (id: WidgetId) => void;
@@ -129,6 +146,7 @@ const buildDefaultInventory = (): InventoryItem[] =>
 const initialState = (): Omit<
   RewardState,
   | 'checkIn'
+  | 'claimSavingsBonus'
   | 'recordReview'
   | 'purchaseItem'
   | 'toggleItemActive'
@@ -136,14 +154,16 @@ const initialState = (): Omit<
   | 'clearLastCheckInResult'
   | 'resetProgressForNewBuild'
 > => ({
-  awareStreak:        REWARD_CONFIG.STREAK_BASELINE,
-  lastCheckedInDate:  null,
-  totalRP:            0,
-  epcBalance:         0,
-  dailyReviewedCount: 0,
-  lastCapResetDate:   null,
-  inventory:          buildDefaultInventory(),
-  isFirstLaunch:      true,
+  awareStreak:          REWARD_CONFIG.STREAK_BASELINE,
+  lastCheckedInDate:    null,
+  lastClaimedBonusDate: null,
+  pendingSavingsReward: null,
+  totalRP:              0,
+  epcBalance:           0,
+  dailyReviewedCount:   0,
+  lastCapResetDate:     null,
+  inventory:            buildDefaultInventory(),
+  isFirstLaunch:        true,
   lastCheckInResult:  null,
 });
 
@@ -161,10 +181,15 @@ export const useRewardStore = create<RewardState>()(
       //   (b) increment streak (gap of exactly 1 day),
       //   (c) reset streak to 1 (gap > 1 day),
       //   (d) award the SAVINGS bonus on top of (b)/(c) if queue empty.
-      checkIn: (queuedTransactionCount) => {
+      // yesterdayTransactionCount: count of SMS transactions that occurred on
+      // the previous calendar day (00:00–23:59 yesterday). Callers must query
+      // this from the transaction store before calling; passing the current
+      // unreviewed queue is WRONG (queue is always empty at morning open).
+      checkIn: (yesterdayTransactionCount) => {
         const state = get();
-        const today = toCalendarDate();
-        const gap   = calendarDaysBetween(state.lastCheckedInDate, today);
+        const today     = toCalendarDate();
+        const yesterday = toCalendarDate(new Date(Date.now() - 86_400_000));
+        const gap       = calendarDaysBetween(state.lastCheckedInDate, today);
 
         // ── Same calendar day → idempotent no-op
         if (gap === 0) {
@@ -181,62 +206,84 @@ export const useRewardStore = create<RewardState>()(
         }
 
         // ── New calendar day: compute new streak value
-        const newStreak = gap === 1
+        const newStreak  = gap === 1
           ? state.awareStreak + 1
           : REWARD_CONFIG.STREAK_BASELINE;
 
         const multiplier = multiplierForStreak(newStreak);
         const isReset    = gap > 1;
-        const isSavings  = queuedTransactionCount === 0;
 
-        // ── Compute awards (savings bonus stacks ON TOP of the base check-in)
-        let rpAwarded  = 0;
-        let epcAwarded = 0;
-        let type: CheckInType = isReset ? 'STREAK_RESET' : 'NEW_DAY';
+        // SAVINGS: yesterday had zero SMS txns, bonus not yet claimed for that
+        // day, and not already sitting in pendingSavingsReward (re-open guard).
+        const isSavings =
+          yesterdayTransactionCount === 0 &&
+          state.lastClaimedBonusDate    !== yesterday &&
+          state.pendingSavingsReward?.forDate !== yesterday;
 
-        if (isSavings) {
-          rpAwarded  = Math.round(REWARD_CONFIG.SAVINGS_RP_BASE  * multiplier);
-          epcAwarded = Math.round(REWARD_CONFIG.SAVINGS_EPC_BASE * multiplier);
-          type = 'SAVINGS';
-        }
+        const rpAwarded  = isSavings
+          ? Math.round(REWARD_CONFIG.SAVINGS_RP_BASE  * multiplier) : 0;
+        const epcAwarded = isSavings
+          ? Math.round(REWARD_CONFIG.SAVINGS_EPC_BASE * multiplier) : 0;
 
-        // ── Banner copy
+        const type: CheckInType = isSavings
+          ? 'SAVINGS'
+          : isReset ? 'STREAK_RESET' : 'NEW_DAY';
+
+        // ── Banner copy (SAVINGS has no banner — it surfaces via bottom sheet)
         let message = '';
-        if (type === 'SAVINGS') {
-          message =
-            `${REWARD_COPY.BANNER_SAVINGS_PREFIX} +${rpAwarded} RP ` +
-            `${REWARD_COPY.BANNER_SAVINGS_SUFFIX}`;
-        } else if (type === 'STREAK_RESET') {
+        if (type === 'STREAK_RESET') {
           message = REWARD_COPY.BANNER_RESET;
-        } else {
-          // Standard new-day check-in — no auto award; show streak lock-in.
+        } else if (type === 'NEW_DAY') {
           message =
             `${REWARD_COPY.BANNER_STREAK_PREFIX} ${newStreak} ` +
             `${REWARD_COPY.BANNER_STREAK_SUFFIX}`;
         }
 
         const result: CheckInResult = {
-          type,
-          rpAwarded,
-          epcAwarded,
-          newStreak,
-          multiplier,
-          message,
+          type, rpAwarded, epcAwarded, newStreak, multiplier, message,
           ts: Date.now(),
         };
 
-        // ── Commit state: streak, date, balances, daily counters reset.
+        // SAVINGS: queue a pending reward for the user to consciously claim
+        // via EpcClaimBottomSheet. Do NOT credit balances here — that happens
+        // in claimSavingsBonus(). Do NOT set lastCheckInResult so the banner
+        // stays silent.
+        if (isSavings) {
+          set({
+            awareStreak:          newStreak,
+            lastCheckedInDate:    today,
+            dailyReviewedCount:   0,
+            lastCapResetDate:     today,
+            pendingSavingsReward: { rpAmount: rpAwarded, epcAmount: epcAwarded, forDate: yesterday },
+          });
+          return result;
+        }
+
+        // NEW_DAY / STREAK_RESET: commit immediately, surface via banner.
         set({
           awareStreak:        newStreak,
           lastCheckedInDate:  today,
-          totalRP:            state.totalRP    + rpAwarded,
-          epcBalance:         state.epcBalance + epcAwarded,
           dailyReviewedCount: 0,
           lastCapResetDate:   today,
           lastCheckInResult:  result,
         });
 
         return result;
+      },
+
+      // ─── Claim the pending Zero-Transaction Day bonus ─────────────────
+      // Called by the EpcClaimBottomSheet onClaim callback. Credits balances,
+      // marks the bonus date so re-detection is blocked, and clears the sheet.
+      claimSavingsBonus: () => {
+        const state   = get();
+        const pending = state.pendingSavingsReward;
+        if (!pending) return;
+        set({
+          totalRP:              state.totalRP    + pending.rpAmount,
+          epcBalance:           state.epcBalance + pending.epcAmount,
+          lastClaimedBonusDate: pending.forDate,
+          pendingSavingsReward: null,
+        });
       },
 
       // ─── Record a single transaction review ──────────────────────────
@@ -364,14 +411,16 @@ export const useRewardStore = create<RewardState>()(
         };
       },
       partialize: (state) => ({
-        awareStreak:        state.awareStreak,
-        lastCheckedInDate:  state.lastCheckedInDate,
-        totalRP:            state.totalRP,
-        epcBalance:         state.epcBalance,
-        dailyReviewedCount: state.dailyReviewedCount,
-        lastCapResetDate:   state.lastCapResetDate,
-        inventory:          state.inventory,
-        isFirstLaunch:      state.isFirstLaunch,
+        awareStreak:          state.awareStreak,
+        lastCheckedInDate:    state.lastCheckedInDate,
+        lastClaimedBonusDate: state.lastClaimedBonusDate,
+        pendingSavingsReward: state.pendingSavingsReward,
+        totalRP:              state.totalRP,
+        epcBalance:           state.epcBalance,
+        dailyReviewedCount:   state.dailyReviewedCount,
+        lastCapResetDate:     state.lastCapResetDate,
+        inventory:            state.inventory,
+        isFirstLaunch:        state.isFirstLaunch,
       }) as any,
     },
   ),

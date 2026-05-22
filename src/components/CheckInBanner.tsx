@@ -392,13 +392,15 @@ const Sparkle: React.FC<{
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// SAVINGS is intentionally excluded — it surfaces via EpcClaimBottomSheet,
+// not the banner. Banner handles NEW_DAY and STREAK_RESET only.
 const shouldRender = (r: CheckInResult | null): boolean =>
-  !!r && r.type !== 'SAME_DAY' && !!r.message;
+  !!r && r.type !== 'SAME_DAY' && r.type !== 'SAVINGS' && !!r.message;
 
 const renderEarningsTail = (r: CheckInResult): string => {
   if (r.rpAwarded <= 0 && r.epcAwarded <= 0) return '';
   const parts: string[] = [];
-  if (r.rpAwarded  > 0) parts.push(`+${r.rpAwarded} RP`);
+  if (r.rpAwarded  > 0) parts.push(`+${r.rpAwarded} Reality Points`);
   if (r.epcAwarded > 0) parts.push(`+${r.epcAwarded} EPC`);
   return parts.join(' · ');
 };

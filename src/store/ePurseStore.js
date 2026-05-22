@@ -1949,3 +1949,23 @@ export const selectUnreviewedQueue = (s) =>
   s.transactions
     .filter((t) => t.source === 'sms' && !t.isIgnored && !t.isReviewed)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+/**
+ * Count of SMS transactions that occurred on the previous calendar day
+ * (00:00:00–23:59:59 yesterday, local time). Used by the Aware Run check-in
+ * to evaluate Zero-Transaction Day eligibility via look-back — NOT the
+ * current unreviewed queue, which is always empty on a fresh morning open.
+ *
+ * Ignored transactions are excluded: they represent user-dismissed noise
+ * and shouldn't penalise a genuine zero-spend day.
+ */
+export const selectYesterdayTransactionCount = (s) => {
+  const now   = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0,  0,  0,   0).getTime();
+  const end   = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
+  return s.transactions.filter((t) => {
+    if (t.source !== 'sms' || t.isIgnored) return false;
+    const ts = new Date(t.createdAt).getTime();
+    return ts >= start && ts <= end;
+  }).length;
+};

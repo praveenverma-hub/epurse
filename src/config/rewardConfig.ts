@@ -140,12 +140,10 @@ export const REWARD_COPY = {
     'continue reviewing items to clear your layout clutter, and your ' +
     'earning capacity resets tomorrow morning!',
 
-  /** Built dynamically: `Day ${n} Locked In! +${rp} RP / +${epc} EPC` */
-  BANNER_STREAK_PREFIX:  '✨ Day',
-  BANNER_STREAK_SUFFIX:  'Locked In!',
-  BANNER_SAVINGS_PREFIX: '🛡️ Zero-Spending Day!',
-  BANNER_SAVINGS_SUFFIX: 'Savings Bonus Added',
-  BANNER_RESET:          '🌅 New Aware Run started — back to Day 1.',
+  /** Built dynamically: `Aware Run · Day ${n} Locked In!` */
+  BANNER_STREAK_PREFIX: '✨ Aware Run · Day',
+  BANNER_STREAK_SUFFIX: 'Locked In!',
+  BANNER_RESET:         '🌅 New Aware Run started — back to Day 1.',
 
   CAP_REACHED_HINT:    'Daily earning cap reached — review keeps clearing!',
 

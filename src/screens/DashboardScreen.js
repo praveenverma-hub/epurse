@@ -19,11 +19,12 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
+import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount } from '../store/ePurseStore';
 import {
   useRewardStore,
   selectLevel,
 } from '../store/useRewardStore';
+const selectPendingSavings = (s) => s.pendingSavingsReward;
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
@@ -50,6 +51,7 @@ import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
 import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
+import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -84,9 +86,11 @@ const DashboardScreen = ({ navigation }) => {
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
-  const level            = useRewardStore(selectLevel);
-  const awareStreak      = useRewardStore(selectAwareStreak);
-  const checkIn          = useRewardStore((s) => s.checkIn);
+  const level              = useRewardStore(selectLevel);
+  const awareStreak        = useRewardStore(selectAwareStreak);
+  const checkIn            = useRewardStore((s) => s.checkIn);
+  const claimSavingsBonus  = useRewardStore((s) => s.claimSavingsBonus);
+  const pendingSavingsReward = useRewardStore(selectPendingSavings);
   const vaultTier        = vaultTierForStreak(awareStreak);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const budget              = useEPurseStore((s) => s.budget);
@@ -210,17 +214,21 @@ const DashboardScreen = ({ navigation }) => {
   // ── Aware Run check-in (hands-free) ──────────────────────────────────────
   // Runs once on mount AND on every screen focus (foregrounding the app
   // after the day rolls over still counts). checkIn() is idempotent within
-  // a calendar day, so re-firing on focus is safe. We pass the count of
-  // unreviewed transactions so the store can recognise a Zero-Spending Day.
+  // a calendar day, so re-firing on focus is safe.
+  //
+  // We pass YESTERDAY's SMS transaction count (not today's queue) so the
+  // store can correctly evaluate Zero-Transaction Day eligibility. The
+  // current queue is always empty at morning open — using it caused a false
+  // SAVINGS bonus every single day.
   useEffect(() => {
     const sub = navigation.addListener('focus', () => {
-      const queueLen = selectUnreviewedQueue(useEPurseStore.getState()).length;
-      checkIn(queueLen);
+      const yesterdayCount = selectYesterdayTransactionCount(useEPurseStore.getState());
+      checkIn(yesterdayCount);
     });
     // Fire once on initial mount as well (focus listener doesn't fire on the
     // first render because the screen is already focused).
-    const queueLen = selectUnreviewedQueue(useEPurseStore.getState()).length;
-    checkIn(queueLen);
+    const yesterdayCount = selectYesterdayTransactionCount(useEPurseStore.getState());
+    checkIn(yesterdayCount);
     return sub;
   }, [navigation, checkIn]);
 
@@ -268,23 +276,7 @@ const DashboardScreen = ({ navigation }) => {
                 activeOpacity={0.85}
                 accessibilityRole="button"
                 accessibilityLabel={`Crystal Piggy Vault · ${awareStreak} day Aware Run · ${vaultTier} tier`}
-                onPress={() => {
-                  const safeStreak = Math.max(1, awareStreak);
-                  useRewardStore.setState({
-                    lastCheckInResult: {
-                      type:       'NEW_DAY',
-                      rpAwarded:  0,
-                      epcAwarded: 0,
-                      newStreak:  safeStreak,
-                      multiplier: safeStreak >= 16 ? 1.5 : safeStreak >= 6 ? 1.2 : 1.0,
-                      message:    `🔥 Crystal Piggy Vault · Day ${safeStreak}`,
-                      subtitle:
-                        'Your vault evolves daily. Day 3 reveals streak ' +
-                        'crystals · Day 16+ unlocks the premium gold tier.',
-                      ts: Date.now(),
-                    },
-                  });
-                }}
+                onPress={() => {/* vault chip — sheet auto-shows when pendingSavingsReward is set */}}
                 onLongPress={() => {
                   // Cycle through all three visual tiers for inspection.
                   // Resets to real streak tier after 8 seconds.
@@ -597,6 +589,16 @@ const DashboardScreen = ({ navigation }) => {
 
       {/* CC outstanding true-up prompt */}
       <CCPaymentPromptModal />
+
+      {/* EPC claim sheet — surfaces automatically when a Zero-Transaction Day
+          bonus is detected. User must consciously claim; crediting is deferred
+          to claimSavingsBonus() so the balance only changes on explicit tap. */}
+      <EpcClaimBottomSheet
+        visible={!!pendingSavingsReward}
+        epcAmount={pendingSavingsReward?.epcAmount ?? 0}
+        rpAmount={pendingSavingsReward?.rpAmount ?? 0}
+        onClaim={claimSavingsBonus}
+      />
 
       {/* ── Settings bottom sheet ── */}
       <Modal
