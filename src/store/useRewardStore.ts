@@ -36,6 +36,7 @@ import {
   multiplierForStreak,
   toCalendarDate,
 } from '../config/rewardConfig';
+import { useNotificationStore } from './useNotificationStore';
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -268,6 +269,28 @@ export const useRewardStore = create<RewardState>()(
           lastCheckInResult:  result,
         });
 
+        // Notification feed entry — separate from the transient top banner.
+        if (type === 'NEW_DAY') {
+          useNotificationStore.getState().add({
+            kind:      'aware_check_in',
+            title:     `Day ${newStreak} Aware Run locked in`,
+            body:
+              multiplier > 1
+                ? `Earnings multiplier now ${multiplier}× — review your queue to bank RP & EPC.`
+                : `Review your queue today to bank RP & EPC.`,
+            dedupeKey: `aware_check_in:${today}`,
+            meta:      { newStreak, multiplier },
+          });
+        } else if (type === 'STREAK_RESET') {
+          useNotificationStore.getState().add({
+            kind:      'aware_streak_reset',
+            title:     'Aware Run reset to Day 1',
+            body:      'A day was missed — start a fresh run today to rebuild your multiplier.',
+            dedupeKey: `aware_streak_reset:${today}`,
+            meta:      { newStreak },
+          });
+        }
+
         return result;
       },
 
@@ -278,12 +301,31 @@ export const useRewardStore = create<RewardState>()(
         const state   = get();
         const pending = state.pendingSavingsReward;
         if (!pending) return;
+        const newRP    = state.totalRP + pending.rpAmount;
+        const prevLvl  = levelFromRP(state.totalRP);
+        const nextLvl  = levelFromRP(newRP);
         set({
-          totalRP:              state.totalRP    + pending.rpAmount,
+          totalRP:              newRP,
           epcBalance:           state.epcBalance + pending.epcAmount,
           lastClaimedBonusDate: pending.forDate,
           pendingSavingsReward: null,
         });
+        useNotificationStore.getState().add({
+          kind:      'aware_savings_claimed',
+          title:     `Zero-spend bonus claimed`,
+          body:      `+${pending.rpAmount} RP and +${pending.epcAmount} EPC credited for ${pending.forDate}.`,
+          dedupeKey: `aware_savings_claimed:${pending.forDate}`,
+          meta:      { rp: pending.rpAmount, epc: pending.epcAmount, forDate: pending.forDate },
+        });
+        if (nextLvl > prevLvl) {
+          useNotificationStore.getState().add({
+            kind:      'level_up',
+            title:     `Level ${nextLvl} reached`,
+            body:      `You crossed ${nextLvl * REWARD_CONFIG.RP_PER_LEVEL} RP — new shop items may now be in reach.`,
+            dedupeKey: `level_up:${nextLvl}`,
+            meta:      { level: nextLvl },
+          });
+        }
       },
 
       // ─── Record a single transaction review ──────────────────────────
@@ -323,12 +365,25 @@ export const useRewardStore = create<RewardState>()(
           Math.round(REWARD_CONFIG.REVIEW_EPC_BASE * multiplier),
         );
 
+        const newRP   = state.totalRP + rpAwarded;
+        const prevLvl = levelFromRP(state.totalRP);
+        const nextLvl = levelFromRP(newRP);
         set({
-          totalRP:            state.totalRP    + rpAwarded,
+          totalRP:            newRP,
           epcBalance:         state.epcBalance + epcAwarded,
           dailyReviewedCount: nextCount,
           lastCapResetDate:   today,
         });
+
+        if (nextLvl > prevLvl) {
+          useNotificationStore.getState().add({
+            kind:      'level_up',
+            title:     `Level ${nextLvl} reached`,
+            body:      `You crossed ${nextLvl * REWARD_CONFIG.RP_PER_LEVEL} RP — new shop items may now be in reach.`,
+            dedupeKey: `level_up:${nextLvl}`,
+            meta:      { level: nextLvl },
+          });
+        }
 
         return {
           counted:       true,

@@ -15,9 +15,9 @@ import {
   View,
 } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { colors, radius, spacing, typography } from '../constants/theme';
@@ -92,7 +92,7 @@ const ParentRow: React.FC<ParentRowProps> = ({
 
   useEffect(() => {
     if (isExpanded) {
-      maxH.value = withSpring(280, { damping: 24, stiffness: 200 });
+      maxH.value = withTiming(280, { duration: 260, easing: Easing.out(Easing.cubic) });
       childOpacity.value = withTiming(1, { duration: 200 });
     } else {
       maxH.value = withTiming(0, { duration: 200 });

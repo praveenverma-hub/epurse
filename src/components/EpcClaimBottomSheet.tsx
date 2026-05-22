@@ -36,7 +36,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -51,7 +50,7 @@ import ThreeDEngravedCoin from './ThreeDEngravedCoin';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
-const ENTER_SPRING = { damping: 18, stiffness: 140, mass: 1 } as const;
+const ENTER_TIMING = { duration: 320, easing: Easing.out(Easing.cubic) };
 const EXIT_TIMING  = { duration: 320, easing: Easing.in(Easing.cubic) };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -93,9 +92,9 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
     if (visible) {
       setMounted(true);
       dismissedRef.current = false;
-      sheetY.value = withSpring(0, ENTER_SPRING);
+      sheetY.value = withTiming(0, ENTER_TIMING);
       scrim.value  = withTiming(1, { duration: 260 });
-      coin.value   = withSpring(1, { damping: 10, stiffness: 90 });
+      coin.value   = withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) });
     }
   }, [visible, sheetY, scrim, coin]);
 

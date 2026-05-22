@@ -37,6 +37,7 @@ import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { isSameMonth, monthKey } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification } from '../utils/notifications';
+import { useNotificationStore } from './useNotificationStore';
 import {
   computeEqualSplit,
   computePercentSplit,
@@ -853,6 +854,25 @@ export const useEPurseStore = create(
             parsedResult.ccPayment
           ) {
             get().applyCCPayment(parsedResult.ccPayment);
+          }
+          // Surface CC bill reminders as in-app notifications.
+          if (
+            parsedResult?.error?.code === 'cc_bill_reminder' &&
+            parsedResult.ccDue
+          ) {
+            const { amount, cardLast4, dueDate, bankName } = parsedResult.ccDue;
+            const cardLabel = cardLast4
+              ? `${bankName || 'Credit Card'} •• ${cardLast4}`
+              : (bankName || 'Credit Card');
+            useNotificationStore.getState().add({
+              kind:      'cc_due',
+              title:     `₹${Math.round(amount).toLocaleString('en-IN')} due on ${cardLabel}`,
+              body:      dueDate
+                ? `Pay by ${dueDate} to avoid late fees.`
+                : 'Pay before the due date to avoid late fees.',
+              dedupeKey: `cc_due:${cardLast4 || bankName || 'unknown'}`,
+              meta:      { amount, cardLast4, dueDate, bankName },
+            });
           }
           return null;
         }

@@ -37,6 +37,12 @@ import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import BudgetWidget from '../components/BudgetWidget';
 import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
+import BellIcon from '../components/BellIcon';
+import NotificationsSheet from '../components/NotificationsSheet';
+import {
+  useNotificationStore,
+  selectHasUnreadNotifications,
+} from '../store/useNotificationStore';
 import { vaultTierForStreak } from '../config/rewardConfig';
 import { selectAwareStreak } from '../store/useRewardStore';
 import WelcomeStreakModal from '../components/WelcomeStreakModal';
@@ -114,6 +120,10 @@ const DashboardScreen = ({ navigation }) => {
   // null means "use real tier from streak".
   const [devVaultTier, setDevVaultTier] = useState(null);
   const devVaultTimer = React.useRef(null);
+
+  // Notifications
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const hasUnreadNotifications = useNotificationStore(selectHasUnreadNotifications);
 
   // ── Period-aware stats ────────────────────────────────────────────────────
   const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
@@ -294,6 +304,10 @@ const DashboardScreen = ({ navigation }) => {
                   day={awareStreak > 0 ? awareStreak : undefined}
                 />
               </TouchableOpacity>
+              <BellIcon
+                hasUnread={hasUnreadNotifications}
+                onPress={() => setNotificationsVisible(true)}
+              />
               <TouchableOpacity
                 style={styles.avatarBtn}
                 onPress={() => navigation.navigate('RewardShop')}
@@ -600,6 +614,12 @@ const DashboardScreen = ({ navigation }) => {
         onClaim={claimSavingsBonus}
       />
 
+      {/* Activity feed — bell icon in header opens this. */}
+      <NotificationsSheet
+        visible={notificationsVisible}
+        onClose={() => setNotificationsVisible(false)}
+      />
+
       {/* ── Settings bottom sheet ── */}
       <Modal
         visible={showSettings}
@@ -672,7 +692,7 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           12,
+    gap:           10,
   },
   avatarBtn: {
     width: 42, height: 42, borderRadius: 21,
@@ -706,7 +726,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
-    paddingVertical: 1,
     backgroundColor: '#FFFFFF14',
     borderRadius: 14,
     borderWidth: 1,

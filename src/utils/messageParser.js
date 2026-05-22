@@ -174,6 +174,29 @@ const VPA_REGEX = /([a-zA-Z0-9._\-]{2,30}@[a-zA-Z]{2,15})/;
 const CC_PAYMENT_NOTIFICATION_REGEX =
   /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?[\s\S]{0,80}(?:has\s+been\s+received\s+on\s+your\b[\s\S]*\bcredit\s+card\b|was\s+credited\s+to\s+your\s+card\b|received\s+towards\s+your\b[\s\S]{0,30}\bcredit\s+card\b)/i;
 
+// Credit-card bill REMINDER (pre-payment alert) — NOT a spend.
+// Banks send these monthly to nudge the user to pay their CC bill.
+// Verbs/phrases that anchor a reminder: amount/total/min/payment due,
+// due date/on/by, outstanding (amount/balance/due), pay (instantly) by <date>,
+// pay your bill/credit card, kindly/please pay, settle by/your/outstanding,
+// bill/statement generated.
+const CC_BILL_REMINDER_REGEX =
+  /\b(?:(?:total|min(?:imum)?|amount|payment)\s+(?:amount\s+)?due|due\s+(?:date|on|by)\s+\d|outstanding(?:\s+(?:amount|balance|due))?|pay\s+(?:instantly\s+)?by\s+\d|pay\s+your\s+(?:bill|credit\s+card)|kindly\s+pay|please\s+pay|settle\s+(?:by|your|outstanding)|bill\s+generated|statement\s+generated)\b/i;
+
+// Hard past-tense confirmation that money has ALREADY moved. If any of these
+// fire, the SMS is a real transaction even if it also mentions "due" — we
+// don't want to swallow `"Rs 500 debited towards EMI due"` as a reminder.
+const CC_BILL_HARD_CONFIRMATION_REGEX =
+  /\b(?:debited|credited|spent|withdrawn|deducted|deposited|refunded|transferred)\b|\bpaid\s+(?:to|via|at|from)\b/i;
+
+// Pull the card last-4 from a CC reminder body.
+const CC_CARD_LAST4_REGEX =
+  /\bcredit\s+card\b[^0-9]{0,30}(\d{4})\b|\bcard\s+(?:ending|no\.?)?\s*[xX*•·]*(\d{4})\b/i;
+
+// Pull the "pay by <date>" date string from a CC reminder body.
+const CC_DUE_DATE_REGEX =
+  /\b(?:pay\s+(?:instantly\s+)?by|due\s+(?:date|on|by))\s+(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -371,6 +394,34 @@ export const parseMessageDetailed = (message, opts = {}) => {
       },
       ccPayment: paidAmt > 0
         ? { amount: paidAmt, accountMask: rawMask ? rawMask.slice(-4) : null, bankName: getBankName(opts.sender) }
+        : null,
+    };
+  }
+
+  // Credit-card bill REMINDER — money has not moved yet. We must NOT register
+  // it as a transaction (the old logic mis-classified these as debits because
+  // "Credit Card" leaks the word "credit" into Gate 2). Return the parsed
+  // reminder fields so the store can anchor an in-app notification on the
+  // matching card.
+  if (
+    CC_BILL_REMINDER_REGEX.test(text) &&
+    !CC_BILL_HARD_CONFIRMATION_REGEX.test(text)
+  ) {
+    const amtMatch  = text.match(AMOUNT_REGEX);
+    const dueAmt    = toNumber(amtMatch?.[1] || amtMatch?.[2]);
+    const cardMatch = text.match(CC_CARD_LAST4_REGEX);
+    const cardLast4 = cardMatch?.[1] || cardMatch?.[2] || null;
+    const dateMatch = text.match(CC_DUE_DATE_REGEX);
+    const dueDate   = dateMatch?.[1] || null;
+    return {
+      ok: false,
+      error: {
+        code: 'cc_bill_reminder',
+        message:
+          'Credit-card bill reminder detected (amount due / pay by …), so it was not added as a spend.',
+      },
+      ccDue: dueAmt > 0
+        ? { amount: dueAmt, cardLast4, dueDate, bankName: getBankName(opts.sender) }
         : null,
     };
   }

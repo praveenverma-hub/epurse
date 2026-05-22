@@ -16,13 +16,13 @@ import {
   View,
 } from 'react-native';
 import Animated, {
+  Easing,
   FadeIn,
   FadeOut,
   LinearTransition,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -68,7 +68,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
   // ── Open / close animation ───────────────────────────────────────────────
   useEffect(() => {
     if (visible) {
-      sheetY.value = withSpring(0, { damping: 24, stiffness: 220 });
+      sheetY.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
       backdropAlpha.value = withTiming(0.48, { duration: 280 });
 
       // Pre-select current categories when editing a known transaction
@@ -114,7 +114,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
         backdropAlpha.value = withTiming(0, { duration: 220 });
         runOnJS(onClose)();
       } else {
-        sheetY.value = withSpring(0, { damping: 24, stiffness: 240 });
+        sheetY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
       }
     });
 

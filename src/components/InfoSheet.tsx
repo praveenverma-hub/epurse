@@ -27,7 +27,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -84,12 +83,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   useEffect(() => {
     if (visible) {
       opacity.value   = withTiming(1, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
-      translate.value = withSpring(0, {
-        damping:           16,
-        stiffness:         150,
-        mass:              0.9,
-        overshootClamping: false,
-      });
+      translate.value = withTiming(0, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
     } else {
       opacity.value   = withTiming(0, { duration: EXIT_MS });
       translate.value = withTiming(SCREEN_H, {

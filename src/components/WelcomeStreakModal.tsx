@@ -28,7 +28,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -73,15 +72,9 @@ const WelcomeStreakModal: React.FC = () => {
     // Quick haptic burst on entry to anchor the moment.
     hapticSuccess();
 
-    // Backdrop fades in instantly; sheet springs up with bounce.
+    // Backdrop fades in instantly; sheet slides up with a smooth ease (no bounce).
     opacity.value    = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
-    translateY.value = withSpring(0, {
-      damping:        14,
-      stiffness:      130,
-      mass:           0.9,
-      overshootClamping: false,
-      restDisplacementThreshold: 0.5,
-    });
+    translateY.value = withTiming(0, { duration: 360, easing: Easing.out(Easing.cubic) });
 
     // After DWELL_MS, slide everything down and flip the flag.
     translateY.value = withDelay(
