@@ -392,13 +392,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         renderItem={({ item }) => (
           <TransactionItem
             txn={item}
-            onPressCategory={() => {
-              if (item.lbLocked) {
-                setConfirm({ title: 'Category locked', message: 'This transaction is linked to a lent/borrow record and cannot be re-categorised.', primaryText: 'OK' });
-                return;
-              }
-              setActiveTxn(item);
-            }}
+            onPressCategory={() => setActiveTxn(item)}
             onPressSplitChip={() => setSplitDetailsTxn(item)}
           />
         )}
@@ -433,6 +427,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         isIgnored={!!activeTxn?.isIgnored}
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
         isSplitTxn={!!activeTxn?.isSplit}
+        categoryLocked={!!activeTxn?.lbLocked}
         onPressSplit={() => {
           const t = activeTxn;
           setActiveTxn(null);

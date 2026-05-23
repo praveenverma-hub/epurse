@@ -55,15 +55,17 @@ interface Props {
   isIgnored: boolean;
   canSplit: boolean;
   isSplitTxn: boolean;
+  /** When true, hides the category picker and shows a locked notice instead. */
+  categoryLocked?: boolean;
   onPressSplit?: () => void;
   onSelectCategory: (categoryId: string) => void;
   onSelectLentBorrow?: (categoryId: string) => void;
   /** Called when a child chip is selected outside the LB flow. */
   onSelectTwoTier?: (parentCategory: string, childCategory: string) => void;
-  onToggleHidden: (hidden: boolean) => void;
-  onIgnore: () => void;
-  onRestore: () => void;
-  onDelete: () => void;
+  onToggleHidden?: (hidden: boolean) => void;
+  onIgnore?: () => void;
+  onRestore?: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 }
 
@@ -188,6 +190,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   isIgnored,
   canSplit,
   isSplitTxn,
+  categoryLocked = false,
   onPressSplit,
   onSelectCategory,
   onSelectLentBorrow,
@@ -241,75 +244,83 @@ const CategoryPickerModal: React.FC<Props> = ({
           <View style={styles.handle} />
           <Text style={styles.title}>Change category</Text>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            style={styles.list}
-            keyboardShouldPersistTaps="handled"
-          >
-            {PARENT_CATEGORIES.map((parent) => (
-              <ParentRow
-                key={parent.id}
-                parent={parent}
-                isExpanded={expandedParentId === parent.id}
-                selectedParent={selectedParent}
-                selectedChild={selectedChild}
-                onParentPress={() => handleParentPress(parent.id)}
-                onChildPress={handleChildPress}
-              />
-            ))}
-
-            {/* Settlement categories — lent_settled / borrow_repaid */}
-            {settlementCats.length > 0 && (
-              <View style={styles.settlementSection}>
-                <Text style={styles.settlementSectionLabel}>SETTLEMENTS</Text>
-                {settlementCats.map((cat) => {
-                  const active = selectedCategoryId === cat.id;
-                  return (
-                    <TouchableOpacity
-                      key={cat.id}
-                      style={[
-                        styles.parentRow,
-                        styles.settlementRow,
-                        active && {
-                          borderWidth: 1.5,
-                          borderColor: colors.success + '66',
-                          backgroundColor: colors.success + '10',
-                        },
-                      ]}
-                      onPress={() => {
-                        // Settlement categories ALSO need the contact-link
-                        // flow (you settled WITH someone). Fall back to the
-                        // plain category select if the host didn't provide
-                        // the LB callback — best-effort behaviour.
-                        if (onSelectLentBorrow) {
-                          onSelectLentBorrow(cat.id);
-                        } else {
-                          onSelectCategory(cat.id);
-                        }
-                      }}
-                      activeOpacity={0.72}
-                    >
-                      <Text style={styles.rowEmoji}>{cat.emoji}</Text>
-                      <View style={styles.rowMid}>
-                        <Text
-                          style={[
-                            styles.rowLabel,
-                            active && { color: colors.success, fontWeight: '700' },
-                          ]}
-                        >
-                          {cat.name}
-                        </Text>
-                        <Text style={styles.lbHint}>Links to person · tracks balance</Text>
-                      </View>
-                      {active && (
-                        <Text style={{ color: colors.success, fontWeight: '800' }}>✓</Text>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+          {categoryLocked ? (
+            <View style={styles.lockedNotice}>
+              <Text style={styles.lockedIcon}>🔒</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lockedTitle}>Category locked</Text>
+                <Text style={styles.lockedBody}>
+                  This transaction is linked to a lent/borrow record. Category cannot be changed.
+                </Text>
               </View>
-            )}
-          </ScrollView>
+            </View>
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={styles.list}
+              keyboardShouldPersistTaps="handled"
+            >
+              {PARENT_CATEGORIES.map((parent) => (
+                <ParentRow
+                  key={parent.id}
+                  parent={parent}
+                  isExpanded={expandedParentId === parent.id}
+                  selectedParent={selectedParent}
+                  selectedChild={selectedChild}
+                  onParentPress={() => handleParentPress(parent.id)}
+                  onChildPress={handleChildPress}
+                />
+              ))}
+
+              {/* Settlement categories — lent_settled / borrow_repaid */}
+              {settlementCats.length > 0 && (
+                <View style={styles.settlementSection}>
+                  <Text style={styles.settlementSectionLabel}>SETTLEMENTS</Text>
+                  {settlementCats.map((cat) => {
+                    const active = selectedCategoryId === cat.id;
+                    return (
+                      <TouchableOpacity
+                        key={cat.id}
+                        style={[
+                          styles.parentRow,
+                          styles.settlementRow,
+                          active && {
+                            borderWidth: 1.5,
+                            borderColor: colors.success + '66',
+                            backgroundColor: colors.success + '10',
+                          },
+                        ]}
+                        onPress={() => {
+                          if (onSelectLentBorrow) {
+                            onSelectLentBorrow(cat.id);
+                          } else {
+                            onSelectCategory(cat.id);
+                          }
+                        }}
+                        activeOpacity={0.72}
+                      >
+                        <Text style={styles.rowEmoji}>{cat.emoji}</Text>
+                        <View style={styles.rowMid}>
+                          <Text
+                            style={[
+                              styles.rowLabel,
+                              active && { color: colors.success, fontWeight: '700' },
+                            ]}
+                          >
+                            {cat.name}
+                          </Text>
+                          <Text style={styles.lbHint}>Links to person · tracks balance</Text>
+                        </View>
+                        {active && (
+                          <Text style={{ color: colors.success, fontWeight: '800' }}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </ScrollView>
+          )}
 
           {canSplit && !isIgnored && onPressSplit ? (
             <TouchableOpacity
@@ -323,31 +334,39 @@ const CategoryPickerModal: React.FC<Props> = ({
             </TouchableOpacity>
           ) : null}
 
-          <View style={styles.hideIgnoreRow}>
-            <TouchableOpacity
-              style={[styles.hideIgnoreHalf, isHidden ? styles.unhideHalf : styles.hideHalf]}
-              onPress={() => onToggleHidden(!isHidden)}
-            >
-              <Text style={[styles.hideIgnoreText, isHidden && styles.unhideText]}>
-                {isHidden ? 'Show' : 'Hide'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.hideIgnoreHalf,
-                isIgnored ? styles.restoreHalf : styles.ignoreHalf,
-              ]}
-              onPress={isIgnored ? onRestore : onIgnore}
-            >
-              <Text style={isIgnored ? styles.restoreText : styles.ignoreText}>
-                {isIgnored ? 'Restore' : 'Ignore'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          {(onToggleHidden || onIgnore || onRestore) && (
+            <View style={styles.hideIgnoreRow}>
+              {onToggleHidden && (
+                <TouchableOpacity
+                  style={[styles.hideIgnoreHalf, isHidden ? styles.unhideHalf : styles.hideHalf]}
+                  onPress={() => onToggleHidden(!isHidden)}
+                >
+                  <Text style={[styles.hideIgnoreText, isHidden && styles.unhideText]}>
+                    {isHidden ? 'Show' : 'Hide'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {(onIgnore || onRestore) && (
+                <TouchableOpacity
+                  style={[
+                    styles.hideIgnoreHalf,
+                    isIgnored ? styles.restoreHalf : styles.ignoreHalf,
+                  ]}
+                  onPress={isIgnored ? onRestore : onIgnore}
+                >
+                  <Text style={isIgnored ? styles.restoreText : styles.ignoreText}>
+                    {isIgnored ? 'Restore' : 'Ignore'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
-          <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
-            <Text style={styles.deleteText}>Delete transaction</Text>
-          </TouchableOpacity>
+          {onDelete && (
+            <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
+              <Text style={styles.deleteText}>Delete transaction</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </Modal>
@@ -549,4 +568,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   deleteText: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
+
+  // ── Category locked notice ─────────────────────────────────────────────────
+  lockedNotice: {
+    flexDirection:   'row',
+    alignItems:      'flex-start',
+    gap:             spacing.sm,
+    backgroundColor: colors.warning + '14',
+    borderWidth:     1,
+    borderColor:     colors.warning + '44',
+    borderRadius:    radius.md,
+    padding:         spacing.md,
+    marginBottom:    spacing.sm,
+  },
+  lockedIcon: { fontSize: 16, marginTop: 1 },
+  lockedTitle: {
+    ...typography.bodyBold,
+    fontWeight: '700' as const,
+    color:      colors.warning,
+    marginBottom: 2,
+  },
+  lockedBody: {
+    fontSize:   12,
+    fontWeight: '500' as const,
+    color:      colors.textSecondary,
+    lineHeight: 17,
+    marginTop:  1,
+  },
 });

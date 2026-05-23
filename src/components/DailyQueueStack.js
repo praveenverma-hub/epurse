@@ -411,6 +411,7 @@ const DailyQueueStack = () => {
         isIgnored={false}
         canSplit={!!pickerTxn && canSplitTransaction(pickerTxn)}
         isSplitTxn={!!pickerTxn?.isSplit}
+        categoryLocked={!!pickerTxn?.lbLocked}
         onSelectCategory={handleSelectCategory}
         onSelectLentBorrow={handleSelectLentBorrow}
         onClose={handlePickerClose}
