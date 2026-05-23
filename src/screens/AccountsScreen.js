@@ -183,7 +183,7 @@ export default function AccountsScreen({ navigation }) {
               </View>
               <Text style={[styles.listBalance, { color: (a.balance ?? 0) < 0 ? colors.danger : colors.textPrimary }]}>
                 {(a.type !== ACCOUNT_TYPES.BANK || balancesVisible)
-                  ? formatCurrency(a.balance ?? 0)
+                  ? formatCurrency(Math.abs(a.balance ?? 0))
                   : '••••'}
               </Text>
             </TouchableOpacity>

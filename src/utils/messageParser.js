@@ -384,6 +384,30 @@ export const parseMessageDetailed = (message, opts = {}) => {
   const lower = text.toLowerCase();
   const normalized = normalizeForKeywordScan(text);
 
+  // ── Gate 1: Source validation ─────────────────────────────────────────────
+  // Reject non-financial senders before any CC-specific pattern checks.
+  // This prevents Airtel / Jio / utility SMSes from being misclassified as
+  // credit-card events (e.g. "bill due on 15" matching CC_BILL_REMINDER_REGEX).
+  const senderOk = isBankOrWalletSender(opts.sender);
+  const bodyHasAccountRef =
+    ACCOUNT_REF_REGEX.test(text) &&
+    hasAnyWord(normalized, BODY_DEBIT_CREDIT_TERMS);
+  const strongKeywordSignal = hasAnyWord(normalized, STRONG_TRANSACTION_WORDS);
+  const nonFinancialDlt = isLikelyNonFinancialDltSender(opts.sender);
+
+  if (!senderOk && (!bodyHasAccountRef || !strongKeywordSignal || nonFinancialDlt)) {
+    return {
+      ok: false,
+      error: {
+        code: 'source_not_financial',
+        message:
+          'Could not verify this as a financial SMS (no known bank sender or account/payment reference).',
+      },
+    };
+  }
+
+  // ── CC-specific early exits (bank-sender verified above) ──────────────────
+
   // Exclude card payment acknowledgement SMSes. The actual outgoing spend is
   // already captured from the source account debit message.
   // We still extract amount + mask so the store can credit the CC account balance.
@@ -412,7 +436,8 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // matching card.
   if (
     CC_BILL_REMINDER_REGEX.test(text) &&
-    !CC_BILL_HARD_CONFIRMATION_REGEX.test(text)
+    !CC_BILL_HARD_CONFIRMATION_REGEX.test(text) &&
+    /\bcredit\s+card\b/i.test(text)
   ) {
     const amtMatch  = text.match(AMOUNT_REGEX);
     const dueAmt    = toNumber(amtMatch?.[1] || amtMatch?.[2]);
@@ -456,29 +481,6 @@ export const parseMessageDetailed = (message, opts = {}) => {
       ccOutgoing: outAmt > 0
         ? { amount: outAmt, accountMask: rawMask ? rawMask.slice(-4) : null, bankName: getBankName(opts.sender) }
         : null,
-    };
-  }
-
-  // ── Gate 1: Source validation ─────────────────────────────────────────────
-  // Accept if sender is a bank/wallet, OR if body has an account reference
-  // plus a basic debit/credit term (covers unlisted senders).
-  const senderOk = isBankOrWalletSender(opts.sender);
-  const bodyHasAccountRef =
-    ACCOUNT_REF_REGEX.test(text) &&
-    hasAnyWord(normalized, BODY_DEBIT_CREDIT_TERMS);
-  const strongKeywordSignal = hasAnyWord(normalized, STRONG_TRANSACTION_WORDS);
-  const nonFinancialDlt = isLikelyNonFinancialDltSender(opts.sender);
-
-  // Unknown sender fallback is intentionally strict: require account reference
-  // plus a debit/credit term. This avoids promo senders slipping in.
-  if (!senderOk && (!bodyHasAccountRef || !strongKeywordSignal || nonFinancialDlt)) {
-    return {
-      ok: false,
-      error: {
-        code: 'source_not_financial',
-        message:
-          'Could not verify this as a financial SMS (no known bank sender or account/payment reference).',
-      },
     };
   }
 

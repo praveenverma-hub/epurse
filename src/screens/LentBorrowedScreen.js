@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Modal,
   View,
   Text,
   StyleSheet,
@@ -46,8 +48,12 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [note, setNote] = useState('');
   const [expandedPerson, setExpandedPerson] = useState(null);
   const [confirm, setConfirm] = useState(null);
-  const [reminderTarget, setReminderTarget] = useState(null);       // WA reminder target
-  const [borrowReminderTarget, setBorrowReminderTarget] = useState(null); // push notification target
+  const [reminderTarget, setReminderTarget] = useState(null);
+  const [borrowReminderTarget, setBorrowReminderTarget] = useState(null);
+  const [contactSheetVisible, setContactSheetVisible] = useState(false);
+  const [contactQuery, setContactQuery] = useState('');
+  const [allContacts, setAllContacts] = useState([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
 
   const all = useEPurseStore((s) => s.lentBorrowed);
   const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
@@ -95,21 +101,40 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       });
       return;
     }
+    setContactQuery('');
+    setContactSheetVisible(true);
+    setContactsLoading(true);
     try {
-      const result = await Contacts.presentContactPickerAsync();
-      if (!result?.contact) return;
-      const c = result.contact;
-      if (c.phoneNumbers?.length) {
-        const raw = c.phoneNumbers[0].number || '';
-        setPhone(raw.replace(/[^\d+]/g, ''));
-        setContactId(c.id ?? null);
-      }
-      if (!person.trim() && c.name) {
-        setPerson(c.name);
-      }
+      const { data } = await Contacts.getContactsAsync({
+        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
+      });
+      setAllContacts(data.filter((c) => c.name && c.phoneNumbers?.length > 0));
     } catch {
-      // user cancelled picker
+      // permission revoked mid-flow or contacts unavailable
+    } finally {
+      setContactsLoading(false);
     }
+  }, []);
+
+  const filteredContacts = useMemo(() => {
+    const q = contactQuery.trim().toLowerCase();
+    const base = q
+      ? allContacts.filter(
+          (c) =>
+            c.name?.toLowerCase().includes(q) ||
+            c.phoneNumbers?.some((p) => p.number?.includes(q)),
+        )
+      : allContacts;
+    return base.slice(0, 60);
+  }, [allContacts, contactQuery]);
+
+  const handleSelectContact = useCallback((c) => {
+    if (c.phoneNumbers?.length) {
+      setPhone(c.phoneNumbers[0].number?.replace(/[^\d+]/g, '') || '');
+      setContactId(c.id ?? null);
+    }
+    if (!person.trim() && c.name) setPerson(c.name);
+    setContactSheetVisible(false);
   }, [person]);
 
   // Per-person balances: lent tab shows net > 0, borrowed tab shows net < 0.
@@ -447,6 +472,62 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           person={borrowReminderTarget}
           onClose={() => setBorrowReminderTarget(null)}
         />
+
+        {/* ── Contact search sheet ── */}
+        <Modal
+          visible={contactSheetVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setContactSheetVisible(false)}
+        >
+          <View style={styles.contactBackdrop}>
+            <TouchableOpacity
+              style={styles.contactDismiss}
+              activeOpacity={1}
+              onPress={() => setContactSheetVisible(false)}
+            />
+            <View style={styles.contactSheet}>
+              <View style={styles.contactHandle} />
+              <Text style={styles.contactTitle}>Pick a contact</Text>
+              <TextInput
+                autoFocus
+                value={contactQuery}
+                onChangeText={setContactQuery}
+                placeholder="Search name or number…"
+                placeholderTextColor={colors.textMuted}
+                style={styles.contactSearch}
+              />
+              {contactsLoading ? (
+                <ActivityIndicator
+                  style={{ marginVertical: 32 }}
+                  color={colors.primary}
+                />
+              ) : (
+                <FlatList
+                  data={filteredContacts}
+                  keyExtractor={(c) => c.id}
+                  keyboardShouldPersistTaps="handled"
+                  style={styles.contactList}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.contactRow}
+                      onPress={() => handleSelectContact(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.contactName}>{item.name}</Text>
+                      <Text style={styles.contactPhone}>
+                        {item.phoneNumbers[0].number}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  ListEmptyComponent={
+                    <Text style={styles.contactEmpty}>No contacts found.</Text>
+                  }
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -709,6 +790,71 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+
+  // ── Contact search sheet ────────────────────────────────────────────────
+  contactBackdrop: {
+    flex:            1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent:  'flex-end',
+  },
+  contactDismiss: { flex: 1 },
+  contactSheet: {
+    backgroundColor:      colors.card,
+    borderTopLeftRadius:  24,
+    borderTopRightRadius: 24,
+    paddingHorizontal:    20,
+    paddingBottom:        32,
+    maxHeight:            '75%',
+  },
+  contactHandle: {
+    width:           36,
+    height:          4,
+    borderRadius:    2,
+    backgroundColor: colors.divider,
+    alignSelf:       'center',
+    marginTop:       10,
+    marginBottom:    14,
+  },
+  contactTitle: {
+    ...typography.h2,
+    fontWeight:   '700',
+    color:        colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  contactSearch: {
+    ...typography.body,
+    color:           colors.textPrimary,
+    borderWidth:     1.5,
+    borderColor:     colors.divider,
+    borderRadius:    radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical:   10,
+    marginBottom:    spacing.sm,
+    backgroundColor: colors.background,
+  },
+  contactList: { maxHeight: 380 },
+  contactRow: {
+    paddingVertical:   12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  contactName: {
+    ...typography.bodyBold,
+    fontWeight: '600',
+    color:      colors.textPrimary,
+  },
+  contactPhone: {
+    ...typography.small,
+    color:     colors.textSecondary,
+    marginTop: 2,
+  },
+  contactEmpty: {
+    ...typography.body,
+    color:     colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.lg,
   },
 });
 

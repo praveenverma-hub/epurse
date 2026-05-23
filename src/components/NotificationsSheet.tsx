@@ -12,6 +12,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -42,7 +43,9 @@ export interface NotificationsSheetProps {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const SCREEN_H = Dimensions.get('window').height;
+const SCREEN_H    = Dimensions.get('window').height;
+const SHEET_MAX_H = SCREEN_H * 0.78;
+const STATUS_BAR_H = StatusBar.currentHeight ?? 44;
 const ENTER_MS = 320;
 const EXIT_MS  = 240;
 
@@ -89,7 +92,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
   const dismiss     = useNotificationStore((s) => s.dismiss);
 
   const opacity   = useSharedValue<number>(0);
-  const translate = useSharedValue<number>(SCREEN_H);
+  const translate = useSharedValue<number>(-SHEET_MAX_H);
 
   useEffect(() => {
     if (visible) {
@@ -97,7 +100,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
       translate.value = withTiming(0, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
     } else {
       opacity.value   = withTiming(0, { duration: EXIT_MS });
-      translate.value = withTiming(SCREEN_H, {
+      translate.value = withTiming(-SHEET_MAX_H, {
         duration: EXIT_MS,
         easing:   Easing.in(Easing.cubic),
       });
@@ -111,7 +114,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
   const handleDismiss = (): void => {
     opacity.value = withTiming(0, { duration: EXIT_MS });
     translate.value = withTiming(
-      SCREEN_H,
+      -SHEET_MAX_H,
       { duration: EXIT_MS, easing: Easing.in(Easing.cubic) },
       (finished) => {
         if (finished) runOnJS(onClose)();
@@ -139,8 +142,6 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
 
         <Animated.View style={[styles.sheet, sheetStyle]}>
-          <View style={styles.handle} />
-
           <View style={styles.headerRow}>
             <Text style={styles.title}>Notifications</Text>
             {unreadCount > 0 && (
@@ -172,6 +173,11 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
               ))}
             </ScrollView>
           )}
+
+          {/* Pull-down indicator */}
+          <View style={styles.handleRow}>
+            <View style={styles.handle} />
+          </View>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -238,24 +244,27 @@ const styles = StyleSheet.create({
   backdrop: {
     flex:            1,
     backgroundColor: 'rgba(5, 8, 16, 0.65)',
-    justifyContent:  'flex-end',
+    justifyContent:  'flex-start',
   },
   sheet: {
-    backgroundColor:      '#FFFFFF',
-    paddingHorizontal:    20,
-    paddingTop:           12,
-    paddingBottom:        28,
-    borderTopLeftRadius:  28,
-    borderTopRightRadius: 28,
-    maxHeight:            SCREEN_H * 0.78,
+    backgroundColor:         '#FFFFFF',
+    paddingHorizontal:       20,
+    paddingTop:              STATUS_BAR_H + 12,
+    paddingBottom:           8,
+    borderBottomLeftRadius:  28,
+    borderBottomRightRadius: 28,
+    maxHeight:               SHEET_MAX_H,
+  },
+  handleRow: {
+    alignItems:    'center',
+    paddingTop:    10,
+    paddingBottom: 10,
   },
   handle: {
     width:           38,
     height:          4,
     borderRadius:    2,
     backgroundColor: '#E5E7EB',
-    alignSelf:       'center',
-    marginBottom:    14,
   },
   headerRow: {
     flexDirection:  'row',
