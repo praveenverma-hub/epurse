@@ -15,6 +15,7 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   Modal,
   TextInput,
@@ -34,6 +35,7 @@ import GradientButton from '../components/GradientButton';
 import TransactionItem from '../components/TransactionItem';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
+import ExportSheet from '../components/ExportSheet';
 import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
@@ -104,6 +106,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
+  const [exportVisible, setExportVisible] = useState(false);
 
   // Net balance per person from LB entries.
   // Positive = they owe me (lent more than received back).
@@ -184,6 +187,18 @@ const TransactionsScreen = ({ navigation, route }) => {
     const acctIds      = [...activeFilters].filter((f) => f.startsWith('acct:')).map((f) => f.slice(5));
     return { showIgnored, showHidden, showSplit, catIds, acctIds };
   }, [activeFilters]);
+
+  // Passed to ExportSheet so it can describe the active filter context in the report.
+  const exportFilterCtx = useMemo(() => ({
+    timeframe,
+    catIds:      filterMeta.catIds,
+    acctIds:     filterMeta.acctIds,
+    showHidden:  filterMeta.showHidden,
+    showIgnored: filterMeta.showIgnored,
+    showSplit:   filterMeta.showSplit,
+    advanced,
+    searchQuery,
+  }), [timeframe, filterMeta, advanced, searchQuery]);
 
   const data = useMemo(() => {
     const { showIgnored, showHidden, showSplit, catIds, acctIds } = filterMeta;
@@ -326,12 +341,13 @@ const TransactionsScreen = ({ navigation, route }) => {
         </View>
       </View>{/* end topSection */}
 
-      {/* ── Gray area: filter chips ── */}
-      <View style={styles.filterScrollWrap}>
+      {/* ── Gray area: filter chips + export trigger ── */}
+      <View style={styles.filterBarContainer}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterRow}
+          style={styles.filterScrollView}
           keyboardShouldPersistTaps="handled"
         >
           <FilterPill
@@ -371,6 +387,31 @@ const TransactionsScreen = ({ navigation, route }) => {
             onPress={() => toggleFilter('ignored')}
           />
         </ScrollView>
+
+        {/* Right-edge fade hinting at more chips */}
+        <View style={styles.filterFade} pointerEvents="none">
+          <LinearGradient
+            colors={[colors.background + '00', colors.background]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
+
+        {/* Export micro-pill */}
+        <Pressable
+          onPress={() => setExportVisible(true)}
+          style={({ pressed }) => [
+            styles.exportPill,
+            {
+              backgroundColor: pressed ? theme.primary + '25' : theme.primary + '12',
+              borderColor: theme.primary + '40',
+            },
+          ]}
+        >
+          <Ionicons name="share-outline" size={13} color={theme.primary} />
+          <Text style={[styles.exportPillText, { color: theme.primary }]}>Export</Text>
+        </Pressable>
       </View>
 
       {/* Active advanced filter chips */}
@@ -601,6 +642,13 @@ const TransactionsScreen = ({ navigation, route }) => {
         onClose={() => setConfirm(null)}
         onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
+
+      <ExportSheet
+        visible={exportVisible}
+        onClose={() => setExportVisible(false)}
+        filteredTransactions={data}
+        filterCtx={exportFilterCtx}
+      />
     </SafeAreaView>
   );
 };
@@ -799,11 +847,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  // Quick filter chips — sits on gray background below the white top section
-  filterScrollWrap: {
+  // Filter chip row — scrollable chips with a fixed export pill at the right
+  filterBarContainer: {
     height: 52,
     backgroundColor: colors.background,
-    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  filterScrollView: {
+    flex: 1,
   },
   filterRow: {
     paddingHorizontal: spacing.lg,
@@ -811,6 +863,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     height: 52,
+  },
+  filterFade: {
+    position: 'absolute',
+    right: 76,   // sits just left of the export pill
+    top: 0,
+    bottom: 0,
+    width: 28,
+    zIndex: 1,
+  },
+  exportPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 28,
+    paddingHorizontal: spacing.md,
+    marginRight: spacing.md,
+    marginLeft: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    flexShrink: 0,
+    zIndex: 2,
+  },
+  exportPillText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   pill: {
     height: 32,
