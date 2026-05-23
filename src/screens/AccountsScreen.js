@@ -7,9 +7,9 @@
 //   • Plain account list below for quick balance scanning
 // =============================================================================
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
+  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -49,6 +49,13 @@ export default function AccountsScreen({ navigation }) {
   const [balancesVisible,    setBalancesVisible]    = useState(false);
   const [addAccountVisible,  setAddAccountVisible]  = useState(false);
   const [confirm,            setConfirm]            = useState(null);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') setBalancesVisible(false);
+    });
+    return () => sub.remove();
+  }, []);
 
   const sortedAccounts = useMemo(
     () => [...accounts].sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9)),
