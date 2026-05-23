@@ -5,9 +5,13 @@
 //   expo-file-system · expo-sharing · expo-print
 // =============================================================================
 
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import * as Print from 'expo-print';
+// NO top-level runtime imports for native expo modules.
+// They are required lazily inside compileAndShare() so that a missing native
+// binary (app not yet rebuilt after `npm install`) never crashes the screen load.
+// Type-only imports are erased at compile time — zero runtime effect.
+import type * as TFileSystem from 'expo-file-system';
+import type * as TSharing    from 'expo-sharing';
+import type * as TPrint       from 'expo-print';
 
 // ---------------------------------------------------------------------------
 // Shared types (intentionally minimal — no store import to avoid circular deps)
@@ -319,24 +323,33 @@ export async function compileAndShare(
   accounts: ExportAccount[],
   userName?: string,
 ): Promise<void> {
+  // Lazy requires — only evaluated here at call-time, never at module load.
+  // This prevents expo-print / expo-sharing from calling requireNativeModule()
+  // during bundle init (which crashes the screen if the binary hasn't been
+  // rebuilt yet after `npm install`).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const FS      = require('expo-file-system') as typeof TFileSystem;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Sharing = require('expo-sharing')     as typeof TSharing;
+
   const ts = Date.now();
 
   if (format === 'csv') {
     const csv  = buildCSV(txns, categories, accounts);
-    const path = `${FileSystem.cacheDirectory}epurse_statement_${ts}.csv`;
-    await FileSystem.writeAsStringAsync(path, csv, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    const path = `${FS.cacheDirectory}epurse_statement_${ts}.csv`;
+    await FS.writeAsStringAsync(path, csv, { encoding: FS.EncodingType.UTF8 });
     await Sharing.shareAsync(path, {
       mimeType: 'text/csv',
       dialogTitle: 'Share Transaction Statement',
       UTI: 'public.comma-separated-values-text',
     });
   } else {
-    const html      = buildPDFHTML(txns, ctx, categories, accounts, userName);
-    const { uri }   = await Print.printToFileAsync({ html, base64: false });
-    const dest      = `${FileSystem.cacheDirectory}epurse_report_${ts}.pdf`;
-    await FileSystem.moveAsync({ from: uri, to: dest });
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Print = require('expo-print') as typeof TPrint;
+    const html  = buildPDFHTML(txns, ctx, categories, accounts, userName);
+    const { uri } = await Print.printToFileAsync({ html, base64: false });
+    const dest    = `${FS.cacheDirectory}epurse_report_${ts}.pdf`;
+    await FS.moveAsync({ from: uri, to: dest });
     await Sharing.shareAsync(dest, {
       mimeType: 'application/pdf',
       dialogTitle: 'Share Transaction Report',

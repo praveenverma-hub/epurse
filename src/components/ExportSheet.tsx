@@ -23,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, radius, spacing, typography } from '../constants/theme';
+import { formatCurrency } from '../utils/format';
 import {
   compileAndShare,
   ExportAccount,
@@ -145,10 +146,7 @@ const ExportSheet: React.FC<Props> = ({
     return { totalDebit: d, totalCredit: c };
   }, [filteredTransactions]);
 
-  const fmtCompact = (n: number) =>
-    new Intl.NumberFormat('en-IN', {
-      style: 'currency', currency: 'INR', maximumFractionDigits: 0,
-    }).format(n);
+  const fmtCompact = (n: number) => formatCurrency(isFinite(n) ? n : 0);
 
   // ── Compile handler ───────────────────────────────────────────────────────
   const handleCompile = useCallback(async () => {
