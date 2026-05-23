@@ -648,7 +648,7 @@ export const useEPurseStore = create(
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== accountId) return a;
-            const next = { ...a, balance: newBalance };
+            const next = { ...a, balance: newBalance, anchoredAt: Date.now() };
             if (a.type === ACCOUNT_TYPES.CREDIT_CARD) next.ccPaymentsTracked = true;
             return next;
           }),
@@ -852,7 +852,7 @@ export const useEPurseStore = create(
         set({
           accounts: accounts.map((a) =>
             a.id === pendingCCPayment.accountId
-              ? { ...a, balance: 0, ccPaymentsTracked: true }
+              ? { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() }
               : a
           ),
           pendingCCPayment: null,
@@ -935,7 +935,13 @@ export const useEPurseStore = create(
 
           const { accounts: accountsWithMatch, account } = ensureAccountForParsed(nextAccounts, candidate);
           candidate.accountId = account?.id || null;
-          nextAccounts = applyDelta(accountsWithMatch, account?.id, candidate);
+          // Skip balance delta for transactions older than a manual anchor — the
+          // anchor already reflects the correct balance up to that point.
+          const anchoredAt = account?.anchoredAt ?? 0;
+          const txnTime    = new Date(candidate.createdAt || Date.now()).getTime();
+          nextAccounts = (anchoredAt && txnTime < anchoredAt)
+            ? accountsWithMatch
+            : applyDelta(accountsWithMatch, account?.id, candidate);
           nextTransactions = [candidate, ...nextTransactions];
           added.push(candidate);
         });

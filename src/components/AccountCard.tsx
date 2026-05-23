@@ -144,7 +144,7 @@ const AccountCard: React.FC<Props> = ({
   const isCreditCard = account.type === ACCOUNT_TYPES.CREDIT_CARD;
   const ccTrackingActive = isCreditCard && !!account.ccPaymentsTracked;
   const isFullyPaid = ccTrackingActive && account.balance >= 0;
-  const outstanding = ccTrackingActive ? Math.abs(account.balance) : null;
+  const outstanding = isCreditCard ? Math.abs(account.balance) : null;
 
   // ── App-state — force-hide sensitive balances when backgrounded ───────────
   const [appActive, setAppActive] = useState<boolean>(

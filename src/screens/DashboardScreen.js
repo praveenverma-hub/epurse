@@ -27,7 +27,7 @@ import {
 const selectPendingSavings = (s) => s.pendingSavingsReward;
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCompact } from '../utils/format';
+import { formatCurrency } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { TRANSACTION_TYPES } from '../constants/categories';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
@@ -330,7 +330,7 @@ const DashboardScreen = ({ navigation }) => {
           {/* Balance */}
           <View style={styles.balanceBlock}>
             <Text style={styles.balanceLabel}>ePurse net this {periodTitle}</Text>
-            <Text style={styles.balanceValue}>{formatCompact(periodNet)}</Text>
+            <Text style={styles.balanceValue}>{formatCurrency(periodNet)}</Text>
           </View>
 
           {/* ── W / M / Y toggle ── */}
@@ -356,11 +356,11 @@ const DashboardScreen = ({ navigation }) => {
           <View style={styles.statsRow}>
             <View style={styles.statPill}>
               <Text style={styles.statLabel}>Spent this {periodTitle}</Text>
-              <Text style={styles.statValue}>{formatCompact(periodStats.spend)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.spend)}</Text>
             </View>
             <View style={styles.statPill}>
               <Text style={styles.statLabel}>Income this {periodTitle}</Text>
-              <Text style={styles.statValue}>{formatCompact(periodStats.income)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.income)}</Text>
             </View>
           </View>
         </SafeAreaView>

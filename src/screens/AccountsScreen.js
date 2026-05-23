@@ -20,7 +20,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, formatCompact } from '../utils/format';
+import { formatCurrency } from '../utils/format';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
@@ -100,7 +100,7 @@ export default function AccountsScreen({ navigation }) {
             <View>
               <Text style={styles.headerLabel}>Total Balance</Text>
               <Text style={styles.headerBalance}>
-                {balancesVisible ? formatCompact(totalBalance) : '₹ ••••••'}
+                {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
               </Text>
             </View>
             <View style={styles.headerActions}>
