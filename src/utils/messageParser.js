@@ -197,6 +197,13 @@ const CC_CARD_LAST4_REGEX =
 const CC_DUE_DATE_REGEX =
   /\b(?:pay\s+(?:instantly\s+)?by|due\s+(?:date|on|by))\s+(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
 
+// Outgoing CC bill payment from source bank account (not an expense — it's a
+// liability settlement). Patterns: "towards [bank] credit card", "credit card
+// bill payment successful", "paid to [bank] credit card".
+// Requires a debit verb (CC_BILL_HARD_CONFIRMATION_REGEX) to fire alongside.
+const CC_PAYMENT_OUTGOING_REGEX =
+  /\btowards\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+(?:bill\s+)?(?:payment|dues?)\s+(?:successful|done|completed|processed|cleared)\b|\bpaid\s+(?:to|towards)\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+bill\s+payment\b/i;
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -422,6 +429,32 @@ export const parseMessageDetailed = (message, opts = {}) => {
       },
       ccDue: dueAmt > 0
         ? { amount: dueAmt, cardLast4, dueDate, bankName: getBankName(opts.sender) }
+        : null,
+    };
+  }
+
+  // Outgoing CC bill payment from source bank account — money leaving the user's
+  // savings/bank account to pay a credit card bill. This is a liability
+  // settlement, NOT an expense: individual CC spends were already counted when
+  // each purchase was made. Suppressing this prevents double-counting.
+  // Requires a past-tense verb to guard against forward-looking reminders.
+  if (
+    CC_PAYMENT_OUTGOING_REGEX.test(text) &&
+    CC_BILL_HARD_CONFIRMATION_REGEX.test(text)
+  ) {
+    const amtMatch  = text.match(AMOUNT_REGEX);
+    const outAmt    = toNumber(amtMatch?.[1] || amtMatch?.[2]);
+    const acctMatch = text.match(ACCOUNT_REGEX);
+    const rawMask   = acctMatch?.[1]?.replace(/[x*·•]/gi, '') || null;
+    return {
+      ok: false,
+      error: {
+        code: 'cc_payment_outgoing',
+        message:
+          'Outgoing credit-card bill payment detected (liability settlement, not an expense), so it was not added to the spend ledger.',
+      },
+      ccOutgoing: outAmt > 0
+        ? { amount: outAmt, accountMask: rawMask ? rawMask.slice(-4) : null, bankName: getBankName(opts.sender) }
         : null,
     };
   }

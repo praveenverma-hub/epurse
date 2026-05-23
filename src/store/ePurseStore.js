@@ -890,6 +890,28 @@ export const useEPurseStore = create(
               meta:      { amount, cardLast4, dueDate, bankName },
             });
           }
+          // Outgoing CC bill payment from source bank account — adjust the bank
+          // account balance without creating a transaction entry. Individual CC
+          // purchases are already counted as expenses; the bill payment is a
+          // liability settlement and must not inflate the monthly spend total.
+          if (
+            parsedResult?.error?.code === 'cc_payment_outgoing' &&
+            parsedResult.ccOutgoing
+          ) {
+            const { amount, accountMask, bankName } = parsedResult.ccOutgoing;
+            const pseudoDebit = {
+              amount,
+              type:        TRANSACTION_TYPES.DEBIT,
+              accountType: ACCOUNT_TYPES.BANK,
+              accountMask: accountMask || null,
+              bankName:    bankName    || null,
+            };
+            const { accounts: srcAccounts, account: srcAccount } =
+              ensureAccountForParsed([...get().accounts], pseudoDebit);
+            if (srcAccount) {
+              set({ accounts: applyDelta(srcAccounts, srcAccount.id, pseudoDebit) });
+            }
+          }
           return null;
         }
 
