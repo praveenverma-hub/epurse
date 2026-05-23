@@ -65,7 +65,8 @@ const TransactionsScreen = ({ navigation, route }) => {
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
-  const userName = useEPurseStore((s) => s.userName);
+  const userName       = useEPurseStore((s) => s.userName);
+  const lentBorrowed   = useEPurseStore((s) => s.lentBorrowed);
 
   // Accept initial period from Dashboard D/W/M/Y toggle or account filter
   const routePeriod    = route?.params?.initialPeriod;
@@ -99,10 +100,25 @@ const TransactionsScreen = ({ navigation, route }) => {
   });
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
-  const [lbLinkTxn, setLbLinkTxn] = useState(null);  // { txn, categoryId }
+  const [lbLinkTxn, setLbLinkTxn] = useState(null);  // { txn, categoryId, suggestedPersons }
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
+
+  // Net balance per person from LB entries.
+  // Positive = they owe me (lent more than received back).
+  // Negative = I owe them (borrowed more than repaid).
+  const lbNetByPerson = useMemo(() => {
+    const map = {};
+    (lentBorrowed || []).forEach((e) => {
+      if (!map[e.person]) {
+        map[e.person] = { person: e.person, phone: e.phone || null, contactId: e.contactId || null, net: 0 };
+      }
+      const sign = (e.kind === 'lent' || e.kind === 'borrow_repaid') ? 1 : -1;
+      map[e.person].net += sign * e.amount;
+    });
+    return map;
+  }, [lentBorrowed]);
 
   useFocusEffect(
     useCallback(() => {
@@ -448,7 +464,19 @@ const TransactionsScreen = ({ navigation, route }) => {
           if (!activeTxn) return;
           const t = activeTxn;
           setActiveTxn(null);
-          setLbLinkTxn({ txn: t, categoryId });
+          // For settlements, pre-filter to people with outstanding balances.
+          let suggestedPersons = [];
+          if (categoryId === 'lent_settled') {
+            suggestedPersons = Object.values(lbNetByPerson)
+              .filter((p) => p.net > 0)
+              .sort((a, b) => b.net - a.net);
+          } else if (categoryId === 'borrow_repaid') {
+            suggestedPersons = Object.values(lbNetByPerson)
+              .filter((p) => p.net < 0)
+              .sort((a, b) => a.net - b.net)
+              .map((p) => ({ ...p, net: Math.abs(p.net) }));
+          }
+          setLbLinkTxn({ txn: t, categoryId, suggestedPersons });
         }}
         onToggleHidden={(hidden) => {
           if (!activeTxn) return;
@@ -526,6 +554,7 @@ const TransactionsScreen = ({ navigation, route }) => {
       <LinkContactModal
         visible={!!lbLinkTxn}
         categoryId={lbLinkTxn?.categoryId}
+        suggestedPersons={lbLinkTxn?.suggestedPersons || []}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
           updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);

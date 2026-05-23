@@ -63,7 +63,7 @@ const PALETTES: Record<VaultTier, Palette> = {
     specular:  'rgba(255,255,255,0.42)',
     tint:      '#5EEAD4',
     labelText: '#0F766E',
-    labelBg:   'rgba(94,234,212,0.18)',
+    labelBg:   'rgb(234, 250, 247)',
   },
   streak: {
     outline:   ['#BAE6FD', '#0EA5E9'],
@@ -72,7 +72,7 @@ const PALETTES: Record<VaultTier, Palette> = {
     specular:  'rgba(255,255,255,0.62)',
     tint:      '#0EA5E9',
     labelText: '#0369A1',
-    labelBg:   'rgba(14,165,233,0.18)',
+    labelBg:   'rgba(231, 236, 238)',
   },
   premium: {
     outline:   ['#FCD34D', '#D4AF37'],
@@ -82,7 +82,7 @@ const PALETTES: Record<VaultTier, Palette> = {
     specular:  'rgba(255, 248, 220, 0.85)',
     tint:      '#FCD34D',
     labelText: '#92400E',
-    labelBg:   'rgba(252,211,77,0.22)',
+    labelBg:   'rgb(248, 225, 149)',
   },
 };
 

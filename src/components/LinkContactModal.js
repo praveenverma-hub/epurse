@@ -25,6 +25,7 @@ import {
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import GradientButton from './GradientButton';
 import { fetchContactsForPicker } from '../services/contactsService';
+import { formatCurrency } from '../utils/format';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,11 +69,13 @@ const looksLikePhone = (q) => /^[\d\s\+\-\(\)]{3,}$/.test(q.trim());
 
 const LinkContactModal = ({
   visible,
-  categoryId,   // 'lent' | 'borrowed' | 'lent_settled' | 'borrow_repaid'
-  onConfirm,    // ({ person, phone, contactId }) => void
-  onSkip,       // () => void
-  onClose,      // () => void
+  categoryId,        // 'lent' | 'borrowed' | 'lent_settled' | 'borrow_repaid'
+  suggestedPersons,  // [{ person, phone, contactId, net }] — pre-filtered LB persons
+  onConfirm,         // ({ person, phone, contactId }) => void
+  onSkip,            // () => void
+  onClose,           // () => void
 }) => {
+  const suggestions = suggestedPersons || [];
   const [contacts, setContacts]           = useState([]);
   const [loading, setLoading]             = useState(false);
   const [query, setQuery]                 = useState('');
@@ -143,6 +146,39 @@ const LinkContactModal = ({
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
+
+          {/* ── Quick-pick from LB records (settlements only) ── */}
+          {!selected && suggestions.length > 0 && (
+            <View style={styles.suggestionsWrap}>
+              <Text style={styles.suggestionsLabel}>From your records</Text>
+              {suggestions.map((p) => (
+                <TouchableOpacity
+                  key={p.person}
+                  style={styles.suggestionRow}
+                  onPress={() => setSelected({ id: p.contactId, name: p.person, phone: p.phone || '' })}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>{p.person.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.contactName}>{p.person}</Text>
+                    {p.phone ? (
+                      <Text style={styles.contactPhone}>{formatPhone(p.phone)}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.suggestionBalance}>
+                    {formatCurrency(Math.abs(p.net ?? 0))}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <View style={styles.suggestionsDivider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerLabel}>or search all contacts</Text>
+                <View style={styles.dividerLine} />
+              </View>
+            </View>
+          )}
 
           {/* ── Selected contact card ── */}
           {selected ? (
@@ -410,6 +446,36 @@ const styles = StyleSheet.create({
 
   skipBtn: { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
   skipText: { ...typography.small, color: colors.textSecondary, textDecorationLine: 'underline' },
+
+  // Suggestions (quick-pick from LB records)
+  suggestionsWrap: { marginBottom: spacing.sm },
+  suggestionsLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: spacing.sm,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+    gap: spacing.md,
+  },
+  suggestionBalance: { fontSize: 13, fontWeight: '700', color: colors.primary },
+  suggestionsDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.divider },
+  dividerLabel: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
 });
 
 export default LinkContactModal;
