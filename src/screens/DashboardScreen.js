@@ -34,7 +34,7 @@ import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
-import BudgetWidget from '../components/BudgetWidget';
+import { BudgetSummary } from '../components/BudgetSummary';
 import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
 import BellIcon from '../components/BellIcon';
@@ -386,7 +386,7 @@ const DashboardScreen = ({ navigation }) => {
         />
 
         {/* Monthly budget — empty CTA or active progress */}
-        <BudgetWidget onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
+        <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
 
         {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
         <DailyQueueStack />
