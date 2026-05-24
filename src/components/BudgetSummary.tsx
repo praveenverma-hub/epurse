@@ -2,10 +2,28 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 import Animated, { useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
+import { useTheme } from '../hooks/useTheme';
 
 // Essential categories that should show in survival mode
 const ESSENTIAL_CATEGORIES = new Set(['food', 'groceries', 'utilities', 'transport', 'health', 'rent']);
+
+// ── Status computation (from BudgetScreen) ───────────────────────────────────
+const computeStatus = (pct: number, daysElapsedPct: number, hasCap: boolean, theme: any) => {
+  if (!hasCap) return { key: 'neutral', label: 'No total cap', color: theme.textMuted, emoji: '·' };
+  if (pct >= 100) return { key: 'over', label: 'Over budget', color: theme.danger, emoji: '🚨' };
+  if (pct > daysElapsedPct + 10) return { key: 'slow', label: 'Over pace', color: theme.danger, emoji: '⚠' };
+  if (pct > daysElapsedPct + 5) return { key: 'slow', label: 'Slow down', color: theme.warning, emoji: '⚠' };
+  return { key: 'on', label: 'On track', color: theme.success, emoji: '✅' };
+};
+
+const ringColor = (pct: number, daysElapsedPct: number, theme: any) => {
+  if (pct >= 100) return theme.danger;
+  if (pct > daysElapsedPct + 10) return theme.danger;
+  if (pct > daysElapsedPct + 5) return theme.warning;
+  return theme.success;
+};
 
 // ============================================================================
 // ANIMATED SVG CIRCLE
@@ -21,6 +39,7 @@ interface ProgressRingProps {
 }
 
 const ProgressRing: React.FC<ProgressRingProps> = ({ progress, size, strokeWidth, color }) => {
+  const theme = useTheme();
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const progressValue = useSharedValue(0);
@@ -40,7 +59,7 @@ const ProgressRing: React.FC<ProgressRingProps> = ({ progress, size, strokeWidth
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#e5e7eb"
+          stroke={theme.divider}
           strokeWidth={strokeWidth}
           fill="none"
         />
@@ -74,6 +93,7 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const setBudgetTotalCap = useEPurseStore((s) => s.setBudgetTotalCap);
   const updateBudgetCategory = useEPurseStore((s) => s.updateBudgetCategory);
   const allCategories = useEPurseStore((s) => s.categories);
+  const theme = useTheme();
   
   const [showInfo, setShowInfo] = useState(false);
   const [showRebalance, setShowRebalance] = useState(false);
@@ -84,17 +104,17 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   // Empty state - no budget set
   if (!budget || !usage) {
     return (
-      <TouchableOpacity style={styles.emptyCard} onPress={onPress} activeOpacity={0.85}>
-        <View style={styles.emptyLeft}>
+      <TouchableOpacity style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.primary + '44' }]} onPress={onPress} activeOpacity={0.85}>
+        <View style={[styles.emptyLeft, { backgroundColor: theme.background }]}>
           <Text style={styles.emptyEmoji}>📋</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.emptyTitle}>Plan your budget</Text>
-          <Text style={styles.emptySub}>
+          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>Plan your budget</Text>
+          <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
             Set caps for categories you care about. Track spend in real time.
           </Text>
         </View>
-        <Text style={styles.emptyArrow}>›</Text>
+        <Text style={[styles.emptyArrow, { color: theme.primary }]}>›</Text>
       </TouchableOpacity>
     );
   }
@@ -125,19 +145,34 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
     });
 
     const filtered = essentialMode ? cats.filter((c) => c.isEssential) : cats;
+    // Limit to top 3 categories by spending
+    const limited = filtered.sort((a, b) => b.spent - a.spent).slice(0, 3);
 
     return {
       totalSpent: totalActual,
       isBudgetExhausted: exhausted,
       overageAmount: overage,
       daysRemaining: days,
-      displayCategories: filtered,
+      displayCategories: limited,
     };
   }, [usage, allCategories, essentialMode]);
 
   const totalCap = usage.total.cap || 1;
   const progressRatio = Math.min(totalSpent / totalCap, 1.0);
-  const ringColor = isBudgetExhausted ? '#dc2626' : '#10b981';
+
+  // Calculate days elapsed percentage for status
+  const now = new Date();
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const totalDays = lastDay.getDate();
+  const elapsedDays = now.getDate();
+  const daysElapsedPct = (elapsedDays / totalDays) * 100;
+
+  // Compute status using BudgetScreen logic
+  const hasCap = totalCap > 0;
+  const pctVal = (totalSpent / totalCap) * 100;
+  const status = useMemo(() => computeStatus(pctVal, daysElapsedPct, hasCap, theme), [pctVal, daysElapsedPct, hasCap, theme]);
+  const ringColorValue = useMemo(() => ringColor(pctVal, daysElapsedPct, theme), [pctVal, daysElapsedPct, theme]);
 
   const formatCurrency = (val: number) => `₹${(val / 1000).toFixed(1)}k`;
 
@@ -162,13 +197,15 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: theme.card }]}>
       {/* HEADER */}
       <View style={styles.header}>
-        <Text style={styles.title}>Budget Summary</Text>
-        <TouchableOpacity onPress={() => setShowInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.infoIcon}>ℹ️</Text>
-        </TouchableOpacity>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>Budget Summary</Text>
+        {isBudgetExhausted && (
+          <TouchableOpacity onPress={() => setShowInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="information-circle-outline" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* MAIN LAYOUT */}
@@ -176,17 +213,15 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
         {/* LEFT: MACRO RING */}
         <View style={styles.leftColumn}>
           <View style={styles.ringContainer}>
-            <ProgressRing progress={progressRatio} size={120} strokeWidth={12} color={ringColor} />
+            <ProgressRing progress={progressRatio} size={60} strokeWidth={6} color={ringColorValue} />
             <View style={styles.ringCenter}>
-              <Text style={styles.percentText}>{Math.round(progressRatio * 100)}%</Text>
+              <Text style={[styles.percentText, { color: theme.textPrimary }]}>{Math.round(progressRatio * 100)}%</Text>
             </View>
           </View>
-          <Text style={styles.spentText}>{formatCurrency(totalSpent)} spent</Text>
-          {isBudgetExhausted ? (
-            <Text style={styles.overageText}>Overage: -{formatCurrency(overageAmount)}</Text>
-          ) : (
-            <Text style={styles.limitText}>of {formatCurrency(totalCap)}</Text>
-          )}
+          <View style={[styles.statusPill, { backgroundColor: status.color + '18' }]}>
+            <Text style={styles.statusEmoji}>{status.emoji}</Text>
+            <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
+          </View>
         </View>
 
         {/* RIGHT: CATEGORY TRACKS */}
@@ -199,16 +234,17 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
 
             return (
               <View key={cat.id} style={styles.trackRow}>
-                <Text style={styles.trackLabel}>
-                  {cat.emoji} {cat.name}
-                </Text>
-                <View style={styles.trackBarContainer}>
-                  <View style={[styles.trackBar, { width: `${ratio * 100}%`, backgroundColor: barColor }]} />
+                <Text style={styles.trackEmoji}>{cat.emoji}</Text>
+                <View style={styles.trackMiddle}>
+                  <Text style={[styles.trackLabel, { color: theme.textPrimary }]}>{cat.name}</Text>
+                  <View style={[styles.trackBarContainer, { backgroundColor: theme.divider }]}>
+                    <View style={[styles.trackBar, { width: `${ratio * 100}%`, backgroundColor: barColor }]} />
+                  </View>
                 </View>
                 {isOver ? (
-                  <Text style={styles.overageValue}>+{formatCurrency(overageVal)}</Text>
+                  <Text style={[styles.overageValue, { color: theme.danger }]}>+{formatCurrency(overageVal)}</Text>
                 ) : (
-                  <Text style={styles.percentValue}>{Math.round(ratio * 100)}%</Text>
+                  <Text style={[styles.percentValue, { color: theme.textSecondary }]}>{Math.round(ratio * 100)}%</Text>
                 )}
               </View>
             );
@@ -216,83 +252,74 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
         </View>
       </View>
 
-      {/* FOOTER BUTTONS */}
-      <View style={styles.footer}>
-        {!isBudgetExhausted ? (
-          <>
-            <TouchableOpacity style={styles.pillButton} onPress={() => setShowRebalance(true)}>
-              <Text style={styles.pillText}>⚖️ Rebalance Tracks</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.pillButton}>
-              <Text style={styles.pillText}>{freezeLabel}</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            <TouchableOpacity style={[styles.pillButton, styles.topUpButton]} onPress={handleTopUp}>
-              <Text style={[styles.pillText, styles.topUpText]}>➕ Top Up</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.pillButton, essentialMode && styles.essentialActive]}
-              onPress={() => setEssentialMode(!essentialMode)}
-            >
-              <Text style={[styles.pillText, essentialMode && styles.essentialActiveText]}>
-                🔒 Essential Mode
-              </Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
+      {/* FOOTER BUTTONS - Only show when budget is exhausted */}
+      {isBudgetExhausted && (
+        <View style={[styles.footer, { marginTop: 12 }]}>
+          <TouchableOpacity style={[styles.pillButton, { backgroundColor: theme.success }]} onPress={handleTopUp}>
+            <Ionicons name="add-circle-outline" size={14} color="#ffffff" style={{ marginRight: 4 }} />
+            <Text style={[styles.pillText, { color: '#ffffff' }]}>Top Up</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pillButton, { backgroundColor: essentialMode ? theme.textPrimary : theme.background }]}
+            onPress={() => setEssentialMode(!essentialMode)}
+          >
+            <Ionicons name="lock-closed-outline" size={14} color={essentialMode ? '#ffffff' : theme.textPrimary} style={{ marginRight: 4 }} />
+            <Text style={[styles.pillText, { color: essentialMode ? '#ffffff' : theme.textPrimary }]}>
+              Essential Mode
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* WARNING STRIP */}
       {isBudgetExhausted && (
-        <View style={styles.warningStrip}>
-          <Text style={styles.warningText}>⚠️ Budget exhausted — {daysRemaining} days remaining</Text>
+        <View style={[styles.warningStrip, { backgroundColor: theme.danger + '15', borderLeftColor: theme.danger }]}>
+          <Text style={[styles.warningText, { color: theme.danger }]}>⚠️ Budget exhausted — {daysRemaining} days remaining</Text>
         </View>
       )}
 
       {/* INFO MODAL */}
       <Modal visible={showInfo} transparent animationType="slide" onRequestClose={() => setShowInfo(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowInfo(false)}>
-          <View style={styles.bottomSheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Budget Features</Text>
+          <View style={[styles.bottomSheet, { backgroundColor: theme.card }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: theme.divider }]} />
+            <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>Budget Features</Text>
             <ScrollView style={styles.sheetScroll}>
               <View style={styles.featureItem}>
-                <View style={styles.featureBadge}>
+                <View style={[styles.featureBadge, { backgroundColor: theme.background }]}>
                   <Text style={styles.featureBadgeText}>⚖️</Text>
                 </View>
                 <View style={styles.featureContent}>
-                  <Text style={styles.featureName}>Smart Rebalancing</Text>
-                  <Text style={styles.featureDesc}>
+                  <Text style={[styles.featureName, { color: theme.textPrimary }]}>Smart Rebalancing</Text>
+                  <Text style={[styles.featureDesc, { color: theme.textSecondary }]}>
                     Move funds from under-budget categories to cover overages without increasing total spend.
                   </Text>
                 </View>
               </View>
               <View style={styles.featureItem}>
-                <View style={styles.featureBadge}>
+                <View style={[styles.featureBadge, { backgroundColor: theme.background }]}>
                   <Text style={styles.featureBadgeText}>⚡</Text>
                 </View>
                 <View style={styles.featureContent}>
-                  <Text style={styles.featureName}>Cooldown Freezes</Text>
-                  <Text style={styles.featureDesc}>
+                  <Text style={[styles.featureName, { color: theme.textPrimary }]}>Cooldown Freezes</Text>
+                  <Text style={[styles.featureDesc, { color: theme.textSecondary }]}>
                     Lock spending for remaining days to preserve budget. Ideal for month-end discipline.
                   </Text>
                 </View>
               </View>
               <View style={styles.featureItem}>
-                <View style={styles.featureBadge}>
+                <View style={[styles.featureBadge, { backgroundColor: theme.background }]}>
                   <Text style={styles.featureBadgeText}>🔒</Text>
                 </View>
                 <View style={styles.featureContent}>
-                  <Text style={styles.featureName}>Essential Mode</Text>
-                  <Text style={styles.featureDesc}>
+                  <Text style={[styles.featureName, { color: theme.textPrimary }]}>Essential Mode</Text>
+                  <Text style={[styles.featureDesc, { color: theme.textSecondary }]}>
                     Filters view to survival categories only (Groceries, Utilities, Transport). Hides discretionary spend.
                   </Text>
                 </View>
               </View>
             </ScrollView>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowInfo(false)}>
+            <TouchableOpacity style={[styles.closeButton, { backgroundColor: theme.textPrimary }]} onPress={() => setShowInfo(false)}>
               <Text style={styles.closeButtonText}>Got it</Text>
             </TouchableOpacity>
           </View>
@@ -302,22 +329,22 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
       {/* REBALANCE MODAL */}
       <Modal visible={showRebalance} transparent animationType="slide" onRequestClose={() => setShowRebalance(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowRebalance(false)}>
-          <View style={styles.bottomSheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Rebalance Budget</Text>
+          <View style={[styles.bottomSheet, { backgroundColor: theme.card }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: theme.divider }]} />
+            <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>Rebalance Budget</Text>
             <ScrollView style={styles.sheetScroll}>
               {overBudgetCats.length === 0 ? (
-                <Text style={styles.emptyText}>All categories are within budget ✅</Text>
+                <Text style={[styles.emptyText, { color: theme.textSecondary }]}>All categories are within budget ✅</Text>
               ) : (
                 overBudgetCats.map((cat) => (
-                  <View key={cat.id} style={styles.rebalanceItem}>
-                    <Text style={styles.rebalanceCat}>
+                  <View key={cat.id} style={[styles.rebalanceItem, { backgroundColor: theme.background }]}>
+                    <Text style={[styles.rebalanceCat, { color: theme.textPrimary }]}>
                       {cat.emoji} {cat.name}
                     </Text>
-                    <Text style={styles.rebalanceOver}>Over by {formatCurrency(cat.spent - cat.allocated)}</Text>
+                    <Text style={[styles.rebalanceOver, { color: theme.danger }]}>Over by {formatCurrency(cat.spent - cat.allocated)}</Text>
                     {underBudgetCats.length > 0 && (
                       <TouchableOpacity
-                        style={styles.rebalanceButton}
+                        style={[styles.rebalanceButton, { backgroundColor: theme.success }]}
                         onPress={() => {
                           handleRebalance(underBudgetCats[0].id, cat.id, 500);
                         }}
@@ -331,7 +358,7 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
                 ))
               )}
             </ScrollView>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowRebalance(false)}>
+            <TouchableOpacity style={[styles.closeButton, { backgroundColor: theme.textPrimary }]} onPress={() => setShowRebalance(false)}>
               <Text style={styles.closeButtonText}>Done</Text>
             </TouchableOpacity>
           </View>
@@ -349,14 +376,12 @@ const styles = StyleSheet.create({
   emptyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 16,
     marginTop: 24,
     gap: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: '#FF6B3544',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -367,7 +392,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#f3f4f6',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -375,24 +399,21 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
   },
   emptySub: {
     fontSize: 12,
-    color: '#6b7280',
     marginTop: 2,
     lineHeight: 15,
   },
   emptyArrow: {
     fontSize: 28,
     fontWeight: '300',
-    color: '#FF6B35',
   },
   card: {
-    backgroundColor: '#ffffff',
     borderRadius: 16,
-    padding: 20,
-    marginTop: 24,
+    padding: 16,
+    paddingBottom: 12,
+    marginTop: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -403,27 +424,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
   },
-  infoIcon: {
-    fontSize: 18,
-  },
+
   mainRow: {
     flexDirection: 'row',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   leftColumn: {
     alignItems: 'center',
-    marginRight: 24,
+    marginRight: 16,
   },
   ringContainer: {
     position: 'relative',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   ringCenter: {
     position: 'absolute',
@@ -435,101 +453,94 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   percentText: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  spentText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 2,
+    fontWeight: '800',
   },
-  limitText: {
-    fontSize: 12,
-    color: '#6b7280',
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'center',
   },
-  overageText: {
-    fontSize: 12,
-    color: '#dc2626',
-    fontWeight: '600',
+  statusEmoji: {
+    fontSize: 10,
+  },
+  statusLabel: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   rightColumn: {
     flex: 1,
     justifyContent: 'space-around',
   },
   trackRow: {
-    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  trackEmoji: {
+    fontSize: 14,
+  },
+  trackMiddle: {
+    flex: 1,
   },
   trackLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#374151',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   trackBarContainer: {
-    height: 6,
-    backgroundColor: '#e5e7eb',
-    borderRadius: 3,
+    height: 5,
+    borderRadius: 2.5,
     overflow: 'hidden',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   trackBar: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 2.5,
   },
   percentValue: {
-    fontSize: 11,
-    color: '#6b7280',
+    fontSize: 10,
+    minWidth: 32,
     textAlign: 'right',
   },
   overageValue: {
-    fontSize: 11,
-    color: '#dc2626',
+    fontSize: 10,
     fontWeight: '600',
+    minWidth: 32,
     textAlign: 'right',
   },
   footer: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
   pillButton: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    flexDirection: 'row',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 20,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   pillText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#374151',
   },
-  topUpButton: {
-    backgroundColor: '#10b981',
-  },
-  topUpText: {
-    color: '#ffffff',
-  },
-  essentialActive: {
-    backgroundColor: '#1f2937',
-  },
-  essentialActiveText: {
-    color: '#ffffff',
-  },
+
   warningStrip: {
     marginTop: 12,
-    backgroundColor: '#fef2f2',
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderLeftWidth: 3,
-    borderLeftColor: '#dc2626',
   },
   warningText: {
     fontSize: 12,
-    color: '#991b1b',
     fontWeight: '600',
   },
   modalOverlay: {
@@ -538,7 +549,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   bottomSheet: {
-    backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
@@ -549,7 +559,6 @@ const styles = StyleSheet.create({
   sheetHandle: {
     width: 40,
     height: 4,
-    backgroundColor: '#d1d5db',
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 16,
@@ -557,7 +566,6 @@ const styles = StyleSheet.create({
   sheetTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
     marginBottom: 16,
   },
   sheetScroll: {
@@ -571,7 +579,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#f3f4f6',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -585,16 +592,13 @@ const styles = StyleSheet.create({
   featureName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
     marginBottom: 4,
   },
   featureDesc: {
     fontSize: 13,
-    color: '#6b7280',
     lineHeight: 18,
   },
   closeButton: {
-    backgroundColor: '#111827',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -606,12 +610,10 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    color: '#6b7280',
     textAlign: 'center',
     paddingVertical: 20,
   },
   rebalanceItem: {
-    backgroundColor: '#f9fafb',
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
@@ -619,17 +621,14 @@ const styles = StyleSheet.create({
   rebalanceCat: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
     marginBottom: 4,
   },
   rebalanceOver: {
     fontSize: 13,
-    color: '#dc2626',
     fontWeight: '600',
     marginBottom: 12,
   },
   rebalanceButton: {
-    backgroundColor: '#10b981',
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,

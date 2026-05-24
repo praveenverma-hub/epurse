@@ -166,6 +166,23 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     );
   }, []);
 
+  // Auto-distribute total budget equally when total cap changes
+  useEffect(() => {
+    const capNum = parseInt(localCap.replace(/\D/g, ''), 10);
+    if (Number.isFinite(capNum) && capNum > 0 && localCats.length > 0) {
+      const perCategory = Math.floor(capNum / localCats.length);
+      setLocalCats((prev) =>
+        prev.map((c) => {
+          // Only auto-fill if the field is empty
+          if (!c.cap || c.cap === '0') {
+            return { ...c, cap: String(perCategory) };
+          }
+          return c;
+        })
+      );
+    }
+  }, [localCap, localCats.length]);
+
   const handleLocalAddCat = useCallback((catId) => {
     const avg = getCategoryAverage(catId, 3);
     setLocalCats((prev) => [
@@ -211,6 +228,41 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
   const savePlan = useCallback(() => {
     const capNum = parseInt(localCap.replace(/\D/g, ''), 10);
+    
+    // Validate: if categories exist, ensure they all have values
+    if (localCats.length > 0) {
+      const hasEmptyCategories = localCats.some(({ cap }) => {
+        const num = parseInt(cap, 10);
+        return !Number.isFinite(num) || num <= 0;
+      });
+      
+      if (hasEmptyCategories) {
+        setConfirm({
+          title: 'Empty category budgets',
+          message: 'All categories must have a budget value greater than 0. Please fill in all category budgets.',
+          primaryText: 'OK',
+        });
+        return;
+      }
+      
+      // Validate: sum of category budgets should not exceed total budget
+      if (Number.isFinite(capNum) && capNum > 0) {
+        const totalCategoryBudget = localCats.reduce((sum, { cap }) => {
+          const num = parseInt(cap, 10);
+          return sum + (Number.isFinite(num) ? num : 0);
+        }, 0);
+        
+        if (totalCategoryBudget > capNum) {
+          setConfirm({
+            title: 'Budget mismatch',
+            message: `Category budgets (₹${totalCategoryBudget.toLocaleString('en-IN')}) exceed total budget (₹${capNum.toLocaleString('en-IN')}). Please adjust.`,
+            primaryText: 'OK',
+          });
+          return;
+        }
+      }
+    }
+    
     setBudgetTotalCap(Number.isFinite(capNum) ? capNum : null);
     // Remove categories that are no longer in the plan
     const newIds = new Set(localCats.map((c) => c.catId));
@@ -223,7 +275,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
       updateBudgetCategory(catId, Number.isFinite(num) ? num : 0);
     });
     setPlanModalVisible(false);
-  }, [localCap, localCats, budget, setBudgetTotalCap, removeBudgetCategory, updateBudgetCategory]);
+  }, [localCap, localCats, budget, setBudgetTotalCap, removeBudgetCategory, updateBudgetCategory, setConfirm]);
 
   const handleResetPlan = useCallback(() => {
     setConfirm({
