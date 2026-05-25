@@ -342,7 +342,7 @@ const CategoryPickerModal: React.FC<Props> = ({
                   onPress={() => onToggleHidden(!isHidden)}
                 >
                   <Text style={[styles.hideIgnoreText, isHidden && styles.unhideText]}>
-                    {isHidden ? 'Show' : 'Hide'}
+                    {isHidden ? 'Public' : 'Private'}
                   </Text>
                 </TouchableOpacity>
               )}

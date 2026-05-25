@@ -377,7 +377,7 @@ const TransactionsScreen = ({ navigation, route }) => {
             />
           ))}
           <FilterPill
-            label="🙈 Hidden"
+            label="🔒 Private"
             active={activeFilters.has('hidden')}
             onPress={() => toggleFilter('hidden')}
           />
@@ -524,11 +524,11 @@ const TransactionsScreen = ({ navigation, route }) => {
           const t = activeTxn;
           setActiveTxn(null);
           setConfirm({
-            title: hidden ? 'Hide transaction?' : 'Show transaction?',
+            title: hidden ? 'Mark as Private?' : 'Make Public?',
             message: hidden
-              ? 'This transaction will be hidden from default views but still counted in totals.'
-              : 'This transaction will be visible again in default views.',
-            primaryText: hidden ? 'Hide' : 'Show',
+              ? 'This transaction will be private — hidden from default views but still counted in totals.'
+              : 'This transaction will be visible again in all default views.',
+            primaryText: hidden ? 'Mark Private' : 'Make Public',
             destructive: hidden,
             secondaryText: 'Cancel',
             onSecondary: () => setConfirm(null),

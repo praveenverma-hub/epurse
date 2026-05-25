@@ -53,7 +53,7 @@ const TransactionItem = ({ txn, onPress, onPressCategory, onPressSplitChip }) =>
             </View>
           ) : null}
           {txn.isIgnored ? <Text style={styles.ignoredTag}>IGNORED</Text> : null}
-          {!txn.isIgnored && txn.isHidden ? <Text style={styles.hiddenTag}>HIDDEN</Text> : null}
+          {!txn.isIgnored && txn.isHidden ? <Text style={styles.hiddenTag}>PRIVATE</Text> : null}
         </View>
         <Text style={styles.time}>{formatDateTime(txn.createdAt)}</Text>
       </View>

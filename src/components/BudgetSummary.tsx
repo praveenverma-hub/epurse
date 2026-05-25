@@ -212,7 +212,11 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   };
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.card }]}>
+    <TouchableOpacity
+      style={[styles.card, { backgroundColor: theme.card }]}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.85 : 1}
+    >
       {/* HEADER */}
       <View style={styles.header}>
         <Text style={[styles.title, { color: theme.textPrimary }]}>Budget Summary</Text>
@@ -379,7 +383,7 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
           </View>
         </TouchableOpacity>
       </Modal>
-    </View>
+    </TouchableOpacity>
   );
 };
 
