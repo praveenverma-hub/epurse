@@ -80,6 +80,31 @@ const SENDER_KEY_TO_BANK = [
   ['indbnk',     'Indian Bank'],
   ['centbk',     'Central Bank'],
   ['iobbnk',     'IOB'],
+  ['ucobk',      'UCO Bank'],
+  ['mahbnk',     'Bank of Maharashtra'],
+  ['punbsind',   'Punjab & Sind Bank'],
+  ['jkbank',     'J&K Bank'],
+  ['dcb',        'DCB Bank'],
+  ['karur',      'Karur Vysya Bank'],
+  ['cityunion',  'City Union Bank'],
+  ['southind',   'South Indian Bank'],
+  ['equitas',    'Equitas SFB'],
+  ['utkarsh',    'Utkarsh SFB'],
+  ['ujjvn',      'Ujjivan SFB'],
+  ['suryoday',   'Suryoday SFB'],
+  ['jana',       'Jana SFB'],
+  ['esaf',       'ESAF SFB'],
+  ['northeast',  'North East SFB'],
+  ['indiapst',   'India Post Payments'],
+  ['tamilnad',   'Tamilnad Mercantile Bank'],
+  ['nainital',   'Nainital Bank'],
+  ['lakshmi',    'Lakshmi Vilas Bank'],
+  ['vijaya',     'Bank of Baroda'],
+  ['dena',       'Bank of Baroda'],
+  ['syndbk',     'Canara Bank'],
+  ['allbnk',     'Indian Bank'],
+  ['andbk',      'Union Bank'],
+  ['kvbank',     'Karur Vysya Bank'],
   ['paytm',      'Paytm'],
   ['pytm',       'Paytm'],
   ['phonepe',    'PhonePe'],
@@ -142,9 +167,11 @@ const TRANSACTION_PHRASES = [
   // Credit-side
   'credited', 'deposited', 'refunded', 'refund', 'salary credited',
   'amount credited', 'cashback credited',
-  'received in', 'received to',
+  'received in', 'received to', 'received from',
   // Bare-verb credit forms
   'credit to', 'credit in', 'credit of',
+  // Reversal confirmations
+  'reversed to', 'amount reversed', 'transaction reversed', 'reversal credited',
 ];
 
 // =============================================================================
@@ -221,6 +248,10 @@ const PROMOTIONAL_OFFER_REGEX =
 // Detected by: two or more forex pairs in succession, or commodity + forex combo.
 const MARKET_RATES_REGEX =
   /\b(?:gbp|eur|jpy|chf|usd|aud|cad|sgd)\s+[\d.]+[,\s]+(?:gbp|eur|jpy|chf|usd|aud|cad|sgd)\s+[\d.]+\b|\bglb\s*mkts\b|\bglobal\s+market\b/i;
+
+// UPI collect / payment requests — money has NOT moved yet; user must approve.
+// Example: "Collect Request of Rs 500 from merchant@upi. Tap to approve."
+const COLLECT_REQUEST_REGEX = /\bcollect\s+request\b|\bupi\s+collect\b|\bpayment\s+request\s+of\b/i;
 
 // =============================================================================
 // Helpers
@@ -450,6 +481,17 @@ export const parseMessageDetailed = (message, opts = {}) => {
     };
   }
 
+  // UPI collect / payment requests — approval prompt, money has not moved yet.
+  if (COLLECT_REQUEST_REGEX.test(text)) {
+    return {
+      ok: false,
+      error: {
+        code: 'upi_collect_request',
+        message: 'UPI collect/payment request detected — not a completed transaction.',
+      },
+    };
+  }
+
   // ── CC-specific early exits (bank-sender verified above) ──────────────────
 
   // Exclude card payment acknowledgement SMSes. The actual outgoing spend is
@@ -563,7 +605,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
 
   // ── Extract: debit vs credit ──────────────────────────────────────────────
   const isCredit =
-    /credited|deposited|refunded|refund|received in|received to|salary credited|cashback credited|amount credited/i.test(text);
+    /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b/i.test(text);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
