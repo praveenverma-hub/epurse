@@ -138,6 +138,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
       statusBarTranslucent
       onRequestClose={handleDismiss}
     >
+      <StatusBar barStyle="dark-content" />
       <Animated.View style={[styles.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
 

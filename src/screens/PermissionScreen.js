@@ -98,6 +98,7 @@ export default function PermissionScreen({ navigation }) {
   const setLastSmsDate = useEPurseStore((s) => s.setLastSmsDate);
   const ingestMessage = useEPurseStore((s) => s.ingestMessage);
   const compactTransactions = useEPurseStore((s) => s.compactTransactions);
+  const capOnboardingQueue  = useEPurseStore((s) => s.capOnboardingQueue);
   const storedName = useEPurseStore((s) => s.userName);
 
   const [step, setStep] = useState(0); // 0 welcome, 1 name
@@ -211,10 +212,11 @@ export default function PermissionScreen({ navigation }) {
     if (maxSmsDate > 0) setLastSmsDate(maxSmsDate);
     setLastSmsSync(Date.now());
     compactTransactions(true); // first run: force a compaction pass
+    capOnboardingQueue(5);     // new user: keep only 5 newest in the review queue
 
     setProgress({ current: total, total, label: "Done!" });
     await new Promise((r) => setTimeout(r, 350)); // brief pause so user sees "Done"
-  }, [ingestMessage, setLastSmsSync, setLastSmsDate, compactTransactions]);
+  }, [ingestMessage, setLastSmsSync, setLastSmsDate, compactTransactions, capOnboardingQueue]);
 
   // ── Permission request ─────────────────────────────────────────────────────
   const handleAllowSms = async () => {

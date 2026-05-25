@@ -415,14 +415,7 @@ const DashboardScreen = ({ navigation }) => {
             <TransactionItem
               key={t.id}
               txn={t}
-              onPress={() => navigation.navigate('Transactions', { focusId: t.id })}
-              onPressCategory={() => {
-                if (t.lbLocked) {
-                  setConfirm({ title: 'Category locked', message: 'This transaction is linked to a lent/borrow record and cannot be re-categorised.', primaryText: 'OK' });
-                  return;
-                }
-                setActiveTxn(t);
-              }}
+              onPressCategory={() => setActiveTxn(t)}
               onPressSplitChip={() => setSplitDetailsTxn(t)}
             />
           ))
@@ -436,6 +429,7 @@ const DashboardScreen = ({ navigation }) => {
       <CategoryPickerModal
         visible={!!activeTxn}
         categories={categories}
+        categoryLocked={!!activeTxn?.lbLocked}
         selectedCategoryId={activeTxn?.categoryId}
         selectedParent={activeTxn?.parentCategory}
         selectedChild={activeTxn?.childCategory}

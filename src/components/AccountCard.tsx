@@ -517,7 +517,7 @@ const BackFace: React.FC<BackFaceProps> = ({
     : Number(currentBalance).toFixed(2);
   const titleText    = isCreditCard ? 'OUTSTANDING ANCHOR'  : 'BALANCE ANCHOR';
   const subtitleText = isCreditCard
-    ? 'Set actual outstanding (0 if fully paid)'
+    ? 'Set actual outstanding in ₹ (0 if fully paid)'
     : 'Set the actual balance on this account';
 
   return (

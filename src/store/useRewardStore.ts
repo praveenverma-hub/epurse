@@ -207,6 +207,9 @@ export const useRewardStore = create<RewardState>()(
         }
 
         // ── New calendar day: compute new streak value
+        // gap === Infinity means lastCheckedInDate was null → very first check-in ever.
+        const isFirstCheckIn = state.lastCheckedInDate === null;
+
         const newStreak  = gap === 1
           ? state.awareStreak + 1
           : REWARD_CONFIG.STREAK_BASELINE;
@@ -216,7 +219,10 @@ export const useRewardStore = create<RewardState>()(
 
         // SAVINGS: yesterday had zero SMS txns, bonus not yet claimed for that
         // day, and not already sitting in pendingSavingsReward (re-open guard).
+        // Skip entirely on first check-in — user had no "yesterday" as an app user
+        // so yesterday's zero count is meaningless and must not trigger the modal.
         const isSavings =
+          !isFirstCheckIn &&
           yesterdayTransactionCount === 0 &&
           state.lastClaimedBonusDate    !== yesterday &&
           state.pendingSavingsReward?.forDate !== yesterday;
@@ -226,15 +232,17 @@ export const useRewardStore = create<RewardState>()(
         const epcAwarded = isSavings
           ? Math.round(REWARD_CONFIG.SAVINGS_EPC_BASE * multiplier) : 0;
 
+        // First check-in is treated as NEW_DAY (streak starts at 1, no reset noise).
         const type: CheckInType = isSavings
           ? 'SAVINGS'
-          : isReset ? 'STREAK_RESET' : 'NEW_DAY';
+          : (isReset && !isFirstCheckIn) ? 'STREAK_RESET' : 'NEW_DAY';
 
         // ── Banner copy (SAVINGS has no banner — it surfaces via bottom sheet)
+        // Suppress banner on first check-in so the welcome screen isn't cluttered.
         let message = '';
         if (type === 'STREAK_RESET') {
           message = REWARD_COPY.BANNER_RESET;
-        } else if (type === 'NEW_DAY') {
+        } else if (type === 'NEW_DAY' && !isFirstCheckIn) {
           message =
             `${REWARD_COPY.BANNER_STREAK_PREFIX} ${newStreak} ` +
             `${REWARD_COPY.BANNER_STREAK_SUFFIX}`;
@@ -269,26 +277,30 @@ export const useRewardStore = create<RewardState>()(
           lastCheckInResult:  result,
         });
 
-        // Notification feed entry — separate from the transient top banner.
-        if (type === 'NEW_DAY') {
-          useNotificationStore.getState().add({
-            kind:      'aware_check_in',
-            title:     `Day ${newStreak} Aware Run locked in`,
-            body:
-              multiplier > 1
-                ? `Earnings multiplier now ${multiplier}× — review your queue to bank RP & EPC.`
-                : `Review your queue today to bank RP & EPC.`,
-            dedupeKey: `aware_check_in:${today}`,
-            meta:      { newStreak, multiplier },
-          });
-        } else if (type === 'STREAK_RESET') {
-          useNotificationStore.getState().add({
-            kind:      'aware_streak_reset',
-            title:     'Aware Run reset to Day 1',
-            body:      'A day was missed — start a fresh run today to rebuild your multiplier.',
-            dedupeKey: `aware_streak_reset:${today}`,
-            meta:      { newStreak },
-          });
+        // Notification feed entries — skip entirely on first-ever check-in
+        // (no prior streak to celebrate or reset, and the welcome flow is
+        // already surfaced by WelcomeStreakModal).
+        if (!isFirstCheckIn) {
+          if (type === 'NEW_DAY') {
+            useNotificationStore.getState().add({
+              kind:      'aware_check_in',
+              title:     `Day ${newStreak} Aware Run locked in`,
+              body:
+                multiplier > 1
+                  ? `Earnings multiplier now ${multiplier}× — review your queue to bank RP & EPC.`
+                  : `Review your queue today to bank RP & EPC.`,
+              dedupeKey: `aware_check_in:${today}`,
+              meta:      { newStreak, multiplier },
+            });
+          } else if (type === 'STREAK_RESET') {
+            useNotificationStore.getState().add({
+              kind:      'aware_streak_reset',
+              title:     'Aware Run reset to Day 1',
+              body:      'A day was missed — start a fresh run today to rebuild your multiplier.',
+              dedupeKey: `aware_streak_reset:${today}`,
+              meta:      { newStreak },
+            });
+          }
         }
 
         return result;

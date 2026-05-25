@@ -16,11 +16,8 @@ export const formatCompact = (value) => {
   const n = Number(value || 0);
   const abs = Math.abs(n);
   const sign = n < 0 ? '-' : '';
-  // Drop trailing ".0" so ₹15.0k → ₹15k, but ₹1.2k stays ₹1.2k
-  const fmt = (num) => {
-    const s = num.toFixed(1);
-    return s.endsWith('.0') ? s.slice(0, -2) : s;
-  };
+  // 2 decimal places, strip trailing zeros: 2.00→2, 2.10→2.1, 2.03→2.03
+  const fmt = (num) => num.toFixed(2).replace(/\.?0+$/, '');
   if (abs >= 1e7) return `${sign}₹${fmt(abs / 1e7)}Cr`;
   if (abs >= 1e5) return `${sign}₹${fmt(abs / 1e5)}L`;
   if (abs >= 1e3) return `${sign}₹${fmt(abs / 1e3)}k`;

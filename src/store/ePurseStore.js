@@ -437,6 +437,25 @@ export const useEPurseStore = create(
           };
         }),
 
+      // Called once at the end of the onboarding inbox sweep.
+      // Keeps only `limit` newest unreviewed SMS in the queue so a brand-new
+      // user isn't overwhelmed by dozens of cards on first open.
+      capOnboardingQueue: (limit = 5) =>
+        set((s) => {
+          const unreviewed = s.transactions
+            .filter((t) => t.source === 'sms' && !t.isIgnored && !t.isReviewed)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          if (unreviewed.length <= limit) return s;
+          const keepIds = new Set(unreviewed.slice(0, limit).map((t) => t.id));
+          return {
+            transactions: s.transactions.map((t) =>
+              t.source === 'sms' && !t.isReviewed && !keepIds.has(t.id)
+                ? { ...t, isReviewed: true }
+                : t
+            ),
+          };
+        }),
+
       /**
        * Fires the mid-cycle nudge notification once per cycle.
        * Conditions: budget exists, today >= day 15, not already nudged this cycle.
@@ -1779,7 +1798,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 14,
+      version: 15,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -1946,6 +1965,45 @@ export const useEPurseStore = create(
             ...state,
             userCustomRules: state.userCustomRules ?? {},
           };
+        }
+
+        if (version < 15) {
+          // Backfill bankName for accounts whose names were created with a
+          // generic type fallback (e.g. "Bank ··1234", "Credit Card ··5678")
+          // instead of the real bank name. We derive the correct name from
+          // the bankName field that was already stored on each linked transaction.
+          const GENERIC_PREFIXES = new Set(['Bank', 'Credit Card', 'Digital Wallet', 'Cash']);
+          const txns = state.transactions || [];
+
+          const updatedAccounts = (state.accounts || []).map((acct) => {
+            // Skip accounts that already have an explicit bankName.
+            if (acct.bankName) return acct;
+
+            // Determine if the current name prefix is just the account-type
+            // fallback rather than a real bank name.
+            const prefix = acct.name?.includes('··')
+              ? acct.name.split('··')[0].trim()
+              : acct.name?.trim() ?? '';
+            if (!GENERIC_PREFIXES.has(prefix)) return acct;
+
+            // Collect bankName values from all SMS transactions linked to
+            // this account, then pick the most frequently occurring one.
+            const freq = {};
+            txns.forEach((t) => {
+              if (t.accountId === acct.id && t.bankName) {
+                freq[t.bankName] = (freq[t.bankName] || 0) + 1;
+              }
+            });
+            const entries = Object.entries(freq);
+            if (!entries.length) return acct;
+
+            const bestBank = entries.sort((a, b) => b[1] - a[1])[0][0];
+            const newName  = acct.mask ? `${bestBank} ··${acct.mask}` : bestBank;
+
+            return { ...acct, bankName: bestBank, name: newName };
+          });
+
+          state = { ...state, accounts: updatedAccounts };
         }
 
         return state;

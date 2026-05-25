@@ -145,8 +145,23 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
     });
 
     const filtered = essentialMode ? cats.filter((c) => c.isEssential) : cats;
-    // Limit to top 3 categories by spending
-    const limited = filtered.sort((a, b) => b.spent - a.spent).slice(0, 3);
+
+    // Sort by spending descending; pick top 3 as default
+    const sorted = [...filtered].sort((a, b) => b.spent - a.spent);
+    const top3 = sorted.slice(0, 3);
+
+    // If a category outside the top 3 has hit its full budget (spent >= allocated),
+    // replace the third slot (lowest spender) with the most-exhausted one so the
+    // user always sees a "maxed out" category in the summary card.
+    if (top3.length === 3) {
+      const alertCat = sorted
+        .slice(3)
+        .filter((c) => c.allocated > 0 && c.spent >= c.allocated)
+        .sort((a, b) => (b.spent / b.allocated) - (a.spent / a.allocated))[0];
+      if (alertCat) top3[2] = alertCat;
+    }
+
+    const limited = top3;
 
     return {
       totalSpent: totalActual,
