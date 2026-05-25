@@ -137,10 +137,14 @@ const TRANSACTION_PHRASES = [
   'transferred to', 'transferred from', 'transfer of',
   'payment of', 'payment for',
   'purchase at', 'purchase of', 'spent at', 'spent on',
+  // Bare-verb debit forms (some banks omit -ed: "Rs 500 debit from A/c")
+  'debit from', 'debit of', 'debit at',
   // Credit-side
   'credited', 'deposited', 'refunded', 'refund', 'salary credited',
   'amount credited', 'cashback credited',
   'received in', 'received to',
+  // Bare-verb credit forms
+  'credit to', 'credit in', 'credit of',
 ];
 
 // =============================================================================
@@ -154,8 +158,10 @@ const AMOUNT_REGEX_GLOBAL =
   /(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)|([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)\s*(?:rs\.?|inr|₹)/ig;
 
 // Masked account / card: A/c xx1234 / Card ending 4321
+// NOTE: Only whitespace + mask chars (x, *, •) allowed between the keyword and the
+// digits — prevents "Card spends of INR 8497" from capturing 8497 as a mask.
 const ACCOUNT_REGEX =
-  /(?:a\/c|account|card(?:\s+ending)?)[^0-9]*([x*]*\d{3,6})/i;
+  /(?:a\/c|account|card(?:\s+ending)?)\s*[xX*•·]{0,8}\s*([xX*•·]*\d{3,6})/i;
 
 const FIRST_ACCOUNT_EVENT_REGEX =
   /(?:a\/c|acct\.?|account)\s*[xX*•·]{0,8}(\d{3,6})\s+(debited|credited|deposited|withdrawn|deducted|refunded|received)\b/i;
@@ -203,6 +209,18 @@ const CC_DUE_DATE_REGEX =
 // Requires a debit verb (CC_BILL_HARD_CONFIRMATION_REGEX) to fire alongside.
 const CC_PAYMENT_OUTGOING_REGEX =
   /\btowards\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+(?:bill\s+)?(?:payment|dues?)\s+(?:successful|done|completed|processed|cleared)\b|\bpaid\s+(?:to|towards)\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+bill\s+payment\b/i;
+
+// Promotional / upsell messages from banks (EMI offers, reward conversions).
+// These contain an amount (the "eligible spend") but no actual transaction happened.
+// Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
+const PROMOTIONAL_OFFER_REGEX =
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your)\b|\bflexi[\s-]*emi\b|\bconvert\s+spends?\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\s+(?:offer|loan|credit|limit)\b/i;
+
+// Market rates / FX bulletin from bank treasury desks — NOT a transaction.
+// Example: "INR 91.79 (-0.08) GBP 1.3786, EUR 1.1980 ... Brent Crude 67.20 Gold 5270.75 Rgds SBI Glb Mkts"
+// Detected by: two or more forex pairs in succession, or commodity + forex combo.
+const MARKET_RATES_REGEX =
+  /\b(?:gbp|eur|jpy|chf|usd|aud|cad|sgd)\s+[\d.]+[,\s]+(?:gbp|eur|jpy|chf|usd|aud|cad|sgd)\s+[\d.]+\b|\bglb\s*mkts\b|\bglobal\s+market\b/i;
 
 // =============================================================================
 // Helpers
@@ -406,6 +424,32 @@ export const parseMessageDetailed = (message, opts = {}) => {
     };
   }
 
+  // ── Non-transaction early exits (bank-sender confirmed above) ───────────────
+
+  // Promotional / EMI-conversion / upsell messages.
+  // These always carry an amount ("eligible spends of INR 8497") but no money moved.
+  if (PROMOTIONAL_OFFER_REGEX.test(text)) {
+    return {
+      ok: false,
+      error: {
+        code: 'promotional_offer',
+        message: 'Promotional or EMI-conversion offer detected — not a transaction.',
+      },
+    };
+  }
+
+  // FX / market-rates bulletins (SBI Glb Mkts, treasury desk broadcasts).
+  // Multiple forex pairs (GBP x.xx, EUR x.xx …) or commodity prices in one message.
+  if (MARKET_RATES_REGEX.test(text)) {
+    return {
+      ok: false,
+      error: {
+        code: 'market_rates_bulletin',
+        message: 'Market rates / FX bulletin detected — not a transaction.',
+      },
+    };
+  }
+
   // ── CC-specific early exits (bank-sender verified above) ──────────────────
 
   // Exclude card payment acknowledgement SMSes. The actual outgoing spend is
@@ -487,8 +531,11 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // ── Gate 2: Mandatory transaction phrase ──────────────────────────────────
   // Must contain a concrete past-tense financial phrase.
   const phraseHit = includesAny(lower, TRANSACTION_PHRASES) || hasAnyWord(normalized, TRANSACTION_PHRASES);
+  // Only past-tense / action forms accepted here.
+  // "debit" and "credit" (bare nouns, as in "debit card" / "credit card") are
+  // intentionally excluded — they produced false positives for promotional SMSes.
   const fallbackTxnWordHit =
-    /\b(?:debit(?:ed)?|credit(?:ed)?|spent|paid|withdrawn|deducted|transferred|deposited|refunded|received)\b/i.test(normalized);
+    /\b(?:debited|credited|spent|paid|withdrawn|deducted|transferred|deposited|refunded|received)\b/i.test(normalized);
   if (!phraseHit && !fallbackTxnWordHit) {
     return {
       ok: false,

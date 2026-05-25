@@ -185,13 +185,12 @@ const AccountCard: React.FC<Props> = ({
   const flipToBack = async () => {
     if (!canFlip) return;
     try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
-      if (hasHardware && isEnrolled) {
+      const secLevel = await LocalAuthentication.getEnrolledLevelAsync();
+      if (secLevel > LocalAuthentication.SecurityLevel.NONE) {
         const result = await LocalAuthentication.authenticateAsync({
           promptMessage: 'Verify to adjust balance',
           cancelLabel:   'Cancel',
-          fallbackLabel: 'Use PIN',
+          fallbackLabel: 'Use Passcode',
           disableDeviceFallback: false,
         });
         if (!result.success) return;
