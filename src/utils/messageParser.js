@@ -214,7 +214,7 @@ const CC_PAYMENT_NOTIFICATION_REGEX =
 // pay your bill/credit card, kindly/please pay, settle by/your/outstanding,
 // bill/statement generated.
 const CC_BILL_REMINDER_REGEX =
-  /\b(?:(?:total|min(?:imum)?|amount|payment)\s+(?:amount\s+)?due|due\s+(?:date|on|by)\s+\d|outstanding(?:\s+(?:amount|balance|due))?|pay\s+(?:instantly\s+)?by\s+\d|pay\s+your\s+(?:bill|credit\s+card)|kindly\s+pay|please\s+pay|settle\s+(?:by|your|outstanding)|bill\s+generated|statement\s+generated)\b/i;
+  /\b(?:(?:total|min(?:imum)?|amt|amount|payment|payable)\s+(?:amount\s+)?due(?:s)?|due\s*[:\s]\s*\d+|due\s+(?:date|on|by)\s+\d+|outstanding(?:\s+(?:amount|balance|due))?|pay(?:able)?\s+(?:instantly\s+)?by\s+\d+|pay\s+your\s+(?:bill|credit\s+card)|kindly\s+pay|please\s+pay|settle\s+(?:by|your|outstanding)|bill\s+generated|statement\s+(?:generated|is\s+sent))\b/i;
 
 // Hard past-tense confirmation that money has ALREADY moved. If any of these
 // fire, the SMS is a real transaction even if it also mentions "due" — we

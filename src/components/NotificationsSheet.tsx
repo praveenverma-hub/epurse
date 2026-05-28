@@ -96,9 +96,11 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
 
   useEffect(() => {
     if (visible) {
+      StatusBar.setBarStyle('dark-content', true);
       opacity.value   = withTiming(1, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
       translate.value = withTiming(0, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
     } else {
+      StatusBar.setBarStyle('light-content', true);
       opacity.value   = withTiming(0, { duration: EXIT_MS });
       translate.value = withTiming(-SHEET_MAX_H, {
         duration: EXIT_MS,
@@ -138,7 +140,6 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
       statusBarTranslucent
       onRequestClose={handleDismiss}
     >
-      <StatusBar barStyle="dark-content" />
       <Animated.View style={[styles.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
 

@@ -1798,7 +1798,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 15,
+      version: 16,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -2004,6 +2004,28 @@ export const useEPurseStore = create(
           });
 
           state = { ...state, accounts: updatedAccounts };
+        }
+
+        if (version < 16) {
+          // Remove phantom debit transactions that were created from CC bill
+          // reminder SMSes before the CC_BILL_REMINDER_REGEX fix. These are
+          // identifiable because the transaction note (original SMS text) still
+          // matches the reminder pattern without any past-tense action verb.
+          const CC_REMINDER_MIG =
+            /\b(?:(?:total|min(?:imum)?|amt|amount|payment|payable)\s+(?:amount\s+)?due(?:s)?|due\s*[:\s]\s*\d+|due\s+(?:date|on|by)\s+\d+|outstanding(?:\s+(?:amount|balance|due))?|pay(?:able)?\s+(?:instantly\s+)?by\s+\d+|pay\s+your\s+(?:bill|credit\s+card)|kindly\s+pay|please\s+pay|settle\s+(?:by|your|outstanding)|bill\s+generated|statement\s+(?:generated|is\s+sent))\b/i;
+          const CC_HARD_MIG =
+            /\b(?:debited|credited|spent|withdrawn|deducted|deposited|refunded|transferred)\b|\bpaid\s+(?:to|via|at|from)\b/i;
+
+          const cleanedTxns = (state.transactions || []).filter((txn) => {
+            if (txn.source !== 'sms' || !txn.note) return true;
+            const isPhantom =
+              CC_REMINDER_MIG.test(txn.note) &&
+              !CC_HARD_MIG.test(txn.note) &&
+              /credit\s*card|cc\b/i.test(txn.note);
+            return !isPhantom;
+          });
+
+          state = { ...state, transactions: cleanedTxns };
         }
 
         return state;
