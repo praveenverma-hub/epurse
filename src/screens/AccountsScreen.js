@@ -17,7 +17,11 @@ import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useIsFocused } from '@react-navigation/native';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import {
+  useEPurseStore,
+  selectEPurseNetWorth,
+  selectShouldShowAnchorNudge,
+} from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
@@ -62,10 +66,13 @@ export default function AccountsScreen({ navigation }) {
     [accounts],
   );
 
-  const totalBalance = useMemo(
-    () => accounts.reduce((sum, a) => sum + (a.balance ?? 0), 0),
-    [accounts],
-  );
+  // Net Worth — your real money across all accounts. Includes private
+  // transactions (they reflect actual money movement). See selectEPurseNetWorth
+  // in the store for the exclusion rules.
+  const totalBalance = useEPurseStore(selectEPurseNetWorth);
+
+  const showAnchorNudge   = useEPurseStore(selectShouldShowAnchorNudge);
+  const dismissAnchorNudge = useEPurseStore((s) => s.dismissAnchorNudge);
 
   const handleToggleBalances = async () => {
     if (balancesVisible) { setBalancesVisible(false); return; }
@@ -101,7 +108,7 @@ export default function AccountsScreen({ navigation }) {
         <SafeAreaView edges={['top']}>
           <View style={styles.headerRow}>
             <View>
-              <Text style={styles.headerLabel}>Total Balance</Text>
+              <Text style={styles.headerLabel}>Net Worth</Text>
               <Text style={styles.headerBalance}>
                 {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
               </Text>
@@ -124,6 +131,33 @@ export default function AccountsScreen({ navigation }) {
         contentContainerStyle={styles.bodyContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* First-time anchor nudge — auto-hides once any account is anchored
+            or once the user dismisses it. */}
+        {showAnchorNudge ? (
+          <View style={[styles.nudgeCard, { backgroundColor: theme.card, borderColor: theme.primary + '33' }]}>
+            <View style={[styles.nudgeIcon, { backgroundColor: theme.primary + '1A' }]}>
+              <Ionicons name="wallet-outline" size={20} color={theme.primary} />
+            </View>
+            <View style={styles.nudgeBody}>
+              <Text style={[styles.nudgeTitle, { color: colors.textPrimary }]}>
+                Set your real balances
+              </Text>
+              <Text style={[styles.nudgeBody2, { color: colors.textSecondary }]}>
+                Tap any card below, flip it, and enter the actual balance from your
+                bank. Net Worth becomes accurate from that moment on.
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={dismissAnchorNudge}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
+            >
+              <Ionicons name="close" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* CRED-style cards */}
         <ScrollView
           horizontal
@@ -270,6 +304,36 @@ const styles = StyleSheet.create({
   },
   addCardPlus:  { fontSize: 32, color: colors.textSecondary, fontWeight: '300', lineHeight: 36 },
   addCardLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
+
+  nudgeCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    ...shadows.card,
+  },
+  nudgeIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nudgeBody: { flex: 1 },
+  nudgeTitle: {
+    ...typography.bodyBold,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  nudgeBody2: {
+    ...typography.small,
+    lineHeight: 18,
+  },
 
   flipHint: {
     flexDirection: 'row',

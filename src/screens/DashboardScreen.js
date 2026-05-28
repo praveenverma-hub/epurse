@@ -19,7 +19,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount } from '../store/ePurseStore';
+import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectExpenseStats } from '../store/ePurseStore';
 import {
   useRewardStore,
   selectLevel,
@@ -29,7 +29,6 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
-import { TRANSACTION_TYPES } from '../constants/categories';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
@@ -56,7 +55,7 @@ import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
-import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
+import { canSplitTransaction } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
@@ -65,16 +64,6 @@ const PERIODS = [
   { key: 'M', label: 'M', title: 'month' },
   { key: 'Y', label: 'Y', title: 'year' },
 ];
-
-/** Returns epoch-ms of the start of the chosen period. */
-const periodStart = (key) => {
-  const now = new Date();
-  if (key === 'D') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  if (key === 'W') return Date.now() - 7 * 24 * 60 * 60 * 1000;
-  if (key === 'Y') return new Date(now.getFullYear(), 0, 1).getTime();
-  // 'M' — first day of current calendar month
-  return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-};
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 const DashboardScreen = ({ navigation }) => {
@@ -125,52 +114,13 @@ const DashboardScreen = ({ navigation }) => {
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const hasUnreadNotifications = useNotificationStore(selectHasUnreadNotifications);
 
-  // ── Period-aware stats ────────────────────────────────────────────────────
-  const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
-
-  const periodStats = useMemo(() => {
-    const startMs = periodStart(period);
-    const now = new Date();
-
-    // Filter raw transactions within the period window (ignored = excluded everywhere)
-    const inPeriod = transactions.filter(
-      (t) => !t.isIgnored && new Date(t.createdAt).getTime() >= startMs
-    );
-    const visibleInPeriod = inPeriod.filter((t) => !t.isHidden);
-
-    // Exclude lent/borrow categories from normal spend/income
-    const rawSpend  = inPeriod
-                        .filter((t) => t.type === TRANSACTION_TYPES.DEBIT && !LB_CATS.has(t.categoryId))
-                        .reduce((s, t) => s + debitDisplayAmount(t), 0);
-    const rawIncome = inPeriod
-                        .filter((t) => t.type === TRANSACTION_TYPES.CREDIT && !LB_CATS.has(t.categoryId))
-                        .reduce((s, t) => s + t.amount, 0);
-
-    // For the Year period we must also pull months older than raw retention
-    // (3 months) from monthlyAggregates so the full year is covered.
-    let aggSpend = 0, aggIncome = 0;
-    if (period === 'Y') {
-      const yearStr    = String(now.getFullYear());
-      // raw retention cutoff ≈ 3 months ago (first of that month)
-      const cutoffDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-      const cutoffKey  = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}`;
-      Object.entries(monthlyAggs).forEach(([k, v]) => {
-        if (k.startsWith(yearStr) && k < cutoffKey) {
-          aggSpend  += v.totalSpend  || 0;
-          aggIncome += v.totalIncome || 0;
-        }
-      });
-    }
-
-    const spend  = rawSpend  + aggSpend;
-    const income = rawIncome + aggIncome;
-
-    const recent = [...visibleInPeriod]
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .slice(0, 20);
-
-    return { spend, income, recent, count: visibleInPeriod.length };
-  }, [period, transactions, monthlyAggs]);
+  // ── Period-aware expense stats (centralized selector) ────────────────────
+  // Returns { debits, credits, net, count, recent }.
+  // Excludes ignored, private (isHidden), and Lent/Borrowed categories.
+  const periodStats = useMemo(
+    () => selectExpenseStats(period)({ transactions, monthlyAggregates: monthlyAggs }),
+    [period, transactions, monthlyAggs]
+  );
 
   // ── Sync date-range label ────────────────────────────────────────────────
   // Shows "1 Apr – 9 May" — the span of messages we have synced.
@@ -251,7 +201,8 @@ const DashboardScreen = ({ navigation }) => {
   }, []);
 
   const periodTitle = PERIODS.find((p) => p.key === period)?.title ?? 'period';
-  const periodNet = periodStats.income - periodStats.spend;
+  // periodStats.net = debits − credits (positive = net expense outflow).
+  const periodNet = periodStats.net;
 
   // Exact label for the transactions section header
   const txnSectionLabel = period === 'M'
@@ -327,9 +278,9 @@ const DashboardScreen = ({ navigation }) => {
             </View>
           </View>
 
-          {/* Balance */}
+          {/* Net expense (debits − credits) for the selected period. */}
           <View style={styles.balanceBlock}>
-            <Text style={styles.balanceLabel}>ePurse net this {periodTitle}</Text>
+            <Text style={styles.balanceLabel}>ePurse net expense {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
             <Text style={styles.balanceValue}>{formatCurrency(periodNet)}</Text>
           </View>
 
@@ -352,15 +303,15 @@ const DashboardScreen = ({ navigation }) => {
             <Text style={styles.dataInfo}>{dataInfo}</Text>
           </View>
 
-          {/* ── Period spend / income pills ── */}
+          {/* ── Period debit / credit pills ── */}
           <View style={styles.statsRow}>
             <View style={styles.statPill}>
-              <Text style={styles.statLabel}>Spent this {periodTitle}</Text>
-              <Text style={styles.statValue}>{formatCurrency(periodStats.spend)}</Text>
+              <Text style={styles.statLabel}>Debits {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.debits)}</Text>
             </View>
             <View style={styles.statPill}>
-              <Text style={styles.statLabel}>Income this {periodTitle}</Text>
-              <Text style={styles.statValue}>{formatCurrency(periodStats.income)}</Text>
+              <Text style={styles.statLabel}>Credits {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.credits)}</Text>
             </View>
           </View>
         </SafeAreaView>

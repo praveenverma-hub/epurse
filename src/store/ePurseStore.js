@@ -272,6 +272,11 @@ export const useEPurseStore = create(
       smsPermissionGranted: false,
       contactsPermissionGranted: false,
 
+      // One-time onboarding nudge: ask the user to anchor their real bank balances
+      // on the Accounts screen. Auto-suppressed once any account has been anchored,
+      // or when the user explicitly dismisses the card.
+      anchorNudgeDismissed: false,
+
       // Theme preferences
       themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
       darkMode: false,             // reserved for future dark-theme rollout
@@ -672,6 +677,10 @@ export const useEPurseStore = create(
             return next;
           }),
         })),
+
+      // User explicitly dismissed the "set your real balances" onboarding card
+      // on the Accounts screen. Survives reloads via partialize.
+      dismissAnchorNudge: () => set({ anchorNudgeDismissed: true }),
 
       deleteAccount: (accountId) =>
         set((s) => ({
@@ -2060,6 +2069,7 @@ export const useEPurseStore = create(
         xp: state.xp,
         reviewStreak: state.reviewStreak,
         userCustomRules: state.userCustomRules,
+        anchorNudgeDismissed: state.anchorNudgeDismissed,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;
@@ -2112,4 +2122,133 @@ export const selectYesterdayTransactionCount = (s) => {
     const ts = new Date(t.createdAt).getTime();
     return ts >= start && ts <= end;
   }).length;
+};
+
+// =============================================================================
+// Balance selectors — single source of truth for all balance math.
+//
+// Two distinct flavours, with different exclusion rules:
+//
+//   ① Expense view  (Dashboard header)
+//      "What's my net expense for this period?"
+//      Excludes: ignored, private (isHidden), Lent/Borrowed categories.
+//      Used to drive: top "ePurse net expense" + Debits / Credits chips.
+//
+//   ② Money view  (Accounts tab header)
+//      "What's the cash I actually have right now?"
+//      Excludes: ignored only. Private transactions DO count — they represent
+//      real money that moved, the user just didn't want them in expense stats.
+//      Lent/Borrowed cats excluded — they're already tracked per-person in
+//      the LB ledger, double-counting would distort net worth.
+//
+// Keeping both as derived selectors (re-computed from transactions) gives us
+// a single source of truth and prevents drift from missed delta updates.
+// =============================================================================
+const LB_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+
+const periodStartMs = (key) => {
+  const now = new Date();
+  if (key === 'D') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (key === 'W') return Date.now() - 7 * 24 * 60 * 60 * 1000;
+  if (key === 'Y') return new Date(now.getFullYear(), 0, 1).getTime();
+  return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+};
+
+/**
+ * Expense stats for the Dashboard header.
+ * @param {'D'|'W'|'M'|'Y'} period
+ * @returns selector: (state) => { debits, credits, net, count, recent }
+ *   • debits  — sum of debit display amounts (your share when split)
+ *   • credits — sum of credit amounts
+ *   • net     — debits − credits  (positive = you spent more than you earned)
+ *   • count   — visible transactions in the period (for the section header)
+ *   • recent  — newest-first slice of up to 20 visible transactions
+ *
+ * Excludes ignored, private (isHidden), and Lent/Borrowed transactions.
+ * For Year periods, also folds in monthlyAggregates beyond the raw-retention
+ * cutoff so the full year is represented.
+ */
+export const selectExpenseStats = (period) => (state) => {
+  const startMs = periodStartMs(period);
+  const now = new Date();
+
+  // All transactions in the period, excluding ignored.
+  const inPeriod = state.transactions.filter(
+    (t) => !t.isIgnored && new Date(t.createdAt).getTime() >= startMs
+  );
+
+  // For the chips/header, also exclude private + Lent/Borrowed.
+  const eligible = inPeriod.filter(
+    (t) => !t.isHidden && !LB_CATEGORY_IDS.has(t.categoryId)
+  );
+
+  const rawDebits = eligible
+    .filter((t) => t.type === TRANSACTION_TYPES.DEBIT)
+    .reduce((s, t) => s + debitDisplayAmount(t), 0);
+  const rawCredits = eligible
+    .filter((t) => t.type === TRANSACTION_TYPES.CREDIT)
+    .reduce((s, t) => s + t.amount, 0);
+
+  let aggDebits = 0;
+  let aggCredits = 0;
+  if (period === 'Y') {
+    const yearStr   = String(now.getFullYear());
+    const cutoffDt  = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const cutoffKey = `${cutoffDt.getFullYear()}-${String(cutoffDt.getMonth() + 1).padStart(2, '0')}`;
+    Object.entries(state.monthlyAggregates || {}).forEach(([k, v]) => {
+      if (k.startsWith(yearStr) && k < cutoffKey) {
+        aggDebits  += v.totalSpend  || 0;
+        aggCredits += v.totalIncome || 0;
+      }
+    });
+  }
+
+  const debits  = rawDebits  + aggDebits;
+  const credits = rawCredits + aggCredits;
+
+  // The visible list (transaction cards) follows the same eligibility rules
+  // as the chips — private and LB items are hidden from the default home view.
+  const recent = [...eligible]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 20);
+
+  return {
+    debits,
+    credits,
+    net: debits - credits,
+    count: eligible.length,
+    recent,
+  };
+};
+
+/**
+ * ePurse net worth — real money currently held across all accounts.
+ * Excludes ignored transactions (user-dismissed noise) and LB-category txns
+ * (tracked separately in the lent/borrowed ledger). Private transactions are
+ * counted because they reflect actual money movement; the privacy flag is a
+ * display preference, not a "this didn't happen" flag.
+ *
+ * Computed as: sum over accounts of (currentStoredBalance) — the per-account
+ * balance is already kept in sync via applyDelta on every txn insert / undo,
+ * which is itself driven by all non-ignored transactions. Treating ignored
+ * txns is handled at the insert/toggle path (balance is reversed on ignore).
+ */
+export const selectEPurseNetWorth = (s) =>
+  (s.accounts || []).reduce((sum, a) => sum + (a.balance ?? 0), 0);
+
+/**
+ * Show the "set your real balances" onboarding card on the Accounts screen
+ * when ALL of the following hold:
+ *   • The user has at least one account (otherwise the empty state takes over).
+ *   • No account has been anchored yet (no `anchoredAt` timestamp).
+ *   • The user hasn't explicitly dismissed the card.
+ *
+ * Setting an anchor on any single account auto-hides the nudge — anchoring
+ * the rest is then discoverable via the existing hint text below the cards.
+ */
+export const selectShouldShowAnchorNudge = (s) => {
+  if (s.anchorNudgeDismissed) return false;
+  const accounts = s.accounts || [];
+  if (accounts.length === 0) return false;
+  return !accounts.some((a) => a.anchoredAt);
 };
