@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, radius, typography } from '../constants/theme';
+import CustomTabHost from '../components/CustomTabHost';
 import BudgetScreen    from './BudgetScreen';
 import AnalyticsScreen from './AnalyticsScreen';
 
@@ -22,13 +23,10 @@ const INNER_TABS = [
 
 export default function InsightsScreen({ navigation, route }) {
   const theme = useTheme();
-  // Initialise directly from params so the correct tab renders on first paint.
   const [activeTab, setActiveTab] = useState(
     () => route.params?.defaultTab || 'analytics',
   );
 
-  // Also handle re-focus (e.g. navigating back here from another screen with
-  // a different defaultTab, or the tab bar pressing the icon while open).
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       const defaultTab = route.params?.defaultTab;
@@ -37,46 +35,49 @@ export default function InsightsScreen({ navigation, route }) {
     return unsubscribe;
   }, [navigation, route.params?.defaultTab]);
 
+  const headerComponent = (
+    <LinearGradient
+      colors={[theme.gradientStart, theme.gradientEnd]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.header}
+    >
+      <SafeAreaView edges={['top']}>
+        <Text style={styles.screenTitle}>Insights</Text>
+        <View style={styles.switcher}>
+          {INNER_TABS.map((t) => (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.switcherBtn, activeTab === t.key && styles.switcherBtnActive]}
+              onPress={() => setActiveTab(t.key)}
+              activeOpacity={0.8}
+            >
+              <Text style={[
+                styles.switcherText,
+                activeTab === t.key && { color: theme.primary, fontWeight: '700' },
+              ]}>
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Shared gradient header */}
-      <LinearGradient
-        colors={[theme.gradientStart, theme.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <SafeAreaView edges={['top']}>
-          <Text style={styles.screenTitle}>Insights</Text>
-
-          {/* Inner pill switcher */}
-          <View style={styles.switcher}>
-            {INNER_TABS.map((t) => (
-              <TouchableOpacity
-                key={t.key}
-                style={[styles.switcherBtn, activeTab === t.key && styles.switcherBtnActive]}
-                onPress={() => setActiveTab(t.key)}
-                activeOpacity={0.8}
-              >
-                <Text style={[
-                  styles.switcherText,
-                  activeTab === t.key && { color: theme.primary, fontWeight: '700' },
-                ]}>
-                  {t.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-
-      {/* Sub-screen content — headers suppressed */}
+    <CustomTabHost
+      tabs={INNER_TABS}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      headerComponent={headerComponent}
+    >
       {activeTab === 'analytics' ? (
         <AnalyticsScreen navigation={navigation} headerless />
       ) : (
         <BudgetScreen navigation={navigation} headerless openPlan={!!route.params?.openPlan} />
       )}
-    </View>
+    </CustomTabHost>
   );
 }
 

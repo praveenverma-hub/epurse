@@ -16,6 +16,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Contacts from 'expo-contacts';
 
+import CustomTabHost from '../components/CustomTabHost';
+
 import { useEPurseStore } from '../store/ePurseStore';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
@@ -34,6 +36,11 @@ const ENTRY_LABEL = {
 };
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
+
+const LB_TABS = [
+  { key: 'lent', label: 'Lent' },
+  { key: 'borrowed', label: 'Borrowed' },
+];
 
 // +/- direction for net contribution to "they owe me" balance
 const isPositiveEntry = (kind) => kind === 'lent' || kind === 'borrow_repaid';
@@ -387,13 +394,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     [kind]
   );
 
-  return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.container}>
-        <LinearGradient
+  const headerComponent = (
+    <LinearGradient
           colors={grad}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -432,7 +434,20 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             </View>
           </SafeAreaView>
         </LinearGradient>
+      );
 
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <CustomTabHost
+        tabs={LB_TABS}
+        activeTab={kind}
+        onTabChange={setKind}
+        headerComponent={headerComponent}
+      >
+        <View style={styles.container}>
         <FlatList
           data={personBalances}
           keyExtractor={(item) => item.personKey}
@@ -528,7 +543,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             </View>
           </View>
         </Modal>
-      </View>
+        </View>
+      </CustomTabHost>
     </KeyboardAvoidingView>
   );
 };
