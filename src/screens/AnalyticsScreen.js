@@ -24,6 +24,7 @@ import { getDailyCumulative, getMerchantBubbles, detectSubscriptions } from '../
 import GhostLineChart from '../components/GhostLineChart';
 import HabitLeakMatrix from '../components/HabitLeakMatrix';
 import SubscriptionHeartbeat from '../components/SubscriptionHeartbeat';
+import EmptyState from '../components/EmptyState';
 
 const SCREEN_W = Dimensions.get('window').width;
 
@@ -46,6 +47,17 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
 
   const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+  // Empty-state flags. `noDataEver` = truly fresh user (no transactions at all)
+  // → one prominent placeholder. Otherwise each section handles its own month
+  // having no data (e.g. browsing back to a quiet month).
+  const noDataEver = transactions.length === 0;
+  const hasPace =
+    monthSpend > 0 ||
+    (Array.isArray(dailyData?.current) && dailyData.current.some((v) => v > 0)) ||
+    (Array.isArray(dailyData?.ghost) && dailyData.ghost.some((v) => v > 0));
+  const hasBubbles = merchantBubbles.length > 0;
+  const hasSubs = allSubscriptions.length > 0;
 
   return (
     <View style={styles.container}>
@@ -112,55 +124,87 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
         contentContainerStyle={[styles.body, headerless && { marginTop: 0, paddingTop: spacing.md }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Bar chart */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Spend by category</Text>
-          {breakdown.length === 0 ? (
-            <Text style={styles.empty}>No spending recorded for this month.</Text>
-          ) : (
-            <BarChart data={breakdown} />
-          )}
-        </View>
-
-        {/* Progress rings */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Category breakdown</Text>
-          <View style={styles.ringsRow}>
-            {breakdown.slice(0, 4).map((c) => (
-              <ProgressRing key={c.id} category={c} />
-            ))}
-          </View>
-
-          {breakdown.map((c) => (
-            <View key={c.id} style={styles.row}>
-              <View style={[styles.rowDot, { backgroundColor: c.color }]} />
-              <Text style={styles.rowLabel}>
-                {c.emoji} {c.name}
-              </Text>
-              <Text style={styles.rowAmount}>{formatCurrency(c.total)}</Text>
-              <Text style={styles.rowPercent}>{c.percent.toFixed(0)}%</Text>
+        {noDataEver ? (
+          <EmptyState
+            emoji="📊"
+            title="No analytics yet"
+            subtitle="Once your transactions start flowing in, you'll see category breakdowns, spending pace, habit leaks and subscriptions here."
+            actionLabel="Add a transaction"
+            onAction={navigation ? () => navigation.navigate('AddTransaction') : undefined}
+            style={{ marginTop: spacing.xl }}
+          />
+        ) : (
+          <>
+            {/* Bar chart */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Spend by category</Text>
+              {breakdown.length === 0 ? (
+                <EmptyState
+                  compact
+                  emoji="🧮"
+                  title="No spending this month"
+                  subtitle="Switch months above, or add an expense to see the breakdown."
+                />
+              ) : (
+                <BarChart data={breakdown} />
+              )}
             </View>
-          ))}
-        </View>
 
-        {/* ── Behavioral Insights ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📈 Spending Pace</Text>
-          <Text style={styles.sectionSubtitle}>Your trajectory vs last month — drag to compare any day.</Text>
-          <GhostLineChart data={dailyData} />
-        </View>
+            {/* Progress rings — only when there's a breakdown to show */}
+            {breakdown.length > 0 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Category breakdown</Text>
+                <View style={styles.ringsRow}>
+                  {breakdown.slice(0, 4).map((c) => (
+                    <ProgressRing key={c.id} category={c} />
+                  ))}
+                </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚡ Habit Leaks</Text>
-          <Text style={styles.sectionSubtitle}>Frequency vs. spend — find the sneaky drains. Tap a bubble.</Text>
-          <HabitLeakMatrix bubbles={merchantBubbles} />
-        </View>
+                {breakdown.map((c) => (
+                  <View key={c.id} style={styles.row}>
+                    <View style={[styles.rowDot, { backgroundColor: c.color }]} />
+                    <Text style={styles.rowLabel}>
+                      {c.emoji} {c.name}
+                    </Text>
+                    <Text style={styles.rowAmount}>{formatCurrency(c.total)}</Text>
+                    <Text style={styles.rowPercent}>{c.percent.toFixed(0)}%</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💓 Subscription Heartbeat</Text>
-          <Text style={styles.sectionSubtitle}>Recurring charges visualised as an EKG. Scroll to explore.</Text>
-          <SubscriptionHeartbeat subscriptions={allSubscriptions} date={date} />
-        </View>
+            {/* ── Behavioral Insights ── */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>📈 Spending Pace</Text>
+              <Text style={styles.sectionSubtitle}>Your trajectory vs last month — drag to compare any day.</Text>
+              {hasPace ? (
+                <GhostLineChart data={dailyData} />
+              ) : (
+                <EmptyState compact emoji="📈" title="No pace to plot yet" subtitle="Spending this month and last will chart here." />
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>⚡ Habit Leaks</Text>
+              <Text style={styles.sectionSubtitle}>Frequency vs. spend — find the sneaky drains. Tap a bubble.</Text>
+              {hasBubbles ? (
+                <HabitLeakMatrix bubbles={merchantBubbles} />
+              ) : (
+                <EmptyState compact emoji="⚡" title="No habit leaks found" subtitle="Repeat merchants for this month will appear here." />
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>💓 Subscription Heartbeat</Text>
+              <Text style={styles.sectionSubtitle}>Recurring charges visualised as an EKG. Scroll to explore.</Text>
+              {hasSubs ? (
+                <SubscriptionHeartbeat subscriptions={allSubscriptions} date={date} />
+              ) : (
+                <EmptyState compact emoji="💓" title="No recurring charges detected" subtitle="Subscriptions like Netflix or Spotify will show up after a couple of cycles." />
+              )}
+            </View>
+          </>
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>

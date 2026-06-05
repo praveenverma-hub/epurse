@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Contacts from 'expo-contacts';
 
 import CustomTabHost from '../components/CustomTabHost';
+import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
@@ -383,13 +384,17 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   const ListEmpty = useMemo(
     () => (
-      <View style={styles.emptyWrap}>
-        <Text style={styles.emptyText}>
-          {kind === 'lent'
-            ? 'No outstanding amounts to receive.'
-            : 'No outstanding amounts to repay.'}
-        </Text>
-      </View>
+      <EmptyState
+        compact
+        emoji={kind === 'lent' ? '🤝' : '🧾'}
+        title={kind === 'lent' ? 'Nothing lent out' : 'Nothing borrowed'}
+        subtitle={
+          kind === 'lent'
+            ? 'Money you lend will show here so you can track what to collect.'
+            : 'Money you borrow will show here so you can track what to repay.'
+        }
+        style={styles.emptyWrap}
+      />
     ),
     [kind]
   );
