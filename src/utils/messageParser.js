@@ -155,6 +155,7 @@ const BODY_DEBIT_CREDIT_TERMS = [
 // =============================================================================
 const TRANSACTION_PHRASES = [
   // Debit-side
+  'debit',
   'debited', 'withdrawn', 'deducted', 'auto-debit', 'autopay',
   'emi debited', 'emi deducted', 'emi paid',
   'paid to', 'paid via', 'paid at', 'paid from', 'amount paid',
@@ -165,6 +166,7 @@ const TRANSACTION_PHRASES = [
   // Bare-verb debit forms (some banks omit -ed: "Rs 500 debit from A/c")
   'debit from', 'debit of', 'debit at',
   // Credit-side
+  'credit',
   'credited', 'deposited', 'refunded', 'refund', 'salary credited',
   'amount credited', 'cashback credited',
   'received in', 'received to', 'received from',
@@ -279,9 +281,11 @@ const EVENT_PATTERNS = [
   { type: TRANSACTION_TYPES.DEBIT, regex: /\b(?:debited|spent|paid|withdrawn|deducted|auto-debit|autopay|transferred)\b/gi },
 ];
 
-const NON_TXN_AMOUNT_HINTS = /\b(?:due|min(?:imum)?\s+due|outstanding|avl(?:\.|\s+bal(?:ance)?)?|available\s+balance|closing\s+balance|total\s+due|statement)\b/i;
+const NON_TXN_AMOUNT_HINTS = /\b(?:due|min(?:imum)?\s+due|outstanding|avl(?:\.|\s+bal(?:ance)?)?|available\s+balance|closing\s+balance|total\s+due|statement|bal(?:ance)?)\b/i;
 
 const STRONG_TRANSACTION_WORDS = [
+  'debit',
+  'credit',
   'debited',
   'credited',
   'paid',
@@ -520,9 +524,12 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // "Credit Card" leaks the word "credit" into Gate 2). Return the parsed
   // reminder fields so the store can anchor an in-app notification on the
   // matching card.
+  // Future-tense forms like "will be debited" don't count as hard confirmation
+  // since the transaction hasn't occurred yet.
+  const isFutureTense = /will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)/i.test(text);
   if (
     CC_BILL_REMINDER_REGEX.test(text) &&
-    !CC_BILL_HARD_CONFIRMATION_REGEX.test(text) &&
+    (!CC_BILL_HARD_CONFIRMATION_REGEX.test(text) || isFutureTense) &&
     /\bcredit\s+card\b/i.test(text)
   ) {
     const amtMatch  = text.match(AMOUNT_REGEX);
@@ -604,8 +611,18 @@ export const parseMessageDetailed = (message, opts = {}) => {
   }
 
   // ── Extract: debit vs credit ──────────────────────────────────────────────
+  // Check for "credited to beneficiary" or "debited from beneficiary" patterns.
+  // These indicate money moved for the OTHER party, so it's the opposite direction
+  // from the user's perspective.
+  const creditedToOther = /credited\s+to\s+(?:beneficiary|your\s+(?:beneficiary|account))/i.test(text);
+  const debitedFromOther = /debited\s+from\s+beneficiary/i.test(text);
+
   const isCredit =
-    /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b/i.test(text);
+    creditedToOther
+      ? false // "credited to beneficiary" = user sent money = DEBIT
+      : debitedFromOther
+        ? true // "debited from beneficiary" = user received money = CREDIT
+        : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b/i.test(text);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
@@ -640,11 +657,13 @@ export const parseMessageDetailed = (message, opts = {}) => {
   const accountMask = firstEvent?.[1] || acctMatch?.[1] || null;
   const firstVerb = (firstEvent?.[2] || '').toLowerCase();
   const inferredTypeFromFirstVerb =
-    firstVerb && /credited|deposited|refunded|refund|received/.test(firstVerb)
-      ? TRANSACTION_TYPES.CREDIT
-      : firstVerb
-        ? TRANSACTION_TYPES.DEBIT
-        : defaultType;
+    creditedToOther || debitedFromOther
+      ? creditedToOther ? TRANSACTION_TYPES.DEBIT : TRANSACTION_TYPES.CREDIT
+      : firstVerb && /credited|deposited|refunded|refund|received/.test(firstVerb)
+        ? TRANSACTION_TYPES.CREDIT
+        : firstVerb
+          ? TRANSACTION_TYPES.DEBIT
+          : defaultType;
   const categoryId = categorise(`${merchant || ''} ${text}`) || 'other';
 
   const single = buildTransaction({
@@ -714,6 +733,15 @@ export const SAMPLE_MESSAGES = [
   'Rs.2,499 debited from A/c xx9012 to NETFLIX on 03-May. UPI Ref 4421.',
   '₹350 paid to bigbasket@upi via UPI from your account xx1234.',
   'Rs.180 debited via UPI to ola@paytm. A/c xx1234. Ref 998877.',
+  // Beneficiary-direction transactions (opposite of normal direction)
+  'Your NEFT txn with ref. no. AXOIR15200939340 for INR 101.00 is credited to beneficiary PRAVEEN KUMAR DWIVEDI on 01-06-26. Axis Bank',
+  'Rs 2,500 is credited to beneficiary account. NEFT reference: 12345. Please acknowledge.',
+  // Credit card bill reminders (future-tense "will be debited" — not actual transactions)
+  'INR 74511.67 is due for payment on 04-06-26 towards Axis Bank CC no. XX6828. INR 74511.67 will be debited from Axis Bank A/c no. XX2655 via auto debit.',
+  // Bare imperative/statement form "Debit" (not "Debited")
+  'Debit INR 38000.00\nAxis Bank A/c XX2655\n02-06-26 11:52:35\nIMPS/P2A/615311412942/PRAV\nWhatsApp BAL to 917036165000\nNot You? SMS BLOCKALL CustID to 919951860002',
+  // Amount extraction: should pick transaction amount, not final balance
+  'Card ending x3733 used at ATM SHYAM NAGAR KAN on 10/04/2026 21:02 for txn Rs 10000.00 Bal Rs 84354.25. If not you?',
 ];
 
 export const buildSampleTransactions = () =>
