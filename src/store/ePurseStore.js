@@ -742,12 +742,22 @@ export const useEPurseStore = create(
 
           const prevMonth = s.budget.monthKey;
           const prevAgg   = s.monthlyAggregates[prevMonth];
-          const perCategorySnapshot = {};
-          Object.entries(s.budget.perCategory).forEach(([catId, cap]) => {
-            perCategorySnapshot[catId] = { cap, actual: prevAgg?.byCategory?.[catId] || 0 };
+          // Roll the finished month's by-legacy-category spend up to parent ids
+          // so the snapshot matches the parent-based budget (groceries → food).
+          const byParentPrev = {};
+          Object.entries(prevAgg?.byCategory || {}).forEach(([cid, amt]) => {
+            if (NON_SPEND_CATS.has(cid)) return;
+            const pid = LEGACY_TO_PARENT[cid] || cid;
+            if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
+            byParentPrev[pid] = (byParentPrev[pid] || 0) + amt;
           });
-
-          const totalActual = prevAgg?.totalSpend || 0;
+          const perCategorySnapshot = {};
+          let totalActual = 0;
+          Object.entries(s.budget.perCategory).forEach(([catId, cap]) => {
+            const actual = byParentPrev[catId] || 0;
+            perCategorySnapshot[catId] = { cap, actual };
+            totalActual += actual;
+          });
           const totalCap    = s.budget.totalCap;
           const status      = totalCap != null
             ? (totalActual <= totalCap ? 'under' : 'over')
@@ -2348,8 +2358,15 @@ export const useEPurseStore = create(
               if (!BUDGETABLE_PARENT_IDS.has(pid)) return; // drop transfers/income/etc
               remapped[pid] = (remapped[pid] || 0) + (Number(cap) || 0);
             });
-            const caps = sumCaps(remapped);
-            nextBudget = { ...nextBudget, perCategory: remapped, totalCap: caps > 0 ? caps : null };
+            // A plan that mapped to no budgetable categories (e.g. an old
+            // total-only plan, or one with only transfers/income) can't be
+            // represented in the parent model — clear it so the user re-creates.
+            if (Object.keys(remapped).length === 0) {
+              nextBudget = null;
+            } else {
+              const caps = sumCaps(remapped);
+              nextBudget = { ...nextBudget, perCategory: remapped, totalCap: caps > 0 ? caps : null };
+            }
           }
           state = { ...state, budget: nextBudget, lastBudgetPlan: state.lastBudgetPlan ?? null };
         }
