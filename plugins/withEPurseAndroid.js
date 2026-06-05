@@ -10,7 +10,9 @@
 //      activity flags, manifest meta-data, etc.).
 // =============================================================================
 
-const { withAndroidColors, AndroidConfig } = require('@expo/config-plugins');
+// Use expo's sub-export (not the standalone @expo/config-plugins package) so the
+// version always matches the installed Expo SDK. See `expo-doctor`.
+const { withAndroidColors, AndroidConfig } = require('expo/config-plugins');
 
 const ICON_BG = '#FF5A1F';
 
