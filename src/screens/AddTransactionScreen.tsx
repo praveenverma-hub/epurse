@@ -287,12 +287,15 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   // ── Budget breach preview ────────────────────────────────────────────────────
   const breachPreview = useMemo(() => {
     if (type !== TRANSACTION_TYPES.DEBIT) return null;
-    if (!budget?.perCategory?.[legacyCategoryId]) return null;
+    // Budgets are keyed by first-level (parent) category — a Groceries spend
+    // counts against the Food & Dining budget.
+    const budgetKey = selectedParentDef?.id;
+    if (!budgetKey || !budget?.perCategory?.[budgetKey]) return null;
     const proposed = parseFloat(amount) || 0;
     if (proposed <= 0) return null;
 
     const usage = getBudgetUsage();
-    const cat   = usage?.perCategory?.[legacyCategoryId];
+    const cat   = usage?.perCategory?.[budgetKey];
     if (!cat) return null;
 
     const projectedActual = cat.actual + proposed;
@@ -307,7 +310,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
       over:      projectedActual > cat.cap,
       overshoot: Math.max(0, projectedActual - cat.cap),
     };
-  }, [type, legacyCategoryId, amount, budget, transactions, getBudgetUsage]);
+  }, [type, selectedParentDef, amount, budget, transactions, getBudgetUsage]);
 
   // ── Open/close accordion sync ────────────────────────────────────────────────
   // Auto-expand the currently selected parent each time the modal opens

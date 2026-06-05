@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
@@ -72,33 +73,51 @@ const ringColor = (pct, daysElapsedPct) => {
   return colors.success;
 };
 
-// Category IDs (or name keywords) shown by default when creating a new plan
-const DEFAULT_CAT_KEYWORDS = ['food', 'travel', 'bill', 'shopping'];
+// Budget operates on FIRST-LEVEL (parent) categories only. Children (e.g.
+// Groceries) roll up into their parent (Food & Dining) in the store, so there's
+// no separate "groceries" budget line.
+const BUDGETABLE_IDS = ['food', 'travel', 'bills', 'shopping', 'entertainment', 'health', 'fuel', 'investments', 'education'];
+// Categories pre-added when creating the very first plan (no history to seed from).
+const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
+
+// Sentinel id for the "Unbudgeted expenses" drill-down.
+const UNBUDGETED_ID = '__unbudgeted__';
+
+// Copy for the "how budgeting works" info popover.
+const BUDGET_INFO = {
+  title: 'How this budget works',
+  message:
+    'Your budget only tracks the categories you add to the plan. Spending in any other category is shown separately as "Unbudgeted expenses" and is not counted against your caps.\n\nSelf transfers and lent/borrowed amounts are never counted — they aren\'t expenses.',
+  primaryText: 'Got it',
+};
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const theme    = useTheme();
   const gradient = useGradient();
 
-  const budget                = useEPurseStore((s) => s.budget);
-  const transactions          = useEPurseStore((s) => s.transactions);
-  const budgetStreak          = useEPurseStore((s) => s.budgetStreak);
-  const categories            = useEPurseStore((s) => s.categories);
-  const setBudgetTotalCap     = useEPurseStore((s) => s.setBudgetTotalCap);
-  const updateBudgetCategory  = useEPurseStore((s) => s.updateBudgetCategory);
-  const removeBudgetCategory  = useEPurseStore((s) => s.removeBudgetCategory);
-  const clearBudget           = useEPurseStore((s) => s.clearBudget);
-  const getBudgetUsage        = useEPurseStore((s) => s.getBudgetUsage);
-  const getCategoryAverage    = useEPurseStore((s) => s.getCategoryAverage);
-  const getCategoryMastery    = useEPurseStore((s) => s.getCategoryMastery);
+  const budget                  = useEPurseStore((s) => s.budget);
+  const lastBudgetPlan          = useEPurseStore((s) => s.lastBudgetPlan);
+  const transactions            = useEPurseStore((s) => s.transactions);
+  const budgetStreak            = useEPurseStore((s) => s.budgetStreak);
+  const categories              = useEPurseStore((s) => s.categories);
+  const setBudget               = useEPurseStore((s) => s.setBudget);
+  const clearBudget             = useEPurseStore((s) => s.clearBudget);
+  const getBudgetUsage          = useEPurseStore((s) => s.getBudgetUsage);
+  const getParentCategoryAverage = useEPurseStore((s) => s.getParentCategoryAverage);
+  const getBudgetChildBreakdown = useEPurseStore((s) => s.getBudgetChildBreakdown);
+  const getUnbudgetedBreakdown  = useEPurseStore((s) => s.getUnbudgetedBreakdown);
+  const getCategoryMastery      = useEPurseStore((s) => s.getCategoryMastery);
 
   const [confirm,         setConfirm]         = useState(null);
   const [planModalVisible, setPlanModalVisible] = useState(false);
 
   // Local state for the plan modal
-  const [localCap,         setLocalCap]         = useState('');
   const [localCats,        setLocalCats]         = useState([]); // [{ catId, cap: string }]
   const [localPickerOpen,  setLocalPickerOpen]   = useState(false);
+
+  // Drill-down sheet: which budget category's sub-categories to show.
+  const [drillCatId,       setDrillCatId]         = useState(null);
 
   // Recomputes when budget OR transactions change so actuals stay live
   const usage = useMemo(() => getBudgetUsage(), [budget, transactions, getBudgetUsage]);
@@ -113,30 +132,34 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
   const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
 
-  const EXCLUDE_CATS = useMemo(() => new Set([
-    'lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'salary', 'transfer', 'self',
-  ]), []);
+  const BUDGETABLE = useMemo(() => new Set(BUDGETABLE_IDS), []);
+
+  // Sum of the category caps the user is editing — the total is derived, never typed.
+  const localTotal = useMemo(
+    () => localCats.reduce((sum, { cap }) => sum + (parseInt(cap, 10) || 0), 0),
+    [localCats]
+  );
+
+  // Seed the plan form from the previous month's plan (so the user just nudges
+  // each category up/down). Falls back to a few common categories on first ever
+  // use. Returns [{ catId, cap }].
+  const seedFromHistory = useCallback(() => {
+    const prev = lastBudgetPlan?.perCategory;
+    if (prev && Object.keys(prev).length > 0) {
+      return Object.entries(prev)
+        .filter(([catId]) => BUDGETABLE.has(catId))
+        .map(([catId, cap]) => ({ catId, cap: cap ? String(cap) : '' }));
+    }
+    return DEFAULT_BUDGET_IDS
+      .filter((catId) => categories.some((c) => c.id === catId))
+      .map((catId) => ({ catId, cap: '' }));
+  }, [lastBudgetPlan, categories, BUDGETABLE]);
 
   // ── Modal handlers ────────────────────────────────────────────────────────
   const openCreateModal = useCallback(() => {
-    const defaults = DEFAULT_CAT_KEYWORDS
-      .map((kw) => {
-        const cat = categories.find(
-          (c) => !EXCLUDE_CATS.has(c.id) && (
-            c.id.toLowerCase().includes(kw) ||
-            c.name.toLowerCase().includes(kw)
-          )
-        );
-        if (!cat) return null;
-        const avg = getCategoryAverage(cat.id, 3);
-        return { catId: cat.id, cap: avg > 0 ? String(Math.round(avg)) : '' };
-      })
-      .filter(Boolean)
-      .filter((item, idx, arr) => arr.findIndex((x) => x.catId === item.catId) === idx);
-    setLocalCap('');
-    setLocalCats(defaults);
+    setLocalCats(seedFromHistory());
     setPlanModalVisible(true);
-  }, [categories, getCategoryAverage, EXCLUDE_CATS]);
+  }, [seedFromHistory]);
 
   // Auto-open the create modal when arriving from the dashboard with no plan.
   // Ref guard ensures it fires only once per mount even if deps change.
@@ -150,15 +173,13 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   }, [openPlan, budget, openCreateModal]);
 
   const openEditModal = useCallback(() => {
-    setLocalCap(budget?.totalCap ? String(budget.totalCap) : '');
     setLocalCats(
-      Object.entries(budget?.perCategory || {}).map(([catId, cap]) => ({
-        catId,
-        cap: String(cap),
-      }))
+      Object.entries(budget?.perCategory || {})
+        .filter(([catId]) => BUDGETABLE.has(catId))
+        .map(([catId, cap]) => ({ catId, cap: String(cap) }))
     );
     setPlanModalVisible(true);
-  }, [budget]);
+  }, [budget, BUDGETABLE]);
 
   const handleLocalCatCapChange = useCallback((catId, text) => {
     setLocalCats((prev) =>
@@ -166,31 +187,14 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     );
   }, []);
 
-  // Auto-distribute total budget equally when total cap changes
-  useEffect(() => {
-    const capNum = parseInt(localCap.replace(/\D/g, ''), 10);
-    if (Number.isFinite(capNum) && capNum > 0 && localCats.length > 0) {
-      const perCategory = Math.floor(capNum / localCats.length);
-      setLocalCats((prev) =>
-        prev.map((c) => {
-          // Only auto-fill if the field is empty
-          if (!c.cap || c.cap === '0') {
-            return { ...c, cap: String(perCategory) };
-          }
-          return c;
-        })
-      );
-    }
-  }, [localCap, localCats.length]);
-
   const handleLocalAddCat = useCallback((catId) => {
-    const avg = getCategoryAverage(catId, 3);
+    const avg = getParentCategoryAverage(catId, 3);
     setLocalCats((prev) => [
       ...prev,
       { catId, cap: avg > 0 ? String(Math.round(avg)) : '' },
     ]);
     setLocalPickerOpen(false);
-  }, [getCategoryAverage]);
+  }, [getParentCategoryAverage]);
 
   const handleLocalRemoveCat = useCallback((catId) => {
     setLocalCats((prev) => prev.filter((c) => c.catId !== catId));
@@ -199,83 +203,43 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const resetLocalState = useCallback(() => {
     if (budget) {
       // Edit mode — revert to saved plan
-      setLocalCap(budget.totalCap ? String(budget.totalCap) : '');
       setLocalCats(
-        Object.entries(budget.perCategory || {}).map(([catId, cap]) => ({
-          catId,
-          cap: String(cap),
-        }))
+        Object.entries(budget.perCategory || {})
+          .filter(([catId]) => BUDGETABLE.has(catId))
+          .map(([catId, cap]) => ({ catId, cap: String(cap) }))
       );
     } else {
-      // Create mode — go back to defaults
-      const defaults = DEFAULT_CAT_KEYWORDS
-        .map((kw) => {
-          const cat = categories.find(
-            (c) => !EXCLUDE_CATS.has(c.id) && (
-              c.id.toLowerCase().includes(kw) ||
-              c.name.toLowerCase().includes(kw)
-            )
-          );
-          if (!cat) return null;
-          return { catId: cat.id, cap: '' };
-        })
-        .filter(Boolean)
-        .filter((item, idx, arr) => arr.findIndex((x) => x.catId === item.catId) === idx);
-      setLocalCap('');
-      setLocalCats(defaults);
+      // Create mode — go back to the seeded defaults
+      setLocalCats(seedFromHistory());
     }
-  }, [budget, categories, EXCLUDE_CATS]);
+  }, [budget, BUDGETABLE, seedFromHistory]);
 
   const savePlan = useCallback(() => {
-    const capNum = parseInt(localCap.replace(/\D/g, ''), 10);
-    
-    // Validate: if categories exist, ensure they all have values
+    // Every listed category must have a cap > 0.
     if (localCats.length > 0) {
-      const hasEmptyCategories = localCats.some(({ cap }) => {
+      const hasEmpty = localCats.some(({ cap }) => {
         const num = parseInt(cap, 10);
         return !Number.isFinite(num) || num <= 0;
       });
-      
-      if (hasEmptyCategories) {
+      if (hasEmpty) {
         setConfirm({
           title: 'Empty category budgets',
-          message: 'All categories must have a budget value greater than 0. Please fill in all category budgets.',
+          message: 'Give every category a budget greater than 0, or remove it from the plan.',
           primaryText: 'OK',
         });
         return;
       }
-      
-      // Validate: sum of category budgets should not exceed total budget
-      if (Number.isFinite(capNum) && capNum > 0) {
-        const totalCategoryBudget = localCats.reduce((sum, { cap }) => {
-          const num = parseInt(cap, 10);
-          return sum + (Number.isFinite(num) ? num : 0);
-        }, 0);
-        
-        if (totalCategoryBudget > capNum) {
-          setConfirm({
-            title: 'Budget mismatch',
-            message: `Category budgets (₹${totalCategoryBudget.toLocaleString('en-IN')}) exceed total budget (₹${capNum.toLocaleString('en-IN')}). Please adjust.`,
-            primaryText: 'OK',
-          });
-          return;
-        }
-      }
     }
-    
-    setBudgetTotalCap(Number.isFinite(capNum) ? capNum : null);
-    // Remove categories that are no longer in the plan
-    const newIds = new Set(localCats.map((c) => c.catId));
-    Object.keys(budget?.perCategory || {}).forEach((catId) => {
-      if (!newIds.has(catId)) removeBudgetCategory(catId);
-    });
-    // Add / update
+
+    // Build the plan; the store derives the (non-editable) total from the sum.
+    const perCategory = {};
     localCats.forEach(({ catId, cap }) => {
       const num = parseInt(cap, 10);
-      updateBudgetCategory(catId, Number.isFinite(num) ? num : 0);
+      if (Number.isFinite(num) && num > 0) perCategory[catId] = num;
     });
+    setBudget({ perCategory });
     setPlanModalVisible(false);
-  }, [localCap, localCats, budget, setBudgetTotalCap, removeBudgetCategory, updateBudgetCategory, setConfirm]);
+  }, [localCats, setBudget, setConfirm]);
 
   const handleResetPlan = useCallback(() => {
     setConfirm({
@@ -289,11 +253,25 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     });
   }, [clearBudget]);
 
-  // Categories available to add in the modal (not yet in local list)
+  // First-level categories available to add in the modal (not yet in local list)
   const localPickerCategories = useMemo(() => {
     const addedIds = new Set(localCats.map((c) => c.catId));
-    return categories.filter((c) => !addedIds.has(c.id) && !EXCLUDE_CATS.has(c.id));
-  }, [categories, localCats, EXCLUDE_CATS]);
+    return BUDGETABLE_IDS
+      .map((id) => categories.find((c) => c.id === id))
+      .filter((c) => c && !addedIds.has(c.id));
+  }, [categories, localCats]);
+
+  // Drill-down: sub-category stats for the tapped budget category (current
+  // month). The special '__unbudgeted__' id drills the unbudgeted slice instead.
+  const isUnbudgetedDrill = drillCatId === UNBUDGETED_ID;
+  const drillCat = isUnbudgetedDrill
+    ? { name: 'Unbudgeted expenses', emoji: null, color: colors.textMuted }
+    : (drillCatId ? categoryById.get(drillCatId) : null);
+  const drillRows = useMemo(() => {
+    if (!drillCatId) return [];
+    return isUnbudgetedDrill ? getUnbudgetedBreakdown() : getBudgetChildBreakdown(drillCatId);
+  }, [drillCatId, isUnbudgetedDrill, getBudgetChildBreakdown, getUnbudgetedBreakdown, transactions]);
+  const drillTotal = useMemo(() => drillRows.reduce((s, r) => s + r.total, 0), [drillRows]);
 
   // ── Progress section ─────────────────────────────────────────────────────
   const renderProgress = () => {
@@ -319,7 +297,17 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
           {/* Top bar */}
           <View style={styles.heroTop}>
             <View>
-              <Text style={styles.heroMonth}>{monthName}</Text>
+              <View style={styles.heroMonthRow}>
+                <Text style={styles.heroMonth}>{monthName}</Text>
+                <TouchableOpacity
+                  onPress={() => setConfirm(BUDGET_INFO)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="How this budget works"
+                >
+                  <Text style={styles.heroInfoIcon}>ⓘ</Text>
+                </TouchableOpacity>
+              </View>
               <Text style={styles.heroDays}>
                 {daysLeftInMonth === 0 ? 'Last day' : `${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'} left`}
               </Text>
@@ -367,6 +355,12 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                     : `₹${Math.round(total.remaining).toLocaleString('en-IN')} remaining`}
                 </Text>
               ) : null}
+              {usage.unbudgeted > 0 ? (
+                <View style={styles.unbudgetedHintRow}>
+                  <Ionicons name="file-tray-outline" size={12} color={colors.textMuted} />
+                  <Text style={styles.unbudgetedHint}>{formatCompact(usage.unbudgeted)} unbudgeted</Text>
+                </View>
+              ) : null}
             </View>
           </View>
         </View>
@@ -385,13 +379,19 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
               const mastery = getCategoryMastery(r.catId);
               const masteryEmoji = mastery >= 6 ? '🥇' : mastery >= 3 ? '⭐' : null;
               return (
-                <View key={r.catId} style={styles.catCard}>
+                <TouchableOpacity
+                  key={r.catId}
+                  style={styles.catCard}
+                  activeOpacity={0.75}
+                  onPress={() => setDrillCatId(r.catId)}
+                >
                   <View style={styles.catCardTop}>
                     <Text style={styles.catEmoji}>{cat.emoji}</Text>
                     <Text style={styles.catName} numberOfLines={1}>{cat.name}</Text>
                     {masteryEmoji ? <Text style={styles.masteryBadge}>{masteryEmoji}</Text> : null}
                     <View style={{ flex: 1 }} />
                     <Text style={[styles.catPct, { color: barColor }]}>{Math.round(r.pct)}%</Text>
+                    <Text style={styles.catChevron}>›</Text>
                   </View>
                   <View style={styles.barTrack}>
                     <View style={[styles.barFill, { width: `${Math.min(100, r.pct)}%`, backgroundColor: barColor }]} />
@@ -406,9 +406,31 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                         : `₹${Math.round(r.remaining ?? 0).toLocaleString('en-IN')} left`}
                     </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
+          </View>
+        ) : null}
+
+        {/* ── Unbudgeted expenses ── */}
+        {usage.unbudgeted > 0 ? (
+          <View style={styles.catSection}>
+            <TouchableOpacity
+              style={[styles.catCard, styles.unbudgetedCard]}
+              activeOpacity={0.75}
+              onPress={() => setDrillCatId(UNBUDGETED_ID)}
+            >
+              <View style={styles.catCardTop}>
+                <Ionicons name="file-tray-outline" size={18} color={colors.textSecondary} />
+                <Text style={styles.catName} numberOfLines={1}>Unbudgeted expenses</Text>
+                <View style={{ flex: 1 }} />
+                <Text style={styles.unbudgetedAmount}>{formatCompact(usage.unbudgeted)}</Text>
+                <Text style={styles.catChevron}>›</Text>
+              </View>
+              <Text style={styles.unbudgetedNote}>
+                Spent outside your budgeted categories — not counted against caps. Tap to see where.
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -467,23 +489,17 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Total budget */}
+            {/* Total budget — derived, non-editable (sum of the categories below) */}
             <View style={styles.modalSection}>
               <Text style={styles.modalFieldLabel}>Total monthly budget</Text>
-              <View style={styles.totalInputWrap}>
-                <Text style={styles.totalInputPrefix}>₹</Text>
-                <TextInput
-                  value={localCap}
-                  onChangeText={(t) => setLocalCap(t.replace(/\D/g, ''))}
-                  placeholder="50,000"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                  style={styles.totalInput}
-                  autoFocus={!budget}
-                />
+              <View style={styles.totalReadonlyWrap}>
+                <Text style={styles.totalReadonlyValue}>
+                  ₹{localTotal.toLocaleString('en-IN')}
+                </Text>
+                <Text style={styles.totalReadonlyTag}>auto</Text>
               </View>
               <Text style={styles.totalInputHint}>
-                Leave blank to track only by category
+                Adds up automatically from your category budgets below.
               </Text>
             </View>
 
@@ -496,7 +512,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
               {localCats.length === 0 ? (
                 <View style={styles.modalEmptyHint}>
                   <Text style={styles.modalEmptyText}>
-                    Add categories below to track individual budgets.
+                    Add first-level categories below to build your budget.
                   </Text>
                 </View>
               ) : (
@@ -579,7 +595,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                   <Text style={styles.pickerEmpty}>All categories are already added.</Text>
                 ) : (
                   localPickerCategories.map((c) => {
-                    const avg = getCategoryAverage(c.id, 3);
+                    const avg = getParentCategoryAverage(c.id, 3);
                     return (
                       <TouchableOpacity
                         key={c.id}
@@ -638,6 +654,56 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
       {renderPlanModal()}
 
+      {/* Category drill-down — sub-category stats for the tapped budget card */}
+      <Modal
+        visible={!!drillCatId}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDrillCatId(null)}
+      >
+        <TouchableOpacity
+          style={styles.pickerBackdrop}
+          activeOpacity={1}
+          onPress={() => setDrillCatId(null)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
+            <View style={styles.pickerHandle} />
+            <View style={styles.drillHeader}>
+              {isUnbudgetedDrill ? (
+                <Ionicons name="file-tray-outline" size={20} color={colors.textSecondary} />
+              ) : (
+                <Text style={styles.drillEmoji}>{drillCat?.emoji}</Text>
+              )}
+              <Text style={styles.drillTitle}>{drillCat?.name}</Text>
+              <View style={{ flex: 1 }} />
+              <Text style={styles.drillTotal}>{formatCompact(drillTotal)}</Text>
+            </View>
+            <Text style={styles.drillSub}>This month, by sub-category</Text>
+            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+              {drillRows.length === 0 ? (
+                <Text style={styles.pickerEmpty}>No spending in this category yet this month.</Text>
+              ) : (
+                drillRows.map((row) => {
+                  const pct = drillTotal > 0 ? (row.total / drillTotal) * 100 : 0;
+                  return (
+                    <View key={row.label} style={styles.drillRow}>
+                      <View style={styles.drillRowTop}>
+                        <Text style={styles.drillRowLabel} numberOfLines={1}>{row.label}</Text>
+                        <Text style={styles.drillRowAmount}>{formatCompact(row.total)}</Text>
+                        <Text style={styles.drillRowPct}>{Math.round(pct)}%</Text>
+                      </View>
+                      <View style={styles.barTrack}>
+                        <View style={[styles.barFill, { width: `${Math.min(100, pct)}%`, backgroundColor: drillCat?.color ?? colors.info }]} />
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <CenterModal
         visible={!!confirm}
         title={confirm?.title}
@@ -691,7 +757,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.md,
   },
+  heroMonthRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   heroMonth: { ...typography.h2, color: colors.textPrimary },
+  heroInfoIcon: { fontSize: 15, color: colors.textMuted, marginTop: 1 },
   heroDays:  { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   streakBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -730,6 +798,8 @@ const styles = StyleSheet.create({
   statusLabel: { ...typography.small, fontWeight: '700' },
   paceText:    { ...typography.tiny, color: colors.textSecondary, marginTop: 4 },
   remainText:  { ...typography.small, fontWeight: '700', marginTop: 2 },
+  unbudgetedHintRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  unbudgetedHint: { ...typography.tiny, color: colors.textMuted, fontWeight: '600' },
 
   // ── Category section ──
   catSection: { gap: spacing.sm, marginBottom: spacing.lg },
@@ -748,6 +818,7 @@ const styles = StyleSheet.create({
   catName:      { ...typography.bodyBold, color: colors.textPrimary, flexShrink: 1 },
   masteryBadge: { fontSize: 13 },
   catPct:       { fontSize: 13, fontWeight: '800' },
+  catChevron:   { fontSize: 18, color: colors.textMuted, marginLeft: 6, marginTop: -2 },
   barTrack: {
     height: 7, backgroundColor: colors.divider,
     borderRadius: 4, overflow: 'hidden',
@@ -757,6 +828,10 @@ const styles = StyleSheet.create({
   catActual:    { ...typography.small, color: colors.textPrimary, fontWeight: '700' },
   catCapLabel:  { ...typography.small, color: colors.textSecondary },
   catRemain:    { ...typography.tiny, fontWeight: '600' },
+
+  unbudgetedCard: { borderWidth: 1, borderColor: colors.divider, borderStyle: 'dashed' },
+  unbudgetedAmount: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '800' },
+  unbudgetedNote: { ...typography.tiny, color: colors.textSecondary, marginTop: 6, lineHeight: 15 },
 
   resetLink:     { alignSelf: 'center', paddingVertical: spacing.md },
   resetLinkText: { ...typography.small, fontWeight: '700' },
@@ -815,6 +890,22 @@ const styles = StyleSheet.create({
     fontSize: 28, fontWeight: '800', color: colors.textPrimary,
   },
   totalInputHint: { ...typography.tiny, color: colors.textMuted, marginTop: spacing.xs },
+
+  totalReadonlyWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+  },
+  totalReadonlyValue: { flex: 1, fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
+  totalReadonlyTag: {
+    ...typography.tiny, fontWeight: '700', color: colors.textSecondary,
+    backgroundColor: colors.divider, paddingHorizontal: spacing.sm, paddingVertical: 2,
+    borderRadius: radius.pill, textTransform: 'uppercase', letterSpacing: 0.5,
+  },
 
   catList:      { gap: spacing.sm, marginBottom: spacing.md },
   catInputRow: {
@@ -900,4 +991,16 @@ const styles = StyleSheet.create({
   pickerAvg:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   pickerArrow: { fontSize: 22, fontWeight: '300' },
   pickerEmpty: { ...typography.small, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl },
+
+  // ── Category drill-down sheet ──
+  drillHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  drillEmoji:  { fontSize: 22 },
+  drillTitle:  { ...typography.h3, color: colors.textPrimary },
+  drillTotal:  { ...typography.h3, color: colors.textPrimary, fontWeight: '800' },
+  drillSub:    { ...typography.small, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },
+  drillRow:    { paddingVertical: spacing.sm },
+  drillRowTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: spacing.sm },
+  drillRowLabel:  { flex: 1, ...typography.body, color: colors.textPrimary },
+  drillRowAmount: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
+  drillRowPct:    { ...typography.small, color: colors.textSecondary, width: 40, textAlign: 'right' },
 });

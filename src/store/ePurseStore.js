@@ -270,6 +270,57 @@ const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid'
  */
 const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Budget = FIRST-LEVEL (parent) categories. Children roll up into their parent,
+// so a Groceries spend counts against the Food & Dining budget (no separate
+// "groceries" budget line). Keys are legacy parent ids that also exist in
+// DEFAULT_CATEGORIES, so name/emoji/colour resolve for free.
+// ─────────────────────────────────────────────────────────────────────────────
+const BUDGETABLE_PARENT_IDS = new Set([
+  'food', 'travel', 'bills', 'shopping', 'entertainment', 'health', 'fuel', 'investments', 'education',
+]);
+
+// Two-tier parent LABEL → legacy parent id.
+const PARENT_LABEL_TO_ID = {
+  'Food & Dining':     'food',
+  'Travel & Commute':  'travel',
+  'Bills & Utilities': 'bills',
+  'Shopping':          'shopping',
+  'Entertainment':     'entertainment',
+  'Health & Fitness':  'health',
+  'Fuel':              'fuel',
+  'Investments':       'investments',
+  'Education':         'education',
+  'Transfers':         'transfers',
+  'Income':            'income',
+  'Unassigned':        'other',
+};
+
+// Legacy flat categoryId → legacy parent id (children fold into parents).
+const LEGACY_TO_PARENT = {
+  food: 'food', groceries: 'food',
+  travel: 'travel', fuel: 'fuel',
+  bills: 'bills', shopping: 'shopping',
+  entertainment: 'entertainment', health: 'health',
+  education: 'education', investments: 'investments',
+  salary: 'income', transfer: 'transfers',
+  lent: 'transfers', borrowed: 'transfers',
+  lent_settled: 'transfers', borrow_repaid: 'transfers',
+  self: 'transfers', other: 'other',
+};
+
+/** Resolve a transaction to its first-level (parent) budget category id. */
+const parentCatId = (t) => {
+  if (t.parentCategory && PARENT_LABEL_TO_ID[t.parentCategory]) {
+    return PARENT_LABEL_TO_ID[t.parentCategory];
+  }
+  return LEGACY_TO_PARENT[t.categoryId] || 'other';
+};
+
+/** Sum of category caps — the budget total is always derived from this. */
+const sumCaps = (perCategory) =>
+  Object.values(perCategory || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+
 /**
  * Produce monthly aggregates from a list of transactions.
  * Returns `{ '2025-12': { totalSpend, totalIncome, byCategory, byAccount } }`.
@@ -353,6 +404,9 @@ export const useEPurseStore = create(
       budget: null,
       budgetHistory: {},
       budgetStreak: { current: 0, best: 0, lastResetMonth: null },
+      // Previous month's plan, kept after rollover so the next "Create plan"
+      // form can pre-fill the prior caps as a starting point. { perCategory, totalCap, monthKey }
+      lastBudgetPlan: null,
 
       // Per-month dedup so we only fire one breach notification per category
       // (and one for the overall total) — { '2026-05': ['shopping', '__total__'] }
@@ -429,15 +483,22 @@ export const useEPurseStore = create(
       setBudget: (plan) =>
         set((s) => {
           const nowIso = new Date().toISOString();
+          const perCategory = plan?.perCategory ? { ...plan.perCategory } : {};
+          const caps = sumCaps(perCategory);
+          const totalCap = caps > 0 ? caps : null;
           return {
             budget: {
               monthKey: monthKey(new Date()),
-              totalCap: plan?.totalCap ?? null,
-              perCategory: plan?.perCategory ? { ...plan.perCategory } : {},
+              // Total cap is derived from the category caps — never set directly.
+              totalCap,
+              perCategory,
               startDay: 1, // calendar month for Phase 1 — settings hook later
               createdAt: s.budget?.createdAt || nowIso,
               lastEditedAt: nowIso,
             },
+            // Remember the latest plan so a future "Create plan" (next month, or
+            // after a reset) can pre-fill these caps as a starting point.
+            lastBudgetPlan: { perCategory, totalCap, monthKey: monthKey(new Date()) },
           };
         }),
 
@@ -453,10 +514,13 @@ export const useEPurseStore = create(
             createdAt: nowIso,
             lastEditedAt: nowIso,
           };
+          const perCategory = { ...current.perCategory, [categoryId]: Number(cap) || 0 };
+          const caps = sumCaps(perCategory);
           return {
             budget: {
               ...current,
-              perCategory: { ...current.perCategory, [categoryId]: Number(cap) || 0 },
+              perCategory,
+              totalCap: caps > 0 ? caps : null,
               lastEditedAt: nowIso,
             },
           };
@@ -471,25 +535,22 @@ export const useEPurseStore = create(
           const currentMonth = s.budget.monthKey;
           const breachMonth  = (s.budgetBreachNotified?.[currentMonth] || [])
             .filter((id) => id !== categoryId);
+          const caps = sumCaps(next);
           return {
-            budget: { ...s.budget, perCategory: next, lastEditedAt: new Date().toISOString() },
+            budget: { ...s.budget, perCategory: next, totalCap: caps > 0 ? caps : null, lastEditedAt: new Date().toISOString() },
             budgetBreachNotified: { ...s.budgetBreachNotified, [currentMonth]: breachMonth },
           };
         }),
 
-      setBudgetTotalCap: (cap) =>
+      // The total budget is non-editable — it is always the sum of the category
+      // caps. This setter just re-derives it (kept for callers that still invoke
+      // it, e.g. legacy "top up total" affordances, which are now no-ops).
+      setBudgetTotalCap: () =>
         set((s) => {
-          const nowIso = new Date().toISOString();
-          const current = s.budget || {
-            monthKey: monthKey(new Date()),
-            totalCap: null,
-            perCategory: {},
-            startDay: 1,
-            createdAt: nowIso,
-            lastEditedAt: nowIso,
-          };
+          if (!s.budget) return s;
+          const caps = sumCaps(s.budget.perCategory);
           return {
-            budget: { ...current, totalCap: cap == null ? null : Number(cap) || 0, lastEditedAt: nowIso },
+            budget: { ...s.budget, totalCap: caps > 0 ? caps : null, lastEditedAt: new Date().toISOString() },
           };
         }),
 
@@ -630,11 +691,14 @@ export const useEPurseStore = create(
         const toMark       = [];
 
         // ── Category-level breach ─────────────────────────────────────────
-        if (categoryId && s.budget.perCategory[categoryId] != null) {
-          const cat = usage.perCategory[categoryId];
-          if (cat?.over && !notifiedList.includes(categoryId)) {
-            toMark.push(categoryId);
-            const meta = s.categories.find((c) => c.id === categoryId);
+        // Budgets are keyed by first-level (parent) category, but callers pass
+        // the transaction's legacy categoryId — roll it up to its parent.
+        const parentId = LEGACY_TO_PARENT[categoryId] || categoryId;
+        if (parentId && s.budget.perCategory[parentId] != null) {
+          const cat = usage.perCategory[parentId];
+          if (cat?.over && !notifiedList.includes(parentId)) {
+            toMark.push(parentId);
+            const meta = s.categories.find((c) => c.id === parentId);
             // Fire-and-forget — don't block the action on permission/network
             fireBudgetBreachNotification({
               scope: 'category',
@@ -721,11 +785,19 @@ export const useEPurseStore = create(
           };
 
           return {
-            budget: { ...s.budget, monthKey: currentMonth, lastEditedAt: new Date().toISOString() },
+            // Do NOT auto-carry the plan into the new month. The user must
+            // create the new month's plan themselves. We remember the previous
+            // plan so the create form can pre-fill it as a starting point.
+            budget: null,
+            lastBudgetPlan: {
+              perCategory: { ...s.budget.perCategory },
+              totalCap: s.budget.totalCap,
+              monthKey: prevMonth,
+            },
             budgetHistory: { ...s.budgetHistory, [prevMonth]: historyEntry },
             budgetStreak: { current, best, lastResetMonth },
-            // Drop old months' dedup — keep only the new (current) month
-            budgetBreachNotified: { [currentMonth]: [] },
+            // No active plan for the new month yet → no dedup marks to keep.
+            budgetBreachNotified: {},
             pendingCelebration,
             // Reset mid-month nudge dedup for the new cycle
             lastMidmonthNudgeMonth: null,
@@ -1699,30 +1771,47 @@ export const useEPurseStore = create(
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-        const byCategory = {};
-        let totalActual = 0;
+        // Spend rolled up to first-level parent categories. Self & lent/borrow
+        // are excluded entirely — they aren't expenses. `allExpense` is every
+        // real expense this month (any category) so we can surface the slice
+        // that falls OUTSIDE the budgeted categories.
+        const byParent = {};
+        let allExpense = 0;
         s.transactions.forEach((t) => {
           if (t.isIgnored) return;
           if (new Date(t.createdAt).getTime() < monthStart) return;
           if (t.type !== TRANSACTION_TYPES.DEBIT) return;
-          const spend = debitDisplayAmount(t);
-          byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + spend;
-          if (!NON_SPEND_CATS.has(t.categoryId)) totalActual += spend;
+          if (NON_SPEND_CATS.has(t.categoryId)) return; // self + lent/borrow
+          const amt = debitDisplayAmount(t);
+          allExpense += amt;
+          const pid = parentCatId(t);
+          if (BUDGETABLE_PARENT_IDS.has(pid)) byParent[pid] = (byParent[pid] || 0) + amt;
         });
 
-        const totalCap = s.budget.totalCap;
+        // Total cap & actual are DERIVED from the category lines — the total is
+        // never edited directly (it is the sum of the per-category caps).
         const perCategory = {};
+        let totalCap = 0;
+        let totalActual = 0;
         Object.entries(s.budget.perCategory).forEach(([catId, cap]) => {
-          const actual = byCategory[catId] || 0;
+          const capNum = Number(cap) || 0;
+          const actual = byParent[catId] || 0;
+          totalCap += capNum;
+          totalActual += actual;
           perCategory[catId] = {
-            cap,
+            cap: capNum,
             actual,
-            pct:       cap > 0 ? (actual / cap) * 100 : 0,
-            remaining: Math.max(0, cap - actual),
-            over:      actual > cap,
-            overshoot: Math.max(0, actual - cap),
+            pct:       capNum > 0 ? (actual / capNum) * 100 : 0,
+            remaining: Math.max(0, capNum - actual),
+            over:      actual > capNum,
+            overshoot: Math.max(0, actual - capNum),
           };
         });
+        const totalCapFinal = totalCap > 0 ? totalCap : null;
+
+        // Expense that falls OUTSIDE the budgeted categories (unbudgeted parents,
+        // transfers, unassigned…). Self & LB are already excluded from allExpense.
+        const unbudgeted = Math.max(0, allExpense - totalActual);
 
         const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
         const dayOfMonth     = now.getDate();
@@ -1732,19 +1821,99 @@ export const useEPurseStore = create(
         return {
           monthKey: monthKey(now),
           total: {
-            cap: totalCap,
+            cap: totalCapFinal,
             actual: totalActual,
-            pct: totalCap > 0 ? (totalActual / totalCap) * 100 : 0,
-            remaining: totalCap != null ? Math.max(0, totalCap - totalActual) : null,
-            over: totalCap != null && totalActual > totalCap,
-            overshoot: (totalCap != null && totalActual > totalCap) ? (totalActual - totalCap) : 0,
+            pct: totalCapFinal ? (totalActual / totalCapFinal) * 100 : 0,
+            remaining: totalCapFinal != null ? Math.max(0, totalCapFinal - totalActual) : null,
+            over: totalCapFinal != null && totalActual > totalCapFinal,
+            overshoot: (totalCapFinal != null && totalActual > totalCapFinal) ? (totalActual - totalCapFinal) : 0,
           },
           perCategory,
+          allExpense,
+          unbudgeted,
           daysLeftInMonth,
           daysElapsedPct,
           dayOfMonth,
           lastDayOfMonth,
         };
+      },
+
+      /**
+       * Average monthly spend for a FIRST-LEVEL (parent) budget category over
+       * the last N months. Rolls up child legacy ids (e.g. groceries → food)
+       * from monthlyAggregates so the figure matches the parent-based budget.
+       * Used to suggest caps in the plan form.
+       */
+      getParentCategoryAverage: (parentId, months = 3) => {
+        const s = get();
+        const now = new Date();
+        let total = 0;
+        let count = 0;
+        for (let i = 1; i <= months; i++) {
+          const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const agg = s.monthlyAggregates[monthKey(d)];
+          if (!agg?.byCategory) continue;
+          let monthSum = 0;
+          let has = false;
+          Object.entries(agg.byCategory).forEach(([cid, amt]) => {
+            if (LEGACY_TO_PARENT[cid] === parentId) { monthSum += amt; has = true; }
+          });
+          if (has) { total += monthSum; count += 1; }
+        }
+        return count > 0 ? Math.round(total / count) : 0;
+      },
+
+      /**
+       * Current-month spend for a parent budget category, broken down by its
+       * child (sub) categories. Powers the budget category drill-down sheet.
+       * Self & lent/borrow are excluded. Returns [{ label, total }] desc.
+       */
+      getBudgetChildBreakdown: (parentId, date = new Date()) => {
+        const s = get();
+        const catName = (id) => s.categories.find((c) => c.id === id)?.name;
+        const rows = {};
+        s.transactions.forEach((t) => {
+          if (t.isIgnored) return;
+          if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+          if (NON_SPEND_CATS.has(t.categoryId)) return;
+          if (!isSameMonth(t.createdAt, date)) return;
+          if (parentCatId(t) !== parentId) return;
+          const label = t.childCategory || catName(t.categoryId) || 'Other';
+          rows[label] = (rows[label] || 0) + debitDisplayAmount(t);
+        });
+        return Object.entries(rows)
+          .map(([label, total]) => ({ label, total }))
+          .sort((a, b) => b.total - a.total);
+      },
+
+      /**
+       * Current-month expense that falls OUTSIDE the budgeted categories,
+       * grouped by first-level category. Powers the "Unbudgeted expenses"
+       * card / drill-down. Self & lent/borrow excluded.
+       */
+      getUnbudgetedBreakdown: (date = new Date()) => {
+        const s = get();
+        if (!s.budget) return [];
+        const budgeted = new Set(Object.keys(s.budget.perCategory));
+        const labelFor = (pid) => {
+          if (pid === 'transfers') return 'Transfers';
+          if (pid === 'other') return 'Other';
+          return s.categories.find((c) => c.id === pid)?.name || 'Other';
+        };
+        const rows = {};
+        s.transactions.forEach((t) => {
+          if (t.isIgnored) return;
+          if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+          if (NON_SPEND_CATS.has(t.categoryId)) return;
+          if (!isSameMonth(t.createdAt, date)) return;
+          const pid = parentCatId(t);
+          if (budgeted.has(pid)) return; // already tracked by a budget line
+          const label = labelFor(pid);
+          rows[label] = (rows[label] || 0) + debitDisplayAmount(t);
+        });
+        return Object.entries(rows)
+          .map(([label, total]) => ({ label, total }))
+          .sort((a, b) => b.total - a.total);
       },
 
       /**
@@ -1937,7 +2106,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 17,
+      version: 18,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -2167,6 +2336,24 @@ export const useEPurseStore = create(
           state = { ...state, transactions: cleanedTxns };
         }
 
+        // v18: budget moves to first-level (parent) categories. Remap any
+        // existing per-category caps to parent ids (groceries → food, etc.),
+        // drop non-budgetable keys, and re-derive the total from the sum.
+        if (version < 18) {
+          let nextBudget = state.budget;
+          if (nextBudget?.perCategory) {
+            const remapped = {};
+            Object.entries(nextBudget.perCategory).forEach(([cid, cap]) => {
+              const pid = LEGACY_TO_PARENT[cid] || cid;
+              if (!BUDGETABLE_PARENT_IDS.has(pid)) return; // drop transfers/income/etc
+              remapped[pid] = (remapped[pid] || 0) + (Number(cap) || 0);
+            });
+            const caps = sumCaps(remapped);
+            nextBudget = { ...nextBudget, perCategory: remapped, totalCap: caps > 0 ? caps : null };
+          }
+          state = { ...state, budget: nextBudget, lastBudgetPlan: state.lastBudgetPlan ?? null };
+        }
+
         // v17: self-transfer support. Seed userPhones (used to detect transfers
         // to the user's own linked mobile) and ensure the new `self` category
         // exists so own-account transfers can be excluded from spend/income.
@@ -2202,6 +2389,7 @@ export const useEPurseStore = create(
         darkMode: state.darkMode,
         notificationIds: state.notificationIds,
         budget: state.budget,
+        lastBudgetPlan: state.lastBudgetPlan,
         budgetHistory: state.budgetHistory,
         budgetStreak: state.budgetStreak,
         budgetBreachNotified: state.budgetBreachNotified,

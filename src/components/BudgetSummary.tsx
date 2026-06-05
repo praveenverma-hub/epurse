@@ -90,7 +90,6 @@ interface BudgetSummaryProps {
 export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const budget = useEPurseStore((s) => s.budget);
   const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
-  const setBudgetTotalCap = useEPurseStore((s) => s.setBudgetTotalCap);
   const updateBudgetCategory = useEPurseStore((s) => s.updateBudgetCategory);
   const allCategories = useEPurseStore((s) => s.categories);
   const theme = useTheme();
@@ -197,11 +196,6 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const overBudgetCats = displayCategories.filter((c) => c.spent > c.allocated);
   const underBudgetCats = displayCategories.filter((c) => c.spent < c.allocated);
 
-  const handleTopUp = () => {
-    const newCap = totalCap + 5000;
-    setBudgetTotalCap(newCap);
-  };
-
   const handleRebalance = (fromId: string, toId: string, amount: number) => {
     const fromCat = displayCategories.find((c) => c.id === fromId);
     const toCat = displayCategories.find((c) => c.id === toId);
@@ -271,13 +265,11 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
         </View>
       </View>
 
-      {/* FOOTER BUTTONS - Only show when budget is exhausted */}
+      {/* FOOTER BUTTONS - Only show when budget is exhausted.
+          Total is non-editable (sum of category caps), so there's no "Top Up"
+          of the total — the user raises a category cap in Edit Plan instead. */}
       {isBudgetExhausted && (
         <View style={[styles.footer, { marginTop: 12 }]}>
-          <TouchableOpacity style={[styles.pillButton, { backgroundColor: theme.success }]} onPress={handleTopUp}>
-            <Ionicons name="add-circle-outline" size={14} color="#ffffff" style={{ marginRight: 4 }} />
-            <Text style={[styles.pillText, { color: '#ffffff' }]}>Top Up</Text>
-          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.pillButton, { backgroundColor: essentialMode ? theme.textPrimary : theme.background }]}
             onPress={() => setEssentialMode(!essentialMode)}
