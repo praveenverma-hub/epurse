@@ -14,14 +14,15 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { useToast } from './Toast';
 
 const TYPE_OPTIONS = [
-  { key: ACCOUNT_TYPES.CASH,        label: 'Cash',        emoji: '💵' },
+  { key: ACCOUNT_TYPES.CASH,        label: 'Cash',         emoji: '💵' },
   { key: ACCOUNT_TYPES.WALLET,      label: 'Wallet / UPI', emoji: '👛' },
+  { key: ACCOUNT_TYPES.DEBIT_CARD,  label: 'Debit Card',   emoji: '🏧' },
   { key: ACCOUNT_TYPES.CREDIT_CARD, label: 'Credit Card',  emoji: '💳' },
   { key: ACCOUNT_TYPES.BANK,        label: 'Bank Account', emoji: '🏦' },
 ];
 
-const NEEDS_MASK = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD]);
-const NEEDS_BANK = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD, ACCOUNT_TYPES.WALLET]);
+const NEEDS_MASK = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD, ACCOUNT_TYPES.DEBIT_CARD]);
+const NEEDS_BANK = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.CREDIT_CARD, ACCOUNT_TYPES.DEBIT_CARD, ACCOUNT_TYPES.WALLET]);
 
 const AddAccountModal = ({ visible, onClose, onAdd }) => {
   const theme = useTheme();

@@ -75,6 +75,7 @@ const CARD_PALETTES: Palette[] = [
 const TYPE_SUBTITLE: Record<string, string> = {
   [ACCOUNT_TYPES.BANK]: 'SAVINGS BANK',
   [ACCOUNT_TYPES.CREDIT_CARD]: 'CREDIT CARD',
+  [ACCOUNT_TYPES.DEBIT_CARD]: 'DEBIT CARD',
   [ACCOUNT_TYPES.WALLET]: 'DIGITAL WALLET',
   [ACCOUNT_TYPES.CASH]: 'CASH',
 };
@@ -82,11 +83,13 @@ const TYPE_SUBTITLE: Record<string, string> = {
 const TYPE_EMOJI: Record<string, string> = {
   [ACCOUNT_TYPES.BANK]: '🏦',
   [ACCOUNT_TYPES.CREDIT_CARD]: '💳',
+  [ACCOUNT_TYPES.DEBIT_CARD]: '🏧',
   [ACCOUNT_TYPES.WALLET]: '👛',
   [ACCOUNT_TYPES.CASH]: '💵',
 };
 
-const BALANCE_SENSITIVE_TYPES = new Set<string>([ACCOUNT_TYPES.BANK]);
+// Debit-card balance reflects real bank money, so hide it when backgrounded too.
+const BALANCE_SENSITIVE_TYPES = new Set<string>([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT_CARD]);
 const TYPE_LABEL_SET = new Set<string>(Object.values(TYPE_SUBTITLE));
 
 // Heavy, physical spring — feels like a real card flipping.

@@ -52,7 +52,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
 const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
 const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
-const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid'];
+const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self'];
 
 /** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
@@ -130,6 +130,7 @@ const ensureAccountForParsed = (accounts, parsed) => {
   const colorByType = {
     [ACCOUNT_TYPES.BANK]: '#1E40AF',
     [ACCOUNT_TYPES.CREDIT_CARD]: '#6D28D9',
+    [ACCOUNT_TYPES.DEBIT_CARD]: '#0EA5E9',
     [ACCOUNT_TYPES.WALLET]: '#10B981',
     [ACCOUNT_TYPES.CASH]: '#F59E0B',
   };
@@ -152,6 +153,54 @@ const applyDelta = (accounts, accountId, parsed) => {
   return accounts.map((a) =>
     a.id === accountId ? { ...a, balance: a.balance + sign * parsed.amount } : a
   );
+};
+
+// ── Self-transfer detection ──────────────────────────────────────────────────
+// A "self" transfer moves money between the user's OWN accounts (or to their own
+// linked mobile). It still adjusts account balances, but is neither income nor
+// expense, so it's tagged categoryId='self' and excluded from all totals.
+const onlyDigits = (v) => String(v ?? '').replace(/\D/g, '');
+
+/** Two masks match if one is a suffix of the other (≥3 shared trailing digits). */
+const maskMatch = (a, b) => {
+  const x = onlyDigits(a);
+  const y = onlyDigits(b);
+  if (x.length < 3 || y.length < 3) return false;
+  return x.endsWith(y) || y.endsWith(x);
+};
+const maskInList = (mask, masks) => !!mask && masks.some((m) => maskMatch(mask, m));
+
+/** A counterparty phone is the user's if a stored number shares ≥4 trailing digits. */
+const phoneIsUser = (cp, userPhones) => {
+  const c = onlyDigits(cp);
+  if (c.length < 4) return false;
+  return (userPhones || []).some((p) => {
+    const x = onlyDigits(p);
+    return x.length >= 4 && (x.endsWith(c) || c.endsWith(x));
+  });
+};
+
+/**
+ * True when a parsed transaction is a transfer between the user's OWN accounts:
+ *   (a) a dual-leg SMS where BOTH the debited and credited masks are user
+ *       accounts ("Acct XX171 debited … & Acct XX532 credited"), or
+ *   (b) money landing on a user account "by a/c linked to mobile …" that is the
+ *       user's own registered number.
+ * `userMasks` is the list of masks for every known account (all the user's own).
+ */
+const isSelfTransfer = (txn, userMasks, userPhones) => {
+  if (!txn) return false;
+  if (!maskInList(txn.accountMask, userMasks)) return false; // own leg must be a user account
+  if (txn.selfDualLeg && maskInList(txn.counterpartyMask, userMasks)) return true;
+  if (txn.counterpartyPhone && phoneIsUser(txn.counterpartyPhone, userPhones)) return true;
+  return false;
+};
+
+const SELF_TXN_FIELDS = {
+  categoryId: 'self',
+  parentCategory: 'Transfers',
+  childCategory: 'Self',
+  isSelfTransfer: true,
 };
 
 const ensureRequiredCategories = (categories = []) => {
@@ -213,6 +262,15 @@ const isDuplicate = (transactions, parsed, smsId = null, suppressedSmsIds = []) 
 const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
 
 /**
+ * Categories excluded from every spend/income total and budget calculation.
+ * Lent/borrow are tracked per-person in the LB ledger. `self` covers transfers
+ * between the user's OWN accounts (or to their own linked mobile) — real money
+ * moved, so account balances are still adjusted via applyDelta, but it is
+ * neither income nor expense and must not skew totals.
+ */
+const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
+
+/**
  * Produce monthly aggregates from a list of transactions.
  * Returns `{ '2025-12': { totalSpend, totalIncome, byCategory, byAccount } }`.
  * Lent/borrow categories are stored in byCategory for reference but excluded
@@ -230,11 +288,11 @@ const aggregate = (transactions) => {
     if (t.type === TRANSACTION_TYPES.DEBIT) {
       const spend = debitDisplayAmount(t);
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + spend;
-      if (!LB_ALL_CATS.has(t.categoryId)) a.totalSpend += spend;
+      if (!NON_SPEND_CATS.has(t.categoryId)) a.totalSpend += spend;
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) - t.amount;
     } else if (t.type === TRANSACTION_TYPES.CREDIT) {
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + t.amount;
-      if (!LB_ALL_CATS.has(t.categoryId)) a.totalIncome += t.amount;
+      if (!NON_SPEND_CATS.has(t.categoryId)) a.totalIncome += t.amount;
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) + t.amount;
     }
   });
@@ -255,6 +313,9 @@ export const useEPurseStore = create(
       lentBorrowed: [],
 
       userName: '',
+      // The user's own mobile number(s) linked to their bank accounts / UPI.
+      // Used to detect self transfers when money lands "by a/c linked to mobile …".
+      userPhones: [],
       smsAutoImport: false,
       lastSmsSync: null,   // wall-clock time of last sync run (legacy, kept for compat)
       lastSmsDate: null,   // max SMS `date` field (epoch ms) we have ever ingested —
@@ -324,6 +385,28 @@ export const useEPurseStore = create(
 
       // ----- onboarding setters -----------------------------------------
       setUserName: (name) => set({ userName: (name || '').trim() }),
+
+      // ─── User mobile numbers (for self-transfer detection) ───────────────────
+      /** Replace the full list. Each entry is normalised to digits only. */
+      setUserPhones: (phones) =>
+        set({
+          userPhones: Array.from(
+            new Set((phones || []).map((p) => String(p).replace(/\D/g, '')).filter((p) => p.length >= 4))
+          ),
+        }),
+      addUserPhone: (phone) =>
+        set((s) => {
+          const digits = String(phone || '').replace(/\D/g, '');
+          if (digits.length < 4) return s;
+          if ((s.userPhones || []).includes(digits)) return s;
+          return { userPhones: [...(s.userPhones || []), digits] };
+        }),
+      removeUserPhone: (phone) =>
+        set((s) => {
+          const digits = String(phone || '').replace(/\D/g, '');
+          return { userPhones: (s.userPhones || []).filter((p) => p !== digits) };
+        }),
+
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
@@ -963,6 +1046,14 @@ export const useEPurseStore = create(
 
           const { accounts: accountsWithMatch, account } = ensureAccountForParsed(nextAccounts, candidate);
           candidate.accountId = account?.id || null;
+
+          // Tag transfers between the user's own accounts as `self` so they're
+          // excluded from spend/income totals (balances still update below).
+          const userMasks = accountsWithMatch.map((a) => a.mask).filter(Boolean);
+          if (isSelfTransfer(candidate, userMasks, state.userPhones)) {
+            Object.assign(candidate, SELF_TXN_FIELDS);
+          }
+
           // Skip balance delta for transactions older than a manual anchor — the
           // anchor already reflects the correct balance up to that point.
           const anchoredAt = account?.anchoredAt ?? 0;
@@ -975,6 +1066,22 @@ export const useEPurseStore = create(
         });
 
         if (added.length === 0) return null;
+
+        // Reconcile self-transfer tags: a dual-leg transfer's counterpart account
+        // is often only learned from its OWN later SMS, so re-check earlier
+        // candidates against the now-grown account set. Re-tagging only changes
+        // the category (balances already applied), so it's safe to run anytime.
+        // User-edited / LB-locked transactions are left untouched.
+        const finalMasks = nextAccounts.map((a) => a.mask).filter(Boolean);
+        const userPhones = state.userPhones || [];
+        nextTransactions = nextTransactions.map((t) => {
+          if (!t || t.userEditedCategory || t.lbLocked || t.categoryId === 'self') return t;
+          if (!t.selfDualLeg && !t.counterpartyPhone) return t;
+          return isSelfTransfer(t, finalMasks, userPhones)
+            ? { ...t, ...SELF_TXN_FIELDS }
+            : t;
+        });
+
         set({ transactions: nextTransactions, accounts: nextAccounts });
 
         // Check budget breach for each unique category affected by this ingest.
@@ -1156,7 +1263,30 @@ export const useEPurseStore = create(
 
       updateTwoTierCategory: (id, parentCategory, childCategory) =>
         set((s) => {
+          // Map two-tier (parent, child) → legacy categoryId that DEFAULT_CATEGORIES
+          // and budget calculations rely on. PARENT_CATEGORIES uses different ids
+          // ('income', 'transfers') from DEFAULT_CATEGORIES ('salary', 'transfer'),
+          // so we resolve child-level first, then fall back to a parent-level alias.
+          const childToLegacy = {
+            // Income children
+            Salary:          'salary',
+            Freelance:       'salary',
+            // Transfer children
+            'P2P Transfer':  'transfer',
+            Self:            'self',
+            Lent:            'lent',
+            Borrowed:        'borrowed',
+          };
+          const parentToLegacy = {
+            Income:    'salary',
+            Transfers: 'transfer',
+          };
           const parentId = findParentByLabel(parentCategory)?.id;
+          const legacyCategoryId =
+            childToLegacy[childCategory] ||
+            parentToLegacy[parentCategory] ||
+            parentId;
+
           return {
             transactions: s.transactions.map((t) =>
               t.id === id
@@ -1164,8 +1294,7 @@ export const useEPurseStore = create(
                     ...t,
                     parentCategory,
                     childCategory,
-                    // Keep categoryId in sync so TransactionItem renders the new category.
-                    ...(parentId ? { categoryId: parentId } : {}),
+                    ...(legacyCategoryId ? { categoryId: legacyCategoryId } : {}),
                     userEdited: true,
                     userEditedCategory: true,
                   }
@@ -1488,7 +1617,7 @@ export const useEPurseStore = create(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.DEBIT &&
-            !LB_ALL_CATS.has(t.categoryId) &&
+            !NON_SPEND_CATS.has(t.categoryId) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) {
@@ -1502,7 +1631,7 @@ export const useEPurseStore = create(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.CREDIT &&
-            !LB_ALL_CATS.has(t.categoryId) &&
+            !NON_SPEND_CATS.has(t.categoryId) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
@@ -1521,7 +1650,7 @@ export const useEPurseStore = create(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.DEBIT &&
-            !LB_ALL_CATS.has(t.categoryId) &&
+            !NON_SPEND_CATS.has(t.categoryId) &&
             isSameMonth(t.createdAt, date)
         );
 
@@ -1539,13 +1668,13 @@ export const useEPurseStore = create(
           // byCategory may include LB entries from historical aggregation — strip them
           totals = {};
           Object.entries(agg.byCategory || {}).forEach(([catId, val]) => {
-            if (!LB_ALL_CATS.has(catId)) totals[catId] = val;
+            if (!NON_SPEND_CATS.has(catId)) totals[catId] = val;
           });
           grandTotal = agg.totalSpend || 1;
         }
 
         return cats
-          .filter((c) => !LB_ALL_CATS.has(c.id))
+          .filter((c) => !NON_SPEND_CATS.has(c.id))
           .map((c) => ({ ...c, total: totals[c.id] || 0, percent: ((totals[c.id] || 0) / grandTotal) * 100 }))
           .filter((c) => c.total > 0)
           .sort((a, b) => b.total - a.total);
@@ -1578,7 +1707,7 @@ export const useEPurseStore = create(
           if (t.type !== TRANSACTION_TYPES.DEBIT) return;
           const spend = debitDisplayAmount(t);
           byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + spend;
-          if (!LB_ALL_CATS.has(t.categoryId)) totalActual += spend;
+          if (!NON_SPEND_CATS.has(t.categoryId)) totalActual += spend;
         });
 
         const totalCap = s.budget.totalCap;
@@ -1651,7 +1780,7 @@ export const useEPurseStore = create(
           const agg = s.monthlyAggregates[monthKey(d)];
           if (!agg?.byCategory) continue;
           Object.entries(agg.byCategory).forEach(([catId, amt]) => {
-            if (LB_ALL_CATS.has(catId)) return;
+            if (NON_SPEND_CATS.has(catId)) return;
             totals[catId] = (totals[catId] || 0) + amt;
             counts[catId] = (counts[catId] || 0) + 1;
           });
@@ -1786,6 +1915,7 @@ export const useEPurseStore = create(
           suppressedSmsIds: [],
           manualTxnSeq: 0,
           userName: '',
+          userPhones: [],
           hasOnboarded: false,
           smsPermissionGranted: false,
           contactsPermissionGranted: false,
@@ -1807,7 +1937,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 16,
+      version: 17,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -2037,6 +2167,17 @@ export const useEPurseStore = create(
           state = { ...state, transactions: cleanedTxns };
         }
 
+        // v17: self-transfer support. Seed userPhones (used to detect transfers
+        // to the user's own linked mobile) and ensure the new `self` category
+        // exists so own-account transfers can be excluded from spend/income.
+        if (version < 17) {
+          state = {
+            ...state,
+            userPhones: state.userPhones ?? [],
+            categories: ensureRequiredCategories(state.categories || []),
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -2053,6 +2194,7 @@ export const useEPurseStore = create(
         manualTxnSeq: state.manualTxnSeq,
         lastCompactedAt: state.lastCompactedAt,
         userName: state.userName,
+        userPhones: state.userPhones,
         hasOnboarded: state.hasOnboarded,
         smsPermissionGranted: state.smsPermissionGranted,
         contactsPermissionGranted: state.contactsPermissionGranted,
@@ -2145,6 +2287,8 @@ export const selectYesterdayTransactionCount = (s) => {
 // a single source of truth and prevents drift from missed delta updates.
 // =============================================================================
 const LB_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+// Dashboard header/chip exclusions: LB ledger + self transfers between own accounts.
+const NON_SPEND_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 
 const periodStartMs = (key) => {
   const now = new Date();
@@ -2177,9 +2321,9 @@ export const selectExpenseStats = (period) => (state) => {
     (t) => !t.isIgnored && new Date(t.createdAt).getTime() >= startMs
   );
 
-  // For the chips/header, also exclude private + Lent/Borrowed.
+  // For the chips/header, also exclude private + Lent/Borrowed + self transfers.
   const eligible = inPeriod.filter(
-    (t) => !t.isHidden && !LB_CATEGORY_IDS.has(t.categoryId)
+    (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId)
   );
 
   const rawDebits = eligible

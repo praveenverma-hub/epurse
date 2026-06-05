@@ -114,7 +114,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
 
   const EXCLUDE_CATS = useMemo(() => new Set([
-    'lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'salary', 'transfer',
+    'lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'salary', 'transfer', 'self',
   ]), []);
 
   // ── Modal handlers ────────────────────────────────────────────────────────

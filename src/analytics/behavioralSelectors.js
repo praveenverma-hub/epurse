@@ -6,7 +6,9 @@
 import { TRANSACTION_TYPES } from '../constants/categories';
 import { debitDisplayAmount } from '../utils/split';
 
-const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+// Excluded from behavioral spend analytics: LB ledger + self transfers between
+// the user's own accounts (real movement, but neither income nor expense).
+const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 
 /**
  * Computes day-by-day cumulative debit spend for targetDate's month (current)

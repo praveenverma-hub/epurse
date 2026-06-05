@@ -242,7 +242,7 @@ const CategoryPickerModal: React.FC<Props> = ({
 
         <View style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.title}>Change category</Text>
+          <Text style={styles.title}>Manage transaction</Text>
 
           {categoryLocked ? (
             <View style={styles.lockedNotice}>

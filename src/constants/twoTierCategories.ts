@@ -110,6 +110,7 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     color: '#6B7280',
     children: [
       { id: 'p2p',      label: 'P2P Transfer', emoji: '👤' },
+      { id: 'self',     label: 'Self',          emoji: '🔄' },
       { id: 'lent',     label: 'Lent',          emoji: '🤝' },
       { id: 'borrowed', label: 'Borrowed',      emoji: '🧾' },
     ],

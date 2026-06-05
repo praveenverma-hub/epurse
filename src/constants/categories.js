@@ -20,6 +20,7 @@ export const DEFAULT_CATEGORIES = [
   { id: 'investments',   name: 'Investments',    color: '#14B8A6', emoji: '📈' },
   { id: 'salary',        name: 'Salary',         color: '#059669', emoji: '💰' },
   { id: 'transfer',      name: 'P2P Transfer',   color: '#6B7280', emoji: '🔁' },
+  { id: 'self',          name: 'Self Transfer',  color: '#6B7280', emoji: '🔄' },
   { id: 'lent',          name: 'You Lent',       color: '#10B981', emoji: '🤝' },
   { id: 'borrowed',      name: 'You Borrowed',   color: '#8B5CF6', emoji: '🧾' },
   { id: 'lent_settled',  name: 'Lent Settled',   color: '#14B8A6', emoji: '✅' },
@@ -144,6 +145,7 @@ export const CATEGORY_KEYWORDS = {
 export const ACCOUNT_TYPES = {
   BANK: 'Bank',
   CREDIT_CARD: 'Credit Card',
+  DEBIT_CARD: 'Debit Card',
   WALLET: 'Digital Wallet',
   CASH: 'Cash',
 };

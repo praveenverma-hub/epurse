@@ -309,7 +309,11 @@ const LEGACY_CATEGORY_FALLBACK: Record<
   education:     { parentCategory: 'Education',         childCategory: 'Unassigned' },
   investments:   { parentCategory: 'Investments',       childCategory: 'Unassigned' },
   salary:        { parentCategory: 'Income',            childCategory: 'Salary' },
+  // Aliases written by old updateTwoTierCategory which stored parent.id as categoryId
+  income:        { parentCategory: 'Income',            childCategory: 'Salary' },
+  transfers:     { parentCategory: 'Transfers',         childCategory: 'P2P Transfer' },
   transfer:      { parentCategory: 'Transfers',         childCategory: 'P2P Transfer' },
+  self:          { parentCategory: 'Transfers',         childCategory: 'Self' },
   lent:          { parentCategory: 'Transfers',         childCategory: 'Lent' },
   borrowed:      { parentCategory: 'Transfers',         childCategory: 'Borrowed' },
   lent_settled:  { parentCategory: 'Transfers',         childCategory: 'Lent Settled' },
@@ -604,7 +608,7 @@ export function parseIncomingSMS(
     rawMerchant:    rawMerchant || '',
     cleanMerchant:  isExcludable ? mapped.cleanMerchant : mapped.cleanMerchant,
     parentCategory: isExcludable ? 'Transfers' : mapped.parentCategory,
-    childCategory:  isExcludable ? 'Self Transfer' : mapped.childCategory,
+    childCategory:  isExcludable ? 'Self' : mapped.childCategory,
     isSubscription: !isExcludable && mapped.isSubscription,
     isExcludable,
   };
@@ -728,7 +732,7 @@ export function migrateToTwoTier(
 
     if (isExcludable) {
       parentCategory = 'Transfers';
-      childCategory  = 'Self Transfer';
+      childCategory  = 'Self';
       isSubscription = false;
     }
 

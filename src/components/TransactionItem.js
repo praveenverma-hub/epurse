@@ -153,6 +153,7 @@ const styles = StyleSheet.create({
 });
 
 function getStatusChip(categoryId) {
+  if (categoryId === 'self') return { label: 'SELF', bg: '#6B72801A', border: '#6B728055', text: '#6B7280' };
   if (categoryId === 'lent') return { label: 'LENT', bg: colors.success + '18', border: colors.success + '55', text: colors.success };
   if (categoryId === 'borrowed') return { label: 'BORROWED', bg: colors.info + '18', border: colors.info + '55', text: colors.info };
   if (categoryId === 'lent_settled') return { label: 'SETTLED', bg: '#14B8A61A', border: '#14B8A655', text: '#0F766E' };

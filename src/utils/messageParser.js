@@ -163,6 +163,8 @@ const TRANSACTION_PHRASES = [
   'transferred to', 'transferred from', 'transfer of',
   'payment of', 'payment for',
   'purchase at', 'purchase of', 'spent at', 'spent on',
+  // Card usage / ATM cash withdrawal ("Card ending 1234 used at ATM/merchant")
+  'used at', 'used for', 'cash withdrawal', 'cash withdrawn', 'withdrawal at', 'atm cash',
   // Bare-verb debit forms (some banks omit -ed: "Rs 500 debit from A/c")
   'debit from', 'debit of', 'debit at',
   // Credit-side
@@ -190,10 +192,21 @@ const AMOUNT_REGEX_GLOBAL =
 // NOTE: Only whitespace + mask chars (x, *, •) allowed between the keyword and the
 // digits — prevents "Card spends of INR 8497" from capturing 8497 as a mask.
 const ACCOUNT_REGEX =
-  /(?:a\/c|account|card(?:\s+ending)?)\s*[xX*•·]{0,8}\s*([xX*•·]*\d{3,6})/i;
+  /(?:a\/c|acct|account|card(?:\s+ending)?)\.?\s*(?:no\.?\s*)?[xX*•·]{0,8}\s*([xX*•·]*\d{3,6})/i;
 
 const FIRST_ACCOUNT_EVENT_REGEX =
   /(?:a\/c|acct\.?|account)\s*[xX*•·]{0,8}(\d{3,6})\s+(debited|credited|deposited|withdrawn|deducted|refunded|received)\b/i;
+
+// Every masked account/card number in the body (global). Used for self-transfer
+// detection: a single SMS that references two accounts (e.g. "Acct XX171 debited
+// … & Acct XX532 credited") may be a transfer between the user's own accounts.
+const ACCOUNT_MASK_GLOBAL =
+  /(?:a\/c|acct\.?|account)\.?\s*(?:no\.?)?\s*[xX*•·]{0,8}\s*(\d{3,6})/ig;
+
+// Counterparty mobile number — "credited … by a/c linked to mobile 9XXXXXX33221".
+// Captures the (possibly masked) token; trailing digits are extracted in code.
+const COUNTERPARTY_PHONE_REGEX =
+  /(?:linked\s+to\s+mobile|to\s+mobile(?:\s+no\.?)?|mobile\s+no\.?|vpa\s+linked\s+to\s+mobile)\s*(?:\+?91)?\s*([0-9xX*]{4,15})/i;
 
 // Merchant after "to", "at", "@", "from" — lazy, stops at stop words
 const MERCHANT_REGEX =
@@ -369,6 +382,15 @@ const NON_FINANCIAL_DLT_KEYS = [
 
 const inferAccountType = (text) => {
   if (/credit\s+card|cc\b|c\.c\./i.test(text)) return ACCOUNT_TYPES.CREDIT_CARD;
+  // Debit card / ATM: explicit "debit card", or an ATM / cash withdrawal (always
+  // a debit/ATM card), or a "Card ending …" reference WITHOUT "credit card".
+  // Keeps debit-card spends segregated from generic bank-account ("A/c") debits.
+  if (
+    /debit\s*card|\bdr\s*card\b|\batm\b|cash\s+with(?:drawal|drawn)|\bawcw\b/i.test(text) ||
+    /card\s+(?:ending|no\.?|number)\b/i.test(text)
+  ) {
+    return ACCOUNT_TYPES.DEBIT_CARD;
+  }
   if (/wallet|paytm|phonepe|gpay|google\s*pay|amazon\s*pay/i.test(text))
     return ACCOUNT_TYPES.WALLET;
   if (/a\/c|account|saving|current|bank/i.test(text)) return ACCOUNT_TYPES.BANK;
@@ -666,6 +688,31 @@ export const parseMessageDetailed = (message, opts = {}) => {
           : defaultType;
   const categoryId = categorise(`${merchant || ''} ${text}`) || 'other';
 
+  // ── Self-transfer signals ─────────────────────────────────────────────────
+  // Surfaced raw — the store decides (against the user's accounts / phones)
+  // whether this is actually a transfer between the user's own accounts.
+  const allMasks = [];
+  let mm;
+  while ((mm = ACCOUNT_MASK_GLOBAL.exec(text)) !== null) {
+    if (mm[1]) allMasks.push(mm[1]);
+  }
+  ACCOUNT_MASK_GLOBAL.lastIndex = 0;
+  const distinctMasks = [...new Set(allMasks)];
+
+  // Dual-leg: one SMS reporting both a debit and a credit across ≥2 accounts.
+  const hasDebitEvt  = /\bdebited\b/i.test(text);
+  const hasCreditEvt = /\bcredited\b/i.test(text);
+  const selfDualLeg  = distinctMasks.length >= 2 && hasDebitEvt && hasCreditEvt;
+
+  // The "other" account mask in a dual-leg message (the counterparty leg).
+  const counterpartyMask = selfDualLeg
+    ? (distinctMasks.find((m) => m !== accountMask) || null)
+    : null;
+
+  // Counterparty mobile — trailing digit run of the captured (masked) token.
+  const phoneToken = text.match(COUNTERPARTY_PHONE_REGEX)?.[1] || '';
+  const counterpartyPhone = (phoneToken.match(/(\d{4,})\s*$/)?.[1]) || null;
+
   const single = buildTransaction({
     amount,
     type: inferredTypeFromFirstVerb,
@@ -676,6 +723,9 @@ export const parseMessageDetailed = (message, opts = {}) => {
     categoryId,
     note,
     createdAt: opts.receivedAt,
+    counterpartyMask,
+    counterpartyPhone,
+    selfDualLeg,
   });
 
   return {
@@ -702,6 +752,9 @@ function buildTransaction({
   categoryId,
   note,
   createdAt,
+  counterpartyMask = null,
+  counterpartyPhone = null,
+  selfDualLeg = false,
 }) {
   return {
     id:          `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -717,6 +770,10 @@ function buildTransaction({
     isSplit:     false,
     splitWith:   [],
     createdAt:   createdAt || new Date().toISOString(),
+    // Self-transfer detection hints (resolved against user accounts/phones in store).
+    counterpartyMask,
+    counterpartyPhone,
+    selfDualLeg,
   };
 }
 
@@ -742,6 +799,9 @@ export const SAMPLE_MESSAGES = [
   'Debit INR 38000.00\nAxis Bank A/c XX2655\n02-06-26 11:52:35\nIMPS/P2A/615311412942/PRAV\nWhatsApp BAL to 917036165000\nNot You? SMS BLOCKALL CustID to 919951860002',
   // Amount extraction: should pick transaction amount, not final balance
   'Card ending x3733 used at ATM SHYAM NAGAR KAN on 10/04/2026 21:02 for txn Rs 10000.00 Bal Rs 84354.25. If not you?',
+  // Self transfer between own accounts — dual-leg (sender bank) + counterparty-phone (receiver bank)
+  'ICICI Bank Acct XX171 debited with Rs 60,000.00 on 03-Jun-26 & Acct XX532 credited.IMPS:615423432006. Call 18002662 for dispute or SMS BLOCK 171 to 9215676766',
+  'Your a/c. XXXX9532 is credited by Rs. 60000.00 on 03-06-26 by a/c linked to mobile 9XXXXXX33221 (IMPS Ref no. 615423432006). -IndianBank',
 ];
 
 export const buildSampleTransactions = () =>

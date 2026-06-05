@@ -259,6 +259,7 @@ const DailyQueueStack = () => {
   const categories               = useEPurseStore((s) => s.categories);
   const markReviewed             = useEPurseStore((s) => s.markReviewed);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
+  const updateTwoTierCategory    = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
 
   // Category picker state
@@ -309,6 +310,14 @@ const DailyQueueStack = () => {
     markReviewed(pickerTxn.id);
     setPickerTxn(null);
   }, [pickerTxn, updateTransactionCategory, markReviewed, recordReview]);
+
+  const handleSelectTwoTier = useCallback((parentCategory, childCategory) => {
+    if (!pickerTxn) return;
+    updateTwoTierCategory(pickerTxn.id, parentCategory, childCategory);
+    recordReview();
+    markReviewed(pickerTxn.id);
+    setPickerTxn(null);
+  }, [pickerTxn, updateTwoTierCategory, markReviewed, recordReview]);
 
   const handleSelectLentBorrow = useCallback((categoryId) => {
     if (!pickerTxn) return;
@@ -407,12 +416,15 @@ const DailyQueueStack = () => {
         visible={!!pickerTxn}
         categories={categories}
         selectedCategoryId={pickerTxn?.categoryId}
+        selectedParent={pickerTxn?.parentCategory}
+        selectedChild={pickerTxn?.childCategory}
         isHidden={false}
         isIgnored={false}
         canSplit={!!pickerTxn && canSplitTransaction(pickerTxn)}
         isSplitTxn={!!pickerTxn?.isSplit}
         categoryLocked={!!pickerTxn?.lbLocked}
         onSelectCategory={handleSelectCategory}
+        onSelectTwoTier={handleSelectTwoTier}
         onSelectLentBorrow={handleSelectLentBorrow}
         onClose={handlePickerClose}
       />

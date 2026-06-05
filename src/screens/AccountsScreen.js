@@ -10,6 +10,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
+  TextInput, Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,12 +36,28 @@ import CenterModal    from '../components/CenterModal';
 const TYPE_ORDER = {
   [ACCOUNT_TYPES.CASH]:        0,
   [ACCOUNT_TYPES.WALLET]:      1,
-  [ACCOUNT_TYPES.CREDIT_CARD]: 2,
-  [ACCOUNT_TYPES.BANK]:        3,
+  [ACCOUNT_TYPES.DEBIT_CARD]:  2,
+  [ACCOUNT_TYPES.CREDIT_CARD]: 3,
+  [ACCOUNT_TYPES.BANK]:        4,
 };
 
-const TYPE_EMOJI = { bank: '🏦', credit_card: '💳', wallet: '👛', cash: '💵' };
-const TYPE_LABEL = { bank: 'Bank', credit_card: 'Credit Card', wallet: 'Wallet', cash: 'Cash' };
+const TYPE_EMOJI = {
+  [ACCOUNT_TYPES.BANK]:        '🏦',
+  [ACCOUNT_TYPES.CREDIT_CARD]: '💳',
+  [ACCOUNT_TYPES.DEBIT_CARD]:  '🏧',
+  [ACCOUNT_TYPES.WALLET]:      '👛',
+  [ACCOUNT_TYPES.CASH]:        '💵',
+};
+const TYPE_LABEL = {
+  [ACCOUNT_TYPES.BANK]:        'Bank',
+  [ACCOUNT_TYPES.CREDIT_CARD]: 'Credit Card',
+  [ACCOUNT_TYPES.DEBIT_CARD]:  'Debit Card',
+  [ACCOUNT_TYPES.WALLET]:      'Wallet',
+  [ACCOUNT_TYPES.CASH]:        'Cash',
+};
+
+// Balances reflecting real bank money are gated behind biometric reveal.
+const BALANCE_SENSITIVE = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT_CARD]);
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
@@ -50,9 +67,22 @@ export default function AccountsScreen({ navigation }) {
   const addAccount   = useEPurseStore((s) => s.addAccount);
   const deleteAccount = useEPurseStore((s) => s.deleteAccount);
 
+  const userPhones     = useEPurseStore((s) => s.userPhones);
+  const addUserPhone   = useEPurseStore((s) => s.addUserPhone);
+  const removeUserPhone = useEPurseStore((s) => s.removeUserPhone);
+
   const [balancesVisible,    setBalancesVisible]    = useState(false);
   const [addAccountVisible,  setAddAccountVisible]  = useState(false);
   const [confirm,            setConfirm]            = useState(null);
+  const [phoneInput,         setPhoneInput]         = useState('');
+
+  const handleAddPhone = () => {
+    const digits = phoneInput.replace(/\D/g, '');
+    if (digits.length < 4) return;
+    addUserPhone(digits);
+    setPhoneInput('');
+    Keyboard.dismiss();
+  };
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -172,7 +202,7 @@ export default function AccountsScreen({ navigation }) {
               key={a.id}
               account={a}
               active={isFocused}
-              showBalance={a.type !== ACCOUNT_TYPES.BANK || balancesVisible}
+              showBalance={!BALANCE_SENSITIVE.has(a.type) || balancesVisible}
               holderName={userName}
               // onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
               onDelete={() =>
@@ -226,13 +256,63 @@ export default function AccountsScreen({ navigation }) {
                 <Text style={styles.listType}>{TYPE_LABEL[a.type] ?? a.type}</Text>
               </View>
               <Text style={[styles.listBalance, { color: (a.balance ?? 0) < 0 ? colors.danger : colors.textPrimary }]}>
-                {(a.type !== ACCOUNT_TYPES.BANK || balancesVisible)
+                {(!BALANCE_SENSITIVE.has(a.type) || balancesVisible)
                   ? formatCurrency(Math.abs(a.balance ?? 0))
                   : '••••'}
               </Text>
             </TouchableOpacity>
           ))
         )}
+
+        {/* Linked mobile numbers — powers self-transfer detection */}
+        <Text style={styles.listTitle}>Your mobile numbers</Text>
+        <View style={styles.phoneCard}>
+          <Text style={styles.phoneHelp}>
+            Add the mobile number(s) linked to your bank accounts. When money moves
+            to your own account or number, we'll tag it as a self transfer and keep
+            it out of your spending and income totals.
+          </Text>
+
+          {userPhones?.length > 0 ? (
+            <View style={styles.phoneChips}>
+              {userPhones.map((p) => (
+                <View key={p} style={styles.phoneChip}>
+                  <Text style={styles.phoneChipText}>{p}</Text>
+                  <TouchableOpacity
+                    onPress={() => removeUserPhone(p)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${p}`}
+                  >
+                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          <View style={styles.phoneInputRow}>
+            <TextInput
+              style={styles.phoneInput}
+              value={phoneInput}
+              onChangeText={setPhoneInput}
+              placeholder="e.g. 9876543210"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="phone-pad"
+              returnKeyType="done"
+              onSubmitEditing={handleAddPhone}
+              maxLength={15}
+            />
+            <TouchableOpacity
+              style={[styles.phoneAddBtn, phoneInput.replace(/\D/g, '').length < 4 && styles.phoneAddBtnDisabled]}
+              onPress={handleAddPhone}
+              disabled={phoneInput.replace(/\D/g, '').length < 4}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.phoneAddText}>Add</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <View style={{ height: TAB_BAR_HEIGHT + 40 }} />
       </ScrollView>
@@ -378,6 +458,63 @@ const styles = StyleSheet.create({
   listName:    { ...typography.bodyBold, color: colors.textPrimary },
   listType:    { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   listBalance: { ...typography.bodyBold, color: colors.textPrimary },
+
+  phoneCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    ...shadows.card,
+  },
+  phoneHelp: {
+    ...typography.small,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  phoneChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  phoneChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  phoneChipText: { ...typography.small, color: colors.textPrimary, fontWeight: '600' },
+  phoneInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  phoneInput: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    ...typography.body,
+    color: colors.textPrimary,
+  },
+  phoneAddBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.textPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneAddBtnDisabled: { opacity: 0.4 },
+  phoneAddText: { color: colors.card, ...typography.bodyBold, fontWeight: '700' },
 
   emptyCard: {
     backgroundColor: colors.card,
