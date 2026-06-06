@@ -35,6 +35,11 @@ import { findParentByLabel } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
+import {
+  isSelfTransfer,
+  propagateSelfByRef,
+  SELF_TXN_FIELDS,
+} from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification } from '../utils/notifications';
 import { useNotificationStore } from './useNotificationStore';
@@ -157,51 +162,10 @@ const applyDelta = (accounts, accountId, parsed) => {
 
 // ── Self-transfer detection ──────────────────────────────────────────────────
 // A "self" transfer moves money between the user's OWN accounts (or to their own
-// linked mobile). It still adjusts account balances, but is neither income nor
-// expense, so it's tagged categoryId='self' and excluded from all totals.
-const onlyDigits = (v) => String(v ?? '').replace(/\D/g, '');
-
-/** Two masks match if one is a suffix of the other (≥3 shared trailing digits). */
-const maskMatch = (a, b) => {
-  const x = onlyDigits(a);
-  const y = onlyDigits(b);
-  if (x.length < 3 || y.length < 3) return false;
-  return x.endsWith(y) || y.endsWith(x);
-};
-const maskInList = (mask, masks) => !!mask && masks.some((m) => maskMatch(mask, m));
-
-/** A counterparty phone is the user's if a stored number shares ≥4 trailing digits. */
-const phoneIsUser = (cp, userPhones) => {
-  const c = onlyDigits(cp);
-  if (c.length < 4) return false;
-  return (userPhones || []).some((p) => {
-    const x = onlyDigits(p);
-    return x.length >= 4 && (x.endsWith(c) || c.endsWith(x));
-  });
-};
-
-/**
- * True when a parsed transaction is a transfer between the user's OWN accounts:
- *   (a) a dual-leg SMS where BOTH the debited and credited masks are user
- *       accounts ("Acct XX171 debited … & Acct XX532 credited"), or
- *   (b) money landing on a user account "by a/c linked to mobile …" that is the
- *       user's own registered number.
- * `userMasks` is the list of masks for every known account (all the user's own).
- */
-const isSelfTransfer = (txn, userMasks, userPhones) => {
-  if (!txn) return false;
-  if (!maskInList(txn.accountMask, userMasks)) return false; // own leg must be a user account
-  if (txn.selfDualLeg && maskInList(txn.counterpartyMask, userMasks)) return true;
-  if (txn.counterpartyPhone && phoneIsUser(txn.counterpartyPhone, userPhones)) return true;
-  return false;
-};
-
-const SELF_TXN_FIELDS = {
-  categoryId: 'self',
-  parentCategory: 'Transfers',
-  childCategory: 'Self',
-  isSelfTransfer: true,
-};
+// linked mobile / name). It still adjusts account balances, but is neither income
+// nor expense, so it's tagged categoryId='self' and excluded from all totals.
+// Pure detection logic lives in src/utils/selfTransfer.js so the parser test
+// suite can exercise it without importing this (RN-heavy) store.
 
 const ensureRequiredCategories = (categories = []) => {
   const byId = new Map(categories.map((c) => [c.id, c]));
@@ -1132,7 +1096,7 @@ export const useEPurseStore = create(
           // Tag transfers between the user's own accounts as `self` so they're
           // excluded from spend/income totals (balances still update below).
           const userMasks = accountsWithMatch.map((a) => a.mask).filter(Boolean);
-          if (isSelfTransfer(candidate, userMasks, state.userPhones)) {
+          if (isSelfTransfer(candidate, userMasks, state.userPhones, state.userName)) {
             Object.assign(candidate, SELF_TXN_FIELDS);
           }
 
@@ -1156,13 +1120,21 @@ export const useEPurseStore = create(
         // User-edited / LB-locked transactions are left untouched.
         const finalMasks = nextAccounts.map((a) => a.mask).filter(Boolean);
         const userPhones = state.userPhones || [];
+        const userName   = state.userName || '';
         nextTransactions = nextTransactions.map((t) => {
           if (!t || t.userEditedCategory || t.lbLocked || t.categoryId === 'self') return t;
-          if (!t.selfDualLeg && !t.counterpartyPhone) return t;
-          return isSelfTransfer(t, finalMasks, userPhones)
+          if (!t.selfDualLeg && !t.counterpartyPhone && !t.counterpartyName) return t;
+          return isSelfTransfer(t, finalMasks, userPhones, userName)
             ? { ...t, ...SELF_TXN_FIELDS }
             : t;
         });
+
+        // Cross-leg linkage: the two banks involved in one self transfer each
+        // send their own SMS, both carrying the same IMPS/UPI reference. Once
+        // either leg is tagged self (above), propagate that to the other leg
+        // via the shared reference — handles the receiving-bank credit whose
+        // only counterparty signal is a heavily-masked phone.
+        nextTransactions = propagateSelfByRef(nextTransactions, finalMasks);
 
         set({ transactions: nextTransactions, accounts: nextAccounts });
 

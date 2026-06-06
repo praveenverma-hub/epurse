@@ -211,6 +211,19 @@ const ACCOUNT_MASK_GLOBAL =
 const COUNTERPARTY_PHONE_REGEX =
   /(?:linked\s+to\s+mobile|to\s+mobile(?:\s+no\.?)?|mobile\s+no\.?|vpa\s+linked\s+to\s+mobile)\s*(?:\+?91)?\s*([0-9xX*]{4,15})/i;
 
+// Counterparty name appended after a masked mobile / VPA token, e.g.
+// "linked to mobile 7XXXXXX221-PRAVEEN VE" or "VPA name@bank-RAHUL K". Used to
+// detect self transfers when the phone is too masked to match (only the
+// counterparty NAME — possibly the user's own — is left to anchor on).
+const COUNTERPARTY_NAME_REGEX =
+  /(?:mobile|vpa)\s+[\w@.xX*]+\s*-\s*([A-Za-z][A-Za-z]*(?:\s+[A-Za-z]+){0,3})/i;
+
+// Transfer reference shared by both legs of one transfer, reported separately
+// by the sending and receiving banks. Matches "IMPS Ref# 615722061047",
+// "IMPS:615722061047", "UPI Ref no 597700275328", "UPI:199999367779", etc.
+const TRANSFER_REF_REGEX =
+  /\b(?:imps|upi|neft|rtgs)\b[\s\S]{0,6}?(?:ref(?:erence)?\.?\s*(?:no\.?|#)?\s*)?[:#\-\s]\s*([0-9]{6,})/i;
+
 // Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
 // Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
 const MERCHANT_REGEX =
@@ -759,8 +772,19 @@ export const parseMessageDetailed = (message, opts = {}) => {
     : null;
 
   // Counterparty mobile — trailing digit run of the captured (masked) token.
+  // Banks mask all but the last 3-4 digits, so accept a run of ≥3 here; the
+  // store still requires ≥4 shared digits to MATCH a user phone (this just
+  // surfaces whatever is visible).
   const phoneToken = text.match(COUNTERPARTY_PHONE_REGEX)?.[1] || '';
-  const counterpartyPhone = (phoneToken.match(/(\d{4,})\s*$/)?.[1]) || null;
+  const counterpartyPhone = (phoneToken.match(/(\d{3,})\s*$/)?.[1]) || null;
+
+  // Counterparty name (e.g. "…-PRAVEEN VE") — lets the store flag a self
+  // transfer to the user's own number even when the phone is fully masked.
+  const counterpartyName = text.match(COUNTERPARTY_NAME_REGEX)?.[1]?.trim() || null;
+
+  // Shared transfer reference — links the two legs of one transfer reported by
+  // the sending and receiving banks (see propagateSelfByRef in the store).
+  const transferRef = text.match(TRANSFER_REF_REGEX)?.[1] || null;
 
   const single = buildTransaction({
     amount,
@@ -774,6 +798,8 @@ export const parseMessageDetailed = (message, opts = {}) => {
     createdAt: opts.receivedAt,
     counterpartyMask,
     counterpartyPhone,
+    counterpartyName,
+    transferRef,
     selfDualLeg,
   });
 
@@ -803,6 +829,8 @@ function buildTransaction({
   createdAt,
   counterpartyMask = null,
   counterpartyPhone = null,
+  counterpartyName = null,
+  transferRef = null,
   selfDualLeg = false,
 }) {
   return {
@@ -819,9 +847,11 @@ function buildTransaction({
     isSplit:     false,
     splitWith:   [],
     createdAt:   createdAt || new Date().toISOString(),
-    // Self-transfer detection hints (resolved against user accounts/phones in store).
+    // Self-transfer detection hints (resolved against user accounts/phones/name in store).
     counterpartyMask,
     counterpartyPhone,
+    counterpartyName,
+    transferRef,
     selfDualLeg,
   };
 }

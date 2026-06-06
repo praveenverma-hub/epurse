@@ -305,6 +305,18 @@ const REAL_WORLD = [
     sms: 'DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 3348.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 2170 ON 9-5-2026.YOUR AVAILABLE LIMIT IS RS. 249999.76',
     expect: { accept: false, code: 'credit_card_payment_notification' },
   },
+  {
+    name: 'SBI credit leg — counterparty name + transfer ref surfaced for self-detection',
+    sender: 'SBIINB',
+    sms: 'Dear Customer, Your a/c no. XXXXXXXX0972 is credited by Rs.1.00 on 06-06-26 by a/c linked to mobile 7XXXXXX221-PRAVEEN VE (IMPS Ref# 615722061047)-SBI',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 1, accountMask: '0972', counterpartyName: 'PRAVEEN VE', counterpartyPhone: '221', transferRef: '615722061047' },
+  },
+  {
+    name: 'ICICI debit leg — dual-leg + same transfer ref for cross-bank linkage',
+    sender: 'ICICIB',
+    sms: 'ICICI Bank Acct XX171 debited with Rs 1.00 on 06-Jun-26 & Acct XX972 credited.IMPS:615722061047. Call 18002662 for dispute or SMS BLOCK 171 to 9215676766',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 1, accountMask: '171', selfDualLeg: true, counterpartyMask: '972', transferRef: '615722061047' },
+  },
 ];
 
 const SUITES = [
@@ -336,6 +348,8 @@ function checkCase({ sender, sms, expect }) {
     cmp('selfDualLeg', t.selfDualLeg, expect.selfDualLeg);
     cmp('counterpartyMask', t.counterpartyMask, expect.counterpartyMask);
     cmp('counterpartyPhone', t.counterpartyPhone, expect.counterpartyPhone);
+    cmp('counterpartyName', t.counterpartyName, expect.counterpartyName);
+    cmp('transferRef', t.transferRef, expect.transferRef);
     if (expect.merchantIncludes !== undefined && !(t.merchant || '').includes(expect.merchantIncludes))
       fails.push(`merchant: expected to include ${JSON.stringify(expect.merchantIncludes)}, got ${JSON.stringify(t.merchant)}`);
   } else {
