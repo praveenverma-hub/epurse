@@ -390,7 +390,11 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <FlatList
           data={ledger}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <TransactionItem txn={item} />}
+          renderItem={({ item }) => (
+            <View style={styles.txnRow}>
+              <TransactionItem txn={item} />
+            </View>
+          )}
           ListHeaderComponent={listHeaderComponent}
           ListEmptyComponent={
             <EmptyState
@@ -438,10 +442,13 @@ const styles = StyleSheet.create({
     marginBottom: -POCKET_OVERLAP,
   },
   card: {
-    width:        '90%',
+    width:        '84%',
     aspectRatio:  1.586,
     borderRadius: 16,
     padding:      spacing.lg,
+    // paddingBottom pushes content up so space-between distributes only within
+    // the visible slice above the pocket seam (POCKET_OVERLAP px are hidden).
+    paddingBottom: POCKET_OVERLAP + 8,
     justifyContent: 'space-between',
     elevation:    6,
     shadowColor:  '#000',
@@ -554,6 +561,7 @@ const styles = StyleSheet.create({
   },
 
   listContent: { paddingBottom: spacing.xxl * 2 },
+  txnRow: { paddingHorizontal: 16 },
   emptyLedger: { marginTop: spacing.lg },
   missingState: { marginTop: spacing.xxl },
 

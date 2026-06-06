@@ -269,8 +269,13 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     : (drillCatId ? categoryById.get(drillCatId) : null);
   const drillRows = useMemo(() => {
     if (!drillCatId) return [];
-    return isUnbudgetedDrill ? getUnbudgetedBreakdown() : getBudgetChildBreakdown(drillCatId);
-  }, [drillCatId, isUnbudgetedDrill, getBudgetChildBreakdown, getUnbudgetedBreakdown, transactions]);
+    if (isUnbudgetedDrill) return getUnbudgetedBreakdown();
+    const rows = getBudgetChildBreakdown(drillCatId);
+    // Exclude rows whose label is the parent category name — those come from
+    // transactions tagged directly to the parent with no child sub-category set.
+    const parentName = categoryById.get(drillCatId)?.name;
+    return parentName ? rows.filter((r) => r.label !== parentName) : rows;
+  }, [drillCatId, isUnbudgetedDrill, getBudgetChildBreakdown, getUnbudgetedBreakdown, transactions, categoryById]);
   const drillTotal = useMemo(() => drillRows.reduce((s, r) => s + r.total, 0), [drillRows]);
 
   // ── Progress section ─────────────────────────────────────────────────────
@@ -383,7 +388,12 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                   key={r.catId}
                   style={styles.catCard}
                   activeOpacity={0.75}
-                  onPress={() => setDrillCatId(r.catId)}
+                  onPress={() => {
+                    const rows = getBudgetChildBreakdown(r.catId);
+                    const parentName = categoryById.get(r.catId)?.name;
+                    const realSubs = parentName ? rows.filter((row) => row.label !== parentName) : rows;
+                    if (realSubs.length > 1) setDrillCatId(r.catId);
+                  }}
                 >
                   <View style={styles.catCardTop}>
                     <Text style={styles.catEmoji}>{cat.emoji}</Text>

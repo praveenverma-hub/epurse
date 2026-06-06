@@ -207,6 +207,8 @@ const DashboardScreen = ({ navigation }) => {
   // Exact label for the transactions section header
   const txnSectionLabel = period === 'M'
     ? new Date().toLocaleDateString('en-IN', { month: 'long' })
+    : period === 'D'
+    ? 'Today'
     : `this ${periodTitle}`;
 
   // ─────────────────────────────────────────────────────────────────────────
