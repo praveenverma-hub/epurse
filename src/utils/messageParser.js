@@ -47,7 +47,7 @@ const BANK_WALLET_SENDER_KEYS = [
   'airpay', 'airtpay',   // Airtel Payments Bank — NOT 'airtel' (avoids telecom)
   'finopay', 'fino', 'indiapst',
   // ── Wallets & UPI ─────────────────────────────────────────────────────────
-  'phonepe', 'phpe', 'gpay', 'googlepay',
+  'phonepe', 'phpe', 'phonpe', 'gpay', 'googlepay',
   'ampay', 'amazonpay',
   'freecharge', 'frech', 'mobikwik', 'bhim', 'olamoney',
 ];
@@ -109,6 +109,7 @@ const SENDER_KEY_TO_BANK = [
   ['pytm',       'Paytm'],
   ['phonepe',    'PhonePe'],
   ['phpe',       'PhonePe'],
+  ['phonpe',     'PhonePe'],
   ['gpay',       'Google Pay'],
   ['googlepay',  'Google Pay'],
   ['amazonpay',  'Amazon Pay'],
@@ -176,6 +177,8 @@ const TRANSACTION_PHRASES = [
   'credit to', 'credit in', 'credit of',
   // Reversal confirmations
   'reversed to', 'amount reversed', 'transaction reversed', 'reversal credited',
+  // Bank charges / penalties (no debit verb — only "levied on" or "penalty of")
+  'levied on', 'levied', 'penalty of', 'charge levied',
 ];
 
 // =============================================================================
@@ -208,19 +211,20 @@ const ACCOUNT_MASK_GLOBAL =
 const COUNTERPARTY_PHONE_REGEX =
   /(?:linked\s+to\s+mobile|to\s+mobile(?:\s+no\.?)?|mobile\s+no\.?|vpa\s+linked\s+to\s+mobile)\s*(?:\+?91)?\s*([0-9xX*]{4,15})/i;
 
-// Merchant after "to", "at", "@", "from" — lazy, stops at stop words
+// Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
+// Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
 const MERCHANT_REGEX =
-  /(?:to|at|@|from)\s+([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by)\b|\.|,|;|$)/i;
+  /(?:to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate)\b|\s+to\s+your\b|\.|,|;|$)/i;
 
 const MERCHANT_STOP =
-  /\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by)\b.*$/i;
+  /\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate)\b.*$/i;
 
 // UPI VPA: someone@bank
 const VPA_REGEX = /([a-zA-Z0-9._\-]{2,30}@[a-zA-Z]{2,15})/;
 
 // Payment acknowledgements for credit cards (not new spend/income transactions).
 const CC_PAYMENT_NOTIFICATION_REGEX =
-  /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?[\s\S]{0,80}(?:has\s+been\s+received\s+on\s+your\b[\s\S]*\bcredit\s+card\b|was\s+credited\s+to\s+your\s+card\b|received\s+towards\s+your\b[\s\S]{0,30}\bcredit\s+card\b)/i;
+  /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?[\s\S]{0,80}(?:has\s+been\s+received\s+on\s+your\b[\s\S]*\bcredit\s+card\b|was\s+credited\s+to\s+your\s+card\b|received\s+towards\s+[\w\s]{0,30}credit\s+card\b)/i;
 
 // Credit-card bill REMINDER (pre-payment alert) — NOT a spend.
 // Banks send these monthly to nudge the user to pay their CC bill.
@@ -256,7 +260,7 @@ const CC_PAYMENT_OUTGOING_REGEX =
 // These contain an amount (the "eligible spend") but no actual transaction happened.
 // Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
 const PROMOTIONAL_OFFER_REGEX =
-  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your)\b|\bflexi[\s-]*emi\b|\bconvert\s+spends?\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\s+(?:offer|loan|credit|limit)\b/i;
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,60}\bincreased\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|https?:\/\//i;
 
 // Market rates / FX bulletin from bank treasury desks — NOT a transaction.
 // Example: "INR 91.79 (-0.08) GBP 1.3786, EUR 1.1980 ... Brent Crude 67.20 Gold 5270.75 Rgds SBI Glb Mkts"
@@ -310,6 +314,7 @@ const STRONG_TRANSACTION_WORDS = [
   'refund',
   'refunded',
   'received',
+  'levied',
 ];
 
 const extractAmountNearTransactionKeyword = (text) => {
@@ -386,8 +391,10 @@ const inferAccountType = (text) => {
   // a debit/ATM card), or a "Card ending …" reference WITHOUT "credit card".
   // Keeps debit-card spends segregated from generic bank-account ("A/c") debits.
   if (
-    /debit\s*card|\bdr\s*card\b|\batm\b|cash\s+with(?:drawal|drawn)|\bawcw\b/i.test(text) ||
-    /card\s+(?:ending|no\.?|number)\b/i.test(text)
+    /debit\s*card(?!\s+(?:maintenance|annual|issuance|fees?|charges?|renewal))/i.test(text) ||
+    /\bdr\s*card\b|\batm\b|cash\s+with(?:drawal|drawn)|\bawcw\b/i.test(text) ||
+    /card\s+(?:ending|no\.?|number)\b/i.test(text) ||
+    /\bcard\s+[xX*•·]{1,8}\d{3,6}\b/i.test(text)
   ) {
     return ACCOUNT_TYPES.DEBIT_CARD;
   }
@@ -548,7 +555,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // matching card.
   // Future-tense forms like "will be debited" don't count as hard confirmation
   // since the transaction hasn't occurred yet.
-  const isFutureTense = /will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)/i.test(text);
+  const isFutureTense = /will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+for\s+(?:auto[\s-]?debit|debit|payment)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment)/i.test(text);
   if (
     CC_BILL_REMINDER_REGEX.test(text) &&
     (!CC_BILL_HARD_CONFIRMATION_REGEX.test(text) || isFutureTense) &&
@@ -569,6 +576,39 @@ export const parseMessageDetailed = (message, opts = {}) => {
       },
       ccDue: dueAmt > 0
         ? { amount: dueAmt, cardLast4, dueDate, bankName: getBankName(opts.sender) }
+        : null,
+    };
+  }
+
+  // Future / scheduled debit — money has NOT moved yet (e.g. loan EMI "scheduled
+  // for auto-debit on 05-Jun", or "will be debited"). Catches the NON-credit-card
+  // forms that the CC_BILL_REMINDER branch above (which requires "credit card")
+  // does not cover. We surface the amount/mask so the store can anchor a reminder.
+  //
+  // Backward-compat guard: only fire when the message is PURELY future — i.e.
+  // after stripping the future clauses, no completed past-tense verb remains.
+  // This protects mixed messages like "Rs 500 debited … Rs 10 will be credited",
+  // where a real transaction already happened and must still be booked.
+  const textSansFuture = text.replace(
+    /\b(?:will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+for\s+(?:auto[\s-]?debit|debit|payment)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment))\b/gi,
+    ' ',
+  );
+  const hasCompletedVerb =
+    /\b(?:debited|credited|deposited|withdrawn|deducted|refunded|spent)\b/i.test(textSansFuture);
+  if (isFutureTense && !hasCompletedVerb) {
+    const amtMatch  = text.match(AMOUNT_REGEX);
+    const dueAmt    = toNumber(amtMatch?.[1] || amtMatch?.[2]);
+    const acctMatch = text.match(ACCOUNT_REGEX);
+    const rawMask   = acctMatch?.[1]?.replace(/[x*·•]/gi, '') || null;
+    return {
+      ok: false,
+      error: {
+        code: 'future_scheduled_debit',
+        message:
+          'Scheduled / future debit detected (not yet executed), so it was not added as a spend.',
+      },
+      scheduledDebit: dueAmt > 0
+        ? { amount: dueAmt, accountMask: rawMask ? rawMask.slice(-4) : null, bankName: getBankName(opts.sender) }
         : null,
     };
   }
@@ -606,7 +646,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // "debit" and "credit" (bare nouns, as in "debit card" / "credit card") are
   // intentionally excluded — they produced false positives for promotional SMSes.
   const fallbackTxnWordHit =
-    /\b(?:debited|credited|spent|paid|withdrawn|deducted|transferred|deposited|refunded|received)\b/i.test(normalized);
+    /\b(?:debited|credited|spent|paid|withdrawn|deducted|transferred|deposited|refunded|received|levied)\b/i.test(normalized);
   if (!phraseHit && !fallbackTxnWordHit) {
     return {
       ok: false,
@@ -639,12 +679,15 @@ export const parseMessageDetailed = (message, opts = {}) => {
   const creditedToOther = /credited\s+to\s+(?:beneficiary|your\s+(?:beneficiary|account))/i.test(text);
   const debitedFromOther = /debited\s+from\s+beneficiary/i.test(text);
 
+  // Direction is read from `textSansFuture` (future clauses stripped) so a
+  // forward-looking aside like "Cashback … will be credited" can't flip a
+  // completed debit into a credit.
   const isCredit =
     creditedToOther
       ? false // "credited to beneficiary" = user sent money = DEBIT
       : debitedFromOther
         ? true // "debited from beneficiary" = user received money = CREDIT
-        : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b/i.test(text);
+        : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b/i.test(textSansFuture);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
@@ -658,10 +701,16 @@ export const parseMessageDetailed = (message, opts = {}) => {
   if (merchant) {
     merchant = merchant
       .replace(MERCHANT_STOP, '')
+      .replace(/\.\s+\S.*$/g, '')   // stop at "period + space" — prevents bleeding past sentence end
+      .replace(/^\d+\.\s*/g, '')    // strip NEFT/IMPS batch prefix e.g. "11." before sender name
+      .replace(/^(?:upi|imps|neft|rtgs|ach|nft)[-\s]*\d+[-\s]*/i, '') // strip rail+ref prefix e.g. "UPI-755012995968-" → payee
       .replace(/[.,;:]+$/g, '')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 40);
+    // Discard pure-numeric captures — phone / ref numbers are never a merchant
+    // (e.g. dispute footer "...SMS BLOCK 171 to 9215676766" → falls back to sender).
+    if (/^\d{4,}$/.test(merchant)) merchant = null;
   }
 
   // Fallback merchant: cleaned-up sender ID

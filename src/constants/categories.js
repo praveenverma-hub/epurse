@@ -119,6 +119,7 @@ export const CATEGORY_KEYWORDS = {
     'zerodha', 'upstox', 'groww', 'kuvera', 'paytm money', 'inditrade',
     'smallcase', 'ind money',
     ' sip ', 'mutual fund', ' mf ', ' nps ', ' ppf ', ' fd ', ' rd ',
+    'dividend', 'div payout', 'ach/nacs',
   ],
   salary: ['salary', 'payroll', 'stipend', 'wages credited', 'compensation'],
   transfer: [

@@ -2116,7 +2116,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 18,
+      version: 19,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -2380,6 +2380,70 @@ export const useEPurseStore = create(
             userPhones: state.userPhones ?? [],
             categories: ensureRequiredCategories(state.categories || []),
           };
+        }
+
+        // v19: remove phantom transactions the OLDER parser booked before the
+        // future-scheduled-debit, credit-limit-increase, and expanded
+        // promotional-offer fixes. Identified purely from the stored `note`
+        // (the raw SMS text) — no past-tense action verb means money never
+        // moved, so the row was never a real transaction.
+        //
+        // FROZEN logic: these regexes are intentionally inlined (not imported
+        // from messageParser) so this one-time migration never changes meaning
+        // as the live parser evolves. Mirrors the v16 CC-reminder cleanup.
+        //
+        // Caveats kept deliberately conservative to avoid deleting real data:
+        //   • only SMS-sourced rows with a note are considered;
+        //   • user-touched rows (edited category / lent-borrow locked) are kept;
+        //   • notes are stored truncated to ~120 chars, and rows older than
+        //     ~90 days may already be compacted into monthlyAggregates — those
+        //     are not reachable here, so this cleans recent/raw phantoms only.
+        if (version < 19) {
+          // (a) Purely-future / scheduled debit (e.g. "EMI scheduled for
+          //     auto-debit", "will be debited") with NO completed verb left
+          //     after stripping the future clause.
+          const FUTURE_MIG =
+            /will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+for\s+(?:auto[\s-]?debit|debit|payment)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment)/i;
+          const COMPLETED_VERB_MIG =
+            /\b(?:debited|credited|deposited|withdrawn|deducted|refunded|spent)\b/i;
+          // (b) Credit / card / loan limit increase — never a transaction.
+          const LIMIT_INCREASE_MIG =
+            /\b(?:credit|card|loan)\s+limit\b[\s\S]{0,60}\bincreased\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)/i;
+          // (c) Promotional / EMI-conversion / loan-offer / URL spam.
+          const PROMO_MIG =
+            /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|https?:\/\//i;
+
+          const isPhantom19 = (note) => {
+            if (FUTURE_MIG.test(note)) {
+              const sansFuture = note.replace(new RegExp(FUTURE_MIG.source, 'gi'), ' ');
+              if (!COMPLETED_VERB_MIG.test(sansFuture)) return true;
+            }
+            return LIMIT_INCREASE_MIG.test(note) || PROMO_MIG.test(note);
+          };
+
+          const txns = state.transactions || [];
+          const kept = txns.filter((t) => {
+            if (!t || t.source !== 'sms' || !t.note) return true;     // manual / note-less → keep
+            if (t.userEditedCategory || t.lbLocked) return true;      // user owns it → keep
+            return !isPhantom19(t.note);
+          });
+
+          if (kept.length !== txns.length) {
+            // Rows were removed — replay balances so a deleted debit/credit
+            // doesn't leave its delta baked into account balances (cf. v11).
+            const accounts = [...(state.accounts || [])];
+            const balanceMap = new Map(accounts.map((a) => [a.id, 0]));
+            for (const t of kept) {
+              if (t.isIgnored || !t.accountId) continue;
+              const sign = t.type === TRANSACTION_TYPES.DEBIT ? -1 : 1;
+              balanceMap.set(t.accountId, (balanceMap.get(t.accountId) || 0) + sign * t.amount);
+            }
+            state = {
+              ...state,
+              transactions: kept,
+              accounts: accounts.map((a) => ({ ...a, balance: balanceMap.get(a.id) ?? 0 })),
+            };
+          }
         }
 
         return state;
