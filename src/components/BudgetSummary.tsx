@@ -6,8 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 
-// Essential categories that should show in survival mode
-const ESSENTIAL_CATEGORIES = new Set(['food', 'groceries', 'utilities', 'transport', 'health', 'rent']);
+// Essential (survival) categories — keyed by the first-level BUDGET parent ids
+// the plan actually uses (groceries rolls into food, utilities→bills,
+// transport→travel). Keep in sync with BudgetScreen's BUDGETABLE_IDS.
+const ESSENTIAL_CATEGORIES = new Set(['food', 'bills', 'travel', 'health']);
 
 // ── Status computation (from BudgetScreen) ───────────────────────────────────
 const computeStatus = (pct: number, daysElapsedPct: number, hasCap: boolean, theme: any) => {
@@ -171,20 +173,13 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
     };
   }, [usage, allCategories, essentialMode]);
 
-  const totalCap = usage.total.cap || 1;
-  const progressRatio = Math.min(totalSpent / totalCap, 1.0);
-
-  // Calculate days elapsed percentage for status
-  const now = new Date();
-  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const totalDays = lastDay.getDate();
-  const elapsedDays = now.getDate();
-  const daysElapsedPct = (elapsedDays / totalDays) * 100;
-
-  // Compute status using BudgetScreen logic
-  const hasCap = totalCap > 0;
-  const pctVal = (totalSpent / totalCap) * 100;
+  // Mirror BudgetScreen's hero-card logic exactly so the two cards can never
+  // disagree: same cap guard, same pct, same days-elapsed basis — all taken
+  // straight from the shared getBudgetUsage() selector.
+  const hasCap = usage.total.cap != null && usage.total.cap > 0;
+  const pctVal = hasCap ? usage.total.pct : 0;
+  const progressRatio = Math.min(pctVal / 100, 1.0);
+  const daysElapsedPct = usage.daysElapsedPct;
   const status = useMemo(() => computeStatus(pctVal, daysElapsedPct, hasCap, theme), [pctVal, daysElapsedPct, hasCap, theme]);
   const ringColorValue = useMemo(() => ringColor(pctVal, daysElapsedPct, theme), [pctVal, daysElapsedPct, theme]);
 

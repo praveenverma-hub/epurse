@@ -1,41 +1,66 @@
 // =============================================================================
-// InsightsScreen — tabbed host for Budget and Analytics.
+// InsightsScreen — tabbed host for Analytics and Budget.
 //
-// Provides a shared gradient header with a Budget | Analytics pill switcher.
-// Sub-screens receive headerless=true so they skip their own nav headers.
+// Uses react-native-tab-view (backed by the native react-native-pager-view) so
+// switching between Analytics and Budget is a real finger-tracking swipe with
+// sliding panels — not an instant content swap. A shared gradient header with a
+// pill switcher rides on top via renderTabBar. Sub-screens receive
+// headerless=true so they skip their own nav headers.
 // =============================================================================
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TabView } from 'react-native-tab-view';
 
 import { useTheme } from '../hooks/useTheme';
-import { colors, spacing, radius, typography } from '../constants/theme';
-import CustomTabHost from '../components/CustomTabHost';
+import { spacing, radius, typography } from '../constants/theme';
 import BudgetScreen    from './BudgetScreen';
 import AnalyticsScreen from './AnalyticsScreen';
 
-const INNER_TABS = [
+const ROUTES = [
   { key: 'analytics', label: 'Analytics' },
   { key: 'budget',    label: 'Budget' },
 ];
 
+const keyToIndex = (k) => {
+  const i = ROUTES.findIndex((r) => r.key === k);
+  return i < 0 ? 0 : i;
+};
+
+const initialLayout = { width: Dimensions.get('window').width };
+
 export default function InsightsScreen({ navigation, route }) {
   const theme = useTheme();
-  const [activeTab, setActiveTab] = useState(
-    () => route.params?.defaultTab || 'analytics',
-  );
+  const [index, setIndex] = useState(() => keyToIndex(route.params?.defaultTab));
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       const defaultTab = route.params?.defaultTab;
-      if (defaultTab) setActiveTab(defaultTab);
+      if (defaultTab) setIndex(keyToIndex(defaultTab));
     });
     return unsubscribe;
   }, [navigation, route.params?.defaultTab]);
 
-  const headerComponent = (
+  const renderScene = ({ route: r }) => {
+    switch (r.key) {
+      case 'analytics':
+        return <AnalyticsScreen navigation={navigation} headerless />;
+      case 'budget':
+        return (
+          <BudgetScreen
+            navigation={navigation}
+            headerless
+            openPlan={!!route.params?.openPlan}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderTabBar = () => (
     <LinearGradient
       colors={[theme.gradientStart, theme.gradientEnd]}
       start={{ x: 0, y: 0 }}
@@ -45,16 +70,16 @@ export default function InsightsScreen({ navigation, route }) {
       <SafeAreaView edges={['top']}>
         <Text style={styles.screenTitle}>Insights</Text>
         <View style={styles.switcher}>
-          {INNER_TABS.map((t) => (
+          {ROUTES.map((t, i) => (
             <TouchableOpacity
               key={t.key}
-              style={[styles.switcherBtn, activeTab === t.key && styles.switcherBtnActive]}
-              onPress={() => setActiveTab(t.key)}
+              style={[styles.switcherBtn, index === i && styles.switcherBtnActive]}
+              onPress={() => setIndex(i)}
               activeOpacity={0.8}
             >
               <Text style={[
                 styles.switcherText,
-                activeTab === t.key && { color: theme.primary, fontWeight: '700' },
+                index === i && { color: theme.primary, fontWeight: '700' },
               ]}>
                 {t.label}
               </Text>
@@ -66,18 +91,14 @@ export default function InsightsScreen({ navigation, route }) {
   );
 
   return (
-    <CustomTabHost
-      tabs={INNER_TABS}
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
-      headerComponent={headerComponent}
-    >
-      {activeTab === 'analytics' ? (
-        <AnalyticsScreen navigation={navigation} headerless />
-      ) : (
-        <BudgetScreen navigation={navigation} headerless openPlan={!!route.params?.openPlan} />
-      )}
-    </CustomTabHost>
+    <TabView
+      navigationState={{ index, routes: ROUTES }}
+      renderScene={renderScene}
+      renderTabBar={renderTabBar}
+      onIndexChange={setIndex}
+      initialLayout={initialLayout}
+      swipeEnabled
+    />
   );
 }
 

@@ -11,12 +11,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TabView } from 'react-native-tab-view';
 import * as Contacts from 'expo-contacts';
 
-import CustomTabHost from '../components/CustomTabHost';
 import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -38,17 +39,25 @@ const ENTRY_LABEL = {
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
 
-const LB_TABS = [
+const LB_ROUTES = [
   { key: 'lent', label: 'Lent' },
   { key: 'borrowed', label: 'Borrowed' },
 ];
+
+const keyToIndex = (k) => (k === 'borrowed' ? 1 : 0);
+const initialLayout = { width: Dimensions.get('window').width };
 
 // +/- direction for net contribution to "they owe me" balance
 const isPositiveEntry = (kind) => kind === 'lent' || kind === 'borrow_repaid';
 
 const LentBorrowedScreen = ({ route, navigation }) => {
   const initialKind = route?.params?.kind || 'lent';
-  const [kind, setKind] = useState(initialKind);
+  // Tab index is the source of truth; `kind` is the active route's key. This
+  // keeps the existing kind-based logic intact while the native pager drives
+  // the real swipe between the Lent and Borrowed panels.
+  const [index, setIndex] = useState(() => keyToIndex(initialKind));
+  const kind = LB_ROUTES[index].key;
+  const setKind = useCallback((k) => setIndex(keyToIndex(k)), []);
   const [person, setPerson] = useState('');
   const [phone, setPhone] = useState('');
   const [contactId, setContactId] = useState(null);
@@ -70,7 +79,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const userName        = useEPurseStore((s) => s.userName);
   const notificationIds = useEPurseStore((s) => s.notificationIds);
 
-  const handleAdd = useCallback(() => {
+  const handleAdd = useCallback((addKind) => {
     const n = parseFloat(amount);
     if (!person.trim()) {
       setConfirm({ title: 'Missing name', message: 'Enter a person name.', primaryText: 'OK' });
@@ -85,7 +94,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       return;
     }
     addLentBorrowed({
-      kind,
+      kind: addKind,
       person: person.trim(),
       amount: n,
       note: note.trim(),
@@ -97,7 +106,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     setContactId(null);
     setAmount('');
     setNote('');
-  }, [kind, person, phone, contactId, amount, note, addLentBorrowed]);
+  }, [person, phone, contactId, amount, note, addLentBorrowed]);
 
   const pickContact = useCallback(async () => {
     const { status } = await Contacts.requestPermissionsAsync();
@@ -145,44 +154,53 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     setContactSheetVisible(false);
   }, [person]);
 
-  // Per-person balances: lent tab shows net > 0, borrowed tab shows net < 0.
-  // Also include recently-settled (net === 0) persons for up to 3 months.
-  const personBalances = useMemo(() => {
+  // Per-person balances for BOTH panels (both scenes are mounted by the pager).
+  // lent panel shows net > 0, borrowed panel shows net < 0. Also include
+  // recently-settled (net === 0) persons for up to 3 months.
+  const balancesByKind = useMemo(() => {
     const nowMs = Date.now();
     const allBalances = getPersonBalances();
-    const active = allBalances.filter((p) => kind === 'lent' ? p.net > 0 : p.net < 0);
-    const recentlySettled = allBalances.filter((p) => {
-      if (p.net !== 0 || !p.entries.length) return false;
-      const mostRecent = Math.max(
-        ...p.entries.map((e) => {
-          const d = new Date(e.date).getTime();
-          const s = e.settledAt ? new Date(e.settledAt).getTime() : 0;
-          return Math.max(d, s);
-        })
-      );
-      if (nowMs - mostRecent > THREE_MONTHS_MS) return false;
-      const hasLent = p.entries.some((e) => e.kind === 'lent');
-      const hasBorrowed = p.entries.some((e) => e.kind === 'borrowed');
-      return kind === 'lent' ? hasLent : (hasBorrowed && !hasLent);
-    });
-    return [...active, ...recentlySettled];
-  }, [getPersonBalances, all, kind]);
+    const build = (k) => {
+      const active = allBalances.filter((p) => (k === 'lent' ? p.net > 0 : p.net < 0));
+      const recentlySettled = allBalances.filter((p) => {
+        if (p.net !== 0 || !p.entries.length) return false;
+        const mostRecent = Math.max(
+          ...p.entries.map((e) => {
+            const d = new Date(e.date).getTime();
+            const s = e.settledAt ? new Date(e.settledAt).getTime() : 0;
+            return Math.max(d, s);
+          })
+        );
+        if (nowMs - mostRecent > THREE_MONTHS_MS) return false;
+        const hasLent = p.entries.some((e) => e.kind === 'lent');
+        const hasBorrowed = p.entries.some((e) => e.kind === 'borrowed');
+        return k === 'lent' ? hasLent : (hasBorrowed && !hasLent);
+      });
+      return [...active, ...recentlySettled];
+    };
+    return { lent: build('lent'), borrowed: build('borrowed') };
+  }, [getPersonBalances, all]);
 
-  // Total for the header
-  const total = useMemo(() => {
-    const all = getPersonBalances();
-    return kind === 'lent'
-      ? all.filter((p) => p.net > 0).reduce((s, p) => s + p.net, 0)
-      : all.filter((p) => p.net < 0).reduce((s, p) => s + Math.abs(p.net), 0);
-  }, [getPersonBalances, all, kind]);
+  // Totals for the header (per panel).
+  const totalByKind = useMemo(() => {
+    const allBalances = getPersonBalances();
+    return {
+      lent: allBalances.filter((p) => p.net > 0).reduce((s, p) => s + p.net, 0),
+      borrowed: allBalances
+        .filter((p) => p.net < 0)
+        .reduce((s, p) => s + Math.abs(p.net), 0),
+    };
+  }, [getPersonBalances, all]);
+  const total = totalByKind[kind];
 
-  const grad = useMemo(
-    () =>
-      kind === 'lent'
+  const gradFor = useCallback(
+    (k) =>
+      k === 'lent'
         ? [colors.gradientGreenStart, colors.gradientGreenEnd]
         : [colors.gradientPurpleStart, colors.gradientPurpleEnd],
-    [kind]
+    []
   );
+  const grad = gradFor(kind);
 
   const renderPersonCard = useCallback(
     ({ item: pb }) => {
@@ -330,73 +348,69 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     [expandedPerson, settlePersonBalance, notificationIds]
   );
 
-  const ListHeader = useMemo(
-    () => (
-      <View style={styles.formCard}>
-        <Text style={styles.formTitle}>
-          {kind === 'lent' ? 'Lend to someone' : 'Note a borrowed amount'}
-        </Text>
+  // Form + empty state are rendered per panel (both scenes are mounted). They
+  // take the panel's kind `k` so the offscreen page shows the correct copy.
+  const renderForm = (k) => (
+    <View style={styles.formCard}>
+      <Text style={styles.formTitle}>
+        {k === 'lent' ? 'Lend to someone' : 'Note a borrowed amount'}
+      </Text>
+      <TextInput
+        value={person}
+        onChangeText={setPerson}
+        placeholder="Person name *"
+        placeholderTextColor={colors.textMuted}
+        style={styles.input}
+      />
+      <View style={styles.phoneRow}>
         <TextInput
-          value={person}
-          onChangeText={setPerson}
-          placeholder="Person name *"
+          value={phone}
+          onChangeText={(t) => { setPhone(t); setContactId(null); }}
+          placeholder="Phone number (optional)"
           placeholderTextColor={colors.textMuted}
-          style={styles.input}
+          keyboardType="phone-pad"
+          style={[styles.input, styles.phoneInput]}
         />
-        <View style={styles.phoneRow}>
-          <TextInput
-            value={phone}
-            onChangeText={(t) => { setPhone(t); setContactId(null); }}
-            placeholder="Phone number (optional)"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="phone-pad"
-            style={[styles.input, styles.phoneInput]}
-          />
-          <TouchableOpacity style={styles.contactPickBtn} onPress={pickContact}>
-            <ContactPickIcon />
-          </TouchableOpacity>
-        </View>
-        <TextInput
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-          placeholder="Amount *"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="Note (optional)"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-        <GradientButton
-          title="Add"
-          onPress={handleAdd}
-          colors={grad}
-          style={{ marginTop: spacing.sm }}
-        />
+        <TouchableOpacity style={styles.contactPickBtn} onPress={pickContact}>
+          <ContactPickIcon />
+        </TouchableOpacity>
       </View>
-    ),
-    [kind, person, phone, contactId, amount, note, handleAdd, grad, pickContact]
+      <TextInput
+        value={amount}
+        onChangeText={setAmount}
+        keyboardType="decimal-pad"
+        placeholder="Amount *"
+        placeholderTextColor={colors.textMuted}
+        style={styles.input}
+      />
+      <TextInput
+        value={note}
+        onChangeText={setNote}
+        placeholder="Note (optional)"
+        placeholderTextColor={colors.textMuted}
+        style={styles.input}
+      />
+      <GradientButton
+        title="Add"
+        onPress={() => handleAdd(k)}
+        colors={gradFor(k)}
+        style={{ marginTop: spacing.sm }}
+      />
+    </View>
   );
 
-  const ListEmpty = useMemo(
-    () => (
-      <EmptyState
-        compact
-        emoji={kind === 'lent' ? '🤝' : '🧾'}
-        title={kind === 'lent' ? 'Nothing lent out' : 'Nothing borrowed'}
-        subtitle={
-          kind === 'lent'
-            ? 'Money you lend will show here so you can track what to collect.'
-            : 'Money you borrow will show here so you can track what to repay.'
-        }
-        style={styles.emptyWrap}
-      />
-    ),
-    [kind]
+  const renderEmpty = (k) => (
+    <EmptyState
+      compact
+      emoji={k === 'lent' ? '🤝' : '🧾'}
+      title={k === 'lent' ? 'Nothing lent out' : 'Nothing borrowed'}
+      subtitle={
+        k === 'lent'
+          ? 'Money you lend will show here so you can track what to collect.'
+          : 'Money you borrow will show here so you can track what to repay.'
+      }
+      style={styles.emptyWrap}
+    />
   );
 
   const headerComponent = (
@@ -441,30 +455,39 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         </LinearGradient>
       );
 
-  return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <CustomTabHost
-        tabs={LB_TABS}
-        activeTab={kind}
-        onTabChange={setKind}
-        headerComponent={headerComponent}
-      >
-        <View style={styles.container}>
+  const renderScene = ({ route: r }) => {
+    const k = r.key;
+    return (
+      <View style={styles.container}>
         <FlatList
-          data={personBalances}
+          data={balancesByKind[k]}
           keyExtractor={(item) => item.personKey}
           renderItem={renderPersonCard}
-          ListHeaderComponent={ListHeader}
-          ListEmptyComponent={ListEmpty}
+          ListHeaderComponent={renderForm(k)}
+          ListEmptyComponent={renderEmpty(k)}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           initialNumToRender={10}
           windowSize={7}
         />
+      </View>
+    );
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <TabView
+        navigationState={{ index, routes: LB_ROUTES }}
+        renderScene={renderScene}
+        renderTabBar={() => headerComponent}
+        onIndexChange={setIndex}
+        initialLayout={initialLayout}
+        swipeEnabled
+      />
 
         <CenterModal
           visible={!!confirm}
@@ -548,8 +571,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             </View>
           </View>
         </Modal>
-        </View>
-      </CustomTabHost>
     </KeyboardAvoidingView>
   );
 };
