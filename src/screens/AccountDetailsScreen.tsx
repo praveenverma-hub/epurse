@@ -1,23 +1,28 @@
 // =============================================================================
-// AccountDetailsScreen — uniform ledger view for a single bank/debit account or
-// credit card.
+// AccountDetailsScreen — premium "card-in-slot" ledger view for a single
+// bank / debit account or credit card, with biometric step-up + background
+// lock for sensitive (real-money) accounts.
 //
 // Layout (top → bottom):
 //   1. Lightweight top nav header  — back arrow (left) + centered title.
-//   2. Premium hardware card hero  — native-styled, bank-branded card face
-//                                    (no image assets): bank top-left, network
-//                                    top-right, masked number near the bottom.
-//   3. Account summary surface     — dynamic balance label + value.
+//   2. "Card slot" hero            — bank-branded card whose bottom third slips
+//                                    behind a foreground page surface (z-index +
+//                                    soft top shadow) so it reads as nestled in
+//                                    a secure sleeve.
+//   3. Matte summary surface       — calm charcoal balance figure, no alarm tones.
 //   4. Divider + ledger feed       — transactions filtered to this account.
 //
-// All visual values come from the active theme palette (useTheme) and the
-// static spacing/radius token scales. NOTE: this app's useTheme() returns a
-// FLAT palette (theme.textPrimary, theme.card, theme.divider, …) — there is no
-// `theme.colors.*` namespace — so the spec's surface/border tokens map to
-// card/divider here.
+// Security:
+//   • Biometric step-up on mount for sensitive accounts (Bank / Debit Card).
+//   • Re-lock the instant the app leaves the foreground; re-prompt on return.
+//
+// NOTE: this app's useTheme() returns a FLAT palette (theme.textPrimary,
+// theme.background, theme.card, theme.divider, theme.gradientGreenStart …) —
+// there is no `theme.colors.*` namespace — so the spec's textPrimary/background
+// map directly onto those flat keys.
 // =============================================================================
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -26,10 +31,13 @@ import {
   FlatList,
   StatusBar,
   Platform,
+  AppState,
 } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
@@ -72,10 +80,18 @@ interface Props {
   route: { params?: { accountId?: string } };
 }
 
-// ── Bank-branding palettes (gradient pairs) ──────────────────────────────────
-// Solid-feel gradients tuned to common Indian bank colours. Falls back to the
-// account's own colour, then a deterministic premium palette keyed off the id.
+// ── Security: which account types carry real money worth gating ──────────────
+// Mirrors AccountCard's BALANCE_SENSITIVE_TYPES — Bank + Debit Card balances are
+// the figures hidden when the app is backgrounded elsewhere in the app.
+const SENSITIVE_TYPES = new Set<string>([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT_CARD]);
 
+// ── Visual constants ─────────────────────────────────────────────────────────
+// How far the bottom of the card tucks behind the foreground sleeve (~1/3 of the
+// card height for a standard ID-1 ratio card at typical phone widths).
+const CARD_PEEK = 60;
+
+// Bank-branding gradients. Indian Bank intentionally pulls the theme's emerald
+// token (handled in heroGradient) so it matches the dashboard colorway exactly.
 const BANK_GRADIENTS: Record<string, [string, string]> = {
   ICICI: ['#9E2A1B', '#D4502E'], // terracotta red
   HDFC: ['#0B4DA2', '#1E66C7'],
@@ -86,7 +102,6 @@ const BANK_GRADIENTS: Record<string, [string, string]> = {
   PNB: ['#0E5B4A', '#138A6E'],
   YES: ['#0C3C8C', '#1E5FD0'],
   RBL: ['#5B2A86', '#8047C2'],
-  INDIAN: ['#0E5B4A', '#138A6E'],
 };
 
 const FALLBACK_PALETTES: [string, string][] = [
@@ -114,8 +129,10 @@ const hashIndex = (seed: string, mod: number): number => {
   return h % mod;
 };
 
-const heroGradient = (account: Account): [string, string] => {
+const heroGradient = (account: Account, theme: any): [string, string] => {
   const key = (account.bankName || account.name || '').toUpperCase();
+  // Indian Bank → exact emerald token from the active theme palette.
+  if (key.includes('INDIAN')) return [theme.gradientGreenStart, theme.gradientGreenEnd];
   const matched = Object.keys(BANK_GRADIENTS).find((bank) => key.includes(bank));
   if (matched) return BANK_GRADIENTS[matched];
   if (account.color) return [account.color, account.color];
@@ -166,6 +183,73 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     () => accounts.find((a) => a.id === accountId),
     [accounts, accountId],
   );
+
+  const isSensitive = !!account && SENSITIVE_TYPES.has(account.type);
+
+  // ── Biometric gate ────────────────────────────────────────────────────────
+  // Non-sensitive accounts are open immediately; sensitive ones start locked.
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!isSensitive);
+  const [authFailed, setAuthFailed] = useState(false);
+  // Guards against the iOS biometric overlay (which briefly flips AppState to
+  // 'inactive') re-locking and re-prompting in a loop while a prompt is open.
+  const authInFlight = useRef(false);
+
+  const authenticate = useCallback(async () => {
+    if (!isSensitive) {
+      setIsAuthenticated(true);
+      return;
+    }
+    if (authInFlight.current) return;
+    authInFlight.current = true;
+    setAuthFailed(false);
+    try {
+      const secLevel = await LocalAuthentication.getEnrolledLevelAsync();
+      // No biometrics / passcode enrolled — we can't step up, so don't trap the
+      // user out of their own ledger (consistent with AccountCard's behaviour).
+      if (secLevel <= LocalAuthentication.SecurityLevel.NONE) {
+        setIsAuthenticated(true);
+        return;
+      }
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Verify to view account details',
+        cancelLabel: 'Cancel',
+        fallbackLabel: 'Use Passcode',
+        disableDeviceFallback: false,
+      });
+      setIsAuthenticated(result.success);
+      setAuthFailed(!result.success);
+    } catch {
+      setIsAuthenticated(false);
+      setAuthFailed(true);
+    } finally {
+      authInFlight.current = false;
+    }
+  }, [isSensitive]);
+
+  // Prompt once on mount for sensitive accounts.
+  useEffect(() => {
+    if (isSensitive) authenticate();
+    // Mount-only: authenticate is stable for a given account.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Background lifecycle: re-lock on leaving foreground, re-prompt on return.
+  const appState = useRef<AppStateStatus>(AppState.currentState);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      const prev = appState.current;
+      appState.current = next;
+      if (authInFlight.current) return; // ignore the biometric-overlay blip
+      if (next === 'background' || next === 'inactive') {
+        // Trip the lock the moment we leave 'active'.
+        if (isSensitive) setIsAuthenticated(false);
+      } else if (next === 'active' && prev !== 'active') {
+        // Returning to the foreground → re-verify before revealing figures.
+        if (isSensitive) authenticate();
+      }
+    });
+    return () => sub.remove();
+  }, [isSensitive, authenticate]);
 
   // Keep the status bar legible over the light screen surface.
   useEffect(() => {
@@ -229,25 +313,50 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }
 
+  // ── Locked state: freeze the layout tree behind the biometric gate ────────
+  if (isSensitive && !isAuthenticated) {
+    return (
+      <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]} edges={['top']}>
+        {renderHeader()}
+        <View style={styles.lockWrap}>
+          <View style={[styles.lockBadge, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+            <Ionicons name="lock-closed" size={30} color={theme.textPrimary} />
+          </View>
+          <Text style={[styles.lockTitle, { color: theme.textPrimary }]}>
+            Locked for your security
+          </Text>
+          <Text style={[styles.lockSub, { color: theme.textSecondary }]}>
+            {authFailed
+              ? 'Verification was cancelled or failed. Try again to view this account.'
+              : 'Verify your identity to view this account’s balance and ledger.'}
+          </Text>
+          <TouchableOpacity
+            style={[styles.unlockBtn, { backgroundColor: theme.textPrimary }]}
+            onPress={authenticate}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="finger-print" size={18} color={theme.card} />
+            <Text style={[styles.unlockText, { color: theme.card }]}>Unlock</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const isCreditCard = account.type === ACCOUNT_TYPES.CREDIT_CARD;
   const rawBalance = account.balance ?? 0;
   const summaryLabel = isCreditCard ? 'Total Outstanding' : 'Available Balance';
   const summaryValue = isCreditCard ? Math.abs(rawBalance) : rawBalance;
-  const summaryColor =
-    isCreditCard && Math.abs(rawBalance) > 0
-      ? theme.danger
-      : rawBalance < 0
-        ? theme.danger
-        : theme.textPrimary;
 
-  const [gradStart, gradEnd] = heroGradient(account);
+  const [gradStart, gradEnd] = heroGradient(account, theme);
   const networkLabel = account.network || TYPE_SUBTITLE[account.type] || '';
 
-  // ── Hero + summary + divider live in the list header so the whole screen
-  //    scrolls as one performant FlatList. ──────────────────────────────────
+  // ── Layered header: card (LAYER 1) tucking behind the foreground sleeve
+  //    (LAYER 2). The sleeve's negative-offset top shadow casts onto the card
+  //    bottom, selling the "embedded in a slot" depth illusion. ──────────────
   const ListHeader = (
-    <View style={styles.body}>
-      {/* 2 ── Premium hardware card hero */}
+    <View style={styles.heroZone}>
+      {/* LAYER 1 — the bank card, bottom third slipping downward */}
       <LinearGradient
         colors={[gradStart, gradEnd]}
         start={{ x: 0, y: 0 }}
@@ -281,27 +390,34 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       </LinearGradient>
 
-      {/* 3 ── Account summary surface */}
-      <View
-        style={[
-          styles.summaryCard,
-          { backgroundColor: theme.card, borderColor: theme.divider },
-        ]}
-      >
-        <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>
-          {summaryLabel}
-        </Text>
-        <Text style={[styles.summaryValue, { color: summaryColor }]}>
-          {formatMoney(summaryValue)}
+      {/* LAYER 2 — foreground sleeve. Higher z-index + top shadow paints over
+          the card's lower third. */}
+      <View style={[styles.foreground, { backgroundColor: theme.background }]}>
+        {/* The slot seam */}
+        <View style={[styles.slotLine, { backgroundColor: theme.divider }]} />
+
+        {/* 3 ── Matte, calm summary surface (no alarm colours) */}
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: theme.card, borderColor: theme.divider },
+          ]}
+        >
+          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>
+            {summaryLabel}
+          </Text>
+          <Text style={[styles.summaryValue, { color: theme.textPrimary }]}>
+            {formatMoney(summaryValue)}
+          </Text>
+        </View>
+
+        {/* 4 ── Separation divider */}
+        <View style={[styles.divider, { backgroundColor: theme.divider }]} />
+
+        <Text style={[styles.ledgerTitle, { color: theme.textPrimary }]}>
+          Transactions
         </Text>
       </View>
-
-      {/* 4 ── Separation divider */}
-      <View style={[styles.divider, { backgroundColor: theme.divider }]} />
-
-      <Text style={[styles.ledgerTitle, { color: theme.textPrimary }]}>
-        Transactions
-      </Text>
     </View>
   );
 
@@ -349,22 +465,27 @@ const styles = StyleSheet.create({
   navTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
 
   // Scroll body
-  listContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  body: { paddingTop: spacing.sm },
+  listContent: { paddingBottom: spacing.xxl * 2 },
 
-  // 2 ── Hero card
+  // 2 ── Card-slot hero zone
+  heroZone: {
+    // Children stack with explicit z-index; allow the card shadow to bleed.
+    paddingTop: spacing.sm,
+  },
+  // LAYER 1 — bank card
   card: {
-    width: '100%',
+    marginHorizontal: spacing.lg,
+    marginBottom: -CARD_PEEK, // bottom ~1/3 slips beneath the foreground sleeve
     aspectRatio: 1.586, // standard ID-1 bank-card ratio
     borderRadius: 16,
     padding: spacing.lg,
     justifyContent: 'space-between',
-    // soft elevation so the card lifts off the surface
+    zIndex: 1,
+    elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
     shadowRadius: 16,
-    elevation: 8,
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -417,12 +538,34 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  // 3 ── Summary surface
+  // LAYER 2 — foreground sleeve that masks the card's lower third
+  foreground: {
+    zIndex: 2,
+    elevation: 12, // ensure it paints over the card on Android too
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: CARD_PEEK + spacing.sm, // clear the tucked card area
+    paddingHorizontal: spacing.lg,
+    // Soft top shadow → reads as the lip of a card sleeve.
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+  },
+  slotLine: {
+    height: 4,
+    width: 48,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+    opacity: 0.9,
+  },
+
+  // 3 ── Summary surface (matte / calm)
   summaryCard: {
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    marginTop: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -440,6 +583,40 @@ const styles = StyleSheet.create({
 
   emptyLedger: { marginTop: spacing.lg },
   missingState: { marginTop: spacing.xxl },
+
+  // Locked state
+  lockWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  lockBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  lockTitle: { fontSize: 18, fontWeight: '700', marginBottom: spacing.sm },
+  lockSub: {
+    fontSize: 14,
+    fontWeight: '400',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: spacing.xl,
+  },
+  unlockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+  },
+  unlockText: { fontSize: 15, fontWeight: '700' },
 });
 
 export default AccountDetailsScreen;
