@@ -8,6 +8,7 @@ import PermissionScreen    from '../screens/PermissionScreen';
 import MainTabNavigator    from './MainTabNavigator';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
+import AccountDetailsScreen from '../screens/AccountDetailsScreen';
 import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
 import RewardShop          from '../screens/RewardShop';
@@ -43,8 +44,9 @@ export default function AppNavigator() {
           component={AddTransactionScreen}
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
-        <Stack.Screen name="Categories"    component={CategoriesScreen} />
-        <Stack.Screen name="LentBorrowed"  component={LentBorrowedScreen} />
+        <Stack.Screen name="Categories"     component={CategoriesScreen} />
+        <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />
+        <Stack.Screen name="LentBorrowed"   component={LentBorrowedScreen} />
         <Stack.Screen name="SmsDiagnostic" component={SmsDiagnosticScreen} />
         <Stack.Screen
           name="RewardShop"

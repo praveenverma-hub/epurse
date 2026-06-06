@@ -245,7 +245,7 @@ export default function AccountsScreen({ navigation }) {
             <TouchableOpacity
               key={a.id}
               style={styles.listRow}
-              onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
+              onPress={() => navigation.navigate('AccountDetails', { accountId: a.id })}
               activeOpacity={0.7}
             >
               <View style={styles.listIcon}>
