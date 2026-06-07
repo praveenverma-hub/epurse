@@ -129,6 +129,8 @@ const ParentRow: React.FC<ParentRowProps> = ({
               styles.rowLabel,
               isParentSelected && { color: parent.color, fontWeight: '700' },
             ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
             {parent.label}
           </Text>

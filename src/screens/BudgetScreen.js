@@ -30,6 +30,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
+import { INPUT_LIMITS } from '../utils/validation';
 import CenterModal from '../components/CenterModal';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
@@ -183,7 +184,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
   const handleLocalCatCapChange = useCallback((catId, text) => {
     setLocalCats((prev) =>
-      prev.map((c) => c.catId === catId ? { ...c, cap: text.replace(/\D/g, '') } : c)
+      prev.map((c) => c.catId === catId ? { ...c, cap: text.replace(/\D/g, '').slice(0, INPUT_LIMITS.AMOUNT_INT_DIGITS) } : c)
     );
   }, []);
 
@@ -407,13 +408,16 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                     <View style={[styles.barFill, { width: `${Math.min(100, r.pct)}%`, backgroundColor: barColor }]} />
                   </View>
                   <View style={styles.catCardBot}>
-                    <Text style={styles.catActual}>{formatCompact(r.actual)}</Text>
-                    <Text style={styles.catCapLabel}>{`/ ${formatCompact(r.cap)}`}</Text>
-                    <View style={{ flex: 1 }} />
-                    <Text style={[styles.catRemain, { color: r.over ? colors.danger : colors.textSecondary }]}>
+                    <Text style={styles.catActual} numberOfLines={1}>{formatCompact(r.actual)}</Text>
+                    <Text style={styles.catCapLabel} numberOfLines={1}>{`/ ${formatCompact(r.cap)}`}</Text>
+                    <View style={{ flex: 1, minWidth: spacing.sm }} />
+                    <Text
+                      style={[styles.catRemain, { color: r.over ? colors.danger : colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
                       {r.over
-                        ? `₹${Math.round(r.overshoot ?? 0).toLocaleString('en-IN')} over`
-                        : `₹${Math.round(r.remaining ?? 0).toLocaleString('en-IN')} left`}
+                        ? `${formatCompact(r.overshoot ?? 0)} over`
+                        : `${formatCompact(r.remaining ?? 0)} left`}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -543,6 +547,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                             placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                             style={styles.catAmountInput}
+                            maxLength={INPUT_LIMITS.AMOUNT_INT_DIGITS}
                           />
                         </View>
                         <TouchableOpacity
@@ -615,7 +620,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                       >
                         <Text style={styles.pickerEmoji}>{c.emoji}</Text>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.pickerName}>{c.name}</Text>
+                          <Text style={styles.pickerName} numberOfLines={1} ellipsizeMode="tail">{c.name}</Text>
                           {avg > 0 ? (
                             <Text style={styles.pickerAvg}>avg ₹{avg.toLocaleString('en-IN')}/mo</Text>
                           ) : (
@@ -684,9 +689,11 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
               ) : (
                 <Text style={styles.drillEmoji}>{drillCat?.emoji}</Text>
               )}
-              <Text style={styles.drillTitle}>{drillCat?.name}</Text>
-              <View style={{ flex: 1 }} />
-              <Text style={styles.drillTotal}>{formatCompact(drillTotal)}</Text>
+              <Text style={[styles.drillTitle, { flexShrink: 1 }]} numberOfLines={1} ellipsizeMode="tail">
+                {drillCat?.name}
+              </Text>
+              <View style={{ flex: 1, minWidth: spacing.sm }} />
+              <Text style={styles.drillTotal} numberOfLines={1}>{formatCompact(drillTotal)}</Text>
             </View>
             <Text style={styles.drillSub}>This month, by sub-category</Text>
             <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>

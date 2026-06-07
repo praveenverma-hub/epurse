@@ -11,6 +11,7 @@ import {
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { ACCOUNT_TYPES } from '../constants/categories';
+import { INPUT_LIMITS, sanitizeName } from '../utils/validation';
 import { useToast } from './Toast';
 
 const TYPE_OPTIONS = [
@@ -170,10 +171,11 @@ const AddAccountModal = ({ visible, onClose, onAdd }) => {
             <Text style={styles.label}>Custom Name (optional)</Text>
             <TextInput
               value={customName}
-              onChangeText={setCustomName}
+              onChangeText={(t) => setCustomName(sanitizeName(t))}
               placeholder="Leave blank to auto-generate"
               placeholderTextColor={colors.textMuted}
               style={styles.input}
+              maxLength={INPUT_LIMITS.NAME_MAX}
             />
 
           </ScrollView>

@@ -29,6 +29,7 @@ import Animated, {
 import { useEPurseStore } from '../store/ePurseStore';
 import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
+import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButtonBase from '../components/GradientButton';
@@ -494,11 +495,12 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             <Field label="Amount (₹) · Max 10 crore">
               <TextInput
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(t) => setAmount(sanitizeAmount(t))}
                 keyboardType="decimal-pad"
                 placeholder="0"
                 placeholderTextColor={colors.textMuted}
                 style={styles.amountInput}
+                maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
               />
             </Field>
 
@@ -543,10 +545,11 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             <Field label="Merchant / Person">
               <TextInput
                 value={merchant}
-                onChangeText={setMerchant}
+                onChangeText={(t) => setMerchant(sanitizeName(t, INPUT_LIMITS.MERCHANT_MAX))}
                 placeholder="e.g. Zomato / Rohit"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
+                maxLength={INPUT_LIMITS.MERCHANT_MAX}
               />
             </Field>
 
@@ -852,7 +855,11 @@ const Seg = ({
       onPress={onPress}
       style={[styles.seg, active && { backgroundColor: primary + '15', borderColor: primary }]}
     >
-      <Text style={[styles.segText, active && { color: primary, fontWeight: '700' }]}>
+      <Text
+        style={[styles.segText, active && { color: primary, fontWeight: '700' }]}
+        numberOfLines={1}
+        ellipsizeMode="tail"
+      >
         {label}
       </Text>
     </TouchableOpacity>
@@ -945,6 +952,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.divider,
+    maxWidth: '100%',
   },
   segText: {
     fontSize: 13,

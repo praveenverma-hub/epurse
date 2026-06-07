@@ -28,6 +28,7 @@ import {
   requestSmsPermission,
 } from '../services/smsService';
 import { formatDateTime } from '../utils/format';
+import { INPUT_LIMITS, sanitizeName } from '../utils/validation';
 
 const COLOR_PALETTE = [
   '#FF5A1F', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981',
@@ -222,10 +223,11 @@ const CategoriesScreen = ({ navigation }) => {
 
           <TextInput
             value={name}
-            onChangeText={setName}
+            onChangeText={(t) => setName(sanitizeName(t, INPUT_LIMITS.CATEGORY_MAX))}
             placeholder="Category name"
             placeholderTextColor={colors.textMuted}
             style={styles.input}
+            maxLength={INPUT_LIMITS.CATEGORY_MAX}
           />
 
           <Text style={styles.sub}>Pick an emoji</Text>
@@ -264,7 +266,7 @@ const CategoriesScreen = ({ navigation }) => {
           {categories.map((c) => (
             <View key={c.id} style={styles.catRow}>
               <CategoryIcon category={c} size={36} />
-              <Text style={styles.catName}>{c.name}</Text>
+              <Text style={styles.catName} numberOfLines={1} ellipsizeMode="tail">{c.name}</Text>
               <TouchableOpacity onPress={() => handleDelete(c)}>
                 <Text style={styles.catDelete}>✕</Text>
               </TouchableOpacity>

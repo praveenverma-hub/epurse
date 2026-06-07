@@ -31,6 +31,7 @@ import Animated, {
 
 import { radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCompact } from '../utils/format';
+import { INPUT_LIMITS, sanitizeAmount } from '../utils/validation';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { useEPurseStore } from '../store/ePurseStore';
 
@@ -544,14 +545,14 @@ const BackFace: React.FC<BackFaceProps> = ({
         <TextInput
           ref={inputRef}
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={(t) => setDraft(sanitizeAmount(t))}
           placeholder={placeholderValue}
           placeholderTextColor="#FFFFFF44"
           keyboardType="decimal-pad"
           returnKeyType="done"
           onSubmitEditing={onConfirm}
           style={styles.input}
-          maxLength={14}
+          maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
           selectionColor="#FFFFFF"
           underlineColorAndroid="transparent"
         />

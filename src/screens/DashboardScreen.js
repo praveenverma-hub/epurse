@@ -229,9 +229,11 @@ const DashboardScreen = ({ navigation }) => {
         <SafeAreaView edges={['top']}>
           {/* Top row */}
           <View style={styles.headerRow}>
-            <View>
-              <Text style={styles.greeting}>{greeting}</Text>
-              <Text style={styles.userName}>{userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}</Text>
+            <View style={styles.headerGreetWrap}>
+              <Text style={styles.greeting} numberOfLines={1}>{greeting}</Text>
+              <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
+                {userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}
+              </Text>
             </View>
             <View style={styles.headerRight}>
               <TouchableOpacity
@@ -634,12 +636,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: spacing.md,
   },
+  headerGreetWrap: { flex: 1, marginRight: spacing.md },
   greeting:  { color: '#FFFFFFCC', ...typography.small },
   userName:  { color: '#fff', ...typography.h2, marginTop: 2 },
   headerRight: {
     flexDirection: 'row',
     alignItems:    'center',
     gap:           10,
+    flexShrink:    0,
   },
   avatarBtn: {
     width: 42, height: 42, borderRadius: 21,

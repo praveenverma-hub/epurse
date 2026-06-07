@@ -22,6 +22,7 @@ import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
+import { INPUT_LIMITS, sanitizeName, sanitizePhone, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency, formatDate } from '../utils/format';
 import GradientButton from '../components/GradientButton';
@@ -226,12 +227,16 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 {(pb.person || '?').charAt(0).toUpperCase()}
               </Text>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.name, isFullySettled && styles.nameSettled]}>
+            <View style={{ flex: 1, marginRight: spacing.sm }}>
+              <Text
+                style={[styles.name, isFullySettled && styles.nameSettled]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {pb.person || 'Unknown'}
               </Text>
               {pb.phone ? (
-                <Text style={styles.personPhone}>{pb.phone}</Text>
+                <Text style={styles.personPhone} numberOfLines={1}>{pb.phone}</Text>
               ) : null}
             </View>
             {isFullySettled ? (
@@ -239,8 +244,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 <Text style={styles.settledBadgeText}>✓ Settled</Text>
               </View>
             ) : (
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={[styles.netAmount, { color: netColor }]}>
+              <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>
+                <Text style={[styles.netAmount, { color: netColor }]} numberOfLines={1}>
                   {formatCurrency(netAbs)}
                 </Text>
                 <Text style={[styles.netLabel, { color: netColor }]}>
@@ -357,19 +362,21 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       </Text>
       <TextInput
         value={person}
-        onChangeText={setPerson}
+        onChangeText={(t) => setPerson(sanitizeName(t))}
         placeholder="Person name *"
         placeholderTextColor={colors.textMuted}
         style={styles.input}
+        maxLength={INPUT_LIMITS.NAME_MAX}
       />
       <View style={styles.phoneRow}>
         <TextInput
           value={phone}
-          onChangeText={(t) => { setPhone(t); setContactId(null); }}
+          onChangeText={(t) => { setPhone(sanitizePhone(t)); setContactId(null); }}
           placeholder="Phone number (optional)"
           placeholderTextColor={colors.textMuted}
           keyboardType="phone-pad"
           style={[styles.input, styles.phoneInput]}
+          maxLength={INPUT_LIMITS.PHONE_LEN}
         />
         <TouchableOpacity style={styles.contactPickBtn} onPress={pickContact}>
           <ContactPickIcon />
@@ -377,18 +384,20 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       </View>
       <TextInput
         value={amount}
-        onChangeText={setAmount}
+        onChangeText={(t) => setAmount(sanitizeAmount(t))}
         keyboardType="decimal-pad"
         placeholder="Amount *"
         placeholderTextColor={colors.textMuted}
         style={styles.input}
+        maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
       />
       <TextInput
         value={note}
-        onChangeText={setNote}
+        onChangeText={(t) => setNote(t.slice(0, INPUT_LIMITS.NOTE_MAX))}
         placeholder="Note (optional)"
         placeholderTextColor={colors.textMuted}
         style={styles.input}
+        maxLength={INPUT_LIMITS.NOTE_MAX}
       />
       <GradientButton
         title="Add"

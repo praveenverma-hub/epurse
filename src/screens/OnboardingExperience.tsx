@@ -57,6 +57,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 import { useTheme } from '../hooks/useTheme';
@@ -64,6 +65,7 @@ import { spacing, radius } from '../constants/theme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
+import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone, sanitizeAmount } from '../utils/validation';
 
 // =============================================================================
 // Types
@@ -85,6 +87,7 @@ interface Theme {
   danger: string;
   warning: string;
   info: string;
+  darkMode?: boolean;
 }
 
 export interface Account {
@@ -287,8 +290,8 @@ export default function OnboardingDeck({
   const totalPages = SLIDES.length + 1; // info slides + registration
   const registrationIndex = SLIDES.length;
 
-  const nameValid = name.trim().length >= 2;
-  const phoneValid = /^\d{10}$/.test(phone);
+  const nameValid = isValidName(name);
+  const phoneValid = isValidPhone(phone);
   const formValid = nameValid && phoneValid;
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
@@ -368,6 +371,8 @@ export default function OnboardingDeck({
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+      {/* Onboarding sits on a light background → dark status-bar glyphs. */}
+      <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
       {/* Skip — muted, top-right; accelerates to the registration page */}
       {page < registrationIndex && (
         <Pressable
@@ -432,9 +437,10 @@ export default function OnboardingDeck({
                 placeholder="e.g. Praveen Verma"
                 placeholderTextColor={theme.textSecondary}
                 value={name}
-                onChangeText={setName}
+                onChangeText={(t) => setName(sanitizeName(t))}
                 autoCapitalize="words"
                 returnKeyType="next"
+                maxLength={INPUT_LIMITS.NAME_MAX}
               />
 
               <Text style={styles.label}>Mobile number</Text>
@@ -446,9 +452,9 @@ export default function OnboardingDeck({
                   placeholder="10-digit number"
                   placeholderTextColor={theme.textSecondary}
                   value={phone}
-                  onChangeText={(t) => setPhone(t.replace(/\D/g, '').slice(0, 10))}
+                  onChangeText={(t) => setPhone(sanitizePhone(t))}
                   keyboardType="number-pad"
-                  maxLength={10}
+                  maxLength={INPUT_LIMITS.PHONE_LEN}
                   returnKeyType="done"
                 />
               </View>
@@ -562,6 +568,7 @@ export function AccountFilterScreen({
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+      <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
       <View style={styles.header}>
         <View style={[styles.headerIcon, { backgroundColor: theme.primary + '14' }]}>
           <CardChipIcon color={theme.primary} size={24} />
@@ -876,8 +883,9 @@ export function BalanceAnchorModal({
               placeholder="0"
               placeholderTextColor={theme.textSecondary}
               value={value}
-              onChangeText={(t) => setValue(t.replace(/[^0-9.]/g, ''))}
+              onChangeText={(t) => setValue(sanitizeAmount(t))}
               keyboardType="decimal-pad"
+              maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
               autoFocus
             />
           </View>

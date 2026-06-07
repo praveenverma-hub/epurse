@@ -250,11 +250,14 @@ export default function AccountsScreen({ navigation }) {
               <View style={styles.listIcon}>
                 <Text style={{ fontSize: 20 }}>{TYPE_EMOJI[a.type] ?? '💳'}</Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.listName}>{a.name}</Text>
-                <Text style={styles.listType}>{TYPE_LABEL[a.type] ?? a.type}</Text>
+              <View style={{ flex: 1, marginRight: spacing.sm }}>
+                <Text style={styles.listName} numberOfLines={1} ellipsizeMode="tail">{a.name}</Text>
+                <Text style={styles.listType} numberOfLines={1}>{TYPE_LABEL[a.type] ?? a.type}</Text>
               </View>
-              <Text style={[styles.listBalance, { color: (a.balance ?? 0) < 0 ? colors.danger : colors.textPrimary }]}>
+              <Text
+                style={[styles.listBalance, { color: (a.balance ?? 0) < 0 ? colors.danger : colors.textPrimary }]}
+                numberOfLines={1}
+              >
                 {(!BALANCE_SENSITIVE.has(a.type) || balancesVisible)
                   ? formatCurrency(Math.abs(a.balance ?? 0))
                   : '••••'}
