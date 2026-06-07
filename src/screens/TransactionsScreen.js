@@ -248,19 +248,21 @@ const TransactionsScreen = ({ navigation, route }) => {
     const prev = lastScrollY.current;
     lastScrollY.current = y;
 
-    if (y <= CHIP_RIBBON_H) {
-      // Inline chips back in view — always hide sticky
+    if (y <= 2) {
+      // Inline chips fully back in view — hide sticky
+      stickyOpa.value = withTiming(0, { duration: 200 });
+      setStickyActive(false);
+    } else if (y > prev) {
+      // Scrolling up (deeper into list) — hide sticky
       stickyOpa.value = withTiming(0, { duration: 180 });
       setStickyActive(false);
-    } else if (y < prev) {
-      // Scrolling down (back toward top), chips off-screen — show sticky
+    } else if (y < prev && y > CHIP_RIBBON_H) {
+      // Scrolling down, chips still off-screen — show sticky
       stickyOpa.value = withTiming(1, { duration: 180 });
       setStickyActive(true);
-    } else if (y > prev) {
-      // Scrolling up (deeper into list), chips off-screen — hide sticky
-      stickyOpa.value = withTiming(0, { duration: 180 });
-      setStickyActive(false);
     }
+    // Scrolling down while 2 < y <= CHIP_RIBBON_H: inline chips travelling back
+    // into view — keep sticky as-is so there's no gap while they emerge
   }, []);
 
   // ── Reanimated sheet ───────────────────────────────────────────────────────
@@ -1011,8 +1013,7 @@ const styles = StyleSheet.create({
     top: 0, left: 0, right: 0,
     zIndex: 10,
     backgroundColor: colors.card,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
+    ...shadows.card,
   },
   chipRow: {
     paddingHorizontal: spacing.lg,
