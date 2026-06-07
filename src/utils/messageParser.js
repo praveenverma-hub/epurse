@@ -40,7 +40,9 @@ const BANK_WALLET_SENDER_KEYS = [
   'sbi', 'pnb', 'boi', 'bob', 'canbnk', 'canbk', 'unionbk',
   'ucobk', 'indianbk', 'indbnk', 'centbk', 'mahbnk', 'punbsind',
   'iobbnk', 'allbnk', 'andbk', 'syndbk', 'vijaya', 'dena',
-  'jkbank', 'kvbank',
+  'jkbank', 'kvbank', 'idbi',
+  // ── Card networks / issuers (non-bank DLT senders) ───────────────────────
+  'amex',                // American Express India
   // ── Payment banks ─────────────────────────────────────────────────────────
   'paytm', 'pytm',       // Paytm (PYTMWT = Paytm Wallet Transaction)
   'jiomny',              // JioMoney — NOT 'jio' (avoids JIOBIL)
@@ -105,6 +107,8 @@ const SENDER_KEY_TO_BANK = [
   ['allbnk',     'Indian Bank'],
   ['andbk',      'Union Bank'],
   ['kvbank',     'Karur Vysya Bank'],
+  ['idbi',       'IDBI Bank'],
+  ['amex',       'American Express'],
   ['paytm',      'Paytm'],
   ['pytm',       'Paytm'],
   ['phonepe',    'PhonePe'],
@@ -161,9 +165,13 @@ const TRANSACTION_PHRASES = [
   'emi debited', 'emi deducted', 'emi paid',
   'paid to', 'paid via', 'paid at', 'paid from', 'amount paid',
   'sent to', 'sent via',
+  'money sent',           // "Money Sent: Rs.60.00 to MERCHANT"
   'transferred to', 'transferred from', 'transfer of',
   'payment of', 'payment for',
   'purchase at', 'purchase of', 'spent at', 'spent on',
+  'charged on', 'charged at',  // "INR 2,150.00 charged on Axis Card xx1002"
+  // "Txn Rs.305.00 On HDFC Bank Card 8077 At merchant@upi by UPI …" — no debit verb, just "Txn"
+  'txn',
   // Card usage / ATM cash withdrawal ("Card ending 1234 used at ATM/merchant")
   'used at', 'used for', 'cash withdrawal', 'cash withdrawn', 'withdrawal at', 'atm cash',
   // Bare-verb debit forms (some banks omit -ed: "Rs 500 debit from A/c")
@@ -173,6 +181,7 @@ const TRANSACTION_PHRASES = [
   'credited', 'deposited', 'refunded', 'refund', 'salary credited',
   'amount credited', 'cashback credited',
   'received in', 'received to', 'received from',
+  'money in',             // "Money In: Rs.10,000.00 to A/c XX1102"
   // Bare-verb credit forms
   'credit to', 'credit in', 'credit of',
   // Reversal confirmations
@@ -224,6 +233,10 @@ const COUNTERPARTY_NAME_REGEX =
 const TRANSFER_REF_REGEX =
   /\b(?:imps|upi|neft|rtgs)\b[\s\S]{0,6}?(?:ref(?:erence)?\.?\s*(?:no\.?|#)?\s*)?[:#\-\s]\s*([0-9]{6,})/i;
 
+// "Acct XX302 debited … ; RADHIKA credited." — beneficiary name between semicolon and "credited".
+// Guard: skips account references (Acct/A/c/Account) so own-account transfers don't leak through.
+const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-Za-z\s]{1,29}?)\s+credited\b/i;
+
 // Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
 // Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
 const MERCHANT_REGEX =
@@ -252,7 +265,12 @@ const CC_BILL_REMINDER_REGEX =
 // fire, the SMS is a real transaction even if it also mentions "due" — we
 // don't want to swallow `"Rs 500 debited towards EMI due"` as a reminder.
 const CC_BILL_HARD_CONFIRMATION_REGEX =
-  /\b(?:debited|credited|spent|withdrawn|deducted|deposited|refunded|transferred)\b|\bpaid\s+(?:to|via|at|from)\b/i;
+  /\b(?:debited|credited|spent|withdrawn|deducted|deposited|refunded|transferred|charged|billed)\b|\bpaid\s+(?:to|via|at|from)\b/i;
+
+// Guard: past-tense completion phrase that overrides promotional patterns.
+// "has been credited/debited/transferred" = real disbursement, not a promo pitch.
+const COMPLETED_TRANSACTION_REGEX =
+  /\b(?:has\s+been|was|have\s+been)\s+(?:debited|credited|transferred|deposited|refunded|disbursed|processed)\b/i;
 
 // Pull the card last-4 from a CC reminder body.
 const CC_CARD_LAST4_REGEX =
@@ -273,14 +291,15 @@ const CC_PAYMENT_OUTGOING_REGEX =
 // These contain an amount (the "eligible spend") but no actual transaction happened.
 // Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
 const PROMOTIONAL_OFFER_REGEX =
-  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,60}\bincreased\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\//i;
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b/i;
 
 // EMI conversion NOTICE — an already-booked purchase being restructured into
 // instalments ("...purchase of Rs.45,000 ... has been converted to 6 Months EMI").
 // The original spend was counted when it happened, so this must NOT book a second
 // transaction. Distinct from a real EMI INSTALMENT debit ("EMI of Rs X debited"),
 // which has no "converted to … EMI" phrasing and still books normally.
-const EMI_CONVERSION_REGEX = /\bconverted\s+(?:in)?to\b[\s\S]{0,30}\bemi\b/i;
+// Also catches setup-confirmation format: "request to convert … into N Months EMI has been set up"
+const EMI_CONVERSION_REGEX = /\bconverted?\s+(?:in)?to\b[\s\S]{0,60}\bemi\b|\bto\s+convert\b[\s\S]{0,80}\binto\b[\s\S]{0,30}\bemi\b/i;
 
 // Market rates / FX bulletin from bank treasury desks — NOT a transaction.
 // Example: "INR 91.79 (-0.08) GBP 1.3786, EUR 1.1980 ... Brent Crude 67.20 Gold 5270.75 Rgds SBI Glb Mkts"
@@ -291,6 +310,11 @@ const MARKET_RATES_REGEX =
 // UPI collect / payment requests — money has NOT moved yet; user must approve.
 // Example: "Collect Request of Rs 500 from merchant@upi. Tap to approve."
 const COLLECT_REQUEST_REGEX = /\bcollect\s+request\b|\bupi\s+collect\b|\bpayment\s+request\s+of\b/i;
+
+// AutoPay / NACH mandate SETUP confirmations — the mandate was registered, no money moved yet.
+// Distinct from an actual mandate EXECUTION ("AutoPay of Rs 500 debited"), which has a debit verb.
+// Guard: COMPLETED_TRANSACTION_REGEX (was/has been debited/credited) lets real dual-action messages through.
+const MANDATE_SETUP_REGEX = /\b(?:autopay|nach|standing\s+instruction|mandate)\b[\s\S]{0,100}\b(?:created|registered|set\s+up|activated|established)\b/i;
 
 // =============================================================================
 // Helpers
@@ -418,9 +442,11 @@ const inferAccountType = (text) => {
   ) {
     return ACCOUNT_TYPES.DEBIT_CARD;
   }
+  // Bank check BEFORE wallet: "splitwise@paytm" in a UPI credit should not
+  // override an explicit "Kotak Bank A/c XX5124" reference in the same SMS.
+  if (/a\/c|account|saving|current|bank/i.test(text)) return ACCOUNT_TYPES.BANK;
   if (/wallet|paytm|phonepe|gpay|google\s*pay|amazon\s*pay/i.test(text))
     return ACCOUNT_TYPES.WALLET;
-  if (/a\/c|account|saving|current|bank/i.test(text)) return ACCOUNT_TYPES.BANK;
   return ACCOUNT_TYPES.BANK;
 };
 
@@ -511,8 +537,10 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // ── Non-transaction early exits (bank-sender confirmed above) ───────────────
 
   // Promotional / EMI-conversion / upsell messages.
-  // These always carry an amount ("eligible spends of INR 8497") but no money moved.
-  if (PROMOTIONAL_OFFER_REGEX.test(text)) {
+  // Guard: if a completed past-tense transaction verb is present ("has been credited/
+  // disbursed/…") the message is a real disbursement, not a sales pitch — skip the
+  // filter so pre-approved loan disbursals aren't swallowed.
+  if (PROMOTIONAL_OFFER_REGEX.test(text) && !COMPLETED_TRANSACTION_REGEX.test(text)) {
     return {
       ok: false,
       error: {
@@ -552,6 +580,17 @@ export const parseMessageDetailed = (message, opts = {}) => {
       error: {
         code: 'upi_collect_request',
         message: 'UPI collect/payment request detected — not a completed transaction.',
+      },
+    };
+  }
+
+  // Mandate setup confirmations — mandate registered, no money has moved.
+  if (MANDATE_SETUP_REGEX.test(text) && !COMPLETED_TRANSACTION_REGEX.test(text)) {
+    return {
+      ok: false,
+      error: {
+        code: 'mandate_setup',
+        message: 'AutoPay/NACH mandate creation confirmation — not an actual debit.',
       },
     };
   }
@@ -713,18 +752,24 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // Direction is read from `textSansFuture` (future clauses stripped) so a
   // forward-looking aside like "Cashback … will be credited" can't flip a
   // completed debit into a credit.
+  // When "debited … from your" appears (e.g. RD installment "debited Rs.5k from your
+  // savings A/c"), treat as DEBIT even if "credited" also appears (dual-leg phrasing).
+  const debitedFromThisAccount = /\bdebited\b[\s\S]{0,50}from\s+your\b/i.test(textSansFuture);
   const isCredit =
-    creditedToOther
-      ? false // "credited to beneficiary" = user sent money = DEBIT
-      : debitedFromOther
-        ? true // "debited from beneficiary" = user received money = CREDIT
-        : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b/i.test(textSansFuture);
+    debitedFromThisAccount
+      ? false
+      : creditedToOther
+        ? false // "credited to beneficiary" = user sent money = DEBIT
+        : debitedFromOther
+          ? true // "debited from beneficiary" = user received money = CREDIT
+          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b/i.test(textSansFuture);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
 
   // ── Extract: merchant ─────────────────────────────────────────────────────
   let merchant =
+    text.match(BENEFICIARY_CREDITED_REGEX)?.[1]?.trim() ||
     text.match(VPA_REGEX)?.[1] ||
     text.match(MERCHANT_REGEX)?.[1]?.trim() ||
     null;

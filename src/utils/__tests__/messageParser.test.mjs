@@ -501,6 +501,287 @@ const FASTAG_FX_SURCHARGE = [
   },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 8 — 50-message real-world sweep (UPI/CC/DC/NACH, Jun-26)
+// Bugs fixed: added IDBI+Amex to sender list, "money sent"/"money in"/"charged"
+// to TRANSACTION_PHRASES, "money in" to credit-direction regex, Bank-before-Wallet
+// ordering in inferAccountType.
+// Known gaps (not asserted): merchant falls back to sender for "towards X" /
+// "Money Sent" / "NACH" formats; "Amex Card"/"Axis Card"/"OneCard" parsed as
+// Debit Card when body lacks explicit "credit card" keyword.
+// ─────────────────────────────────────────────────────────────────────────────
+const UPI_CC_DC_NACH = [
+  // ── CAT 1: UPI Outflows ──────────────────────────────────────────────────
+  { name: 'HDFC UPI debit to Zomato',
+    sender: 'HDFCBK', sms: 'Rs.150.00 debited from A/c XX4398 via UPI to ZOMATO on 08-Jun-26 Ref 61599021. Bal: Rs.24,500.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 150, accountMask: '4398' } },
+  { name: 'Axis Bank UPI debit to Chai Point',
+    sender: 'AXISBK', sms: 'Txn Alert: ₹45.00 debited from your Axis Bank A/c XX1102 to CHAI POINT via UPI. Ref No: 615920119. Avl Bal: ₹12,140.22.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 45, accountMask: '1102' } },
+  { name: 'Kotak UPI debit to MakeMyTrip',
+    sender: 'KOTAKB', sms: 'Your Kotak Bank A/c XX5124 has been debited by ₹2,500.00 to MAKE MY TRIP via UPI Ref 6157811. Avl Bal: ₹45,100.12.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 2500, accountMask: '5124' } },
+  // "Money Sent:" prefix — previously rejected missing_transaction_keyword
+  { name: 'Money Sent prefix (UPI debit)',
+    sender: 'AXISBK', sms: 'Money Sent: Rs.60.00 to LOCAL KIRYANA STORE from A/c XX1102 via UPI on 08-Jun-26. Current Bal: Rs.11,220.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 60, accountMask: '1102' } },
+  { name: 'PNB UPI debit to Swiggy Instamart',
+    sender: 'PNBSMS', sms: 'Debited: INR 180.00 from PNB A/c XX3021 via UPI to SWIGGY INSTAMART. Ref: 6159821. Bal: INR 8,430.22.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 180, accountMask: '3021' } },
+  // ── CAT 2: UPI Inward / P2P Credits ─────────────────────────────────────
+  { name: 'HDFC UPI credit from person',
+    sender: 'HDFCBK', sms: 'Money Received: Rs.500.00 credited to your HDFC A/c XX4398 via UPI from Amit Verma on 08-Jun-26. Ref: 61599301. Bal: Rs.25,000.00.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 500, accountMask: '4398' } },
+  { name: 'SBI UPI credit — Received! prefix',
+    sender: 'SBIBNK', sms: 'Received! ₹3,000.00 into SBI A/c XX7741 from Sakshi Umrao via UPI on 08/06/26. Ref: 6159401. Balance: ₹7,120.35.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 3000, accountMask: '7741' } },
+  // "Money In:" prefix — previously rejected missing_transaction_keyword
+  { name: 'Money In prefix (UPI credit)',
+    sender: 'AXISBK', sms: 'Money In: Rs.10,000.00 to A/c XX1102 via UPI from Papa Kanpur on 06-Jun-26. Current Bal: Rs.21,220.00.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 10000, accountMask: '1102' } },
+  { name: 'Kotak UPI credit — Bank type despite paytm VPA in body',
+    sender: 'KOTAKB', sms: 'Your Kotak Bank A/c XX5124 has been credited by ₹800.00 via UPI from splitwise@paytm Ref 6157922. Avl Bal: ₹45,900.12.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 800, accountMask: '5124' } },
+  { name: 'BoB UPI cashback credit',
+    sender: 'BOBIBN', sms: 'ALERT: ₹35.00 credited to your Bank of Baroda A/c XX8812 via UPI towards Merchant Cashback. Ref: 6158999. Bal: ₹14,385.00.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 35, accountMask: '8812' } },
+  // ── CAT 3: Credit Card Spends ────────────────────────────────────────────
+  { name: 'HDFC CC spend at Amazon',
+    sender: 'HDFCBK', sms: 'Txn Alert: Your HDFC Bank Credit Card ending 9876 was spent for Rs.4,350.00 at AMAZON INDIA on 08-Jun-26. Available Limit: Rs.1,45,650.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 4350, accountMask: '9876' } },
+  { name: 'ICICI CC spend at Uber',
+    sender: 'ICICIB', sms: 'Alert: ₹850.00 was spent on your ICICI Credit Card xx5004 at UBER INDIA on 07/06/26. Current Available Limit: ₹88,400.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 850, accountMask: '5004' } },
+  // "charged on" — previously rejected missing_transaction_keyword
+  { name: 'Axis Card charged-on format',
+    sender: 'AXISBK', sms: 'Transaction Alert: INR 2,150.00 charged on Axis Card xx1002 at SWIGGY DINESTRUCT on 08-Jun-26. Outstanding Amount: INR 14,250.00.',
+    expect: { accept: true, type: 'debit', amount: 2150, accountMask: '1002' } },
+  // Amex — previously rejected source_not_financial; amex added to sender keys
+  { name: 'Amex Card spend at Taj Hotels',
+    sender: 'AMEXIN', sms: 'Your Amex Card ending 2004 was used for a payment of ₹6,800.00 at TAJ HOTELS on 07-Jun-26. Available Spends Limit: ₹3,12,000.00.',
+    expect: { accept: true, type: 'debit', amount: 6800, accountMask: '2004', merchant: 'TAJ HOTELS' } },
+  { name: 'Kotak CC spend at MakeMyTrip',
+    sender: 'KOTAKB', sms: 'Alert: INR 18,500.00 spent on Kotak Credit Card xx3192 at MAKE MY TRIP on 08/06/26. Avl Limit: INR 1,11,500.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 18500, accountMask: '3192' } },
+  { name: 'IDFC CC spend at Shell fuel',
+    sender: 'IDFCFB', sms: 'Txn Info: Your IDFC FIRST Credit Card ending 7741 was charged Rs.1,250.00 at SHELL FUEL STATION on 07-Jun-26. Avl Limit: Rs.78,200.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1250, accountMask: '7741', merchant: 'SHELL FUEL STATION' } },
+  { name: 'RBL CC swiped at Starbucks',
+    sender: 'RBLBNK', sms: 'Your RBL Bank Credit Card xx6631 was swiped for ₹350.00 at STARBUCKS DELHI on 08-Jun-26. Available Credit Limit: ₹64,150.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 350, accountMask: '6631' } },
+  { name: 'IndusInd CC spend at Zara',
+    sender: 'INDUSB', sms: 'Notification: Rs.8,990.00 spent on IndusInd Credit Card ending 5512 at ZARA INDIA on 06-Jun-26. Clear Spends Limit: Rs.1,41,010.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 8990, accountMask: '5512' } },
+  // ── CAT 4: Debit Card POS / ECOM ────────────────────────────────────────
+  { name: 'Axis Debit Card swiped at Shoppers Stop',
+    sender: 'AXISBK', sms: 'Txn Alert: Your Axis Bank Debit Card XX4412 was swiped for INR 4,500.00 at SHOPPERS STOP on 07/06/26. Clean Balance: INR 26,900.12.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 4500, accountMask: '4412', merchant: 'SHOPPERS STOP' } },
+  { name: 'SBI Debit Card ECOM at Flipkart',
+    sender: 'SBICRD', sms: 'Debited: Rs.2,500.00 from your SBI Debit Card ending 1124 via ATM Cash ECOM at FLIPKART INDIA on 06-Jun-26. Avl Bal: Rs.41,200.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 2500, accountMask: '1124' } },
+  { name: 'HDFC Debit Card POS at Decathlon',
+    sender: 'HDFCBK', sms: 'Your HDFC Bank Debit Card ending 4398 was used for a POS transaction of ₹1,850.00 at DECATHLON DELHI on 08-Jun-26. Avl Bal: ₹20,580.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 1850, accountMask: '4398', merchant: 'DECATHLON DELHI' } },
+  { name: 'ICICI Debit Card debit at Paytm Parking',
+    sender: 'ICICIB', sms: 'Alert: INR 350.00 debited from ICICI Debit Card xx2019 at PAYTM PARKING PLAZA on 07-Jun-26. Balance left: INR 45,200.12.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 350, accountMask: '2019' } },
+  // IDBI — previously rejected source_not_financial; idbi added to sender keys
+  { name: 'IDBI Debit Card ECOM at Rebel Foods',
+    sender: 'IDBIBK', sms: 'Transaction Info: INR 750.00 debited from your IDBI Debit Card xx4110 at REBEL FOODS via ECOM on 08-Jun-26. Bal: INR 12,400.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 750, accountMask: '4110' } },
+  { name: 'Canara Bank Debit Card POS at Big Bazaar',
+    sender: 'CANBNK', sms: 'Debited: ₹3,200.00 from Canara Bank Debit Card ending 5541 via POS at BIG BAZAAR on 07-Jun-26. Avl Bal: ₹18,100.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 3200, accountMask: '5541' } },
+  // ── CAT 5: Autopay / NACH / SI ───────────────────────────────────────────
+  { name: 'Axis Autopay debit for Netflix mandate',
+    sender: 'AXISBK', sms: 'Autopay Debit: Your Axis Bank A/c XX1102 has been debited by ₹799.00 on 05-Jun-26 for NETFLIX INDIA mandate. Ref: UPI-MP-99410A. Bal: ₹24,150.22.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 799, accountMask: '1102' } },
+  // Mandate hold (fund block, money not moved) — correct reject
+  { name: 'Mandate hold / fund block (not a spend)',
+    sender: 'HDFCBK', sms: 'Mandate Block: INR 3,500.00 has been held in HDFC A/c XX4398 on 04/06/26 for Zoomcar booking ref 88319. Funds will be captured post-trip.',
+    expect: { accept: false } },
+  { name: 'ICICI Autopay Executed for Apple One',
+    sender: 'ICICIB', sms: 'Autopay Executed: Your ICICI Bank A/c XX2019 has been debited by ₹3,199.00 on 05-Jun-26 for Apple One Premium Bundle via UPI Mandate Ref: UMN993041.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 3199, accountMask: '2019' } },
+  { name: 'SBI SI debit for Home Loan EMI',
+    sender: 'SBICRD', sms: 'Standing Instruction: Your SBI Savings A/c XX7741 debited by Rs.15,000.00 towards Home Loan EMI Ref LH99401 on 05-Jun-26. Avl Bal: Rs.61,400.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 15000, accountMask: '7741' } },
+  { name: 'Kotak NACH debit for Nippon Life Insurance',
+    sender: 'KOTAKB', sms: 'NACH Alert: Rs.2,499.00 debited from your Kotak Bank A/c XX5124 towards NIPPON LIFE INSURANCE mandate on 08-Jun-26. Bal: Rs.42,601.12.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 2499, accountMask: '5124' } },
+  { name: 'PNB UPI Mandate for YouTube Premium',
+    sender: 'PNBSMS', sms: 'UPI Mandate: ₹149.00 successfully debited from PNB A/c XX3021 for YouTube Premium automated subscription. Ref: 61594011.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 149, accountMask: '3021' } },
+  { name: 'BoB SI Executed for Tata Power',
+    sender: 'BOBIBN', sms: 'SI Executed: Your Bank of Baroda A/c XX8812 has been debited by INR 4,300.00 for Tata Power SI mandate on 07-Jun-26. Bal: INR 8,850.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 4300, accountMask: '8812' } },
+  { name: 'HDFC CC Autopay for JioFiber',
+    sender: 'HDFCBK', sms: 'Autopay Notification: Rs.699.00 debited from HDFC Credit Card xx9876 for JioFiber Automated Bill Pay. Available Limit: Rs.1,44,951.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 699, accountMask: '9876' } },
+  { name: 'Axis Mandate Executed for Spotify',
+    sender: 'AXISBK', sms: 'Mandate Executed: INR 599.00 debited from Axis Bank A/c XX1102 for Spotify Premium annual mandate on 06-Jun-26. Bal: INR 23,551.22.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 599, accountMask: '1102' } },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 9 — Investments, FASTag variants, fuel surcharge pairs, EMI/loan (Jun-26)
+// Bugs fixed: COMPLETED_TRANSACTION_REGEX guard on PROMOTIONAL_OFFER_REGEX (loan
+// disbursal); "charged"/"billed" added to CC_BILL_HARD_CONFIRMATION_REGEX; broadened
+// EMI_CONVERSION_REGEX to catch "to convert … into … EMI" setup confirmations;
+// "processed into" added to isCredit direction regex; debitedFromThisAccount guard;
+// reward-points accumulation/redeem added to PROMOTIONAL_OFFER_REGEX.
+// Known gaps: NPS "confirms receipt" rejected (no txn phrase — own RD confirms right);
+// OneCard "first installment generated in statement" rejected (informational, not debit);
+// merchant falls back to sender for "towards X" / NACH formats.
+// ─────────────────────────────────────────────────────────────────────────────
+const INVEST_FASTAG_EMI = [
+  // ── CAT 6: Investments ──────────────────────────────────────────────────
+  { name: 'Indian Bank FD creation (debit from savings)',
+    sender: 'INDBNK', sms: 'FD Created: Your Savings A/c XX9532 has been debited by Rs.50,000.00 for creation of Term Deposit No. 9940129482. Interest Rate: 7.10% p.a. Maturity Date: 07-Jun-2027.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 50000, accountMask: '9532' } },
+  { name: 'Indian Bank FD maturity (credit back)',
+    sender: 'INDBNK', sms: 'Alert: Fixed Deposit No. XXXXXX4412 for INR 1,00,000.00 has matured on 06-Jun-26 & total proceeds of INR 1,07,450.00 have been credited back to your Indian Bank A/c XX9532.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 107450, accountMask: '9532' } },
+  { name: 'HDFC SIP NACH debit to MF',
+    sender: 'HDFCBK', sms: 'SIP Order: Your HDFC Bank A/c XX4398 has been debited with ₹5,000.00 on 05-Jun-26 via NACH toward PARAG PARIKH FLEXI CAP FUND-GROWTH. Folio No: 8812493/11.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 5000, accountMask: '4398' } },
+  // "processed into" direction — previously parsed as DEBIT
+  { name: 'MF dividend credit (processed into)',
+    sender: 'ICICIB', sms: 'Mutual Fund Credit: Dividend payout of Rs.1,250.00 has been processed into your ICICI Bank A/c XX2019 from SBI Bluechip Fund. Avl Bal: Rs.46,450.12.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 1250, accountMask: '2019' } },
+  { name: 'Zerodha SIP debit via Netbanking',
+    sender: 'SBICRD', sms: 'Zerodha Coin: Your SIP installment of ₹2,500.00 for Zerodha Nifty LargeMidcap 250 Index Fund has been debited via Netbanking from SBI A/c XX7741.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 2500, accountMask: '7741' } },
+  // RD — "credited by debited" dual phrasing; debitedFromThisAccount guard kicks in
+  { name: 'RD installment (credited-by-debited format → debit)',
+    sender: 'HDFCBK', sms: 'RD Alert: Monthly Recurring Deposit A/c RD00911 has been credited by debited Rs.5,000.00 from your HDFC Savings A/c XX4398 on 08-Jun-26. Bal: Rs.15,580.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 5000, accountMask: '4398' } },
+  { name: 'Kotak PPF contribution (transfer credit to PPF)',
+    sender: 'KOTAKB', sms: 'PPF Contribution: Your Public Provident Fund A/c XX1104 has been credited with Rs.12,500.00 via transfer from your Kotak Bank A/c XX5124 on 05-Jun-26.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 12500, accountMask: '1104' } },
+  { name: 'HDFC Securities stock purchase debit',
+    sender: 'HDFCBK', sms: 'Stock Purchase: Your HDFC Securities trading account debited by ₹45,210.00 towards purchase of TATA MOTORS equity on 08-Jun-26. Linked A/c XX4398 debited.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 45210, accountMask: '4398' } },
+  // ── CAT 7: FASTag variants ───────────────────────────────────────────────
+  { name: 'ICICI FASTag toll debit (linked A/c)',
+    sender: 'ICICIB', sms: 'ICICI FASTag: Toll fee of Rs.85.00 debited for vehicle HR26-AB-4412 at Eastern Peripheral Expressway on 08-Jun-26. Linked A/c XX2019 debited.',
+    expect: { accept: true, type: 'debit', amount: 85 } },
+  { name: 'Paytm FASTag wallet debit at toll',
+    sender: 'PYTMWT', sms: 'Paytm FASTag: ₹150.00 debited for vehicle UP78-CD-9532 at Kanpur Toll Plaza on 06-Jun-26. Available Wallet Balance: ₹420.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 150, merchant: 'Kanpur Toll Plaza' } },
+  { name: 'Axis FASTag wallet debit at expressway',
+    sender: 'AXISBK', sms: 'Axis FASTag: Rs.240.00 debited for vehicle DL1C-W-2019 at Yamuna Expressway Plaza on 05-Jun-26. Remaining dynamic wallet balance: Rs.1,150.00.',
+    expect: { accept: true, type: 'debit', amount: 240 } },
+  { name: 'IDFC FASTag wallet recharge (credit)',
+    sender: 'IDFCFB', sms: 'Recharge Success: Your IDFC FASTag wallet for vehicle MH02-EE-7741 has been credited with ₹2,000.00 via UPI. Current Wallet Balance: ₹2,450.00.',
+    expect: { accept: true, type: 'credit', amount: 2000 } },
+  { name: 'BoB FASTag wallet toll debit',
+    sender: 'BOBIBN', sms: 'Toll Alert: ₹40.00 debited from your Bank of Baroda FASTag wallet for vehicle DL3C-XX-1102 at DND Flyway on 08-Jun-26. Avl Bal: ₹140.00.',
+    expect: { accept: true, type: 'debit', amount: 40 } },
+  { name: 'Kotak FASTag low-balance alert (no transaction)',
+    sender: 'KOTAKB', sms: 'FASTag Low Bal: Balance in your Kotak FASTag wallet for HR26-AB-4412 is Rs.45.00. Please top-up to ensure seamless passage at next toll barrier.',
+    expect: { accept: false } },
+  { name: 'SBI FASTag wallet toll debit',
+    sender: 'SBIINB', sms: 'Txn Alert: Rs.60.00 debited from SBI FASTag wallet for vehicle UP78-CD-9532 at Ganga Expressway Plaza on 07-Jun-26. Wallet Balance: Rs.360.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 60 } },
+  { name: 'HDFC FASTag auto-recharge (bank debit)',
+    sender: 'HDFCBK', sms: 'FASTag Auto-Recharge: Your HDFC Bank A/c XX4398 has been debited by ₹1,000.00 towards automated top-up of linked FASTag account MH12-XX-9876.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 1000, accountMask: '4398' } },
+  // ── CAT 8: Fuel surcharge pairs ──────────────────────────────────────────
+  { name: 'ICICI CC fuel purchase (main charge vs surcharge)',
+    sender: 'ICICIB', sms: 'Your ICICI Credit Card xx5004 was used for Rs.1,500.00 at Indian Oil Petrol Pump on 08-Jun-26. Surcharge of Rs.15.00 applied. Waiver will follow.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1500, accountMask: '5004' } },
+  { name: 'ICICI fuel surcharge waiver credit',
+    sender: 'ICICIB', sms: 'Waiver Alert: Rs.15.00 credited back to your ICICI Credit Card xx5004 on 09-Jun-26 towards IOCL Fuel Surcharge Waiver. Outstanding updated.',
+    expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 15, accountMask: '5004' } },
+  { name: 'SBI CC fuel spend (surcharge + Fuel Promo)',
+    sender: 'SBICRD', sms: 'Spent: Rs.3,000.00 on SBI Credit Card ending 1234 at Bharat Petroleum Mumbai on 05-Jun-26. Surcharge levied: Rs.30.00. Fuel Promo applied.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 3000, accountMask: '1234' } },
+  { name: 'SBI BPCL surcharge reversal credit',
+    sender: 'SBICRD', sms: 'Surcharge Refund: Reversal of INR 30.00 processed into your SBI Credit Card ending 1234 towards BPCL Surcharge Waiver on 07-Jun-26.',
+    expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 30, accountMask: '1234' } },
+  // "charged to … outstanding" — previously rejected cc_bill_reminder; "charged" now hard-confirms
+  { name: 'Axis CC Shell Fuel charged (outstanding in body)',
+    sender: 'AXISBK', sms: 'Txn: Rs.1,000.00 charged to your Axis Bank Credit Card xx1002 at Shell Fuel on 08-Jun-26. Surcharge of Rs.10.00 + GST added to active outstanding.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1000, accountMask: '1002', merchant: 'Shell Fuel' } },
+  { name: 'Axis Shell surcharge waiver credit',
+    sender: 'AXISBK', sms: 'Waiver Credit: Your Axis Bank Credit Card xx1002 has been credited with Rs.10.00 towards Shell Surcharge Waiver on 09-Jun-26.',
+    expect: { accept: true, type: 'credit', amount: 10, accountMask: '1002' } },
+  { name: 'Kotak CC HPCL surcharge levied (amount = surcharge, not total)',
+    sender: 'KOTAKB', sms: 'Alert: Fuel Surcharge of Rs.25.00 levied on your Kotak Credit Card xx3192 for purchase at HPCL Station on 06-Jun-26. Total charge: Rs.2,525.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 25, accountMask: '3192' } },
+  { name: 'Kotak HPCL surcharge reversal credit',
+    sender: 'KOTAKB', sms: 'Waiver Settled: Kotak Credit Card xx3192 credited with Rs.25.00 on 08-Jun-26 towards HPCL Surcharge Reversal. Clear Limit updated.',
+    expect: { accept: true, type: 'credit', amount: 25, accountMask: '3192' } },
+  // ── CAT 9: EMI / loan ────────────────────────────────────────────────────
+  { name: 'ICICI Amazon purchase converted to EMI (reject)',
+    sender: 'ICICIB', sms: 'Your Amazon purchase of Rs.18,000.00 on ICICI Credit Card xx5004 has been converted to 3 Months EMI. First installment of Rs.6,200.00 bills next cycle.',
+    expect: { accept: false, code: 'emi_conversion' } },
+  // Loan disbursal — "pre-approved" label; previously rejected as promo; COMPLETED_TRANSACTION_REGEX guard
+  { name: 'SBI pre-approved loan disbursal (real credit)',
+    sender: 'SBICRD', sms: 'Loan Disbursal: Pre-approved loan of Rs.2,00,000.00 has been credited to your SBI Savings A/c XX7741 via Loan A/c LN99401. EMI of Rs.8,500.00 starts 05-Jul-26.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 200000, accountMask: '7741' } },
+  // EMI setup confirmation — "to convert … into … EMI"; previously mis-accepted as ₹25k spend
+  { name: 'HDFC EMI setup confirmation (reject as emi_conversion)',
+    sender: 'HDFCBK', sms: 'Your request to convert Rs.25,000.00 spent at TATA MOTORS SERVICE on HDFC CC 9876 into 12 Months EMI has been successfully set up. Ref: EMI202611.',
+    expect: { accept: false, code: 'emi_conversion' } },
+  { name: 'HDFC No-Cost EMI interest subvention credit',
+    sender: 'HDFCBK', sms: 'Your No-Cost EMI request for Rs.12,000.00 on Flipkart using HDFC Credit Card 9876 has been approved. Interest subvention of Rs.450.00 credited.',
+    expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 450, accountMask: '9876' } },
+  { name: 'Axis InstaLoan top-up credit',
+    sender: 'AXISBK', sms: 'Loan Top-Up: INR 50,000.00 successfully transferred to your Axis Bank Savings A/c XX1102 via InstaLoan processing gateway. Ref No: IL99410.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 50000, accountMask: '1102' } },
+  // "billed to … Minimum due updated" — previously rejected cc_bill_reminder; "billed" now hard-confirms
+  { name: 'SBI CC monthly EMI billed (Minimum due in body)',
+    sender: 'SBICRD', sms: 'EMI Notification: Your monthly card EMI of Rs.4,320.00 for Laptop Purchase has been billed to your SBI Credit Card ending 1234. Minimum due updated.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 4320, accountMask: '1234' } },
+  { name: 'Bajaj Finserv consumer durable loan disbursed',
+    sender: 'ICICIB', sms: 'Consumer Durable Loan: Rs.35,000.00 disbursed by Bajaj Finserv to Reliance Digital for your purchase. Monthly auto-debit set from ICICI A/c XX2019.',
+    expect: { accept: true, type: 'debit', amount: 35000, accountMask: '2019' } },
+  // ── CAT 10: Marketing spam ───────────────────────────────────────────────
+  { name: 'HDFC pre-approved loan marketing (no completed verb)',
+    sender: 'HDFCBK', sms: 'Dear Customer, ₹5,00,000.00 has been pre-approved on your HDFC Savings Account XX4398. Instant disbursal in 2 mins. Apply via HDFC Mobile App today!',
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'SBI CC limit increase notification (marketing)',
+    sender: 'SBICRD', sms: 'Great News! The credit limit on your SBI Credit Card ending 1234 has been increased from Rs.1,50,000.00 to Rs.2,50,000.00 at zero cost. Avail now.',
+    expect: { accept: false, code: 'promotional_offer' } },
+  // Reward-points accumulation summary — previously mis-accepted as ₹3,625 spend
+  { name: 'HDFC reward-points summary (not a transaction)',
+    sender: 'HDFCBK', sms: 'Dear Customer, your HDFC Credit Card ending 9876 has accumulated 14,500 Reward Points worth Rs.3,625.00. T&C apply. Redeem now via HDFC Netbanking.',
+    expect: { accept: false, code: 'promotional_offer' } },
+];
+
+// Suite 10 — Credit-limit & mandate-setup edge cases (Jun-26)
+// Fixes: PROMOTIONAL_OFFER_REGEX extended to catch "limit...changed" + "increasing the limit";
+//        MANDATE_SETUP_REGEX added to reject autopay/NACH mandate creation confirmations.
+const CREDIT_LIMIT_MANDATE = [
+  // ── Credit limit upsell / change notifications ───────────────────────────
+  { name: 'ICICI CC limit upsell SMS (increasing the limit)',
+    sender: 'ICICIB',
+    sms: 'Manage spends effectively by increasing the limit on ICICI Bank Credit Card XX7004 from Rs150000 to Rs180000. SMS CRLIM 7004 to 5676766 to raise the limit',
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'ICICI CC credit limit changed notification',
+    sender: 'ICICIB',
+    sms: 'Dear Customer, The credit limit for your ICICI Bank Credit Card 4375X7004 has been changed from INR 150000 to INR 180000 on 2026-04-15.',
+    expect: { accept: false, code: 'promotional_offer' } },
+  // ── AutoPay mandate setup confirmation ───────────────────────────────────
+  { name: 'ICICI AutoPay mandate created (not a real debit)',
+    sender: 'ICICIB',
+    sms: 'Your AutoPay mandate with ASPRESENTED is successfully created towards Www Airtel In from 08-May-26 to 08-May-36 for Rs 7000.00, RRN 612808586417-ICICI Bank.',
+    expect: { accept: false, code: 'mandate_setup' } },
+  // ── HDFC "Txn Rs.X" format (no debit verb, Gate-2 fix via 'txn' phrase) ──
+  { name: 'HDFC CC UPI txn (multi-line, no debit verb)',
+    sender: 'HDFCBK',
+    sms: 'Txn Rs.305.00\nOn HDFC Bank Card 8077\nAt q327914270@ybl \nby UPI 307600331251\nOn 07-06\nNot You?\nCall 18002586161/SMS BLOCK CC 8077 to 7308080808',
+    expect: { accept: true, type: 'debit', amount: 305, accountType: 'Credit Card', accountMask: '8077' } },
+  // ── BENEFICIARY_CREDITED_REGEX: "; PAYEE credited" merchant extraction ───
+  // Previously returned "dispute" (from "Call 18002662 for dispute") — must return "RADHIKA"
+  { name: 'ICICI UPI debit — merchant from "; RADHIKA credited" not from footer',
+    sender: 'ICICIB',
+    sms: 'ICICI Bank Acct XX302 debited for Rs 1400.00 on 04-Jun-26; RADHIKA credited. UPI:607375520779. Call 18002662 for dispute. SMS BLOCK 302 to 9215676766.',
+    expect: { accept: true, type: 'debit', amount: 1400, accountMask: '302', merchant: 'RADHIKA' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -509,6 +790,9 @@ const SUITES = [
   ['ICICI format coverage (Jun-26)', ICICI_FORMATS],
   ['Investments, cards & marketing (Jun-26)', INVEST_CARDS_MARKETING],
   ['FASTag, FX, surcharge & EMI (Jun-26)', FASTAG_FX_SURCHARGE],
+  ['UPI / CC / DC / NACH sweep (Jun-26)', UPI_CC_DC_NACH],
+  ['Investments / FASTag / fuel-waiver / EMI-loan (Jun-26)', INVEST_FASTAG_EMI],
+  ['Credit-limit & mandate-setup (Jun-26)', CREDIT_LIMIT_MANDATE],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
