@@ -273,7 +273,14 @@ const CC_PAYMENT_OUTGOING_REGEX =
 // These contain an amount (the "eligible spend") but no actual transaction happened.
 // Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
 const PROMOTIONAL_OFFER_REGEX =
-  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,60}\bincreased\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|https?:\/\//i;
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,60}\bincreased\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\//i;
+
+// EMI conversion NOTICE — an already-booked purchase being restructured into
+// instalments ("...purchase of Rs.45,000 ... has been converted to 6 Months EMI").
+// The original spend was counted when it happened, so this must NOT book a second
+// transaction. Distinct from a real EMI INSTALMENT debit ("EMI of Rs X debited"),
+// which has no "converted to … EMI" phrasing and still books normally.
+const EMI_CONVERSION_REGEX = /\bconverted\s+(?:in)?to\b[\s\S]{0,30}\bemi\b/i;
 
 // Market rates / FX bulletin from bank treasury desks — NOT a transaction.
 // Example: "INR 91.79 (-0.08) GBP 1.3786, EUR 1.1980 ... Brent Crude 67.20 Gold 5270.75 Rgds SBI Glb Mkts"
@@ -515,6 +522,17 @@ export const parseMessageDetailed = (message, opts = {}) => {
     };
   }
 
+  // EMI conversion notice — original purchase already booked; don't double-count.
+  if (EMI_CONVERSION_REGEX.test(text)) {
+    return {
+      ok: false,
+      error: {
+        code: 'emi_conversion',
+        message: 'EMI conversion of an existing purchase — not a new transaction.',
+      },
+    };
+  }
+
   // FX / market-rates bulletins (SBI Glb Mkts, treasury desk broadcasts).
   // Multiple forex pairs (GBP x.xx, EUR x.xx …) or commodity prices in one message.
   if (MARKET_RATES_REGEX.test(text)) {
@@ -568,7 +586,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // matching card.
   // Future-tense forms like "will be debited" don't count as hard confirmation
   // since the transaction hasn't occurred yet.
-  const isFutureTense = /will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+for\s+(?:auto[\s-]?debit|debit|payment)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment)/i.test(text);
+  const isFutureTense = /will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+(?:for\s+(?:auto[\s-]?debit|debit|payment)|tomorrow|today|on\b)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment)/i.test(text);
   if (
     CC_BILL_REMINDER_REGEX.test(text) &&
     (!CC_BILL_HARD_CONFIRMATION_REGEX.test(text) || isFutureTense) &&
@@ -603,7 +621,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // This protects mixed messages like "Rs 500 debited … Rs 10 will be credited",
   // where a real transaction already happened and must still be booked.
   const textSansFuture = text.replace(
-    /\b(?:will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+for\s+(?:auto[\s-]?debit|debit|payment)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment))\b/gi,
+    /\b(?:will\s+be\s+(?:debited|credited|deducted|withdrawn|transferred)|(?:is\s+)?scheduled\s+(?:for\s+(?:auto[\s-]?debit|debit|payment)|tomorrow|today|on)|is\s+due\s+for\s+(?:auto[\s-]?debit|payment))\b/gi,
     ' ',
   );
   const hasCompletedVerb =

@@ -41,8 +41,8 @@
 // Rejection / interception codes currently emitted:
 //   source_not_financial · promotional_offer · market_rates_bulletin
 //   upi_collect_request · credit_card_payment_notification · cc_bill_reminder
-//   future_scheduled_debit · cc_payment_outgoing · missing_transaction_keyword
-//   amount_not_found
+//   future_scheduled_debit · cc_payment_outgoing · emi_conversion
+//   missing_transaction_keyword · amount_not_found
 // (`code` is optional — omit it to assert "rejected, reason doesn't matter".)
 // =============================================================================
 
@@ -359,12 +359,156 @@ const ICICI_FORMATS = [
   },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 6 — Investments (FD/SIP/mandate/autopay), debit cards & marketing
+// (Jun-26). Asserts the fields the parser resolves reliably. Merchant/category
+// are intentionally NOT asserted where extraction is still weak — see the
+// per-case KNOWN GAP notes; those are tracked follow-ups, not regressions.
+// ─────────────────────────────────────────────────────────────────────────────
+const INVEST_CARDS_MARKETING = [
+  // KNOWN GAP: ideally a self-transfer (own money → FD, non-spend); booked as a
+  // debit/investments today. Merchant noisy ("creation of Term Deposit No").
+  {
+    name: 'FD creation — savings debited to fund a Term Deposit',
+    sender: 'ICICIB',
+    sms: 'FD Created: Your Savings A/c XX9532 has been debited by Rs.50,000.00 for creation of Term Deposit No. 9940129482. Interest Rate: 7.10% p.a. Maturity Date: 07-Jun-2027.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 50000, accountMask: '9532' },
+  },
+  // KNOWN GAP: ideally self-transfer (principal return). Merchant leaks sender.
+  {
+    name: 'FD maturity — proceeds credited back to A/c',
+    sender: 'INDBNK',
+    sms: 'Alert: Fixed Deposit No. XXXXXX4412 for INR 1,00,000.00 has matured on 06-Jun-26 & total proceeds of INR 1,07,450.00 have been credited back to your Indian Bank A/c XX9532.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 107450, accountMask: '9532' },
+  },
+  // KNOWN GAP: merchant should be the fund ("Parag Parikh…"); currently leaks sender.
+  {
+    name: 'SIP via NACH toward a mutual fund',
+    sender: 'HDFCBK',
+    sms: 'SIP Order: Your HDFC Bank A/c XX4398 has been debited with ₹5,000.00 on 05-Jun-26 via NACH toward PARAG PARIKH FLEXI CAP FUND-GROWTH. Folio No: 8812493/11.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 5000, accountMask: '4398', categoryId: 'investments' },
+  },
+  // KNOWN GAP: merchant should be "Groww"; currently leaks sender.
+  {
+    name: 'Groww NACH mandate debit',
+    sender: 'AXISBK',
+    sms: 'Groww Alert: Mandate debit request of INR 10,000.00 initiated by GROWW-STOCKS against your Axis Bank A/c XX1102 on 04/06/26.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 10000, accountMask: '1102', categoryId: 'investments' },
+  },
+  // KNOWN GAP: merchant should be "Apple One"; category ideally subscription. Leaks sender.
+  {
+    name: 'UPI-autopay subscription debit (Apple One)',
+    sender: 'ICICIB',
+    sms: 'Autopay Executed: Your ICICI Bank A/c XX2019 has been debited by ₹3,199.00 on 05-Jun-26 for Apple One Premium Bundle annual subscription via UPI Mandate Ref: UMN993041.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 3199, accountMask: '2019' },
+  },
+  // Scheduled for tomorrow → money has NOT moved yet.
+  {
+    name: 'BillDesk auto-debit scheduled tomorrow',
+    sender: 'BLDESK',
+    sms: 'BillDesk Alert: Auto-debit of Rs.1,450.00 scheduled tomorrow (08-Jun-26) for your BESCOM Electricity Bill from your anchored HDFC Credit Card ending 9876.',
+    expect: { accept: false, code: 'future_scheduled_debit' },
+  },
+  // KNOWN GAP: merchant noisy ("a purchase of Rs.850"); category still resolves to food.
+  {
+    name: 'Indian Bank debit-card purchase (CCD)',
+    sender: 'INDBNK',
+    sms: 'Thank you for using your Indian Bank Debit Card ending 9182 for a purchase of Rs.850.00 at CAFE COFFEE DAY DELHI on 06-Jun-26. Avl Bal: Rs.14,210.35.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 850, accountMask: '9182', categoryId: 'food' },
+  },
+  // Clean end-to-end: merchant + category both resolve.
+  {
+    name: 'Axis debit-card swipe (Croma)',
+    sender: 'AXISBK',
+    sms: 'Txn Alert: Your Axis Bank Debit Card XX4412 was swiped for INR 12,500.00 at TATA CROMA STORES on 04/06/26. Clean Balance: INR 31,400.12.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 12500, accountMask: '4412', merchant: 'TATA CROMA STORES', categoryId: 'shopping' },
+  },
+  // Marketing — pre-approved credit-limit upgrade.
+  {
+    name: 'CC limit-upgrade offer (marketing)',
+    sender: 'ICICIB',
+    sms: 'Pre-Approved Offer: Get an instant credit limit upgrade on your ICICI Credit Card xx5004 up to ₹3,50,000.00 at ZERO processing fee. SMS CCUPG to 56767.',
+    expect: { accept: false, code: 'promotional_offer' },
+  },
+  // Marketing — limit-to-loan conversion.
+  {
+    name: 'InstaLoan conversion (marketing)',
+    sender: 'HDFCBK',
+    sms: 'Urgent: Rs.75,000.00 Cash is waiting to be transferred! Convert your HDFC CC 9876 available limit into an instant InstaLoan today. Tap hdfcbk.io/iloan.',
+    expect: { accept: false, code: 'promotional_offer' },
+  },
+  // Marketing — discount blast ("50% OFF" / "Use code"). The ₹150 / ₹499 are not a spend.
+  {
+    name: 'Swiggy discount blast (marketing)',
+    sender: 'SBICRD',
+    sms: 'Special Deal: Get up to 50% OFF on Swiggy using your SBI Credit Card ending 1234. Max discount ₹150 on orders above ₹499. Use code SBIFOOD.',
+    expect: { accept: false, code: 'promotional_offer' },
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 7 — FASTag, intl/DCC, fuel surcharge, reversals, EMI conversion, DBT.
+// ─────────────────────────────────────────────────────────────────────────────
+const FASTAG_FX_SURCHARGE = [
+  // FASTag toll debit → wallet account, toll plaza merchant, travel.
+  {
+    name: 'FASTag toll debit (SBI wallet)',
+    sender: 'SBIINB',
+    sms: 'FASTag Debit: ₹310.00 debited from your linked SBI FASTag wallet for vehicle DL3C-XX-1102 at Kherki Daula Plaza on 07-Jun-26 14:10:02. Avl Bal: ₹180.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 310, merchant: 'Kherki Daula Plaza', categoryId: 'travel' },
+  },
+  // FASTag low-balance alert — no money moved.
+  {
+    name: 'FASTag low-balance alert',
+    sender: 'HDFCBK',
+    sms: 'Alert: Your HDFC FASTag wallet balance for MH12-XX-9876 has fallen below threshold. Current: Rs.95.00.',
+    expect: { accept: false, code: 'missing_transaction_keyword' },
+  },
+  // International charge with DCC — must book the INR equivalent, not the USD figure.
+  {
+    name: 'Intl card charge with DCC (INR equiv)',
+    sender: 'ICICIB',
+    sms: 'Intl Txn: Your ICICI Bank Credit Card xx5004 was charged USD 15.00 at OpenAI San Francisco on 06-Jun-26. Dynamic Currency Conversion (DCC) Equiv: INR 1,262.45.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1262.45, accountMask: '5004', merchant: 'OpenAI San Francisco' },
+  },
+  // Fuel purchase + surcharge line — must book the main ₹2,000, not the ₹20 surcharge.
+  {
+    name: 'Fuel purchase with surcharge line',
+    sender: 'HDFCBK',
+    sms: 'Txn Alert: Your HDFC Credit Card xx9876 charged Rs.2,000.00 at HPCL Fuel Station, Delhi on 06-Jun-26. Fuel Surcharge of Rs.20.00 + GST levied additionally.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 2000, accountMask: '9876', merchant: 'HPCL Fuel Station', categoryId: 'fuel' },
+  },
+  // Surcharge-waiver reversal → credit back to the card. KNOWN GAP: merchant noisy.
+  {
+    name: 'Fuel surcharge reversal (credit to CC)',
+    sender: 'HDFCBK',
+    sms: 'Surcharge Waiver: Reversal of Rs.20.00 credited to your HDFC Credit Card xx9876 on 07-Jun-26 towards Fuel Surcharge Waiver.',
+    expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 20, accountMask: '9876' },
+  },
+  // EMI conversion of an already-booked purchase — must NOT double-count the ₹45,000.
+  {
+    name: 'EMI conversion notice (no double-count)',
+    sender: 'HDFCBK',
+    sms: 'EMI Alert: Your recent purchase of Rs.45,000.00 at APPLE INDIA STORE on HDFC CC xx9876 has been converted to 6 Months EMI. Monthly Installment: Rs.7,950.00.',
+    expect: { accept: false, code: 'emi_conversion' },
+  },
+  // Govt DBT / tax refund credit. KNOWN GAP: merchant leaks sender; category 'other'.
+  {
+    name: 'DBT income-tax refund (credit)',
+    sender: 'SBIINB',
+    sms: 'DBT Credit: INR 2,000.00 credited to your State Bank of India A/c XX7741 on 05-Jun-26 via NACH/PFMS towards Income Tax Refund AY 2026-27.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 2000, accountMask: '7741' },
+  },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
   ['Lookalike (spam / decoy)', LOOKALIKE],
   ['Real-world (P2P / self-transfer)', REAL_WORLD],
   ['ICICI format coverage (Jun-26)', ICICI_FORMATS],
+  ['Investments, cards & marketing (Jun-26)', INVEST_CARDS_MARKETING],
+  ['FASTag, FX, surcharge & EMI (Jun-26)', FASTAG_FX_SURCHARGE],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
