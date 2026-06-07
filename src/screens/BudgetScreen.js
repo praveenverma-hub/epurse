@@ -32,6 +32,7 @@ import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 import { INPUT_LIMITS } from '../utils/validation';
 import CenterModal from '../components/CenterModal';
+import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 // ── Progress ring SVG ─────────────────────────────────────────────────────────
@@ -96,6 +97,7 @@ const BUDGET_INFO = {
 const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const theme    = useTheme();
   const gradient = useGradient();
+  const toast    = useToast();
 
   const budget                  = useEPurseStore((s) => s.budget);
   const lastBudgetPlan          = useEPurseStore((s) => s.lastBudgetPlan);
@@ -393,7 +395,14 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                     const rows = getBudgetChildBreakdown(r.catId);
                     const parentName = categoryById.get(r.catId)?.name;
                     const realSubs = parentName ? rows.filter((row) => row.label !== parentName) : rows;
-                    if (realSubs.length > 1) setDrillCatId(r.catId);
+                    if (realSubs.length > 1) {
+                      setDrillCatId(r.catId);
+                    } else {
+                      toast.info(
+                        'No sub-category breakdown',
+                        `${cat.name} has no sub-category spending to drill into this month.`,
+                      );
+                    }
                   }}
                 >
                   <View style={styles.catCardTop}>

@@ -312,17 +312,86 @@ export function buildPDFHTML(
 }
 
 // ---------------------------------------------------------------------------
-// Main entry point — compile file and invoke native share sheet
+// File compilation — build the artifact into the app cache, return its handle
 // ---------------------------------------------------------------------------
 
-export async function compileAndShare(
+/** How the compiled file should leave the app. */
+export type ExportMethod = 'share' | 'download';
+
+/** Outcome reported back to the UI so it can show the right confirmation. */
+export interface ExportResult {
+  /** 'saved' = written to a user-visible location; 'shared' = handed to the OS share sheet. */
+  outcome: 'saved' | 'shared';
+  /** Where it landed, when known (e.g. the picked folder name). */
+  location?: string;
+}
+
+interface CompiledFile {
+  path: string;          // cache:// path to the compiled artifact
+  filenameBase: string;  // name without extension (SAF adds it from the mime type)
+  filename: string;      // full name with extension
+  mimeType: string;
+  UTI: string;
+  /** How to read/write the bytes when copying to another location. */
+  encoding: 'utf8' | 'base64';
+}
+
+async function compileFile(
+  FS: typeof TFileSystem,
   format: ExportFormat,
   txns: ExportTransaction[],
   ctx: ExportFilterContext,
   categories: ExportCategory[],
   accounts: ExportAccount[],
   userName?: string,
-): Promise<void> {
+): Promise<CompiledFile> {
+  const ts = Date.now();
+
+  if (format === 'csv') {
+    const csv  = buildCSV(txns, categories, accounts);
+    const base = `epurse_statement_${ts}`;
+    const path = `${FS.cacheDirectory}${base}.csv`;
+    await FS.writeAsStringAsync(path, csv, { encoding: FS.EncodingType.UTF8 });
+    return {
+      path,
+      filenameBase: base,
+      filename: `${base}.csv`,
+      mimeType: 'text/csv',
+      UTI: 'public.comma-separated-values-text',
+      encoding: 'utf8',
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Print = require('expo-print') as typeof TPrint;
+  const html  = buildPDFHTML(txns, ctx, categories, accounts, userName);
+  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  const base = `epurse_report_${ts}`;
+  const dest = `${FS.cacheDirectory}${base}.pdf`;
+  await FS.moveAsync({ from: uri, to: dest });
+  return {
+    path: dest,
+    filenameBase: base,
+    filename: `${base}.pdf`,
+    mimeType: 'application/pdf',
+    UTI: 'com.adobe.pdf',
+    encoding: 'base64',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point — compile, then either share or download
+// ---------------------------------------------------------------------------
+
+export async function compileAndExport(
+  method: ExportMethod,
+  format: ExportFormat,
+  txns: ExportTransaction[],
+  ctx: ExportFilterContext,
+  categories: ExportCategory[],
+  accounts: ExportAccount[],
+  userName?: string,
+): Promise<ExportResult> {
   // Lazy requires — only evaluated here at call-time, never at module load.
   // This prevents expo-print / expo-sharing from calling requireNativeModule()
   // during bundle init (which crashes the screen if the binary hasn't been
@@ -331,29 +400,56 @@ export async function compileAndShare(
   const FS      = require('expo-file-system') as typeof TFileSystem;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Sharing = require('expo-sharing')     as typeof TSharing;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Platform } = require('react-native') as typeof import('react-native');
 
-  const ts = Date.now();
+  const file = await compileFile(FS, format, txns, ctx, categories, accounts, userName);
 
-  if (format === 'csv') {
-    const csv  = buildCSV(txns, categories, accounts);
-    const path = `${FS.cacheDirectory}epurse_statement_${ts}.csv`;
-    await FS.writeAsStringAsync(path, csv, { encoding: FS.EncodingType.UTF8 });
-    await Sharing.shareAsync(path, {
-      mimeType: 'text/csv',
-      dialogTitle: 'Share Transaction Statement',
-      UTI: 'public.comma-separated-values-text',
+  const share = async (): Promise<ExportResult> => {
+    await Sharing.shareAsync(file.path, {
+      mimeType: file.mimeType,
+      dialogTitle: format === 'csv' ? 'Share Transaction Statement' : 'Share Transaction Report',
+      UTI: file.UTI,
     });
-  } else {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Print = require('expo-print') as typeof TPrint;
-    const html  = buildPDFHTML(txns, ctx, categories, accounts, userName);
-    const { uri } = await Print.printToFileAsync({ html, base64: false });
-    const dest    = `${FS.cacheDirectory}epurse_report_${ts}.pdf`;
-    await FS.moveAsync({ from: uri, to: dest });
-    await Sharing.shareAsync(dest, {
-      mimeType: 'application/pdf',
-      dialogTitle: 'Share Transaction Report',
-      UTI: 'com.adobe.pdf',
-    });
+    return { outcome: 'shared' };
+  };
+
+  if (method === 'share') {
+    return share();
   }
+
+  // ── Download ──────────────────────────────────────────────────────────────
+  // Android: write into a user-picked folder via the Storage Access Framework
+  // so the file lands somewhere the user can find it (Downloads, Documents…).
+  // iOS has no public Downloads dir, so we hand it to the share sheet whose
+  // "Save to Files" action is the platform-native way to keep a copy.
+  const SAF = (FS as any).StorageAccessFramework;
+  if (Platform.OS === 'android' && SAF) {
+    const perm = await SAF.requestDirectoryPermissionsAsync();
+    if (!perm.granted) {
+      // User dismissed the folder picker — fall back to share so the action
+      // still does something useful rather than silently failing.
+      return share();
+    }
+    const enc = file.encoding === 'base64' ? FS.EncodingType.Base64 : FS.EncodingType.UTF8;
+    const contents = await FS.readAsStringAsync(file.path, { encoding: enc });
+    const destUri  = await SAF.createFileAsync(perm.directoryUri, file.filenameBase, file.mimeType);
+    await FS.writeAsStringAsync(destUri, contents, { encoding: enc });
+    return { outcome: 'saved', location: 'your selected folder' };
+  }
+
+  // iOS / SAF unavailable → share sheet (offers "Save to Files").
+  return share();
+}
+
+/** Back-compat wrapper — existing callers that only share. */
+export async function compileAndShare(
+  format: ExportFormat,
+  txns: ExportTransaction[],
+  ctx: ExportFilterContext,
+  categories: ExportCategory[],
+  accounts: ExportAccount[],
+  userName?: string,
+): Promise<void> {
+  await compileAndExport('share', format, txns, ctx, categories, accounts, userName);
 }

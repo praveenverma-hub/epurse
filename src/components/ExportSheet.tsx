@@ -22,14 +22,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import { useToast } from './Toast';
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import {
-  compileAndShare,
+  compileAndExport,
   ExportAccount,
   ExportCategory,
   ExportFilterContext,
   ExportFormat,
+  ExportMethod,
   ExportTransaction,
 } from '../services/exportService';
 
@@ -94,12 +96,15 @@ const ExportSheet: React.FC<Props> = ({
   filterCtx,
 }) => {
   const theme      = useTheme();
+  const toast      = useToast();
   const categories = useEPurseStore((s) => s.categories) as ExportCategory[];
   const accounts   = useEPurseStore((s) => s.accounts)   as ExportAccount[];
   const userName   = useEPurseStore((s) => s.userName)   as string | null;
 
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat | null>(null);
-  const [loading, setLoading]               = useState(false);
+  // Which action is in flight (null = idle); drives the per-button spinner.
+  const [busyMethod, setBusyMethod]         = useState<ExportMethod | null>(null);
+  const loading = busyMethod !== null;
 
   const handleClose = useCallback(() => {
     if (loading) return;
@@ -148,12 +153,13 @@ const ExportSheet: React.FC<Props> = ({
 
   const fmtCompact = (n: number) => formatCurrency(isFinite(n) ? n : 0);
 
-  // ── Compile handler ───────────────────────────────────────────────────────
-  const handleCompile = useCallback(async () => {
-    if (!selectedFormat) return;
-    setLoading(true);
+  // ── Export handler (share or download) ────────────────────────────────────
+  const handleExport = useCallback(async (method: ExportMethod) => {
+    if (!selectedFormat || loading) return;
+    setBusyMethod(method);
     try {
-      await compileAndShare(
+      const result = await compileAndExport(
+        method,
         selectedFormat,
         filteredTransactions,
         filterCtx,
@@ -161,6 +167,12 @@ const ExportSheet: React.FC<Props> = ({
         accounts,
         userName || undefined,
       );
+      if (result.outcome === 'saved') {
+        toast.success(
+          'Saved',
+          `${selectedFormat.toUpperCase()} saved to ${result.location ?? 'your device'}.`,
+        );
+      }
       // Close only after share sheet dismissed (iOS awaits, Android resolves early)
       handleClose();
     } catch (err: any) {
@@ -168,17 +180,17 @@ const ExportSheet: React.FC<Props> = ({
       // 'cancel'/'dismiss' means user cancelled the share sheet — not an error
       if (!msg.includes('cancel') && !msg.includes('dismiss')) {
         Alert.alert(
-          'Export failed',
+          method === 'download' ? 'Download failed' : 'Export failed',
           'Could not generate the file. Please try again.',
           [{ text: 'OK' }],
         );
       }
     } finally {
-      setLoading(false);
+      setBusyMethod(null);
     }
-  }, [selectedFormat, filteredTransactions, filterCtx, categories, accounts, userName, handleClose]);
+  }, [selectedFormat, loading, filteredTransactions, filterCtx, categories, accounts, userName, handleClose, toast]);
 
-  const canCompile = !!selectedFormat && !loading && filteredTransactions.length > 0;
+  const canExport = !!selectedFormat && !loading && filteredTransactions.length > 0;
 
   return (
     <Modal
@@ -292,54 +304,70 @@ const ExportSheet: React.FC<Props> = ({
             );
           })}
 
-          {/* ── Compile button ── */}
-          <TouchableOpacity
-            onPress={handleCompile}
-            disabled={!canCompile}
-            activeOpacity={0.85}
-            style={styles.compileBtnWrap}
-          >
-            <LinearGradient
-              colors={
-                canCompile
-                  ? ([theme.gradientStart, theme.gradientEnd] as [string, string])
-                  : (['#C8C8C8', '#ADADAD'] as [string, string])
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.compileBtn}
+          {/* ── Action buttons: Download + Share ── */}
+          <View style={styles.actionRow}>
+            {/* Download — saves a copy to the device (Files / a chosen folder) */}
+            <TouchableOpacity
+              onPress={() => handleExport('download')}
+              disabled={!canExport}
+              activeOpacity={0.85}
+              style={[styles.outlineBtn, { borderColor: canExport ? theme.primary : colors.divider }]}
             >
-              {loading ? (
-                <ActivityIndicator size="small" color="#fff" />
+              {busyMethod === 'download' ? (
+                <ActivityIndicator size="small" color={theme.primary} />
               ) : (
                 <>
                   <Ionicons
-                    name={
-                      selectedFormat === 'pdf'
-                        ? 'document-text-outline'
-                        : selectedFormat === 'csv'
-                        ? 'grid-outline'
-                        : 'share-outline'
-                    }
+                    name="download-outline"
                     size={18}
-                    color="#fff"
-                    style={{ marginRight: 8 }}
+                    color={canExport ? theme.primary : colors.textMuted}
+                    style={{ marginRight: 6 }}
                   />
-                  <Text style={styles.compileBtnText}>
-                    {selectedFormat
-                      ? `Compile ${selectedFormat.toUpperCase()} & Share`
-                      : 'Select a format above'}
+                  <Text
+                    style={[styles.outlineBtnText, { color: canExport ? theme.primary : colors.textMuted }]}
+                  >
+                    Download
                   </Text>
                 </>
               )}
-            </LinearGradient>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          {filteredTransactions.length === 0 && (
-            <Text style={styles.emptyNote}>
-              No transactions match the current filters — nothing to export.
-            </Text>
-          )}
+            {/* Share — hands the file to the OS share sheet */}
+            <TouchableOpacity
+              onPress={() => handleExport('share')}
+              disabled={!canExport}
+              activeOpacity={0.85}
+              style={styles.gradientBtnWrap}
+            >
+              <LinearGradient
+                colors={
+                  canExport
+                    ? ([theme.gradientStart, theme.gradientEnd] as [string, string])
+                    : (['#C8C8C8', '#ADADAD'] as [string, string])
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.gradientBtn}
+              >
+                {busyMethod === 'share' ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="share-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.gradientBtnText}>Share</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.actionHint}>
+            {filteredTransactions.length === 0
+              ? 'No transactions match the current filters — nothing to export.'
+              : !selectedFormat
+              ? 'Select a format above to enable export.'
+              : `Download saves the ${selectedFormat.toUpperCase()} to your device · Share opens the share sheet.`}
+          </Text>
         </View>
       </View>
     </Modal>
@@ -457,26 +485,46 @@ const styles = StyleSheet.create({
   },
   radioDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
 
-  // ── Compile button
-  compileBtnWrap: { marginTop: spacing.xs },
-  compileBtn: {
+  // ── Action buttons (Download + Share)
+  actionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  outlineBtn: {
+    flex: 1,
+    height: 54,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    backgroundColor: colors.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outlineBtnText: {
+    fontSize: 16,
+    fontWeight: '800' as const,
+  },
+  gradientBtnWrap: { flex: 1 },
+  gradientBtn: {
     height: 54,
     borderRadius: radius.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  compileBtnText: {
+  gradientBtnText: {
     fontSize: 16,
     fontWeight: '800' as const,
     color: '#fff',
   },
 
-  emptyNote: {
-    fontSize: 13, fontWeight: '400' as const,
+  actionHint: {
+    fontSize: 12, fontWeight: '400' as const,
     color: colors.textMuted,
     textAlign: 'center' as const,
     marginTop: -spacing.xs,
+    lineHeight: 16,
   },
 });
 
