@@ -35,6 +35,7 @@ import { findParentByLabel } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
+import { cleanMerchantName, detectIsSubscription } from '../utils/merchantEnricher';
 import {
   isSelfTransfer,
   propagateSelfByRef,
@@ -247,6 +248,41 @@ const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repa
 const BUDGETABLE_PARENT_IDS = new Set([
   'food', 'travel', 'bills', 'shopping', 'entertainment', 'health', 'fuel', 'investments', 'education',
 ]);
+
+// Two-tier child LABEL → legacy flat categoryId.
+// Takes priority over parent-level mapping for children with their own legacy IDs.
+const CHILD_TO_LEGACY_CAT = {
+  // Food children
+  'Groceries':      'groceries',
+  // Income children
+  'Salary':         'salary',
+  'Freelance':      'salary',
+  // Transfers children
+  'P2P Transfer':   'transfer',
+  'Self':           'self',
+  'Lent':           'lent',
+  'Borrowed':       'borrowed',
+  // Education children
+  'Online Courses': 'education',
+  'School Fees':    'education',
+};
+
+// Two-tier parent LABEL → legacy flat categoryId (fallback when child not in CHILD_TO_LEGACY_CAT).
+const PARENT_TO_LEGACY_CAT = {
+  'Income':    'salary',
+  'Transfers': 'transfer',
+};
+
+/** Derive the legacy flat categoryId from a two-tier parentCategory + childCategory pair. */
+const twoTierToLegacyCatId = (parentCategory, childCategory) => {
+  if (childCategory && CHILD_TO_LEGACY_CAT[childCategory]) {
+    return CHILD_TO_LEGACY_CAT[childCategory];
+  }
+  if (parentCategory && PARENT_TO_LEGACY_CAT[parentCategory]) {
+    return PARENT_TO_LEGACY_CAT[parentCategory];
+  }
+  return findParentByLabel(parentCategory)?.id || null;
+};
 
 // Two-tier parent LABEL → legacy parent id.
 const PARENT_LABEL_TO_ID = {
@@ -1107,6 +1143,50 @@ export const useEPurseStore = create(
 
           const candidate = { ...txn, isReviewed: false };
           if (smsId) candidate.smsId = smsId;
+
+          // ── Merchant + category enrichment (merchantEnricher secondary layer) ──
+          // messageParser gives a raw merchant string. merchantEnricher strips VPA
+          // suffixes / processor prefixes and maps to brand name + two-tier
+          // category (parentCategory/childCategory from twoTierCategories.ts).
+          // rawMerchant   — original string, key for userCustomRules
+          // cleanMerchant — display-ready name shown in DailyQueueSection
+          // merchant      — same as cleanMerchant (backward-compat field)
+          // When no dictionary match, messageParser's flat categoryId is kept.
+          // Never clobbers user edits.
+          candidate.rawMerchant = candidate.merchant || '';
+          if (!candidate.userEditedCategory || !candidate.userEditedMerchant) {
+            const userRules = state.userCustomRules || {};
+            const { cleanMerchant, parentCategory, childCategory, isKnownSubscription } =
+              cleanMerchantName(candidate.merchant, userRules);
+            if (cleanMerchant && !candidate.userEditedMerchant) {
+              candidate.merchant = cleanMerchant;
+              candidate.cleanMerchant = cleanMerchant;
+            } else {
+              candidate.cleanMerchant = candidate.merchant || '';
+            }
+            if (parentCategory && !candidate.userEditedCategory) {
+              candidate.parentCategory = parentCategory;
+              candidate.childCategory  = childCategory;
+              const legacyId = twoTierToLegacyCatId(parentCategory, childCategory);
+              if (legacyId) candidate.categoryId = legacyId;
+            }
+            if (isKnownSubscription) candidate.isSubscription = true;
+          } else {
+            candidate.cleanMerchant = candidate.merchant || '';
+          }
+
+          // ── Subscription detection ────────────────────────────────────────
+          const subHistory = nextTransactions.map((t) => ({
+            amount: t.amount,
+            timestamp: t.createdAt,
+            cleanMerchant: t.merchant,
+            isExcludable: NON_SPEND_CATS.has(t.categoryId),
+          }));
+          candidate.isSubscription = detectIsSubscription(
+            { amount: candidate.amount, timestamp: candidate.createdAt, cleanMerchant: candidate.merchant },
+            subHistory,
+          );
+
           if (isDuplicate(nextTransactions, candidate, smsId, state.suppressedSmsIds || [])) return;
 
           const { accounts: accountsWithMatch, account } = ensureAccountForParsed(nextAccounts, candidate);
@@ -1336,29 +1416,7 @@ export const useEPurseStore = create(
 
       updateTwoTierCategory: (id, parentCategory, childCategory) =>
         set((s) => {
-          // Map two-tier (parent, child) → legacy categoryId that DEFAULT_CATEGORIES
-          // and budget calculations rely on. PARENT_CATEGORIES uses different ids
-          // ('income', 'transfers') from DEFAULT_CATEGORIES ('salary', 'transfer'),
-          // so we resolve child-level first, then fall back to a parent-level alias.
-          const childToLegacy = {
-            // Income children
-            Salary:          'salary',
-            Freelance:       'salary',
-            // Transfer children
-            'P2P Transfer':  'transfer',
-            Self:            'self',
-            Lent:            'lent',
-            Borrowed:        'borrowed',
-          };
-          const parentToLegacy = {
-            Income:    'salary',
-            Transfers: 'transfer',
-          };
-          const parentId = findParentByLabel(parentCategory)?.id;
-          const legacyCategoryId =
-            childToLegacy[childCategory] ||
-            parentToLegacy[parentCategory] ||
-            parentId;
+          const legacyCategoryId = twoTierToLegacyCatId(parentCategory, childCategory);
 
           return {
             transactions: s.transactions.map((t) =>

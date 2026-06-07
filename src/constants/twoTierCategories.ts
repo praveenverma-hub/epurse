@@ -116,6 +116,16 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     ],
   },
   {
+    id: 'education',
+    label: 'Education',
+    emoji: '🎓',
+    color: '#0EA5E9',
+    children: [
+      { id: 'online_courses', label: 'Online Courses', emoji: '💻' },
+      { id: 'school_fees',    label: 'School Fees',    emoji: '🏫' },
+    ],
+  },
+  {
     id: 'income',
     label: 'Income',
     emoji: '💰',
