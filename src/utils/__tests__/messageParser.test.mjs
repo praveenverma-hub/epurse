@@ -319,11 +319,52 @@ const REAL_WORLD = [
   },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 5 — ICICI real-world format coverage (new patterns added Jun-26)
+// ─────────────────────────────────────────────────────────────────────────────
+const ICICI_FORMATS = [
+  {
+    // "debited; PAYEE SO credited" — semicolon-separated beneficiary format.
+    // smsParser fix: '; ' added to LEFT_ANCHORS + ' SO '/' CREDITED' to RIGHT_ANCHORS.
+    // Known messageParser issue: merchant currently resolves to 'dispute' (trailing noise).
+    name: 'ICICI UPI debit — semicolon beneficiary format (Vikram Singh)',
+    sender: 'ICICIB',
+    sms: 'ICICI Bank Acct XX708 debited for Rs 800.00 on 05-Jun-26; VIKRAM SINGH SO credited. UPI:109957293799. Call 18002662 for dispute. SMS BLOCK 708 to 9215676766.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 800, accountMask: '708' },
+  },
+  {
+    // InfoTRF to FD — internal Fixed Deposit transfer, should be Bank account, self-transfer.
+    // smsParser fix: SELF_TRANSFER_REGEX extended with info\s*trf / trf\s+to\s+fd.
+    // Known messageParser issues: accountType wrongly 'Credit Card'; accountMask null.
+    name: 'ICICI InfoTRF to Fixed Deposit (self-transfer)',
+    sender: 'ICICIB',
+    sms: 'ICICI Bank Acc XX708 debited Rs. 1,70,000.00 on 30-May-26 InfoTRF TO FD no..Avl Bal Rs. 30,570.12.To dispute call 18002662 or SMS BLOCK 708 to 9215676766',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 170000, accountMask: '708' },
+  },
+  {
+    // NEFT delivery confirmation sent to the INITIATOR (sender).
+    // "credited to the beneficiary account" = our NEFT reached the recipient → our side is DEBIT.
+    // Known messageParser issue: type resolves to 'credit' (sees 'credited' keyword).
+    name: 'ICICI NEFT outgoing — delivery confirmation to sender',
+    sender: 'ICICIB',
+    sms: 'ICICI BANK NEFT Transaction with reference number IN52611200536803 for Rs. 587418.00 has been credited to the beneficiary account on 22-04-2026 at 10:36:44',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 587418 },
+  },
+  {
+    // "credited...from NAME" UPI inward — smsParser fix: ' FROM ' added to LEFT_ANCHORS.
+    name: 'ICICI UPI credit — FROM-pattern merchant (Divyanshu Sriva)',
+    sender: 'ICICIB',
+    sms: 'Dear Customer, Acct XX708 is credited with Rs 1.00 on 07-Jun-26 from DIVYANSHU SRIVA. UPI:615833843559-ICICI Bank.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 1, accountMask: '708', merchant: 'DIVYANSHU SRIVA' },
+  },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
   ['Lookalike (spam / decoy)', LOOKALIKE],
   ['Real-world (P2P / self-transfer)', REAL_WORLD],
+  ['ICICI format coverage (Jun-26)', ICICI_FORMATS],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

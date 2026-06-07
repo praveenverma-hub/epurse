@@ -167,6 +167,8 @@ const LEFT_ANCHORS = [
   'PAYMENT TO', 'PAYMENT OF', 'PAYMENT FOR',
   'TO VPA', 'TO M/S', 'FROM VPA',
   'INFO:', 'INFO-', 'INF*', 'INF:', 'WPM*', 'WP*', 'POS ',
+  '; ',      // ICICI "debited; PAYEE credited" format
+  ' FROM ',  // credit messages: "credited from NAME"
   ' AT ', ' TO ', ' @ ',
 ];
 
@@ -176,7 +178,10 @@ const RIGHT_ANCHORS = [
   ' NEFT', ' IMPS', ' RTGS', ' DT ', ' DATED ', ' TXN', ' TRX',
   ' AVL ', ' AVL.', ' AVAILABLE', ' BAL', ' BALANCE',
   ' INFO ', ' NOT YOU', ' CALL ', ' SMS BLOCK', ' TO BLOCK',
-  ' HELP ', ' HELPLINE', ' DISPUTE', '.', ',', ';',
+  ' HELP ', ' HELPLINE', ' DISPUTE',
+  ' SO ',        // "VIKRAM SINGH SO CREDITED" — stop before role word
+  ' CREDITED',   // stop before credited
+  '.', ',', ';',
 ];
 
 // =============================================================================
@@ -191,9 +196,18 @@ const ALL_DIGITS          = /^\d+$/;
 
 // Self-transfer / non-expense detection — text-level signals
 const SELF_TRANSFER_REGEX =
-  /(?:from\s+a\/?c[^.]{0,40}to\s+a\/?c)|(?:credited\b.{0,30}\bdebited)|(?:debited\b.{0,30}\bcredited)|(?:own\s+account)|(?:self\s+transfer)|(?:fund\s+transfer\s+to\s+own)/i;
+  /(?:from\s+a\/?c[^.]{0,40}to\s+a\/?c)|(?:credited\b.{0,30}\bdebited)|(?:debited\b.{0,30}\bcredited)|(?:own\s+account)|(?:self\s+transfer)|(?:fund\s+transfer\s+to\s+own)|(?:info\s*trf\b)|(?:\btrf\s+to\s+fd\b)|(?:transfer\s+to\s+(?:fd|fixed\s+deposit))/i;
 
 const ATM_REGEX = /\batm\b.{0,40}\bwithdraw/i;
+
+// Generic phrases that are never real merchants — discarded after isolation
+const JUNK_RAW_MERCHANT = new Set([
+  'THE BENEFICIARY ACCOUNT',
+  'BENEFICIARY ACCOUNT',
+  'YOUR ACCOUNT',
+  'THIS ACCOUNT',
+  'THE ACCOUNT',
+]);
 
 const AMOUNT_REGEX =
   /(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)|([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)\s*(?:rs\.?|inr|₹)/i;
@@ -414,7 +428,8 @@ export function parseSms(rawText: unknown, userRules: UserRules = {}): ParsedSms
   // ── Raw merchant isolation ──
   let rawMerchant = '';
   try {
-    rawMerchant = isolateRawMerchant(upper);
+    const isolated = isolateRawMerchant(upper);
+    rawMerchant = JUNK_RAW_MERCHANT.has(isolated) ? '' : isolated;
   } catch { /* leave '' */ }
 
   // ── Sanitize + map ──

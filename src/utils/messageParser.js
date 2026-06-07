@@ -195,10 +195,10 @@ const AMOUNT_REGEX_GLOBAL =
 // NOTE: Only whitespace + mask chars (x, *, •) allowed between the keyword and the
 // digits — prevents "Card spends of INR 8497" from capturing 8497 as a mask.
 const ACCOUNT_REGEX =
-  /(?:a\/c|acct|account|card(?:\s+ending)?)\.?\s*(?:no\.?\s*)?[xX*•·]{0,8}\s*([xX*•·]*\d{3,6})/i;
+  /(?:a\/c|acct?|account|card(?:\s+ending)?)\.?\s*(?:no\.?\s*)?[xX*•·]{0,8}\s*([xX*•·]*\d{3,6})/i;
 
 const FIRST_ACCOUNT_EVENT_REGEX =
-  /(?:a\/c|acct\.?|account)\s*[xX*•·]{0,8}(\d{3,6})\s+(debited|credited|deposited|withdrawn|deducted|refunded|received)\b/i;
+  /(?:a\/c|acct?\.?|account)\s*[xX*•·]{0,8}(\d{3,6})\s+(debited|credited|deposited|withdrawn|deducted|refunded|received)\b/i;
 
 // Every masked account/card number in the body (global). Used for self-transfer
 // detection: a single SMS that references two accounts (e.g. "Acct XX171 debited
@@ -399,7 +399,7 @@ const NON_FINANCIAL_DLT_KEYS = [
 ];
 
 const inferAccountType = (text) => {
-  if (/credit\s+card|cc\b|c\.c\./i.test(text)) return ACCOUNT_TYPES.CREDIT_CARD;
+  if (/credit\s+card|\bcc\b|c\.c\./i.test(text)) return ACCOUNT_TYPES.CREDIT_CARD;
   // Debit card / ATM: explicit "debit card", or an ATM / cash withdrawal (always
   // a debit/ATM card), or a "Card ending …" reference WITHOUT "credit card".
   // Keeps debit-card spends segregated from generic bank-account ("A/c") debits.
@@ -689,7 +689,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // Check for "credited to beneficiary" or "debited from beneficiary" patterns.
   // These indicate money moved for the OTHER party, so it's the opposite direction
   // from the user's perspective.
-  const creditedToOther = /credited\s+to\s+(?:beneficiary|your\s+(?:beneficiary|account))/i.test(text);
+  const creditedToOther = /credited\s+to\s+(?:the\s+|a\s+)?(?:beneficiary|your\s+(?:beneficiary|account))/i.test(text);
   const debitedFromOther = /debited\s+from\s+beneficiary/i.test(text);
 
   // Direction is read from `textSansFuture` (future clauses stripped) so a
