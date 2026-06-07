@@ -65,6 +65,10 @@ const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
 const LB_SETTLED_CATS = new Set(['lent_settled', 'borrow_repaid']);
 const LB_SETTLED_RETENTION_MS = 365 * DAY_MS;
 
+/** CC-payment prompts only fire for recent payments; older swept SMS are ignored
+ *  outright (never prompted, never filed) so ccHandledSmsIds can't balloon. */
+const CC_PROMPT_MAX_AGE_MS = 5 * DAY_MS;
+
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
 const SUPPRESS_SMS_CAP = 2500;
 
@@ -386,10 +390,15 @@ export const useEPurseStore = create(
       //   { monthKey, totalActual, totalCap, status, overshoot, streakAfter, savedAmount }
       pendingCelebration: null,
 
-      // Set when a CC payment SMS arrives on an untracked card.
-      // Shape: { amount, accountId, accountMask, bankName }
+      // Set when a CC payment SMS arrives and hasn't been answered yet.
+      // Shape: { amount, accountId, accountMask, bankName, smsId }
       // Cleared by confirmCCTrueUp or dismissCCPaymentPrompt.
       pendingCCPayment: null,
+
+      // SMS `_id`s of CC payments the user has already answered (True-up or Skip).
+      // Stops the inbox sweep from re-opening the prompt for the same payment on
+      // every app launch, while still asking for genuinely new payments.
+      ccHandledSmsIds: [],
 
       // Per-cycle dedup for the mid-month nudge (one notification per cycle).
       lastMidmonthNudgeMonth: null,
@@ -956,9 +965,27 @@ export const useEPurseStore = create(
        *           regardless of timing.
        * Returns the parsed object, or null if not financial / duplicate.
        */
-      applyCCPayment: ({ amount, accountMask, bankName }) => {
+      applyCCPayment: ({ amount, accountMask, bankName }, smsId = null, receivedAt = null) => {
         if (!amount || amount <= 0 || amount > MAX_ALLOWED_AMOUNT) return null;
         const state = get();
+        const sid = smsId ? String(smsId) : null;
+
+        // ── IGNORE STALE PAYMENTS ────────────────────────────────────────
+        // Only prompt for payments from the last few days. Older swept SMS are
+        // dropped outright — not prompted and NOT filed in ccHandledSmsIds — so
+        // an initial inbox sweep of months of history can't balloon that list.
+        const ts = receivedAt ? new Date(receivedAt).getTime() : NaN;
+        if (!Number.isNaN(ts) && Date.now() - ts > CC_PROMPT_MAX_AGE_MS) return null;
+
+        // ── ASK-ONCE-PER-PAYMENT ─────────────────────────────────────────
+        // Each distinct CC-payment SMS prompts exactly once. Once the user has
+        // responded — True-up (confirmCCTrueUp) or Skip (dismissCCPaymentPrompt)
+        // — its smsId is filed in ccHandledSmsIds. The inbox sweep re-reads the
+        // whole inbox on every app open, so without this guard the SAME payment
+        // SMS would re-open the sheet each launch. A genuinely new payment
+        // (different smsId) is NOT in the set, so it still prompts as expected.
+        if (sid && (state.ccHandledSmsIds || []).includes(sid)) return null;
+
         const pseudoTxn = {
           amount,
           type:        TRANSACTION_TYPES.CREDIT,
@@ -970,9 +997,6 @@ export const useEPurseStore = create(
           ensureAccountForParsed([...state.accounts], pseudoTxn);
         if (!account) return null;
 
-        // ── ALWAYS-ASK MODE ──────────────────────────────────────────────
-        // Every detected CC payment surfaces the prompt. User picks
-        // "True-up to Zero" → confirmCCTrueUp() OR "Skip" → balance unchanged.
         set({
           accounts: accountsWithMatch,
           pendingCCPayment: {
@@ -980,37 +1004,16 @@ export const useEPurseStore = create(
             accountId:   account.id,
             accountMask: account.mask  || accountMask || null,
             bankName:    account.bankName || bankName || null,
+            smsId:       sid,
           },
         });
         return { ccPayment: 'pending', accountId: account.id };
-
-        // ── PREVIOUS BEHAVIOUR (kept for re-enable) ──────────────────────
-        // Asked only on the FIRST payment per card, then auto-applied the
-        // delta on subsequent payments. Uncomment this block (and remove the
-        // unconditional set above) to restore it.
-        //
-        // if (!account.ccPaymentsTracked) {
-        //   set({
-        //     accounts: accountsWithMatch,
-        //     pendingCCPayment: {
-        //       amount,
-        //       accountId:   account.id,
-        //       accountMask: account.mask  || accountMask || null,
-        //       bankName:    account.bankName || bankName || null,
-        //     },
-        //   });
-        //   return { ccPayment: 'pending', accountId: account.id };
-        // }
-        //
-        // // Already tracking — apply the payment delta automatically.
-        // const nextAccounts = applyDelta(accountsWithMatch, account.id, pseudoTxn);
-        // set({ accounts: nextAccounts });
-        // return { ccPayment: true, accountId: account.id, amount };
       },
 
-      // User tapped "True-up to Zero" — zero out the CC account and start tracking.
+      // User tapped "True-up to Zero" — zero the CC balance, start tracking, and
+      // file this payment's SMS so the sweep doesn't re-prompt the same one.
       confirmCCTrueUp: () => {
-        const { pendingCCPayment, accounts } = get();
+        const { pendingCCPayment, accounts, ccHandledSmsIds } = get();
         if (!pendingCCPayment) return;
         set({
           accounts: accounts.map((a) =>
@@ -1018,12 +1021,22 @@ export const useEPurseStore = create(
               ? { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() }
               : a
           ),
+          ccHandledSmsIds: appendSuppressedSmsIds(ccHandledSmsIds || [], [pendingCCPayment.smsId]),
           pendingCCPayment: null,
         });
       },
 
-      // User tapped "Skip" — discard without changing the account.
-      dismissCCPaymentPrompt: () => set({ pendingCCPayment: null }),
+      // User tapped "Skip" — leave the balance untouched, but file this payment's
+      // SMS so the sweep won't re-prompt this same one. A future payment still asks.
+      dismissCCPaymentPrompt: () => {
+        const { pendingCCPayment, ccHandledSmsIds } = get();
+        set({
+          ccHandledSmsIds: pendingCCPayment
+            ? appendSuppressedSmsIds(ccHandledSmsIds || [], [pendingCCPayment.smsId])
+            : (ccHandledSmsIds || []),
+          pendingCCPayment: null,
+        });
+      },
 
       ingestMessage: (rawMessage, opts = {}) => {
         const parsedResult = parseMessageDetailed(rawMessage, opts);
@@ -1032,7 +1045,7 @@ export const useEPurseStore = create(
             parsedResult?.error?.code === 'credit_card_payment_notification' &&
             parsedResult.ccPayment
           ) {
-            get().applyCCPayment(parsedResult.ccPayment);
+            get().applyCCPayment(parsedResult.ccPayment, opts.smsId, opts.receivedAt);
           }
           // Surface CC bill reminders as in-app notifications.
           if (
@@ -2070,6 +2083,7 @@ export const useEPurseStore = create(
           lastSmsDate: null,
           lastCompactedAt: null,
           suppressedSmsIds: [],
+          ccHandledSmsIds: [],
           manualTxnSeq: 0,
           userName: '',
           userPhones: [],
@@ -2110,6 +2124,7 @@ export const useEPurseStore = create(
             lastSmsDate: null,
             lastCompactedAt: null,
             suppressedSmsIds: [],
+            ccHandledSmsIds: [],
             manualTxnSeq: 0,
             // Keep userName/hasOnboarded/smsPermissionGranted if present so
             // the user isn't bounced back into onboarding after the wipe.
@@ -2455,6 +2470,7 @@ export const useEPurseStore = create(
         budgetBreachNotified: state.budgetBreachNotified,
         pendingCelebration:    state.pendingCelebration,
         pendingCCPayment:      state.pendingCCPayment      ?? null,
+        ccHandledSmsIds:       state.ccHandledSmsIds       ?? [],
         lastMidmonthNudgeMonth: state.lastMidmonthNudgeMonth,
         xp: state.xp,
         reviewStreak: state.reviewStreak,
