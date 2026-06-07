@@ -5,6 +5,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -15,8 +16,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
+const WINDOW_H = Dimensions.get('window').height;
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -472,18 +474,22 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}
+      style={styles.overlay}
     >
-      <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Tap the dark area above to dismiss */}
+      <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => navigation.goBack()} />
+
+      <View style={styles.container}>
+        <View style={styles.sheetHandle} />
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backText}>←</Text>
-          </TouchableOpacity>
           <Text style={styles.title}>Add transaction</Text>
-          <View style={{ width: 40 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: WINDOW_H * 0.72 }}
+        >
           <>
             <Field label="Amount (₹) · Max 10 crore">
               <TextInput
@@ -744,6 +750,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             <LinkContactModal
               visible={lbPickerOpen}
               categoryId={legacyCategoryId}
+              suggestedPersons={[]}
               onConfirm={(contactInfo: any) => {
                 setLbPickerOpen(false);
                 commitTransaction({
@@ -763,7 +770,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             />
           </>
         </ScrollView>
-      </SafeAreaView>
+      </View>
 
       {/* ── Two-tier category picker sheet ──────────────────────────────── */}
       <Modal
@@ -855,25 +862,29 @@ const Seg = ({
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
+  overlay: {
+    flex: 1,
+    backgroundColor: '#0006',
+    justifyContent: 'flex-end',
+  },
+  container: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingTop: spacing.sm,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: 'center',
+    marginBottom: spacing.sm,
+  },
+  headerRow: {
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.card,
-  },
-  backText: { fontSize: 22, color: colors.textPrimary },
   title: { ...typography.h2, fontWeight: '700' as const, color: colors.textPrimary },
 
   tabs: {
@@ -895,7 +906,7 @@ const styles = StyleSheet.create({
   tabText: { ...typography.bodyBold, fontWeight: '600' as const, color: colors.textSecondary },
   tabTextActive: { color: '#fff' },
 
-  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.xl },
 
   field: { marginBottom: spacing.lg },
   fieldLabel: {

@@ -50,7 +50,7 @@ export default function AppNavigator() {
         <Stack.Screen
           name="AddTransaction"
           component={AddTransactionScreen}
-          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }}
         />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />

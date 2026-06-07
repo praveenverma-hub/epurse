@@ -188,39 +188,38 @@ export default function AccountsScreen({ navigation }) {
           </View>
         ) : null}
 
-        {/* CRED-style cards */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.cardsScroll}
-          contentContainerStyle={styles.cardsRow}
-          snapToInterval={296}
-          decelerationRate="fast"
-        >
-          {sortedAccounts.map((a) => (
-            <AccountCard
-              key={a.id}
-              account={a}
-              active={isFocused}
-              showBalance={!BALANCE_SENSITIVE.has(a.type) || balancesVisible}
-              holderName={userName}
-              // onPress={() => navigation.navigate('Transactions', { accountId: a.id })}
-              onDelete={() =>
-                setConfirm({
-                  title: 'Remove account?',
-                  message: `Remove "${a.name}"?\n\nTransactions will be kept but unlinked.`,
-                  primaryText: 'Remove',
-                  destructive: true,
-                  secondaryText: 'Cancel',
-                  onSecondary: () => setConfirm(null),
-                  onConfirm: () => { deleteAccount(a.id); setConfirm(null); },
-                })
-              }
-            />
-          ))}
-
-          {/* Add-account card removed — use the + button in the header */}
-        </ScrollView>
+        {/* CRED-style cards — hidden when no accounts */}
+        {sortedAccounts.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.cardsScroll}
+            contentContainerStyle={styles.cardsRow}
+            snapToInterval={296}
+            decelerationRate="fast"
+          >
+            {sortedAccounts.map((a) => (
+              <AccountCard
+                key={a.id}
+                account={a}
+                active={isFocused}
+                showBalance={!BALANCE_SENSITIVE.has(a.type) || balancesVisible}
+                holderName={userName}
+                onDelete={() =>
+                  setConfirm({
+                    title: 'Remove account?',
+                    message: `Remove "${a.name}"?\n\nTransactions will be kept but unlinked.`,
+                    primaryText: 'Remove',
+                    destructive: true,
+                    secondaryText: 'Cancel',
+                    onSecondary: () => setConfirm(null),
+                    onConfirm: () => { deleteAccount(a.id); setConfirm(null); },
+                  })
+                }
+              />
+            ))}
+          </ScrollView>
+        ) : null}
 
         {/* Anchor-adjustment hint */}
         {sortedAccounts.length > 0 ? (
