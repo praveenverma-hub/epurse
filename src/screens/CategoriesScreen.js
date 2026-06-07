@@ -141,7 +141,7 @@ const CategoriesScreen = ({ navigation }) => {
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ============= Auto-import SMS — HIDDEN =============
-            SMS permission is now requested during onboarding (PermissionScreen),
+            SMS permission is now requested during onboarding (OnboardingDeck),
             so this in-app toggle is redundant. Keeping the implementation here
             so we can re-enable a "Manage SMS access" sub-screen later if needed.
 

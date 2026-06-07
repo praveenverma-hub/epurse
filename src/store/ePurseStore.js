@@ -331,6 +331,10 @@ export const useEPurseStore = create(
       // The user's own mobile number(s) linked to their bank accounts / UPI.
       // Used to detect self transfers when money lands "by a/c linked to mobile …".
       userPhones: [],
+      // Absolute time (epoch ms) onboarding completed. Drives time-boxed first-run
+      // UI such as the inline "Top 30-Day Vendor Fix" widget (shown <24h after this).
+      // null for users onboarded before this field existed (widget simply won't show).
+      userOnboardedAt: null,
       smsAutoImport: false,
       lastSmsSync: null,   // wall-clock time of last sync run (legacy, kept for compat)
       lastSmsDate: null,   // max SMS `date` field (epoch ms) we have ever ingested —
@@ -426,6 +430,8 @@ export const useEPurseStore = create(
         }),
 
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
+      /** Stamp the moment onboarding completes (defaults to now). */
+      setUserOnboardedAt: (ts) => set({ userOnboardedAt: ts ?? Date.now() }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
 
@@ -2435,6 +2441,7 @@ export const useEPurseStore = create(
         lastCompactedAt: state.lastCompactedAt,
         userName: state.userName,
         userPhones: state.userPhones,
+        userOnboardedAt: state.userOnboardedAt,
         hasOnboarded: state.hasOnboarded,
         smsPermissionGranted: state.smsPermissionGranted,
         contactsPermissionGranted: state.contactsPermissionGranted,

@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { useEPurseStore } from '../store/ePurseStore';
 
-import PermissionScreen    from '../screens/PermissionScreen';
+import OnboardingDeck, { AccountFilterScreen } from '../screens/OnboardingExperience';
 import MainTabNavigator    from './MainTabNavigator';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
@@ -21,18 +21,26 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName={hasOnboarded ? 'Main' : 'Permission'}
+        initialRouteName={hasOnboarded ? 'Main' : 'Onboarding'}
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
           contentStyle: { backgroundColor: '#F4F5F7' },
         }}
       >
-        {/* First-launch onboarding */}
+        {/* First-launch onboarding — 4-slide deck + secure registration handshake */}
         <Stack.Screen
-          name="Permission"
-          component={PermissionScreen}
-          options={{ animation: 'fade' }}
+          name="Onboarding"
+          component={OnboardingDeck}
+          options={{ animation: 'fade', gestureEnabled: false }}
+        />
+
+        {/* "Is this yours?" account filter — shown once, right after the SMS
+            permission handshake and before the dashboard mounts. */}
+        <Stack.Screen
+          name="AccountFilter"
+          component={AccountFilterScreen}
+          options={{ animation: 'fade', gestureEnabled: false }}
         />
 
         {/* Main tab navigator — Dashboard / Transactions / Insights / Accounts */}

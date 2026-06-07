@@ -41,6 +41,7 @@ import { spacing, radius } from '../constants/theme';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import TransactionItemRaw from '../components/TransactionItem';
 import EmptyState from '../components/EmptyState';
+import { AccountAnchorBanner } from './OnboardingExperience';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{ txn: Txn }>;
@@ -332,6 +333,9 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // FlatList header: lives entirely inside the pocket sheet — no z-index tricks.
   const listHeaderComponent = (
     <View style={styles.pocketContent}>
+      {/* First-visit nudge: prompt the user to anchor their live balance.
+          Self-hides once the account is anchored or the toast is dismissed. */}
+      <AccountAnchorBanner account={account as any} position="top" />
       <View style={styles.summaryBox}>
         <Text style={styles.summaryLabel}>{summaryLabel}</Text>
         <Text style={styles.summaryValue}>{formatMoney(summaryValue)}</Text>
