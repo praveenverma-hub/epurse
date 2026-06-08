@@ -42,7 +42,7 @@ import {
   SELF_TXN_FIELDS,
 } from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification } from '../utils/notifications';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification } from '../utils/notifications';
 import { useNotificationStore } from './useNotificationStore';
 import {
   computeEqualSplit,
@@ -426,10 +426,10 @@ export const useEPurseStore = create(
       //   { monthKey, totalActual, totalCap, status, overshoot, streakAfter, savedAmount }
       pendingCelebration: null,
 
-      // Set when a CC payment SMS arrives and hasn't been answered yet.
-      // Shape: { amount, accountId, accountMask, bankName, smsId }
-      // Cleared by confirmCCTrueUp or dismissCCPaymentPrompt.
-      pendingCCPayment: null,
+      // Queue of CC payments waiting for user response.
+      // Each item: { amount, accountId, accountMask, bankName, smsId }
+      // The modal shows queue[0]; confirm/dismiss shifts to the next.
+      pendingCCPaymentQueue: [],
 
       // SMS `_id`s of CC payments the user has already answered (True-up or Skip).
       // Stops the inbox sweep from re-opening the prompt for the same payment on
@@ -1020,7 +1020,10 @@ export const useEPurseStore = create(
         // whole inbox on every app open, so without this guard the SAME payment
         // SMS would re-open the sheet each launch. A genuinely new payment
         // (different smsId) is NOT in the set, so it still prompts as expected.
+        // Also skip if this smsId is already waiting in the queue.
         if (sid && (state.ccHandledSmsIds || []).includes(sid)) return null;
+        const queue = state.pendingCCPaymentQueue || [];
+        if (sid && queue.some((p) => p.smsId === sid)) return null;
 
         const pseudoTxn = {
           amount,
@@ -1033,44 +1036,54 @@ export const useEPurseStore = create(
           ensureAccountForParsed([...state.accounts], pseudoTxn);
         if (!account) return null;
 
+        const newEntry = {
+          amount,
+          accountId:   account.id,
+          accountMask: account.mask  || accountMask || null,
+          bankName:    account.bankName || bankName || null,
+          smsId:       sid,
+        };
         set({
           accounts: accountsWithMatch,
-          pendingCCPayment: {
-            amount,
-            accountId:   account.id,
-            accountMask: account.mask  || accountMask || null,
-            bankName:    account.bankName || bankName || null,
-            smsId:       sid,
-          },
+          pendingCCPaymentQueue: [...queue, newEntry],
+        });
+        fireCCPaymentNotification({
+          amount,
+          accountMask: account.mask || accountMask || null,
+          bankName:    account.bankName || bankName || null,
         });
         return { ccPayment: 'pending', accountId: account.id };
       },
 
       // User tapped "True-up to Zero" — zero the CC balance, start tracking, and
       // file this payment's SMS so the sweep doesn't re-prompt the same one.
+      // Shifts queue so the next pending payment (if any) shows immediately.
       confirmCCTrueUp: () => {
-        const { pendingCCPayment, accounts, ccHandledSmsIds } = get();
-        if (!pendingCCPayment) return;
+        const { pendingCCPaymentQueue, accounts, ccHandledSmsIds } = get();
+        const current = (pendingCCPaymentQueue || [])[0];
+        if (!current) return;
         set({
           accounts: accounts.map((a) =>
-            a.id === pendingCCPayment.accountId
+            a.id === current.accountId
               ? { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() }
               : a
           ),
-          ccHandledSmsIds: appendSuppressedSmsIds(ccHandledSmsIds || [], [pendingCCPayment.smsId]),
-          pendingCCPayment: null,
+          ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
+          pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
         });
       },
 
       // User tapped "Skip" — leave the balance untouched, but file this payment's
       // SMS so the sweep won't re-prompt this same one. A future payment still asks.
+      // Shifts queue so the next pending payment (if any) shows immediately.
       dismissCCPaymentPrompt: () => {
-        const { pendingCCPayment, ccHandledSmsIds } = get();
+        const { pendingCCPaymentQueue, ccHandledSmsIds } = get();
+        const current = (pendingCCPaymentQueue || [])[0];
         set({
-          ccHandledSmsIds: pendingCCPayment
-            ? appendSuppressedSmsIds(ccHandledSmsIds || [], [pendingCCPayment.smsId])
+          ccHandledSmsIds:      current
+            ? appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId])
             : (ccHandledSmsIds || []),
-          pendingCCPayment: null,
+          pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
         });
       },
 

@@ -127,6 +127,30 @@ export async function fireBudgetBreachNotification({ scope, categoryName, actual
 }
 
 /**
+ * Fire an immediate notification when a CC bill payment is received by the bank.
+ * Silently no-ops if permission isn't granted.
+ */
+export async function fireCCPaymentNotification({ amount, accountMask, bankName }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+
+  const amtFmt  = `₹${Number(amount).toLocaleString('en-IN')}`;
+  const cardStr = accountMask ? `XX${accountMask}` : 'your credit card';
+  const bankStr = bankName ? `${bankName} ` : '';
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: '✅ CC Bill Payment Received',
+      body:  `${amtFmt} received on ${bankStr}Credit Card ${cardStr}`,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger: null,
+  });
+}
+
+/**
  * Fires a soft mid-cycle nudge notification. Same channel as budget breaches
  * but with a friendlier tone (passed in as title/body from the store action).
  * No-ops without notification permission.

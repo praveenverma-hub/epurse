@@ -1,9 +1,10 @@
 // =============================================================================
 // CCPaymentPromptModal
 // -----------------------------------------------------------------------------
-// Shown once when a credit-card payment SMS is detected on a card that has
-// never had its outstanding balance tracked. Asks the user whether to zero out
-// the card's balance (true-up) or skip.
+// Shown once per CC payment SMS detected on a tracked card.
+// Works through a queue — if multiple payment SMSes arrive before the user
+// responds, each one is shown in turn after the previous is dismissed/confirmed.
+// Shows the current outstanding balance so the user knows what they're zeroing.
 // =============================================================================
 
 import React, { useEffect, useRef } from 'react';
@@ -13,19 +14,22 @@ import {
 } from 'react-native';
 
 import { radius, spacing, typography, shadows } from '../constants/theme';
-import { formatCompact } from '../utils/format';
+import { formatCompact, formatCurrency } from '../utils/format';
 import { useEPurseStore } from '../store/ePurseStore';
 
 const CCPaymentPromptModal = () => {
-  const pendingCCPayment    = useEPurseStore((s) => s.pendingCCPayment);
-  const confirmCCTrueUp     = useEPurseStore((s) => s.confirmCCTrueUp);
+  const queue                  = useEPurseStore((s) => s.pendingCCPaymentQueue ?? []);
+  const accounts               = useEPurseStore((s) => s.accounts ?? []);
+  const confirmCCTrueUp        = useEPurseStore((s) => s.confirmCCTrueUp);
   const dismissCCPaymentPrompt = useEPurseStore((s) => s.dismissCCPaymentPrompt);
+
+  const current = queue[0] ?? null;
 
   const slideY = useRef(new Animated.Value(300)).current;
   const fade   = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (pendingCCPayment) {
+    if (current) {
       Animated.parallel([
         Animated.timing(fade, {
           toValue: 1, duration: 220, useNativeDriver: true,
@@ -40,13 +44,21 @@ const CCPaymentPromptModal = () => {
         Animated.timing(slideY, { toValue: 300, duration: 180, easing: Easing.in(Easing.ease), useNativeDriver: true }),
       ]).start();
     }
-  }, [!!pendingCCPayment]);
+  }, [!!current]);
 
-  if (!pendingCCPayment) return null;
+  if (!current) return null;
 
-  const { amount, accountMask, bankName } = pendingCCPayment;
+  const { amount, accountMask, bankName, accountId } = current;
   const cardLabel = [bankName, accountMask ? `••${accountMask}` : null]
     .filter(Boolean).join(' ');
+
+  // Current outstanding balance on the CC account (negative = you owe that amount).
+  const account      = accounts.find((a) => a.id === accountId);
+  const outstanding  = account ? Math.abs(Math.min(account.balance ?? 0, 0)) : 0;
+  const hasOutstanding = outstanding > 0;
+
+  // Badge showing queue depth when there's more than one payment waiting.
+  const queueCount = queue.length;
 
   return (
     <Modal
@@ -66,8 +78,15 @@ const CCPaymentPromptModal = () => {
         style={[styles.sheet, { transform: [{ translateY: slideY }] }]}
         pointerEvents="box-none"
       >
-        {/* Handle */}
-        <View style={styles.handle} />
+        {/* Handle + optional queue badge */}
+        <View style={styles.handleRow}>
+          <View style={styles.handle} />
+          {queueCount > 1 && (
+            <View style={styles.queueBadge}>
+              <Text style={styles.queueBadgeText}>{queueCount} payments</Text>
+            </View>
+          )}
+        </View>
 
         {/* Card icon + headline */}
         <Text style={styles.icon}>💳</Text>
@@ -76,15 +95,26 @@ const CCPaymentPromptModal = () => {
           <Text style={styles.cardLabel}>{cardLabel}</Text>
         ) : null}
 
-        {/* Amount pill */}
-        <View style={styles.amountPill}>
-          <Text style={styles.amountText}>₹{formatCompact(amount)}</Text>
+        {/* Summary block — outstanding + payment received in one card */}
+        <View style={styles.summaryCard}>
+          {hasOutstanding && (
+            <>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Current outstanding</Text>
+                <Text style={styles.summaryValueRed}>₹{formatCompact(outstanding)}</Text>
+              </View>
+              <View style={styles.divider} />
+            </>
+          )}
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Payment received</Text>
+            <Text style={styles.summaryValueGreen}>₹{formatCompact(amount)}</Text>
+          </View>
         </View>
 
-        {/* Body copy */}
+        {/* Question */}
         <Text style={styles.body}>
-          Looks like you may have fully settled your card. Would you like to
-          true-up your outstanding balance to zero?
+          Want to true-up your outstanding balance to zero?
         </Text>
 
         {/* CTA row */}
@@ -129,12 +159,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...shadows.elevated,
   },
+  handleRow: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+    position: 'relative',
+  },
   handle: {
     width: 36,
     height: 4,
     borderRadius: 2,
     backgroundColor: '#FFFFFF33',
-    marginBottom: spacing.lg,
+  },
+  queueBadge: {
+    position: 'absolute',
+    right: 0,
+    top: -2,
+    backgroundColor: '#6366F120',
+    borderWidth: 1,
+    borderColor: '#6366F155',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  queueBadgeText: {
+    color: '#A5B4FC',
+    fontSize: 11,
+    fontWeight: '600',
   },
   icon: {
     fontSize: 40,
@@ -154,20 +205,40 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: spacing.md,
   },
-  amountPill: {
-    backgroundColor: '#10B98120',
+  summaryCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF0A',
     borderWidth: 1,
-    borderColor: '#10B98144',
-    borderRadius: 999,
+    borderColor: '#FFFFFF18',
+    borderRadius: radius.md,
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 4,
     marginBottom: spacing.md,
   },
-  amountText: {
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  summaryLabel: {
+    color: '#FFFFFF88',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  summaryValueRed: {
+    color: '#F87171',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  summaryValueGreen: {
     color: '#6EE7B7',
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 0.4,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#FFFFFF14',
   },
   body: {
     color: '#FFFFFFAA',
@@ -175,6 +246,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     textAlign: 'center',
     marginBottom: spacing.lg,
+    marginTop: spacing.xs,
   },
   primaryBtn: {
     width: '100%',
