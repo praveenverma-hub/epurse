@@ -780,6 +780,11 @@ const CREDIT_LIMIT_MANDATE = [
     sender: 'ICICIB',
     sms: 'ICICI Bank Acct XX302 debited for Rs 1400.00 on 04-Jun-26; RADHIKA credited. UPI:607375520779. Call 18002662 for dispute. SMS BLOCK 302 to 9215676766.',
     expect: { accept: true, type: 'debit', amount: 1400, accountMask: '302', merchant: 'RADHIKA' } },
+  // ── HDFC "Sent Rs.X" multi-line UPI format (Gate-2: "sent rs") ───────────
+  { name: 'HDFC UPI "Sent Rs.X" multi-line format',
+    sender: 'HDFCBK',
+    sms: 'Sent Rs.3082.00\nFrom HDFC Bank A/C *5960\nTo JAYPEE INFRATECH LIMITED\nOn 08/06/26\nRef 615949682807\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808',
+    expect: { accept: true, type: 'debit', amount: 3082, accountType: 'Bank', accountMask: '5960', merchantIncludes: 'JAYPEE' } },
 ];
 
 const SUITES = [

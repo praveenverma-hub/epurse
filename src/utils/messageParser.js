@@ -165,6 +165,7 @@ const TRANSACTION_PHRASES = [
   'emi debited', 'emi deducted', 'emi paid',
   'paid to', 'paid via', 'paid at', 'paid from', 'amount paid',
   'sent to', 'sent via',
+  'sent rs', 'sent inr', 'sent ₹',  // "Sent Rs.3082.00\nFrom HDFC Bank A/C *5960\nTo MERCHANT" (HDFC UPI)
   'money sent',           // "Money Sent: Rs.60.00 to MERCHANT"
   'transferred to', 'transferred from', 'transfer of',
   'payment of', 'payment for',
