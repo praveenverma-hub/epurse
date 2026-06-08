@@ -43,6 +43,7 @@ import {
 } from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification } from '../utils/notifications';
+import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import { useNotificationStore } from './useNotificationStore';
 import {
   computeEqualSplit,
@@ -69,6 +70,8 @@ const LB_SETTLED_RETENTION_MS = 365 * DAY_MS;
 /** CC-payment prompts only fire for recent payments; older swept SMS are ignored
  *  outright (never prompted, never filed) so ccHandledSmsIds can't balloon. */
 const CC_PROMPT_MAX_AGE_MS = 5 * DAY_MS;
+// TODO: remove RAW_SMS_RETENTION_MS + rawSms/rawSender fields before production — preview-only debug data
+const RAW_SMS_RETENTION_MS = 3 * DAY_MS;
 
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
 const SUPPRESS_SMS_CAP = 2500;
@@ -1156,6 +1159,14 @@ export const useEPurseStore = create(
 
           const candidate = { ...txn, isReviewed: false };
           if (smsId) candidate.smsId = smsId;
+          // TODO: remove rawSms/rawSender before production — preview-only debug fields
+          if (IS_PREVIEW_BUILD) {
+            const txnAge = Date.now() - new Date(candidate.createdAt || Date.now()).getTime();
+            if (txnAge < RAW_SMS_RETENTION_MS) {
+              candidate.rawSms    = rawMessage || '';
+              candidate.rawSender = opts.sender || '';
+            }
+          }
 
           // ── Merchant + category enrichment (merchantEnricher secondary layer) ──
           // messageParser gives a raw merchant string. merchantEnricher strips VPA
@@ -1729,8 +1740,20 @@ export const useEPurseStore = create(
             if (k < aggCutoffKey) delete merged[k];
           });
 
+          // Strip preview-only debug fields from transactions older than 3 days.
+          // TODO: remove this block before production
+          const rawSmsCutoff = now - RAW_SMS_RETENTION_MS;
+          const finalRaw = stillRaw.map((t) => {
+            if (!t.rawSms) return t;
+            if (new Date(t.createdAt).getTime() < rawSmsCutoff) {
+              const { rawSms: _rs, rawSender: _rsd, ...rest } = t;
+              return rest;
+            }
+            return t;
+          });
+
           return {
-            transactions: stillRaw,
+            transactions: finalRaw,
             lentBorrowed: lentBorrowedPruned,
             monthlyAggregates: merged,
             lastCompactedAt: now,

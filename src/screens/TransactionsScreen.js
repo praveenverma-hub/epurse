@@ -47,6 +47,8 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import TransactionItem from '../components/TransactionItem';
+import TxnDebugSheet from '../components/TxnDebugSheet';
+import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
 import ExportSheet from '../components/ExportSheet';
@@ -188,6 +190,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [splitTxn,        setSplitTxn]        = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm,         setConfirm]         = useState(null);
+  const [debugTxn,        setDebugTxn]        = useState(null);
 
   // ── Route param reactivity ─────────────────────────────────────────────────
   useEffect(() => {
@@ -616,6 +619,7 @@ const TransactionsScreen = ({ navigation, route }) => {
             txn={item}
             onPressCategory={() => setActiveTxn(item)}
             onPressSplitChip={() => setSplitDetailsTxn(item)}
+            onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
           />
         )}
         ListHeaderComponent={
@@ -918,6 +922,10 @@ const TransactionsScreen = ({ navigation, route }) => {
         filteredTransactions={filtered}
         filterCtx={exportFilterCtx}
       />
+
+      {IS_PREVIEW_BUILD && (
+        <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
+      )}
 
     </SafeAreaView>
   );

@@ -49,6 +49,8 @@ import CheckInBanner from '../components/CheckInBanner';
 import CelebrationModal from '../components/CelebrationModal';
 import CCPaymentPromptModal from '../components/CCPaymentPromptModal';
 import TransactionItem from '../components/TransactionItem';
+import TxnDebugSheet from '../components/TxnDebugSheet';
+import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
@@ -104,6 +106,7 @@ const DashboardScreen = ({ navigation }) => {
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
   const [showSettings, setShowSettings] = useState(false);
+  const [debugTxn, setDebugTxn] = useState(null);
   const settingsSlide = useState(() => new Animated.Value(0))[0];
   // Dev-only: long-press vault to cycle tiers for visual preview.
   // null means "use real tier from streak".
@@ -266,10 +269,10 @@ const DashboardScreen = ({ navigation }) => {
               <TouchableOpacity
                 style={styles.avatarBtn}
                 onPress={() => navigation.navigate('RewardShop')}
-                onLongPress={() => {
+                onLongPress={IS_PREVIEW_BUILD ? () => {
                   setShowSettings(true);
                   Animated.spring(settingsSlide, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
-                }}
+                } : undefined}
                 activeOpacity={0.8}
               >
                 <Text style={styles.avatarInitial}>
@@ -372,6 +375,7 @@ const DashboardScreen = ({ navigation }) => {
               txn={t}
               onPressCategory={() => setActiveTxn(t)}
               onPressSplitChip={() => setSplitDetailsTxn(t)}
+              onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(t) : undefined}
             />
           ))
         )}
@@ -552,6 +556,10 @@ const DashboardScreen = ({ navigation }) => {
 
       {/* CC outstanding true-up prompt */}
       <CCPaymentPromptModal />
+
+      {IS_PREVIEW_BUILD && (
+        <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
+      )}
 
       {/* EPC claim sheet — surfaces automatically when a Zero-Transaction Day
           bonus is detected. User must consciously claim; crediting is deferred

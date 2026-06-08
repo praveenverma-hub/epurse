@@ -7,7 +7,7 @@ import { formatCurrency, formatDateTime } from '../utils/format';
 import { debitDisplayAmount, splitParticipantsLabel } from '../utils/split';
 import CategoryIcon from './CategoryIcon';
 
-const TransactionItem = ({ txn, onPress, onPressCategory, onPressSplitChip }) => {
+const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip }) => {
   const categories = useEPurseStore((s) => s.categories);
   const category = useMemo(
     () => categories.find((c) => c.id === txn.categoryId) || categories[categories.length - 1],
@@ -59,9 +59,15 @@ const TransactionItem = ({ txn, onPress, onPressCategory, onPressSplitChip }) =>
       </View>
 
       <View style={styles.right}>
-        <Text style={[styles.amount, { color: amountColor }]}>
-          {sign} {formatCurrency(displayAmount)}
-        </Text>
+        <TouchableOpacity
+          onLongPress={onLongPress}
+          activeOpacity={onLongPress ? 0.6 : 1}
+          disabled={!onLongPress}
+        >
+          <Text style={[styles.amount, { color: amountColor }]}>
+            {sign} {formatCurrency(displayAmount)}
+          </Text>
+        </TouchableOpacity>
         {txn.isSplit ? (
           <TouchableOpacity
             style={styles.splitTag}

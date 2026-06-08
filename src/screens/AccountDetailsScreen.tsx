@@ -40,11 +40,15 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing, radius } from '../constants/theme';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import TransactionItemRaw from '../components/TransactionItem';
+import TxnDebugSheet from '../components/TxnDebugSheet';
 import EmptyState from '../components/EmptyState';
 import { AccountAnchorBanner } from './OnboardingExperience';
+import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
-const TransactionItem = TransactionItemRaw as React.ComponentType<{ txn: Txn }>;
+const TransactionItem = TransactionItemRaw as React.ComponentType<{
+  txn: Txn; onLongPress?: () => void;
+}>;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -181,6 +185,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // ── Biometric gate ─────────────────────────────────────────────────────────
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!isSensitive);
+  const [debugTxn, setDebugTxn] = useState<Txn | null>(null);
   const [authFailed, setAuthFailed]           = useState(false);
   // Guards the iOS biometric overlay blip (briefly flips AppState → 'inactive')
   // so the AppState listener does not re-lock and re-prompt while a prompt is open.
@@ -396,7 +401,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={styles.txnRow}>
-              <TransactionItem txn={item} />
+              <TransactionItem
+                txn={item}
+                onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
+              />
             </View>
           )}
           ListHeaderComponent={listHeaderComponent}
@@ -415,6 +423,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           windowSize={9}
         />
       </View>
+
+      {IS_PREVIEW_BUILD && (
+        <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
+      )}
 
     </SafeAreaView>
   );
