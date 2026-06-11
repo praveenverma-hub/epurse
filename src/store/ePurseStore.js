@@ -256,6 +256,13 @@ const isGroupExcluded = (txn, groups) => {
   return !!(g?.excludeFromTotals);
 };
 
+/** Shared groups always carry the built-in 'me' member (deduped, listed first). Personal → []. */
+const ensureSelfMember = (type, members = []) => {
+  if (type !== 'shared') return [];
+  const others = (members || []).filter((m) => m && m.memberId !== 'me' && !m.isMe);
+  return [{ memberId: 'me', name: 'You', isMe: true }, ...others];
+};
+
 /** Adjust a group's materialised totalSpend by `delta` (floored at 0). No-op if id is falsy. */
 const adjustGroupTotal = (groups, groupId, delta) => {
   if (!groupId || !delta) return groups;
@@ -1085,9 +1092,7 @@ export const useEPurseStore = create(
 
       createGroup: ({ name, type, members = [], emoji = '', color = '#6366F1', excludeFromTotals = false }) => {
         const id = `grp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        const baseMembers = type === 'shared'
-          ? [{ memberId: 'me', name: 'You', isMe: true }, ...members]
-          : [];
+        const baseMembers = ensureSelfMember(type, members);
         const nowIso = new Date().toISOString();
         const group = {
           id,
@@ -1108,9 +1113,14 @@ export const useEPurseStore = create(
 
       updateGroup: (id, patches) => {
         set((s) => ({
-          groups: s.groups.map((g) =>
-            g.id === id ? { ...g, ...patches, lastActivityAt: new Date().toISOString() } : g
-          ),
+          groups: s.groups.map((g) => {
+            if (g.id !== id) return g;
+            const merged = { ...g, ...patches, lastActivityAt: new Date().toISOString() };
+            // Re-normalise members so editing never drops the built-in 'me' (the edit
+            // form passes back only the contacts, with 'me' stripped for display).
+            merged.members = ensureSelfMember(merged.type, merged.members);
+            return merged;
+          }),
         }));
       },
 

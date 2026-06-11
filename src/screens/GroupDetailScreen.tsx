@@ -24,6 +24,7 @@ const typography = typographyBase as unknown as Record<string, import('react-nat
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CreateGroupModal from '../components/CreateGroupModal';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
 import EmptyState from '../components/EmptyState';
 import type { Group, GroupExpenseData } from '../types/group';
@@ -33,6 +34,7 @@ const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any;
   hideGroupChip?: boolean;
   onPress?: () => void;
+  onPressCategory?: () => void;
 }>;
 
 interface NavLike {
@@ -79,6 +81,9 @@ export default function GroupDetailScreen({ route, navigation }: GroupDetailScre
   const group = useEPurseStore((s: any) => s.groups.find((g: Group) => g.id === groupId)) as Group | undefined;
   const transactions = useEPurseStore((s: any) => s.transactions) as any[];
   const lentBorrowed = useEPurseStore((s: any) => s.lentBorrowed) as any[];
+  const categories = useEPurseStore((s: any) => s.categories) as any[];
+  const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
+  const updateTwoTierCategory = useEPurseStore((s: any) => s.updateTwoTierCategory) as (id: string, parent: string, child: string) => void;
   const updateGroup = useEPurseStore((s: any) => s.updateGroup) as (id: string, patches: Partial<Group>) => void;
   const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense) as (id: string, data: GroupExpenseData) => void;
@@ -89,6 +94,7 @@ export default function GroupDetailScreen({ route, navigation }: GroupDetailScre
   const [editVisible, setEditVisible] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
+  const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
 
   // Group transactions sorted newest-first, including memos
   const groupTxns = useMemo(
@@ -271,7 +277,12 @@ export default function GroupDetailScreen({ route, navigation }: GroupDetailScre
             {t.isGroupMemo && (
               <Text style={styles.memoTag}>Paid by {t.groupSplit?.paidByName || 'other'}</Text>
             )}
-            <TransactionItem txn={t} hideGroupChip onPress={() => setDetailTxn(t)} />
+            <TransactionItem
+              txn={t}
+              hideGroupChip
+              onPress={() => setDetailTxn(t)}
+              onPressCategory={() => setCategoryTxn(t)}
+            />
           </View>
         )}
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 32 }]}
@@ -288,6 +299,29 @@ export default function GroupDetailScreen({ route, navigation }: GroupDetailScre
       <GroupTxnDetailSheet
         txn={detailTxn}
         onClose={() => setDetailTxn(null)}
+      />
+
+      {/* Category-only picker (manage modal restricted to switching category) */}
+      <CategoryPickerModal
+        visible={!!categoryTxn}
+        categories={categories}
+        selectedCategoryId={categoryTxn?.categoryId}
+        selectedParent={categoryTxn?.parentCategory}
+        selectedChild={categoryTxn?.childCategory}
+        isHidden={false}
+        isIgnored={false}
+        canSplit={false}
+        isSplitTxn={false}
+        categoryLocked={!!categoryTxn?.lbLocked}
+        onSelectCategory={(categoryId) => {
+          if (categoryTxn) updateTransactionCategory(categoryTxn.id, categoryId);
+          setCategoryTxn(null);
+        }}
+        onSelectTwoTier={(parent, child) => {
+          if (categoryTxn) updateTwoTierCategory(categoryTxn.id, parent, child);
+          setCategoryTxn(null);
+        }}
+        onClose={() => setCategoryTxn(null)}
       />
 
       <CreateGroupModal

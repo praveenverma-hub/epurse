@@ -1003,6 +1003,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         <GroupExpenseSheet
           visible={!!groupExpenseTxn}
           group={groupExpenseTxn.group}
+          presetAmount={groupExpenseTxn.txn?.amount}
           onClose={() => setGroupExpenseTxn(null)}
           onAdd={(expenseData) => {
             tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {

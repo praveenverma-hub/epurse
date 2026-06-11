@@ -47,9 +47,11 @@ interface GroupExpenseSheetProps {
   group: Group | null;
   onClose: () => void;
   onAdd: (expenseData: GroupExpenseData) => void;
+  /** When tagging an EXISTING transaction, its amount — prefilled and locked here. */
+  presetAmount?: number;
 }
 
-export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: GroupExpenseSheetProps) {
+export default function GroupExpenseSheet({ visible, group, onClose, onAdd, presetAmount }: GroupExpenseSheetProps) {
   const theme = useTheme();
   const toast = useToast();
   const accounts = useEPurseStore((s: any) => s.accounts) as AccountLike[];
@@ -65,13 +67,24 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
   const [catSheet, setCatSheet] = useState(false);
 
   const isShared = group?.type === 'shared';
-  const allMembers = useMemo(() => group?.members || [], [group]);
+  // Guarantee the built-in 'me' member is present for shared groups, even if a stored
+  // group lost it (e.g. an older edit) — so "You" always shows in payer + split.
+  const allMembers = useMemo(() => {
+    const ms = group?.members || [];
+    if (group?.type === 'shared' && !ms.some((m) => m.memberId === 'me')) {
+      return [{ memberId: 'me', name: 'You', isMe: true }, ...ms];
+    }
+    return ms;
+  }, [group]);
   const amount = parseFloat(amountRaw.replace(/[^\d.]/g, '')) || 0;
+  // Tagging an existing txn → amount comes from that txn and is fixed (so the
+  // split math matches the real transaction). Manual add → free entry.
+  const amountLocked = typeof presetAmount === 'number' && presetAmount > 0;
 
   // Reset on open
   useEffect(() => {
     if (!visible) return;
-    setAmountRaw('');
+    setAmountRaw(amountLocked ? String(presetAmount) : '');
     setMerchant('');
     setPayerIdx(0);
     setSplitMode('equal');
@@ -89,7 +102,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
         })),
       );
     }
-  }, [visible, group, accounts]);
+  }, [visible, group, accounts, amountLocked, presetAmount]);
 
   // Recompute equal shares when amount changes in equal mode
   useEffect(() => {
@@ -178,18 +191,25 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
           <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
           <View style={styles.sheet}>
             <View style={styles.handle} />
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.bodyContent}
+            >
             <Text style={styles.title}>Add Expense · {group.name}</Text>
 
-            {/* Amount */}
+            {/* Amount — prefilled & locked when tagging an existing transaction */}
             <TextInput
-              style={styles.amountInput}
+              style={[styles.amountInput, amountLocked && styles.amountInputLocked]}
               placeholder="₹ 0"
               placeholderTextColor={colors.textMuted}
               value={amountRaw}
               onChangeText={setAmountRaw}
               keyboardType="decimal-pad"
-              autoFocus
+              editable={!amountLocked}
+              autoFocus={!amountLocked}
             />
+            {amountLocked && <Text style={styles.amountHint}>From the transaction</Text>}
 
             {/* Merchant */}
             <TextInput
@@ -212,8 +232,8 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
               </View>
             </TouchableOpacity>
 
-            {/* Account (payer = me) */}
-            {(!isShared || allMembers[payerIdx]?.isMe) && accounts.length > 1 && (
+            {/* Account — personal groups (no payer concept) */}
+            {!isShared && accounts.length > 1 && (
               <>
                 <Text style={styles.sectionLabel}>Account</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.accountRow}>
@@ -224,7 +244,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
                       onPress={() => setAccountId(a.id)}
                     >
                       <Text
-                        style={[styles.accountChipTxt, accountId === a.id && { color: theme.primary, fontWeight: '700' }]}
+                        style={[styles.accountChipTxt, accountId === a.id && { color: theme.primary }]}
                         numberOfLines={1}
                       >
                         {a.name}
@@ -235,7 +255,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
               </>
             )}
 
-            {/* Payer + split (shared only) */}
+            {/* Payer → account → split (shared only) */}
             {isShared && (
               <>
                 <Text style={styles.sectionLabel}>Who paid?</Text>
@@ -246,12 +266,35 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
                       style={[styles.payerChip, payerIdx === i && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
                       onPress={() => setPayerIdx(i)}
                     >
-                      <Text style={[styles.payerChipTxt, payerIdx === i && { color: theme.primary, fontWeight: '700' }]}>
+                      <Text style={[styles.payerChipTxt, payerIdx === i && { color: theme.primary }]}>
                         {m.isMe ? '👤 You' : m.name}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
+
+                {/* Account — only when YOU paid; sits below "Who paid" */}
+                {allMembers[payerIdx]?.isMe && accounts.length > 1 && (
+                  <>
+                    <Text style={styles.sectionLabel}>Account</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.accountRow}>
+                      {accounts.map((a) => (
+                        <TouchableOpacity
+                          key={a.id}
+                          style={[styles.accountChip, accountId === a.id && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
+                          onPress={() => setAccountId(a.id)}
+                        >
+                          <Text
+                            style={[styles.accountChipTxt, accountId === a.id && { color: theme.primary }]}
+                            numberOfLines={1}
+                          >
+                            {a.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
 
                 <Text style={styles.sectionLabel}>Split</Text>
                 <View style={styles.modeRow}>
@@ -269,7 +312,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
                 </View>
 
                 {splitMode !== 'equal' && (
-                  <ScrollView style={styles.sharesList} showsVerticalScrollIndicator={false}>
+                  <View style={styles.sharesList}>
                     {shares.map((s, idx) => (
                       <View key={s.memberId} style={styles.shareRow}>
                         <Text style={styles.shareName} numberOfLines={1}>
@@ -287,7 +330,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
                         )}
                       </View>
                     ))}
-                  </ScrollView>
+                  </View>
                 )}
 
                 {splitMode === 'equal' && amount > 0 && (
@@ -307,6 +350,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd }: Gr
             <TouchableOpacity style={styles.cancel} onPress={onClose}>
               <Text style={styles.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -352,6 +396,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1.5, borderBottomColor: colors.divider,
     marginBottom: spacing.sm,
   },
+  amountInputLocked: { color: colors.textSecondary, borderBottomColor: 'transparent' },
+  amountHint: { ...typography.tiny, color: colors.textMuted, textAlign: 'center', marginTop: -spacing.xs, marginBottom: spacing.sm },
   nameInput: {
     backgroundColor: colors.background,
     borderRadius: radius.md,
@@ -383,7 +429,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: colors.divider,
     backgroundColor: colors.background, maxWidth: 140,
   },
-  accountChipTxt: { ...typography.small, color: colors.textSecondary },
+  // Constant weight so selecting a chip recolours it without changing its width
+  // (a fontWeight change would resize the text and make the row jump horizontally).
+  accountChipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   payerRow:   { flexDirection: 'row', marginBottom: spacing.sm },
   payerChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
@@ -391,7 +439,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: colors.divider,
     backgroundColor: colors.background,
   },
-  payerChipTxt: { ...typography.small, color: colors.textSecondary },
+  // Constant weight — see accountChipTxt note (prevents the "Who paid" row jumping on tap).
+  payerChipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   modeRow:    { flexDirection: 'row', gap: 8, marginBottom: spacing.sm },
   modeChip: {
     flex: 1, paddingVertical: spacing.sm,
@@ -400,7 +449,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   modeChipTxt: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
-  sharesList: { maxHeight: 180, marginBottom: spacing.xs },
+  bodyContent: { paddingBottom: spacing.sm },
+  sharesList: { marginBottom: spacing.xs },
   shareRow: {
     flexDirection: 'row', alignItems: 'center',
     marginBottom: spacing.xs,

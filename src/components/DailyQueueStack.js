@@ -36,6 +36,10 @@ import { formatCurrency, formatDateTime } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
 import CategoryPickerModal from './CategoryPickerModal';
 import LinkContactModal from './LinkContactModal';
+import SplitConfigModal from './SplitConfigModal';
+import GroupPickerSheet from './GroupPickerSheet';
+import GroupExpenseSheet from './GroupExpenseSheet';
+import CenterModal from './CenterModal';
 import QueueCapInfoSheet from './QueueCapInfoSheet';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -261,10 +265,21 @@ const DailyQueueStack = () => {
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTwoTierCategory    = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
+  // Full manage-panel actions (parity with Dashboard/Activity, available in the queue).
+  const setTransactionSplit       = useEPurseStore((s) => s.setTransactionSplit);
+  const setTransactionHidden      = useEPurseStore((s) => s.setTransactionHidden);
+  const ignoreTransaction         = useEPurseStore((s) => s.ignoreTransaction);
+  const deleteTransaction         = useEPurseStore((s) => s.deleteTransaction);
+  const tagTransactionToGroup     = useEPurseStore((s) => s.tagTransactionToGroup);
+  const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
 
   // Category picker state
   const [pickerTxn,  setPickerTxn]  = useState(null);
   const [lbLinkData, setLbLinkData] = useState(null); // { txn, categoryId }
+  const [splitTxn,   setSplitTxn]   = useState(null);
+  const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
+  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group }
+  const [confirm,    setConfirm]    = useState(null);
   const [showCapInfo, setShowCapInfo] = useState(false);
 
   // InboxZero: show celebration when user clears the last card this session
@@ -342,6 +357,80 @@ const DailyQueueStack = () => {
     setLbLinkData(null);
   }, []);
 
+  // Acting on a queued txn (group/split/hide) counts as reviewing it: award the
+  // capped review reward and clear it from the queue — same as categorising.
+  const clearAsReviewed = useCallback((id) => {
+    recordReview();
+    markReviewed(id);
+  }, [recordReview, markReviewed]);
+
+  // ── Manage actions (parity with the full panel) ──
+  const handleAddToGroup = useCallback(() => {
+    const t = pickerTxn;
+    setPickerTxn(null);
+    setGroupPickerTxn(t);
+  }, [pickerTxn]);
+
+  const handleRemoveFromGroup = useCallback(() => {
+    if (!pickerTxn) return;
+    untagTransactionFromGroup(pickerTxn.id);
+    clearAsReviewed(pickerTxn.id);
+    setPickerTxn(null);
+  }, [pickerTxn, untagTransactionFromGroup, clearAsReviewed]);
+
+  const handleOpenSplit = useCallback(() => {
+    const t = pickerTxn;
+    setPickerTxn(null);
+    setSplitTxn(t);
+  }, [pickerTxn]);
+
+  const handleToggleHidden = useCallback((hidden) => {
+    if (!pickerTxn) return;
+    const t = pickerTxn;
+    setPickerTxn(null);
+    setConfirm({
+      title: hidden ? 'Mark as Private?' : 'Make Public?',
+      message: hidden
+        ? 'This transaction will be private — hidden from default views but still counted in totals.'
+        : 'This transaction will be visible again in all default views.',
+      primaryText: hidden ? 'Mark Private' : 'Make Public',
+      destructive: hidden,
+      secondaryText: 'Cancel',
+      onSecondary: () => setConfirm(null),
+      onConfirm: () => { setTransactionHidden(t.id, hidden); clearAsReviewed(t.id); setConfirm(null); },
+    });
+  }, [pickerTxn, setTransactionHidden, clearAsReviewed]);
+
+  const handleIgnore = useCallback(() => {
+    if (!pickerTxn) return;
+    const t = pickerTxn;
+    setPickerTxn(null);
+    setConfirm({
+      title: 'Ignore transaction?',
+      message: 'This removes it from your balances and every total and chart. It will be treated as if it never happened.',
+      primaryText: 'Ignore',
+      destructive: true,
+      secondaryText: 'Cancel',
+      onSecondary: () => setConfirm(null),
+      onConfirm: () => { ignoreTransaction(t.id); setConfirm(null); }, // ignored ⇒ leaves the queue
+    });
+  }, [pickerTxn, ignoreTransaction]);
+
+  const handleDelete = useCallback(() => {
+    if (!pickerTxn) return;
+    const t = pickerTxn;
+    setPickerTxn(null);
+    setConfirm({
+      title: 'Delete transaction?',
+      message: 'This action cannot be undone.',
+      primaryText: 'Delete',
+      destructive: true,
+      secondaryText: 'Cancel',
+      onSecondary: () => setConfirm(null),
+      onConfirm: () => { deleteTransaction(t.id); setConfirm(null); },
+    });
+  }, [pickerTxn, deleteTransaction]);
+
   // Nothing to show — section is hidden
   if (queue.length === 0 && !showZero) return null;
 
@@ -418,14 +507,21 @@ const DailyQueueStack = () => {
         selectedCategoryId={pickerTxn?.categoryId}
         selectedParent={pickerTxn?.parentCategory}
         selectedChild={pickerTxn?.childCategory}
-        isHidden={false}
-        isIgnored={false}
+        isHidden={!!pickerTxn?.isHidden}
+        isIgnored={!!pickerTxn?.isIgnored}
         canSplit={!!pickerTxn && canSplitTransaction(pickerTxn)}
         isSplitTxn={!!pickerTxn?.isSplit}
         categoryLocked={!!pickerTxn?.lbLocked}
+        currentGroupId={pickerTxn?.groupId || null}
         onSelectCategory={handleSelectCategory}
         onSelectTwoTier={handleSelectTwoTier}
         onSelectLentBorrow={handleSelectLentBorrow}
+        onPressAddToGroup={handleAddToGroup}
+        onPressRemoveFromGroup={handleRemoveFromGroup}
+        onPressSplit={handleOpenSplit}
+        onToggleHidden={handleToggleHidden}
+        onIgnore={handleIgnore}
+        onDelete={handleDelete}
         onClose={handlePickerClose}
       />
 
@@ -435,6 +531,69 @@ const DailyQueueStack = () => {
         categoryId={lbLinkData?.categoryId}
         onConfirm={handleLinkContact}
         onClose={handleLbClose}
+      />
+
+      {/* ── Split ── */}
+      <SplitConfigModal
+        visible={!!splitTxn}
+        transaction={splitTxn}
+        onClose={() => setSplitTxn(null)}
+        onApply={(others, meta) => {
+          if (splitTxn) {
+            setTransactionSplit(splitTxn.id, others, meta);
+            clearAsReviewed(splitTxn.id);
+          }
+          setSplitTxn(null);
+        }}
+      />
+
+      {/* ── Add to group ── */}
+      <GroupPickerSheet
+        visible={!!groupPickerTxn}
+        txn={groupPickerTxn}
+        onClose={() => setGroupPickerTxn(null)}
+        onCreateNew={() => { setGroupPickerTxn(null); navigation.navigate('Groups'); }}
+        onPick={(groupId, group) => {
+          const txn = groupPickerTxn;
+          setGroupPickerTxn(null);
+          if (group?.type === 'shared') {
+            setGroupExpenseTxn({ txn, group });
+          } else {
+            tagTransactionToGroup(txn.id, groupId);
+            clearAsReviewed(txn.id);
+          }
+        }}
+      />
+
+      {groupExpenseTxn && (
+        <GroupExpenseSheet
+          visible={!!groupExpenseTxn}
+          group={groupExpenseTxn.group}
+          presetAmount={groupExpenseTxn.txn?.amount}
+          onClose={() => setGroupExpenseTxn(null)}
+          onAdd={(expenseData) => {
+            tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
+              paidByMemberId: expenseData.paidByMemberId,
+              paidByName: expenseData.paidByName,
+              shares: expenseData.shares,
+            } : null);
+            clearAsReviewed(groupExpenseTxn.txn.id);
+            setGroupExpenseTxn(null);
+          }}
+        />
+      )}
+
+      {/* ── Confirm (hide / ignore / delete) ── */}
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText || 'OK'}
+        destructive={!!confirm?.destructive}
+        secondaryText={confirm?.secondaryText}
+        onSecondary={confirm?.onSecondary}
+        onClose={() => setConfirm(null)}
+        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
 
       {/* ── Daily cap explainer ── */}

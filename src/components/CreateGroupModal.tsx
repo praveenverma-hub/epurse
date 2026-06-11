@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -130,10 +132,19 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.bodyContent}
+          >
           <Text style={styles.title}>{group ? 'Edit Group' : 'New Group'}</Text>
 
           {/* Name */}
@@ -266,8 +277,10 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
           <TouchableOpacity style={styles.cancel} onPress={onClose}>
             <Text style={styles.cancelTxt}>Cancel</Text>
           </TouchableOpacity>
+          </ScrollView>
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -275,6 +288,7 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
 const styles = StyleSheet.create({
   backdrop:       { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   dismiss:        { flex: 1 },
+  bodyContent:    { paddingBottom: spacing.sm },
   sheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: 24,
