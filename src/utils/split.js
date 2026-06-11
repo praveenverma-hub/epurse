@@ -12,6 +12,9 @@ export function canSplitTransaction(txn) {
   if (!txn || txn.isIgnored) return false;
   if (txn.type !== TRANSACTION_TYPES.DEBIT) return false;
   if (SPLIT_BLOCKED_CATEGORY_IDS.has(txn.categoryId)) return false;
+  // A shared-group expense already carries its split (groupSplit → LB legs). A second
+  // independent split would wipe the group's lent rows and double-track, so block it.
+  if (txn.groupSplit) return false;
   return true;
 }
 
@@ -94,6 +97,16 @@ export function debitDisplayAmount(t) {
   if (!t || t.type !== TRANSACTION_TYPES.DEBIT) return t?.amount ?? 0;
   if (t.isSplit && typeof t.myShareAmount === 'number' && !Number.isNaN(t.myShareAmount)) {
     return t.myShareAmount;
+  }
+  // Shared group expense: only the user's own share counts as personal spend —
+  // the rest is owed back by the other members (tracked in the group balance).
+  // Memos (paid by someone else) are excluded from totals upstream, so they never
+  // reach here for spend purposes.
+  if (t.groupSplit && Array.isArray(t.groupSplit.shares)) {
+    const mine = t.groupSplit.shares.find((sh) => sh.memberId === 'me');
+    if (mine && typeof mine.shareAmount === 'number' && !Number.isNaN(mine.shareAmount)) {
+      return mine.shareAmount;
+    }
   }
   return t.amount;
 }

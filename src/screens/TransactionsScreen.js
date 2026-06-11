@@ -55,6 +55,8 @@ import ExportSheet from '../components/ExportSheet';
 import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
+import GroupPickerSheet from '../components/GroupPickerSheet';
+import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
 
 // ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ const FILTER_PANELS = [
   { id: 'type',       label: 'Type',          icon: 'swap-vertical-outline'    },
   { id: 'categories', label: 'Categories',    icon: 'grid-outline'             },
   { id: 'status',     label: 'Status',        icon: 'checkmark-circle-outline' },
-  { id: 'groups',     label: 'Custom Groups', icon: 'folder-outline'           },
+  { id: 'groups',     label: 'Groups',        icon: 'folder-outline'           },
   { id: 'dateRange',  label: 'Date Range',    icon: 'calendar-outline'         },
 ];
 
@@ -92,16 +94,18 @@ const STATIC_OPTIONS = {
     { id: 'credit', label: 'Income / Inflow',   sublabel: 'Money received into account' },
     { id: 'debit',  label: 'Expense / Outflow',  sublabel: 'Money spent or withdrawn'   },
   ],
+  // Mirrors the status chips rendered on TransactionItem (getStatusChip + tags).
   status: [
-    { id: 'success', label: 'Success',          sublabel: 'Completed transactions'   },
-    { id: 'failed',  label: 'Failed',            sublabel: 'Declined or reversed'     },
-    { id: 'pending', label: 'Pending Mandates',  sublabel: 'Awaiting bank settlement' },
+    { id: 'self',          label: 'Self Transfer', sublabel: 'Between your own accounts' },
+    { id: 'lent',          label: 'Lent',          sublabel: 'Money you lent out'        },
+    { id: 'borrowed',      label: 'Borrowed',      sublabel: 'Money you borrowed'        },
+    { id: 'lent_settled',  label: 'Settled',       sublabel: 'Lent money returned'       },
+    { id: 'borrow_repaid', label: 'Repaid',        sublabel: 'Borrowed money repaid'     },
+    { id: 'split',         label: 'Split',         sublabel: 'Shared with others'        },
+    { id: 'private',       label: 'Private',       sublabel: 'Hidden from default views' },
+    { id: 'ignored',       label: 'Ignored',       sublabel: 'Excluded from all totals'  },
   ],
-  groups: [
-    { id: 'trips',    label: 'Trips',      sublabel: 'Travel & vacations'     },
-    { id: 'weddings', label: 'Weddings',   sublabel: 'Wedding expenses'       },
-    { id: 'home',     label: 'Home Setup', sublabel: 'Furniture & appliances' },
-  ],
+  // `groups` is dynamic — built from the store, see groupOptions.
   dateRange: [
     { id: 'week',   label: 'Last Week',     sublabel: 'Past 7 days'   },
     { id: 'month1', label: 'Last 1 Month',  sublabel: 'Past 30 days'  },
@@ -138,6 +142,19 @@ function resolveRangeCutoff(rangeId) {
   return days ? pastDate(days) : null;
 }
 
+/** True if a txn matches ANY selected status chip (union). Mirrors getStatusChip + tags. */
+function matchesStatus(t, statusSet) {
+  if (statusSet.has('private')       && t.isHidden) return true;
+  if (statusSet.has('ignored')       && t.isIgnored) return true;
+  if (statusSet.has('self')          && (t.categoryId === 'self' || t.childCategory === 'Self')) return true;
+  if (statusSet.has('lent')          && t.categoryId === 'lent') return true;
+  if (statusSet.has('borrowed')      && t.categoryId === 'borrowed') return true;
+  if (statusSet.has('lent_settled')  && t.categoryId === 'lent_settled') return true;
+  if (statusSet.has('borrow_repaid') && t.categoryId === 'borrow_repaid') return true;
+  if (statusSet.has('split')         && t.isSplit) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
@@ -149,6 +166,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const transactions = useEPurseStore((s) => s.transactions);
   const accounts     = useEPurseStore((s) => s.accounts);
   const categories   = useEPurseStore((s) => s.categories);
+  const groups       = useEPurseStore((s) => s.groups);
   const userName     = useEPurseStore((s) => s.userName);
   const lentBorrowed = useEPurseStore((s) => s.lentBorrowed);
 
@@ -160,6 +178,8 @@ const TransactionsScreen = ({ navigation, route }) => {
   const ignoreTransaction                    = useEPurseStore((s) => s.ignoreTransaction);
   const unignoreTransaction                  = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit                  = useEPurseStore((s) => s.setTransactionSplit);
+  const tagTransactionToGroup    = useEPurseStore((s) => s.tagTransactionToGroup);
+  const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
 
   // ── Route params ───────────────────────────────────────────────────────────
   const routePeriod    = route?.params?.initialPeriod;
@@ -191,6 +211,8 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm,         setConfirm]         = useState(null);
   const [debugTxn,        setDebugTxn]        = useState(null);
+  const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
+  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null);
 
   // ── Route param reactivity ─────────────────────────────────────────────────
   useEffect(() => {
@@ -333,11 +355,22 @@ const TransactionsScreen = ({ navigation, route }) => {
     [categories],
   );
 
+  // Auto-fed from the store — every group the user creates shows up here.
+  const groupOptions = useMemo(
+    () => (groups ?? []).map((g) => ({
+      id:       g.id,
+      label:    `${g.emoji ? g.emoji + ' ' : ''}${g.name}`,
+      sublabel: g.type === 'shared' ? `${g.members?.length ?? 0} members` : 'Personal',
+    })),
+    [groups],
+  );
+
   const panelOptions = useMemo(() => {
     if (activePanelId === 'method')     return methodOptions;
     if (activePanelId === 'categories') return categoryOptions;
+    if (activePanelId === 'groups')     return groupOptions;
     return STATIC_OPTIONS[activePanelId] ?? [];
-  }, [activePanelId, methodOptions, categoryOptions]);
+  }, [activePanelId, methodOptions, categoryOptions, groupOptions]);
 
   // ── Filtered transaction list ──────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -345,7 +378,16 @@ const TransactionsScreen = ({ navigation, route }) => {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    let list = [...(transactions ?? [])].filter((t) => !t.isHidden && !t.isIgnored);
+    const statusSet    = applied.status;
+    const statusActive = statusSet.size > 0;
+
+    // Base visibility: private (hidden) and ignored rows only surface when their
+    // status chip is explicitly selected; otherwise they stay out of the list.
+    let list = [...(transactions ?? [])].filter((t) => {
+      if (t.isIgnored) return statusSet.has('ignored');
+      if (t.isHidden)  return statusSet.has('private');
+      return true;
+    });
 
     // Quick chip pre-filter
     if (quickChip === 'bank')  list = list.filter((t) => t.accountType === 'Bank Account');
@@ -366,11 +408,10 @@ const TransactionsScreen = ({ navigation, route }) => {
     if (applied.method.size > 0)     list = list.filter((t) => applied.method.has(t.accountId ?? ''));
     if (applied.type.size > 0)       list = list.filter((t) => applied.type.has(t.type));
     if (applied.categories.size > 0) list = list.filter((t) => applied.categories.has(t.categoryId));
+    if (applied.groups.size > 0)     list = list.filter((t) => t.groupId && applied.groups.has(t.groupId));
 
-    if (applied.status.size > 0 && !applied.status.has('pending')) {
-      if (applied.status.has('failed'))  list = list.filter((t) => !!t.isIgnored);
-      if (applied.status.has('success')) list = list.filter((t) => !t.isIgnored);
-    }
+    // Status — union (OR) across the selected chips.
+    if (statusActive) list = list.filter((t) => matchesStatus(t, statusSet));
 
     if (applied.dateRange.size > 0) {
       const cutoff = resolveRangeCutoff([...applied.dateRange][0]);
@@ -769,7 +810,11 @@ const TransactionsScreen = ({ navigation, route }) => {
                   {panelOptions.length === 0 ? (
                     <View style={styles.rightEmpty}>
                       <Ionicons name="folder-open-outline" size={36} color={colors.textMuted} />
-                      <Text style={styles.rightEmptyText}>No options available</Text>
+                      <Text style={styles.rightEmptyText}>
+                        {activePanelId === 'groups'
+                          ? 'No groups yet — create one from the Groups tab.'
+                          : 'No options available'}
+                      </Text>
                     </View>
                   ) : (
                     <ScrollView
@@ -850,6 +895,17 @@ const TransactionsScreen = ({ navigation, route }) => {
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
         isSplitTxn={!!activeTxn?.isSplit}
         categoryLocked={!!activeTxn?.lbLocked}
+        currentGroupId={activeTxn?.groupId || null}
+        onPressAddToGroup={() => {
+          const t = activeTxn;
+          setActiveTxn(null);
+          setGroupPickerTxn(t);
+        }}
+        onPressRemoveFromGroup={() => {
+          if (!activeTxn) return;
+          untagTransactionFromGroup(activeTxn.id);
+          setActiveTxn(null);
+        }}
         onPressSplit={() => {
           const t = activeTxn;
           setActiveTxn(null);
@@ -925,6 +981,38 @@ const TransactionsScreen = ({ navigation, route }) => {
 
       {IS_PREVIEW_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
+      )}
+
+      <GroupPickerSheet
+        visible={!!groupPickerTxn}
+        txn={groupPickerTxn}
+        onClose={() => setGroupPickerTxn(null)}
+        onCreateNew={() => setGroupPickerTxn(null)}
+        onPick={(groupId, group) => {
+          const txn = groupPickerTxn;
+          setGroupPickerTxn(null);
+          if (group?.type === 'shared') {
+            setGroupExpenseTxn({ txn, group });
+          } else {
+            tagTransactionToGroup(txn.id, groupId);
+          }
+        }}
+      />
+
+      {groupExpenseTxn && (
+        <GroupExpenseSheet
+          visible={!!groupExpenseTxn}
+          group={groupExpenseTxn.group}
+          onClose={() => setGroupExpenseTxn(null)}
+          onAdd={(expenseData) => {
+            tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
+              paidByMemberId: expenseData.paidByMemberId,
+              paidByName: expenseData.paidByName,
+              shares: expenseData.shares,
+            } : null);
+            setGroupExpenseTxn(null);
+          }}
+        />
       )}
 
     </SafeAreaView>

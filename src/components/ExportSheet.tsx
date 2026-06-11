@@ -99,7 +99,18 @@ const ExportSheet: React.FC<Props> = ({
   const toast      = useToast();
   const categories = useEPurseStore((s) => s.categories) as ExportCategory[];
   const accounts   = useEPurseStore((s) => s.accounts)   as ExportAccount[];
+  const groups     = useEPurseStore((s) => s.groups)     as { id: string; name: string }[];
   const userName   = useEPurseStore((s) => s.userName)   as string | null;
+
+  // Enrich each row with its resolved group name so the CSV's Group column reads
+  // human names, not raw groupIds. Keeps the export service free of a groups dep.
+  const exportTxns = useMemo<ExportTransaction[]>(() => {
+    if (!groups?.length) return filteredTransactions;
+    const nameById = Object.fromEntries(groups.map((g) => [g.id, g.name]));
+    return filteredTransactions.map((t: any) =>
+      t.groupId ? { ...t, groupName: nameById[t.groupId] || '' } : t
+    );
+  }, [filteredTransactions, groups]);
 
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat | null>(null);
   // Which action is in flight (null = idle); drives the per-button spinner.
@@ -161,7 +172,7 @@ const ExportSheet: React.FC<Props> = ({
       const result = await compileAndExport(
         method,
         selectedFormat,
-        filteredTransactions,
+        exportTxns,
         filterCtx,
         categories,
         accounts,
@@ -188,7 +199,7 @@ const ExportSheet: React.FC<Props> = ({
     } finally {
       setBusyMethod(null);
     }
-  }, [selectedFormat, loading, filteredTransactions, filterCtx, categories, accounts, userName, handleClose, toast]);
+  }, [selectedFormat, loading, exportTxns, filterCtx, categories, accounts, userName, handleClose, toast]);
 
   const canExport = !!selectedFormat && !loading && filteredTransactions.length > 0;
 

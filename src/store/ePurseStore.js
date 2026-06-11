@@ -66,6 +66,8 @@ const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
 /** Settled categories — same; kept raw ≤ 1 yr then dropped, never merged into monthly aggregates. */
 const LB_SETTLED_CATS = new Set(['lent_settled', 'borrow_repaid']);
 const LB_SETTLED_RETENTION_MS = 365 * DAY_MS;
+/** Groups untouched this long AND fully settled are auto-removed (debts, if any, keep them alive). */
+const GROUP_INACTIVE_PRUNE_MS = 180 * DAY_MS;
 
 /** CC-payment prompts only fire for recent payments; older swept SMS are ignored
  *  outright (never prompted, never filed) so ccHandledSmsIds can't balloon. */
@@ -242,6 +244,82 @@ const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid'
  */
 const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 
+/**
+ * Returns true when a transaction should be excluded from ALL spend/income totals
+ * because of its group membership — either it's a group-memo (paid by someone else)
+ * or it belongs to a personal group the user has toggled off from main totals.
+ */
+const isGroupExcluded = (txn, groups) => {
+  if (!txn.groupId) return false;
+  if (txn.isGroupMemo) return true;
+  const g = (groups || []).find((gr) => gr.id === txn.groupId);
+  return !!(g?.excludeFromTotals);
+};
+
+/** Adjust a group's materialised totalSpend by `delta` (floored at 0). No-op if id is falsy. */
+const adjustGroupTotal = (groups, groupId, delta) => {
+  if (!groupId || !delta) return groups;
+  return (groups || []).map((g) =>
+    g.id === groupId ? { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) + delta) } : g
+  );
+};
+
+/**
+ * Build the user's-leg lent/borrowed rows for a shared-group expense — the SINGLE source of
+ * truth for who-owes-whom (mirrors the direct-split → lent pipeline). Tagged with `groupId` +
+ * `sourceTxnId` so they net per-person across all groups and are removed when the txn is.
+ *   • Paid by me            → one `lent` row per other member's share (they owe me).
+ *   • Paid by another (memo) → one `borrowed` row for my own share (I owe the payer).
+ * Returns [] for personal groups or txns without a groupSplit.
+ */
+const buildGroupLbRows = (group, txn) => {
+  if (!group || group.type !== 'shared' || !txn?.groupSplit) return [];
+  const { paidByMemberId, paidByName, shares } = txn.groupSplit;
+  if (!Array.isArray(shares) || shares.length === 0) return [];
+  const stamp = Date.now();
+  const note = `Group · ${group.name}`;
+  const memberById = new Map((group.members || []).map((m) => [m.memberId, m]));
+  const rnd = () => Math.random().toString(36).slice(2, 8);
+
+  if (paidByMemberId === 'me') {
+    return shares
+      .filter((sh) => sh.memberId !== 'me' && (Number(sh.shareAmount) || 0) > 0)
+      .map((sh, i) => {
+        const m = memberById.get(sh.memberId) || {};
+        return {
+          id: `lb_${stamp}_${i}_${rnd()}`,
+          kind: 'lent',
+          person: m.name || sh.name || 'Member',
+          contactId: m.contactId || null,
+          phone: m.phone || null,
+          amount: Number(sh.shareAmount) || 0,
+          note,
+          date: txn.createdAt,
+          sourceTxnId: txn.id,
+          groupId: group.id,
+        };
+      });
+  }
+
+  // Someone else paid → I owe my own share → borrowed (only the user's leg is tracked globally).
+  const myShare = shares.find((sh) => sh.memberId === 'me');
+  const amt = Number(myShare?.shareAmount) || 0;
+  if (amt <= 0) return [];
+  const payer = memberById.get(paidByMemberId) || {};
+  return [{
+    id: `lb_${stamp}_0_${rnd()}`,
+    kind: 'borrowed',
+    person: payer.name || paidByName || 'Member',
+    contactId: payer.contactId || null,
+    phone: payer.phone || null,
+    amount: amt,
+    note,
+    date: txn.createdAt,
+    sourceTxnId: txn.id,
+    groupId: group.id,
+  }];
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Budget = FIRST-LEVEL (parent) categories. Children roll up into their parent,
 // so a Groceries spend counts against the Food & Dining budget (no separate
@@ -334,10 +412,13 @@ const sumCaps = (perCategory) =>
  * Lent/borrow categories are stored in byCategory for reference but excluded
  * from totalSpend/totalIncome so they don't skew normal expense tracking.
  */
-const aggregate = (transactions) => {
+const aggregate = (transactions, groups = []) => {
   const out = {};
   transactions.forEach((t) => {
     if (t.isIgnored) return;
+    // Group memos AND txns in an excluded personal group stay out of historical totals,
+    // matching the live spend paths (isGroupExcluded covers both).
+    if (isGroupExcluded(t, groups)) return;
     const key = monthKey(t.createdAt);
     if (!out[key]) {
       out[key] = { totalSpend: 0, totalIncome: 0, byCategory: {}, byAccount: {} };
@@ -450,6 +531,11 @@ export const useEPurseStore = create(
 
       // Two-tier user-defined automation rules — keyed by SCREAMING_SNAKE_CASE merchant.
       userCustomRules: {},
+
+      // ─── Groups ─────────────────────────────────────────────────────────────
+      // Each group: { id, name, type('personal'|'shared'), emoji, color, members[],
+      //   excludeFromTotals, totalSpend, settlements[], createdAt }
+      groups: [],
 
       hydrated: false,
 
@@ -995,6 +1081,238 @@ export const useEPurseStore = create(
         if (txn?.categoryId) get().checkBudgetBreach(txn.categoryId);
       },
 
+      // ─── Group actions ────────────────────────────────────────────────────
+
+      createGroup: ({ name, type, members = [], emoji = '', color = '#6366F1', excludeFromTotals = false }) => {
+        const id = `grp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const baseMembers = type === 'shared'
+          ? [{ memberId: 'me', name: 'You', isMe: true }, ...members]
+          : [];
+        const nowIso = new Date().toISOString();
+        const group = {
+          id,
+          name: (name || '').trim(),
+          type,
+          emoji: emoji || '',
+          color: color || '#6366F1',
+          members: baseMembers,
+          excludeFromTotals: !!excludeFromTotals,
+          totalSpend: 0,
+          settlements: [],
+          createdAt: nowIso,
+          lastActivityAt: nowIso,
+        };
+        set((s) => ({ groups: [group, ...s.groups] }));
+        return id;
+      },
+
+      updateGroup: (id, patches) => {
+        set((s) => ({
+          groups: s.groups.map((g) =>
+            g.id === id ? { ...g, ...patches, lastActivityAt: new Date().toISOString() } : g
+          ),
+        }));
+      },
+
+      deleteGroup: (id) => {
+        set((s) => ({
+          groups: s.groups.filter((g) => g.id !== id),
+          // Drop this group's debt rows; clearing groupSplit + rows together keeps spend/debt
+          // consistent (the expense reverts to a plain personal spend — no orphan double-count).
+          lentBorrowed: s.lentBorrowed.filter((l) => l.groupId !== id),
+          transactions: s.transactions.map((t) => {
+            if (t.groupId !== id) return t;
+            const next = { ...t };
+            delete next.groupId;
+            delete next.groupSplit;
+            delete next.isGroupMemo;
+            return next;
+          }),
+        }));
+      },
+
+      /** Tag an existing transaction to a group. For shared groups pass groupSplit to record payer + shares. */
+      tagTransactionToGroup: (txnId, groupId, groupSplit = null) => {
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === txnId);
+          if (!txn) return s;
+          const group = s.groups.find((g) => g.id === groupId);
+          if (!group) return s;
+          const prevGroupId = txn.groupId || null;
+          const amount = Number(txn.amount) || 0;
+          const nowIso = new Date().toISOString();
+
+          // Build the updated txn. A shared-group split SUPERSEDES any direct split representation.
+          const updatedTxn = { ...txn, groupId };
+          if (groupSplit) {
+            updatedTxn.groupSplit = groupSplit;
+            if (group.type === 'shared') {
+              updatedTxn.isSplit = false;
+              updatedTxn.splitWith = [];
+              delete updatedTxn.myShareAmount;
+            }
+          }
+          const updatedTxns = s.transactions.map((t) => (t.id === txnId ? updatedTxn : t));
+
+          // Rebuild this txn's debt rows: drop any prior rows for this source, add fresh group legs.
+          const lbRows = buildGroupLbRows(group, updatedTxn);
+          const lentBorrowed = [
+            ...lbRows,
+            ...s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId),
+          ];
+
+          const updatedGroups = s.groups.map((g) => {
+            if (g.id === groupId) {
+              const inc = prevGroupId === groupId ? 0 : amount; // re-tag to same group: no double add
+              return { ...g, totalSpend: (g.totalSpend || 0) + inc, lastActivityAt: nowIso };
+            }
+            if (prevGroupId && prevGroupId !== groupId && g.id === prevGroupId) {
+              return { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) - amount) };
+            }
+            return g;
+          });
+          return { transactions: updatedTxns, groups: updatedGroups, lentBorrowed };
+        });
+      },
+
+      /** Remove a transaction from its group. */
+      untagTransactionFromGroup: (txnId) => {
+        set((s) => {
+          const txn = s.transactions.find((t) => t.id === txnId);
+          if (!txn || !txn.groupId) return s;
+          const amount = Number(txn.amount) || 0;
+          const groupId = txn.groupId;
+          const updatedTxns = s.transactions.map((t) => {
+            if (t.id !== txnId) return t;
+            const next = { ...t };
+            delete next.groupId;
+            delete next.groupSplit;
+            delete next.isGroupMemo;
+            return next;
+          });
+          const updatedGroups = s.groups.map((g) =>
+            g.id === groupId
+              ? { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) - amount) }
+              : g
+          );
+          // Strip the debt with the tag.
+          const lentBorrowed = s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
+          return { transactions: updatedTxns, groups: updatedGroups, lentBorrowed };
+        });
+      },
+
+      /**
+       * Add a manual expense directly to a group.
+       * paidByMemberId: 'me' | group member's memberId
+       * If paidBy !== 'me': isGroupMemo=true, no account balance change.
+       */
+      addGroupExpense: (groupId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, date } = {}) => {
+        const s = get();
+        const group = s.groups.find((g) => g.id === groupId);
+        if (!group || !amount || amount <= 0 || amount > MAX_ALLOWED_AMOUNT) return null;
+
+        const manualSeq = s.manualTxnSeq || 0;
+        const nextSeq   = manualSeq + 1;
+        const id        = `IdM${String(nextSeq).padStart(4, '0')}`;
+        const isGroupMemo = paidByMemberId !== 'me';
+        const groupSplit = (shares && shares.length > 0)
+          ? { paidByMemberId, paidByName: paidByName || paidByMemberId, shares }
+          : null;
+
+        // Derive the legacy flat categoryId from the two-tier labels when not given explicitly.
+        const resolvedCategoryId =
+          categoryId || twoTierToLegacyCatId(parentCategory, childCategory) || 'other';
+
+        const newTxn = {
+          id,
+          createdAt: date || new Date().toISOString(),
+          type: TRANSACTION_TYPES.DEBIT,
+          amount,
+          merchant: (merchant || 'Group Expense').trim(),
+          categoryId: resolvedCategoryId,
+          ...(parentCategory ? { parentCategory } : {}),
+          ...(childCategory  ? { childCategory  } : {}),
+          source: 'manual',
+          isReviewed: true,
+          isSplit: false,
+          splitWith: [],
+          groupId,
+          ...(groupSplit   ? { groupSplit }        : {}),
+          ...(isGroupMemo ? { isGroupMemo: true }  : {}),
+        };
+
+        let resolvedAccountId = accountId || null;
+        let resolvedAccounts  = s.accounts;
+
+        if (!isGroupMemo) {
+          if (!resolvedAccountId) {
+            const { accounts: ensured, account } = ensureAccountForParsed(s.accounts, newTxn);
+            resolvedAccountId = account?.id || null;
+            resolvedAccounts  = ensured;
+          }
+          newTxn.accountId = resolvedAccountId;
+        }
+
+        // Debt legs (single source of truth) for shared groups — nets per-person across groups.
+        const lbRows = buildGroupLbRows(group, newTxn);
+        const nowIso = new Date().toISOString();
+
+        set((ss) => ({
+          transactions: [newTxn, ...ss.transactions],
+          accounts: isGroupMemo ? ss.accounts : applyDelta(resolvedAccounts, resolvedAccountId, newTxn),
+          lentBorrowed: lbRows.length ? [...lbRows, ...ss.lentBorrowed] : ss.lentBorrowed,
+          groups: ss.groups.map((g) =>
+            g.id === groupId
+              ? { ...g, totalSpend: (g.totalSpend || 0) + amount, lastActivityAt: nowIso }
+              : g
+          ),
+          manualTxnSeq: nextSeq,
+        }));
+
+        if (!isGroupMemo && newTxn.categoryId) get().checkBudgetBreach(newTxn.categoryId);
+        return id;
+      },
+
+      /**
+       * Group-scoped settle: settle ONLY this group's portion of a person's balance.
+       * Sums the person's lentBorrowed rows tagged with this groupId and writes one
+       * counterpart settled row (also tagged groupId) for the net — leaving their
+       * balances in OTHER groups / direct splits / manual IOUs untouched. The same row
+       * also reduces the person's global net, so the LB screen stays consistent.
+       */
+      settleGroupPersonBalance: (groupId, personKey) => {
+        const person = get().getPersonBalances().find((p) => p.personKey === personKey);
+        if (!person) return;
+        const groupEntries = (person.entries || []).filter((e) => e.groupId === groupId);
+        if (groupEntries.length === 0) return;
+        const net = groupEntries.reduce((acc, e) => {
+          if (e.kind === 'lent')          return acc + e.amount;
+          if (e.kind === 'lent_settled')  return acc - e.amount;
+          if (e.kind === 'borrowed')      return acc - e.amount;
+          if (e.kind === 'borrow_repaid') return acc + e.amount;
+          return acc;
+        }, 0);
+        if (Math.abs(net) <= 0.005) return;
+
+        const group = get().groups.find((g) => g.id === groupId);
+        const now = new Date().toISOString();
+        const row = {
+          id: `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          kind: net > 0 ? 'lent_settled' : 'borrow_repaid',
+          person: person.person,
+          contactId: person.contactId || null,
+          phone: person.phone || null,
+          amount: Math.abs(net),
+          note: `Group settle · ${group?.name || 'Group'}`,
+          date: now,
+          groupId,
+        };
+        set((s) => ({
+          lentBorrowed: [row, ...s.lentBorrowed],
+          groups: s.groups.map((g) => (g.id === groupId ? { ...g, lastActivityAt: now } : g)),
+        }));
+      },
+
       /**
        * Single canonical SMS / notification ingestion path.
        * opts: { sender, receivedAt, smsId }
@@ -1273,7 +1591,8 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
-          // Already reversed when ignored — only drop the row.
+          // Already reversed when ignored — only drop the row. Group total was also
+          // already decremented at ignore time, so don't decrement again here.
           if (txn.isIgnored) {
             return {
               transactions: s.transactions.filter((t) => t.id !== id),
@@ -1297,6 +1616,7 @@ export const useEPurseStore = create(
           return {
             transactions: s.transactions.filter((t) => t.id !== id),
             accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
             lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
             ...(txn.smsId
               ? {
@@ -1324,6 +1644,7 @@ export const useEPurseStore = create(
               t.id === id ? { ...t, isIgnored: true } : t
             ),
             accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
             lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
             ...(txn.smsId
               ? {
@@ -1349,6 +1670,7 @@ export const useEPurseStore = create(
               t.id === id ? { ...t, isIgnored: false } : t
             ),
             accounts: nextAccounts,
+            groups: adjustGroupTotal(s.groups, txn.groupId, txn.amount || 0),
             ...(txn.smsId ? { suppressedSmsIds } : {}),
           };
         }),
@@ -1702,6 +2024,12 @@ export const useEPurseStore = create(
               return;
             }
 
+            // Group-memo transactions: informational only — drop without aggregating once past raw window.
+            if (t.isGroupMemo) {
+              if (ts >= rawCutoff) stillRaw.push(t);
+              return;
+            }
+
             // Split transactions: keep raw for the full 90-day window so the
             // lentBorrowed sourceTxnId references stay resolvable.
             if (t.isSplit && ts >= rawCutoff) {
@@ -1720,7 +2048,7 @@ export const useEPurseStore = create(
           });
 
           // Merge new aggregates into the existing map.
-          const newAggs = aggregate(toAggregate);
+          const newAggs = aggregate(toAggregate, s.groups);
           const merged = { ...s.monthlyAggregates };
           Object.entries(newAggs).forEach(([k, v]) => {
             if (!merged[k]) {
@@ -1752,10 +2080,49 @@ export const useEPurseStore = create(
             return t;
           });
 
+          // ── Auto-prune groups untouched > 6 months AND fully settled ──
+          // Outstanding (non-zero net) debt keeps a group alive so we never silently erase money owed.
+          // Legacy groups missing lastActivityAt get a fresh clock (backfilled to now), not pruned now.
+          const nowIso = new Date(now).toISOString();
+          const groupInactiveCutoff = now - GROUP_INACTIVE_PRUNE_MS;
+          const groupNet = {}; // groupId -> { personKey -> net (owed-to-me) }
+          lentBorrowedPruned.forEach((l) => {
+            if (!l.groupId) return;
+            const pk = l.contactId || (l.person || '').trim().toLowerCase() || '?';
+            const sign = l.kind === 'lent' || l.kind === 'borrow_repaid' ? 1
+                       : l.kind === 'borrowed' || l.kind === 'lent_settled' ? -1 : 0;
+            if (!groupNet[l.groupId]) groupNet[l.groupId] = {};
+            groupNet[l.groupId][pk] = (groupNet[l.groupId][pk] || 0) + sign * l.amount;
+          });
+          const groupHasOutstanding = (gid) =>
+            Object.values(groupNet[gid] || {}).some((v) => Math.abs(v) > 0.005);
+
+          const prunedGroupIds = new Set();
+          const keptGroups = (s.groups || [])
+            .filter((g) => {
+              const lastTs = new Date(g.lastActivityAt || nowIso).getTime();
+              if (lastTs < groupInactiveCutoff && !groupHasOutstanding(g.id)) {
+                prunedGroupIds.add(g.id);
+                return false;
+              }
+              return true;
+            })
+            .map((g) => (g.lastActivityAt ? g : { ...g, lastActivityAt: nowIso })); // backfill clock
+
+          const finalRawPruned = prunedGroupIds.size === 0 ? finalRaw : finalRaw.map((t) => {
+            if (!t.groupId || !prunedGroupIds.has(t.groupId)) return t;
+            const { groupId: _g, groupSplit: _gs, isGroupMemo: _m, ...rest } = t;
+            return rest;
+          });
+          const lbFinal = prunedGroupIds.size === 0
+            ? lentBorrowedPruned
+            : lentBorrowedPruned.filter((l) => !l.groupId || !prunedGroupIds.has(l.groupId));
+
           return {
-            transactions: finalRaw,
-            lentBorrowed: lentBorrowedPruned,
+            transactions: finalRawPruned,
+            lentBorrowed: lbFinal,
             monthlyAggregates: merged,
+            groups: keptGroups,
             lastCompactedAt: now,
           };
         });
@@ -1780,11 +2147,13 @@ export const useEPurseStore = create(
        * Lent/borrow categories are excluded from spend totals.
        */
       getMonthlySpend: (date = new Date()) => {
+        const groups = get().groups;
         const txns = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.DEBIT &&
             !NON_SPEND_CATS.has(t.categoryId) &&
+            !isGroupExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) {
@@ -1794,11 +2163,13 @@ export const useEPurseStore = create(
       },
 
       getMonthlyIncome: (date = new Date()) => {
+        const groups = get().groups;
         const txns = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.CREDIT &&
             !NON_SPEND_CATS.has(t.categoryId) &&
+            !isGroupExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
@@ -1813,11 +2184,13 @@ export const useEPurseStore = create(
       getCategoryBreakdown: (date = new Date()) => {
         const cats = get().categories;
         const month = monthKey(date);
+        const groups = get().groups;
         const raw = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.DEBIT &&
             !NON_SPEND_CATS.has(t.categoryId) &&
+            !isGroupExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
 
@@ -1877,6 +2250,7 @@ export const useEPurseStore = create(
           if (new Date(t.createdAt).getTime() < monthStart) return;
           if (t.type !== TRANSACTION_TYPES.DEBIT) return;
           if (NON_SPEND_CATS.has(t.categoryId)) return; // self + lent/borrow
+          if (isGroupExcluded(t, s.groups)) return;
           const amt = debitDisplayAmount(t);
           allExpense += amt;
           const pid = parentCatId(t);
@@ -2000,6 +2374,7 @@ export const useEPurseStore = create(
           if (t.isIgnored) return;
           if (t.type !== TRANSACTION_TYPES.DEBIT) return;
           if (NON_SPEND_CATS.has(t.categoryId)) return;
+          if (isGroupExcluded(t, s.groups)) return;
           if (!isSameMonth(t.createdAt, date)) return;
           const pid = parentCatId(t);
           if (budgeted.has(pid)) return; // already tracked by a budget line
@@ -2570,6 +2945,7 @@ export const useEPurseStore = create(
         reviewStreak: state.reviewStreak,
         userCustomRules: state.userCustomRules,
         anchorNudgeDismissed: state.anchorNudgeDismissed,
+        groups: state.groups ?? [],
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;
@@ -2679,9 +3055,9 @@ export const selectExpenseStats = (period) => (state) => {
     (t) => !t.isIgnored && new Date(t.createdAt).getTime() >= startMs
   );
 
-  // For the chips/header, also exclude private + Lent/Borrowed + self transfers.
+  // For the chips/header, also exclude private + Lent/Borrowed + self transfers + group exclusions.
   const eligible = inPeriod.filter(
-    (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId)
+    (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !isGroupExcluded(t, state.groups)
   );
 
   const rawDebits = eligible

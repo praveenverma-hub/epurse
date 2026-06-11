@@ -59,6 +59,8 @@ import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
 import { canSplitTransaction } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
+import GroupPickerSheet from '../components/GroupPickerSheet';
+import GroupExpenseSheet from '../components/GroupExpenseSheet';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -92,6 +94,9 @@ const DashboardScreen = ({ navigation }) => {
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const budget              = useEPurseStore((s) => s.budget);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
+  const tagTransactionToGroup   = useEPurseStore((s) => s.tagTransactionToGroup);
+  const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
+  const addGroupExpense = useEPurseStore((s) => s.addGroupExpense);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
   const clearPendingCelebration = useEPurseStore((s) => s.clearPendingCelebration);
 
@@ -107,6 +112,9 @@ const DashboardScreen = ({ navigation }) => {
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
   const [showSettings, setShowSettings] = useState(false);
   const [debugTxn, setDebugTxn] = useState(null);
+  const [groupPickerTxn, setGroupPickerTxn] = useState(null);
+  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group }
+  const [createGroupVisible, setCreateGroupVisible] = useState(false);
   const settingsSlide = useState(() => new Animated.Value(0))[0];
   // Dev-only: long-press vault to cycle tiers for visual preview.
   // null means "use real tier from streak".
@@ -396,6 +404,17 @@ const DashboardScreen = ({ navigation }) => {
         isIgnored={!!activeTxn?.isIgnored}
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
         isSplitTxn={!!activeTxn?.isSplit}
+        currentGroupId={activeTxn?.groupId || null}
+        onPressAddToGroup={() => {
+          const t = activeTxn;
+          setActiveTxn(null);
+          setGroupPickerTxn(t);
+        }}
+        onPressRemoveFromGroup={() => {
+          if (!activeTxn) return;
+          untagTransactionFromGroup(activeTxn.id);
+          setActiveTxn(null);
+        }}
         onPressSplit={() => {
           const t = activeTxn;
           setActiveTxn(null);
@@ -559,6 +578,38 @@ const DashboardScreen = ({ navigation }) => {
 
       {IS_PREVIEW_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
+      )}
+
+      <GroupPickerSheet
+        visible={!!groupPickerTxn}
+        txn={groupPickerTxn}
+        onClose={() => setGroupPickerTxn(null)}
+        onCreateNew={() => { setGroupPickerTxn(null); navigation.navigate('Groups'); }}
+        onPick={(groupId, group) => {
+          const txn = groupPickerTxn;
+          setGroupPickerTxn(null);
+          if (group?.type === 'shared') {
+            setGroupExpenseTxn({ txn, group });
+          } else {
+            tagTransactionToGroup(txn.id, groupId);
+          }
+        }}
+      />
+
+      {groupExpenseTxn && (
+        <GroupExpenseSheet
+          visible={!!groupExpenseTxn}
+          group={groupExpenseTxn.group}
+          onClose={() => setGroupExpenseTxn(null)}
+          onAdd={(expenseData) => {
+            tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
+              paidByMemberId: expenseData.paidByMemberId,
+              paidByName: expenseData.paidByName,
+              shares: expenseData.shares,
+            } : null);
+            setGroupExpenseTxn(null);
+          }}
+        />
       )}
 
       {/* EPC claim sheet — surfaces automatically when a Zero-Transaction Day

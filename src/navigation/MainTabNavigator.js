@@ -8,6 +8,7 @@ import DashboardScreen  from '../screens/DashboardScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
 import InsightsScreen   from '../screens/InsightsScreen';
 import AccountsScreen   from '../screens/AccountsScreen';
+import GroupsScreen     from '../screens/GroupsScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -23,6 +24,7 @@ export default function MainTabNavigator() {
         <Tab.Screen name="Transactions" component={TransactionsScreen} />
         <Tab.Screen name="Insights"     component={InsightsScreen} />
         <Tab.Screen name="Accounts"     component={AccountsScreen} />
+        <Tab.Screen name="Groups"       component={GroupsScreen} />
       </Tab.Navigator>
     </TabBarVisibilityProvider>
   );

@@ -67,6 +67,10 @@ interface Props {
   onRestore?: () => void;
   onDelete?: () => void;
   onClose: () => void;
+  /** groupId the transaction currently belongs to (if any). */
+  currentGroupId?: string | null;
+  onPressAddToGroup?: () => void;
+  onPressRemoveFromGroup?: () => void;
 }
 
 // ─── ParentRow ───────────────────────────────────────────────────────────────
@@ -202,6 +206,9 @@ const CategoryPickerModal: React.FC<Props> = ({
   onRestore,
   onDelete,
   onClose,
+  currentGroupId,
+  onPressAddToGroup,
+  onPressRemoveFromGroup,
 }) => {
   useTheme();
   const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
@@ -334,6 +341,30 @@ const CategoryPickerModal: React.FC<Props> = ({
                 {isSplitTxn ? 'Edit split' : 'Split bill'}
               </Text>
             </TouchableOpacity>
+          ) : null}
+
+          {!isIgnored && (onPressAddToGroup || onPressRemoveFromGroup) ? (
+            currentGroupId ? (
+              onPressRemoveFromGroup ? (
+                <TouchableOpacity
+                  style={[styles.splitBillBtn, styles.groupRemoveBtn]}
+                  activeOpacity={0.85}
+                  onPress={onPressRemoveFromGroup}
+                >
+                  <Text style={styles.groupRemoveText}>Remove from group</Text>
+                </TouchableOpacity>
+              ) : null
+            ) : (
+              onPressAddToGroup ? (
+                <TouchableOpacity
+                  style={[styles.splitBillBtn, styles.groupAddBtn]}
+                  activeOpacity={0.85}
+                  onPress={onPressAddToGroup}
+                >
+                  <Text style={styles.groupAddText}>🗂 Add to group</Text>
+                </TouchableOpacity>
+              ) : null
+            )
           ) : null}
 
           {(onToggleHidden || onIgnore || onRestore) && (
@@ -511,6 +542,24 @@ const styles = StyleSheet.create({
   },
   splitBillText: {
     color: colors.info,
+    ...typography.bodyBold,
+    fontWeight: '700',
+  },
+  groupAddBtn: {
+    backgroundColor: colors.primary + '18',
+    borderColor: colors.primary + '55',
+  },
+  groupAddText: {
+    color: colors.primary,
+    ...typography.bodyBold,
+    fontWeight: '700',
+  },
+  groupRemoveBtn: {
+    backgroundColor: colors.danger + '12',
+    borderColor: colors.danger + '44',
+  },
+  groupRemoveText: {
+    color: colors.danger,
     ...typography.bodyBold,
     fontWeight: '700',
   },

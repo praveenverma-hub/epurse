@@ -74,11 +74,16 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [contactsLoading, setContactsLoading] = useState(false);
 
   const all = useEPurseStore((s) => s.lentBorrowed);
+  const groups = useEPurseStore((s) => s.groups);
   const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
   const settlePersonBalance  = useEPurseStore((s) => s.settlePersonBalance);
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   const userName        = useEPurseStore((s) => s.userName);
   const notificationIds = useEPurseStore((s) => s.notificationIds);
+  const groupNameById = useMemo(
+    () => Object.fromEntries((groups || []).map((g) => [g.id, g.name])),
+    [groups]
+  );
 
   const handleAdd = useCallback((addKind) => {
     const n = parseFloat(amount);
@@ -211,17 +216,46 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       const netColor = pb.net > 0 ? colors.success : '#EF4444';
       const isExpanded = expandedPerson === pb.personKey;
 
-      const sortedEntries = [...pb.entries].sort(
+      // Collapse all entries belonging to one group into a single cumulative line,
+      // so a person who shares many group expenses shows one row per group (not per txn).
+      // Non-group entries (manual IOUs, direct splits) stay individual.
+      const groupAcc = {}; // groupId -> { net, date }
+      const singles = [];
+      pb.entries.forEach((e) => {
+        if (e.groupId) {
+          if (!groupAcc[e.groupId]) groupAcc[e.groupId] = { groupId: e.groupId, net: 0, date: e.date };
+          const g = groupAcc[e.groupId];
+          g.net += isPositiveEntry(e.kind) ? e.amount : -e.amount;
+          if (new Date(e.date) > new Date(g.date)) g.date = e.date;
+        } else {
+          singles.push(e);
+        }
+      });
+      const groupLines = Object.values(groupAcc)
+        .filter((g) => Math.abs(g.net) > 0.005)
+        .map((g) => ({
+          id: `grp_${g.groupId}`,
+          isGroupLine: true,
+          groupName: groupNameById[g.groupId] || 'Group',
+          kind: g.net > 0 ? 'lent' : 'borrowed',
+          amount: Math.abs(g.net),
+          date: g.date,
+        }));
+      const displayEntries = [...groupLines, ...singles].sort(
         (a, b) => new Date(b.date) - new Date(a.date)
       );
 
+      const toggle = () => setExpandedPerson(isExpanded ? null : pb.personKey);
+
       return (
-        <TouchableOpacity
-          style={[styles.personCard, isFullySettled && styles.personCardSettled]}
-          onPress={() => setExpandedPerson(isExpanded ? null : pb.personKey)}
-          activeOpacity={0.85}
-        >
-          <View style={styles.personCardHeader}>
+        // Plain View wrapper — the header is the only touchable, so the entries
+        // ScrollView below is NOT a descendant of a touchable and can scroll freely.
+        <View style={[styles.personCard, isFullySettled && styles.personCardSettled]}>
+          <TouchableOpacity
+            style={styles.personCardHeader}
+            onPress={toggle}
+            activeOpacity={0.85}
+          >
             <View style={[styles.avatar, isFullySettled && styles.avatarSettled]}>
               <Text style={[styles.avatarText, isFullySettled && styles.avatarTextSettled]}>
                 {(pb.person || '?').charAt(0).toUpperCase()}
@@ -284,7 +318,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
               </TouchableOpacity>
             ) : null}
             <Text style={styles.expandArrow}>{isExpanded ? '▲' : '▼'}</Text>
-          </View>
+          </TouchableOpacity>
 
           {isExpanded && (
             <ScrollView
@@ -292,11 +326,19 @@ const LentBorrowedScreen = ({ route, navigation }) => {
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
             >
-              {sortedEntries.map((entry, idx) => {
+              {displayEntries.map((entry, idx) => {
                 const positive = isPositiveEntry(entry.kind);
                 const entryColor = positive ? colors.success : '#EF4444';
                 const entrySign = positive ? '+' : '−';
-                const isLast = idx === sortedEntries.length - 1;
+                const isLast = idx === displayEntries.length - 1;
+                const primaryText = entry.isGroupLine
+                  ? `Group · ${entry.groupName}`
+                  : (entry.note && entry.note !== 'Manual settlement'
+                      ? entry.note
+                      : ENTRY_LABEL[entry.kind] || entry.kind);
+                const subText = entry.isGroupLine
+                  ? 'Group total'
+                  : `${ENTRY_LABEL[entry.kind]} · ${formatDate(entry.date)}`;
 
                 return (
                   <View
@@ -307,14 +349,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                     ]}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.entryNote}>
-                        {entry.note && entry.note !== 'Manual settlement'
-                          ? entry.note
-                          : ENTRY_LABEL[entry.kind] || entry.kind}
-                      </Text>
-                      <Text style={styles.entryDate}>
-                        {ENTRY_LABEL[entry.kind]} · {formatDate(entry.date)}
-                      </Text>
+                      <Text style={styles.entryNote}>{primaryText}</Text>
+                      <Text style={styles.entryDate}>{subText}</Text>
                     </View>
                     <Text style={[styles.entryAmt, { color: entryColor }]}>
                       {entrySign} {formatCurrency(entry.amount)}
@@ -327,7 +363,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                             title: pb.net > 0 ? 'Mark as settled?' : 'Mark as repaid?',
                             message:
                               `${pb.person} · ${formatCurrency(netAbs)}\n\n` +
-                              `Settles the net outstanding of ${formatCurrency(netAbs)}.`,
+                              `Settles the FULL net outstanding of ${formatCurrency(netAbs)} ` +
+                              `across all groups, splits and manual entries.`,
                             primaryText: pb.net > 0 ? 'Settle' : 'Mark repaid',
                             destructive: true,
                             secondaryText: 'Cancel',
@@ -347,10 +384,10 @@ const LentBorrowedScreen = ({ route, navigation }) => {
               })}
             </ScrollView>
           )}
-        </TouchableOpacity>
+        </View>
       );
     },
-    [expandedPerson, settlePersonBalance, notificationIds]
+    [expandedPerson, settlePersonBalance, notificationIds, groupNameById]
   );
 
   // Form + empty state are rendered per panel (both scenes are mounted). They

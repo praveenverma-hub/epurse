@@ -44,6 +44,8 @@ export interface ExportTransaction {
   isHidden?: boolean;
   isIgnored?: boolean;
   isSplit?: boolean;
+  /** Resolved group name (from groupId) — enriched by ExportSheet before export. */
+  groupName?: string;
 }
 
 export interface ExportCategory {
@@ -122,7 +124,7 @@ export function buildCSV(
 
   const header = [
     'Date', 'Time', 'Merchant', 'Category', 'Sub-Category',
-    'Amount (₹)', 'Type', 'Account', 'Notes',
+    'Amount (₹)', 'Type', 'Account', 'Group', 'Notes',
   ].join(',');
 
   const rows = txns.map((t) => {
@@ -144,6 +146,7 @@ export function buildCSV(
       escapeCell(Number(t.amount || 0).toFixed(2)),
       escapeCell(type),
       escapeCell(acct),
+      escapeCell(t.groupName || ''),
       escapeCell(t.note || ''),
     ].join(',');
   });

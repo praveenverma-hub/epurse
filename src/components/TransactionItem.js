@@ -7,11 +7,19 @@ import { formatCurrency, formatDateTime } from '../utils/format';
 import { debitDisplayAmount, splitParticipantsLabel } from '../utils/split';
 import CategoryIcon from './CategoryIcon';
 
-const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip }) => {
+const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip, hideGroupChip = false }) => {
   const categories = useEPurseStore((s) => s.categories);
+  const groups = useEPurseStore((s) => s.groups);
   const category = useMemo(
     () => categories.find((c) => c.id === txn.categoryId) || categories[categories.length - 1],
     [categories, txn.categoryId]
+  );
+  // Group membership is orthogonal to the status chip — a lent/borrow txn can also
+  // sit in a group, so this renders as its OWN chip (group emoji + colour), not in
+  // place of the SELF/LENT/BORROWED chip.
+  const group = useMemo(
+    () => (txn.groupId ? groups.find((g) => g.id === txn.groupId) : null),
+    [groups, txn.groupId]
   );
 
   const isCredit = txn.type === 'credit';
@@ -54,6 +62,14 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
           ) : null}
           {txn.isIgnored ? <Text style={styles.ignoredTag}>IGNORED</Text> : null}
           {!txn.isIgnored && txn.isHidden ? <Text style={styles.hiddenTag}>PRIVATE</Text> : null}
+          {!hideGroupChip && group ? (
+            <View style={[styles.groupChip, { backgroundColor: (group.color || colors.info) + '1A', borderColor: (group.color || colors.info) + '55' }]}>
+              <Text style={styles.groupChipEmoji}>{group.emoji || '🗂'}</Text>
+              <Text style={[styles.groupChipText, { color: group.color || colors.info }]} numberOfLines={1}>
+                {group.name}
+              </Text>
+            </View>
+          ) : null}
         </View>
         <Text style={styles.time}>{formatDateTime(txn.createdAt)}</Text>
       </View>
@@ -104,7 +120,7 @@ const styles = StyleSheet.create({
   middle: { flex: 1, marginLeft: spacing.md },
   title: { ...typography.h3, color: colors.textPrimary },
   metaRow: { marginTop: 2, flexDirection: 'row', alignItems: 'center' },
-  meta: { ...typography.small, color: colors.textSecondary },
+  meta: { ...typography.small, color: colors.textSecondary, flexShrink: 1 },
   statusChip: {
     marginLeft: spacing.xs,
     paddingHorizontal: 6,
@@ -115,6 +131,22 @@ const styles = StyleSheet.create({
   statusChipText: {
     ...typography.tiny,
     fontWeight: '700',
+  },
+  groupChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: spacing.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    maxWidth: 130,
+  },
+  groupChipEmoji: { fontSize: 10, marginRight: 3 },
+  groupChipText: {
+    ...typography.tiny,
+    fontWeight: '700',
+    flexShrink: 1,
   },
   hiddenTag: {
     marginLeft: spacing.xs,
