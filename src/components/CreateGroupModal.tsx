@@ -149,7 +149,7 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
 
           {/* Name */}
           <TextInput
-            style={styles.nameInput}
+            style={[styles.nameInput, name.trim().length > 0 && !nameValid && styles.nameInputError]}
             placeholder="Group name…"
             placeholderTextColor={colors.textMuted}
             value={name}
@@ -157,6 +157,11 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
             maxLength={INPUT_LIMITS.NAME_MAX}
             autoFocus={!group}
           />
+          {name.trim().length > 0 && !nameValid && (
+            <Text style={styles.nameError}>
+              Group name must be at least {INPUT_LIMITS.NAME_MIN} characters.
+            </Text>
+          )}
 
           {/* Type toggle */}
           <View style={styles.typeRow}>
@@ -332,6 +337,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.divider,
+  },
+  nameInputError: { borderColor: colors.danger },
+  nameError: {
+    ...typography.tiny,
+    color: colors.danger,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.sm,
+    marginLeft: spacing.xs,
   },
   typeRow:      { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
   typeChip: {

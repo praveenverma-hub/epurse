@@ -21,6 +21,8 @@ import GradientButtonBase from './GradientButton';
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { formatCurrency } from '../utils/format';
+import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
+import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useToast } from './Toast';
 import { TwoTierCategorySheet } from './TwoTierCategorySheet';
@@ -79,7 +81,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     }
     return ms;
   }, [group]);
-  const amount = parseFloat(amountRaw.replace(/[^\d.]/g, '')) || 0;
+  const amount = parseAmount(amountRaw);
   // Tagging an existing txn → amount comes from that txn and is fixed (so the
   // split math matches the real transaction). Manual add → free entry.
   const amountLocked = typeof presetAmount === 'number' && presetAmount > 0;
@@ -132,6 +134,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const handleAdd = () => {
     if (amount <= 0) {
       toast.warning('Amount required', 'Enter the expense amount.');
+      return;
+    }
+    if (amount > MAX_ALLOWED_AMOUNT) {
+      toast.error('Amount too large', 'Maximum allowed is ₹10,00,00,000 (10 crore).');
       return;
     }
     const payer = allMembers[payerIdx] || { memberId: 'me', name: 'You' };
@@ -190,8 +196,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         placeholder="₹ 0"
         placeholderTextColor={colors.textMuted}
         value={amountRaw}
-        onChangeText={setAmountRaw}
+        onChangeText={(t) => setAmountRaw(sanitizeAmount(t))}
         keyboardType="decimal-pad"
+        maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
         editable={!amountLocked}
         autoFocus={!amountLocked}
       />
@@ -222,7 +229,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       {!isShared && accounts.length > 1 && (
         <>
           <Text style={styles.sectionLabel}>Account</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.accountRow}>
+          <View style={styles.accountRow}>
             {accounts.map((a) => (
               <TouchableOpacity
                 key={a.id}
@@ -237,7 +244,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
                 </Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
         </>
       )}
 
@@ -245,7 +252,12 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       {isShared && (
         <>
           <Text style={styles.sectionLabel}>Who paid?</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.payerRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.payerRow}
+            contentContainerStyle={styles.payerRowContent}
+          >
             {allMembers.map((m, i) => (
               <TouchableOpacity
                 key={m.memberId}
@@ -263,7 +275,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
           {allMembers[payerIdx]?.isMe && accounts.length > 1 && (
             <>
               <Text style={styles.sectionLabel}>Account</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.accountRow}>
+              <View style={styles.accountRow}>
                 {accounts.map((a) => (
                   <TouchableOpacity
                     key={a.id}
@@ -278,7 +290,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
             </>
           )}
 
@@ -297,33 +309,33 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
             ))}
           </View>
 
-          {splitMode !== 'equal' && (
-            <View style={styles.sharesList}>
-              {shares.map((s, idx) => (
-                <View key={s.memberId} style={styles.shareRow}>
-                  <Text style={styles.shareName} numberOfLines={1}>
-                    {s.memberId === 'me' ? '👤 You' : s.name}
-                  </Text>
-                  <TextInput
-                    style={styles.shareInput}
-                    value={String(splitMode === 'percent' ? (s.percent ?? '') : (s.shareAmount ?? ''))}
-                    onChangeText={(v) => updateShare(idx, parseFloat(v.replace(/[^\d.]/g, '')) || 0, splitMode === 'percent' ? 'percent' : 'shareAmount')}
-                    keyboardType="decimal-pad"
-                  />
-                  <Text style={styles.shareSuffix}>{splitMode === 'percent' ? '%' : '₹'}</Text>
-                  {splitMode === 'percent' && amount > 0 && (
-                    <Text style={styles.shareAmt}>{formatCurrency((amount * (s.percent || 0)) / 100)}</Text>
-                  )}
-                </View>
-              ))}
-            </View>
-          )}
-
-          {splitMode === 'equal' && amount > 0 && (
-            <Text style={styles.equalHint}>
-              {formatCurrency(parseFloat((amount / Math.max(allMembers.length, 1)).toFixed(2)))} per person
-            </Text>
-          )}
+          {/* Per-member breakdown — always visible. Equal mode shows the computed
+              share read-only; percent/amount modes are editable. */}
+          <View style={styles.sharesList}>
+            {shares.map((s, idx) => (
+              <View key={s.memberId} style={styles.shareRow}>
+                <Text style={styles.shareName} numberOfLines={1}>
+                  {s.memberId === 'me' ? '👤 You' : s.name}
+                </Text>
+                {splitMode === 'equal' ? (
+                  <Text style={styles.shareEqualAmt}>{formatCurrency(Number(s.shareAmount) || 0)}</Text>
+                ) : (
+                  <>
+                    <TextInput
+                      style={styles.shareInput}
+                      value={String(splitMode === 'percent' ? (s.percent ?? '') : (s.shareAmount ?? ''))}
+                      onChangeText={(v) => updateShare(idx, parseFloat(v.replace(/[^\d.]/g, '')) || 0, splitMode === 'percent' ? 'percent' : 'shareAmount')}
+                      keyboardType="decimal-pad"
+                    />
+                    <Text style={styles.shareSuffix}>{splitMode === 'percent' ? '%' : '₹'}</Text>
+                    {splitMode === 'percent' && amount > 0 && (
+                      <Text style={styles.shareAmt}>{formatCurrency((amount * (s.percent || 0)) / 100)}</Text>
+                    )}
+                  </>
+                )}
+              </View>
+            ))}
+          </View>
         </>
       )}
 
@@ -385,17 +397,21 @@ const styles = StyleSheet.create({
   catValueMuted:{ color: colors.textMuted, fontWeight: '400' },
   catChevron:   { ...typography.h3, color: colors.textMuted, marginLeft: 6 },
   sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.sm, marginBottom: spacing.xs },
-  accountRow:   { flexDirection: 'row', marginBottom: spacing.sm },
+  // Wrapping grid (no horizontal scroll) — full-screen form has the room.
+  accountRow:   { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm },
   accountChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderRadius: radius.pill, marginRight: 8,
+    borderRadius: radius.pill, marginRight: 8, marginBottom: 8,
     borderWidth: 1.5, borderColor: colors.divider,
-    backgroundColor: colors.background, maxWidth: 140,
+    backgroundColor: colors.background, maxWidth: 160,
   },
   // Constant weight so selecting a chip recolours it without changing its width
   // (a fontWeight change would resize the text and make the row jump horizontally).
   accountChipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
-  payerRow:   { flexDirection: 'row', marginBottom: spacing.sm },
+  payerRow:   { marginBottom: spacing.sm },
+  // flexGrow:1 makes the content fill the viewport when there are few chips, so a
+  // narrow row isn't scrollable (fixes the "jump right on scroll" with few items).
+  payerRowContent: { flexGrow: 1 },
   payerChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: radius.pill, marginRight: 8,
@@ -427,5 +443,6 @@ const styles = StyleSheet.create({
   },
   shareSuffix: { marginLeft: 4, ...typography.small, color: colors.textSecondary },
   shareAmt:    { marginLeft: 8, ...typography.small, color: colors.textMuted },
+  shareEqualAmt: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   equalHint:   { ...typography.small, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs },
 });

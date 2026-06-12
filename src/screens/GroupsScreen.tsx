@@ -522,8 +522,9 @@ const styles = StyleSheet.create({
   subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
   list:       { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
 
-  // Tiles
-  tileRow: { paddingVertical: spacing.sm, gap: spacing.sm },
+  // Tiles. flexGrow:1 fills the viewport when there are few tiles so the row isn't
+  // scrollable — fixes the "items jump right on scroll" glitch with a short list.
+  tileRow: { paddingVertical: spacing.sm, gap: spacing.sm, flexGrow: 1 },
   // Outer ring; 1px padding creates a transparent gap between the border and the fill.
   tileWrap: {
     width: TILE, height: TILE, borderRadius: radius.lg,
