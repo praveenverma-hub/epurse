@@ -245,17 +245,23 @@ const CategoriesScreen = ({ navigation }) => {
 
           <Text style={styles.sub}>Pick a colour</Text>
           <View style={styles.row}>
-            {COLOR_PALETTE.map((c) => (
-              <TouchableOpacity
-                key={c}
-                onPress={() => setColor(c)}
-                style={[
-                  styles.swatch,
-                  { backgroundColor: c },
-                  color === c && { borderWidth: 3, borderColor: '#fff', ...shadows.elevated },
-                ]}
-              />
-            ))}
+            {COLOR_PALETTE.map((c) => {
+              const sel = color === c;
+              return (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => setColor(c)}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.swatch,
+                    { backgroundColor: c },
+                    sel && styles.swatchSelected,
+                  ]}
+                >
+                  {sel && <Text style={styles.swatchCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <GradientButton title="Add category" onPress={handleAdd} style={{ marginTop: spacing.md }} />
@@ -376,7 +382,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   emojiActive: { borderWidth: 2, borderColor: colors.primary },
-  swatch: { width: 32, height: 32, borderRadius: 16 },
+  swatch: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  swatchSelected: {
+    borderWidth: 2, borderColor: '#fff', transform: [{ scale: 1.18 }],
+    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
+  },
+  swatchCheck: { color: '#fff', fontWeight: '900', fontSize: 15 },
 
   catRow: {
     flexDirection: 'row',

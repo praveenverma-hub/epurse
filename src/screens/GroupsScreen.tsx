@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -36,6 +37,22 @@ import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
 import type { Group, GroupExpenseData } from '../types/group';
+
+// Groups gets its OWN distinct gradient header (indigo→violet) — themed like the rest of the
+// app's gradient headers, but a different hue so Groups reads as its own space.
+const GROUP_HEADER_GRADIENT: string[] = ['#6D28D9', '#8B5CF6'];
+
+/** Mix a hex colour toward white by `amt` (0..1) — used for the soft "glow" on the active tile. */
+function lightenHex(hex: string, amt = 0.4): string {
+  const h = (hex || '#6366F1').replace('#', '');
+  if (h.length < 6) return hex;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const mix = (c: number) => Math.round(c + (255 - c) * amt);
+  const to2 = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
+}
 
 // TransactionItem.js has no TS declarations — cast to the props we use here.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -210,10 +227,10 @@ export default function GroupsScreen() {
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.tileRow}
     >
-      {/* Add tile */}
-      <TouchableOpacity style={[styles.tile, styles.addTile, { borderColor: theme.primary + '66' }]} onPress={openCreate} activeOpacity={0.8}>
-        <Text style={[styles.addTilePlus, { color: theme.primary }]}>＋</Text>
-        <Text style={[styles.tileLabel, { color: theme.primary }]} numberOfLines={1}>New</Text>
+      {/* Add tile — flat gray, no outline */}
+      <TouchableOpacity style={styles.addTile} onPress={openCreate} activeOpacity={0.8}>
+        <Text style={styles.addTilePlus}>＋</Text>
+        <Text style={styles.addTileLabel} numberOfLines={1}>New</Text>
       </TouchableOpacity>
 
       {tileGroups.map((g) => {
@@ -222,17 +239,27 @@ export default function GroupsScreen() {
         return (
           <TouchableOpacity
             key={g.id}
-            style={[styles.tile, active ? { backgroundColor: accent } : styles.tileIdle]}
+            // Outer ring with a 1px transparent gap to the fill.
+            style={[styles.tileWrap, { borderColor: active ? accent : colors.divider }]}
             onPress={() => setSelectedId(g.id)}
             activeOpacity={0.85}
           >
-            <Text style={styles.tileEmoji}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
-            <Text
-              style={[styles.tileLabel, active ? styles.tileLabelActive : { color: colors.textPrimary }]}
-              numberOfLines={1}
-            >
-              {g.name}
-            </Text>
+            {active ? (
+              <LinearGradient
+                colors={[lightenHex(accent, 0.5), accent]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.tileFill}
+              >
+                <Text style={styles.tileEmoji}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
+                <Text style={[styles.tileLabel, styles.tileLabelActive]} numberOfLines={1}>{g.name}</Text>
+              </LinearGradient>
+            ) : (
+              <View style={[styles.tileFill, styles.tileFillIdle]}>
+                <Text style={styles.tileEmoji}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
+                <Text style={[styles.tileLabel, { color: colors.textPrimary }]} numberOfLines={1}>{g.name}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -327,18 +354,27 @@ export default function GroupsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
-      <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
+    <View style={styles.root}>
+      <StatusBar style="light" />
 
-      <View style={styles.header}>
-        <View style={styles.headingRow}>
-          <Text style={styles.heading}>Groups</Text>
-          <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-            <Ionicons name="information-circle-outline" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.subheading}>Track shared and personal expenses</Text>
-      </View>
+      <LinearGradient
+        colors={GROUP_HEADER_GRADIENT}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGrad}
+      >
+        <SafeAreaView edges={['top']}>
+          <View style={styles.header}>
+            <View style={styles.headingRow}>
+              <Text style={styles.heading}>Groups</Text>
+              <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
+                <Ionicons name="information-circle-outline" size={20} color="#FFFFFFCC" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.subheading}>Track shared and personal expenses</Text>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
 
       {groups.length === 0 ? (
         <View style={styles.emptyContainer}>
@@ -450,7 +486,7 @@ export default function GroupsScreen() {
         onSecondary={confirm?.onSecondary || (() => setConfirm(null))}
         onClose={() => setConfirm(null)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -458,27 +494,35 @@ const TILE = 84;
 
 const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: colors.background },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  headerGrad: { borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl },
+  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   headingRow: { flexDirection: 'row', alignItems: 'center' },
-  heading:    { ...typography.h1, color: colors.textPrimary },
+  heading:    { ...typography.h1, color: '#fff' },
   infoBtn:    { marginLeft: spacing.xs, padding: 2 },
-  subheading: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
+  subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
   list:       { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
 
   // Tiles
   tileRow: { paddingVertical: spacing.sm, gap: spacing.sm },
-  tile: {
+  // Outer ring; 1px padding creates a transparent gap between the border and the fill.
+  tileWrap: {
     width: TILE, height: TILE, borderRadius: radius.lg,
-    alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 6,
+    borderWidth: 1, padding: 1, backgroundColor: 'transparent',
     ...shadows.card,
   },
-  tileIdle: { backgroundColor: colors.card },
-  addTile: {
-    backgroundColor: colors.card,
-    borderWidth: 1.5, borderStyle: 'dashed',
+  tileFill: {
+    flex: 1, borderRadius: radius.lg - 1,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 6, overflow: 'hidden',
   },
-  addTilePlus: { fontSize: 26, fontWeight: '300', lineHeight: 30 },
+  tileFillIdle: { backgroundColor: colors.card },
+  addTile: {
+    width: TILE, height: TILE, borderRadius: radius.lg,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E6E8EC',   // flat gray, no outline
+  },
+  addTilePlus:  { fontSize: 28, fontWeight: '300', lineHeight: 32, color: colors.textSecondary },
+  addTileLabel: { ...typography.tiny, fontWeight: '700', marginTop: 2, color: colors.textSecondary },
   tileEmoji:   { fontSize: 26 },
   tileLabel:   { ...typography.tiny, fontWeight: '700', marginTop: 6, maxWidth: TILE - 12, textAlign: 'center' },
   tileLabelActive: { color: '#fff' },

@@ -182,6 +182,19 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
           {/* Emoji row */}
           <Text style={styles.sectionLabel}>Icon</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.emojiRow}>
+            {/* Type any emoji — highlighted when the icon isn't one of the presets. */}
+            <TextInput
+              style={[
+                styles.emojiChip,
+                styles.emojiCustom,
+                !EMOJIS.includes(emoji) && { borderColor: theme.primary, backgroundColor: theme.primary + '14' },
+              ]}
+              value={EMOJIS.includes(emoji) ? '' : emoji}
+              onChangeText={(t) => { const e = Array.from(t.trim())[0]; if (e) setEmoji(e); }}
+              placeholder="⌨️"
+              placeholderTextColor={colors.textMuted}
+              maxLength={4}
+            />
             {EMOJIS.map((e) => (
               <TouchableOpacity
                 key={e}
@@ -196,13 +209,19 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
           {/* Color row */}
           <Text style={styles.sectionLabel}>Colour</Text>
           <View style={styles.colorRow}>
-            {GROUP_COLORS.map((c) => (
-              <TouchableOpacity
-                key={c}
-                style={[styles.colorDot, { backgroundColor: c }, color === c && styles.colorDotSelected]}
-                onPress={() => setColor(c)}
-              />
-            ))}
+            {GROUP_COLORS.map((c) => {
+              const sel = color === c;
+              return (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorDot, { backgroundColor: c }, sel && styles.colorDotSelected]}
+                  onPress={() => setColor(c)}
+                  activeOpacity={0.8}
+                >
+                  {sel && <Text style={styles.colorCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Members (shared only) */}
@@ -331,9 +350,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   emojiTxt:     { fontSize: 22 },
-  colorRow:     { flexDirection: 'row', gap: 10, marginBottom: spacing.md, flexWrap: 'wrap' },
-  colorDot:     { width: 28, height: 28, borderRadius: 14 },
-  colorDotSelected: { borderWidth: 3, borderColor: '#fff', transform: [{ scale: 1.15 }] },
+  emojiCustom:  { fontSize: 22, textAlign: 'center', color: colors.textPrimary, padding: 0 },
+  colorRow:     { flexDirection: 'row', gap: 12, marginBottom: spacing.md, flexWrap: 'wrap' },
+  colorDot:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  // Selected = scale up + white inner ring + dark outer ring (visible on any colour) + a check.
+  colorDotSelected: {
+    borderWidth: 2, borderColor: '#fff',
+    transform: [{ scale: 1.18 }],
+    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
+  },
+  colorCheck:   { color: '#fff', fontWeight: '900', fontSize: 15 },
   membersBox:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
   // accent bg/border/text applied inline via theme.primary
   memberChip: {
