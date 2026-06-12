@@ -92,13 +92,19 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const isShared = group?.type === 'shared';
   // Guarantee the built-in 'me' member is present for shared groups, even if a stored
   // group lost it (e.g. an older edit) — so "You" always shows in payer + split.
+  // For personal groups, use a single-member array ['me'] for the split calculation
+  // (personal groups have no member list, but the user is always the implicit payer).
   const allMembers = useMemo(() => {
+    if (!isShared) {
+      // Personal group → single implicit member 'me' for split math.
+      return [{ memberId: 'me', name: 'You', isMe: true }];
+    }
     const ms = group?.members || [];
-    if (group?.type === 'shared' && !ms.some((m) => m.memberId === 'me')) {
+    if (!ms.some((m) => m.memberId === 'me')) {
       return [{ memberId: 'me', name: 'You', isMe: true }, ...ms];
     }
     return ms;
-  }, [group]);
+  }, [group, isShared]);
   const amount = parseAmount(amountRaw);
   // memberId of the currently-selected payer — drives the "Paid / owes" labels.
   const payerMemberId = allMembers[payerIdx]?.memberId;
@@ -166,15 +172,18 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     }
   }, [visible, group, accounts, amountLocked, presetAmount, editTxn, allMembers]);
 
-  // Recompute equal shares when amount changes in equal mode
+  // Equal shares are computed fresh at submit time (handleAdd line ~240) to avoid
+  // race conditions where submitRef reads a stale snapshot. This effect only fills
+  // the display preview; the actual saved shares come from handleAdd's live calc.
   useEffect(() => {
-    if (splitMode !== 'equal' || !amount || !allMembers.length) return;
-    const each = parseFloat((amount / allMembers.length).toFixed(2));
+    if (splitMode !== 'equal' || !allMembers.length) return;
+    const amt = amount || 0;
+    const each = amt > 0 ? parseFloat((amt / allMembers.length).toFixed(2)) : 0;
     setShares(allMembers.map((m, i) => ({
       memberId: m.memberId,
       name: m.name,
-      shareAmount: i === allMembers.length - 1
-        ? parseFloat((amount - each * (allMembers.length - 1)).toFixed(2))
+      shareAmount: amt > 0 && i === allMembers.length - 1
+        ? parseFloat((amt - each * (allMembers.length - 1)).toFixed(2))
         : each,
       percent: Math.round(100 / allMembers.length),
     })));
@@ -226,8 +235,21 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         }
         finalShares = shares.map((x) => ({ memberId: x.memberId, name: x.name, shareAmount: Number(x.shareAmount) || 0 }));
       } else {
-        // equal — the effect already computed shareAmounts that sum to the amount.
-        finalShares = shares.map((x) => ({ memberId: x.memberId, name: x.name, shareAmount: Number(x.shareAmount) || 0 }));
+        // equal — compute fresh from the live amount + members at submit time.
+        // Do NOT trust the `shares` STATE here: it's filled asynchronously by the
+        // equal-split effect, and the pinned-footer submit (submitRef) can fire
+        // while that snapshot still holds 0 for "me" — which, since equal mode has
+        // no sum reconciliation, would silently persist a 0 share (the bug where
+        // the txn/group card showed ₹0 while totals were correct).
+        const n = allMembers.length || 1;
+        const each = parseFloat((amount / n).toFixed(2));
+        finalShares = allMembers.map((m, i) => ({
+          memberId: m.memberId,
+          name: m.name,
+          shareAmount: i === n - 1
+            ? parseFloat((amount - each * (n - 1)).toFixed(2))
+            : each,
+        }));
       }
     }
 
