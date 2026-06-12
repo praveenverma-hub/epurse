@@ -32,6 +32,7 @@ import {
   readInbox,
   subscribeToIncomingSms,
 } from '../services/smsService';
+import { getLocationIfGranted } from '../services/locationService';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -118,10 +119,15 @@ export function useSmsSync() {
       // ── Live listener ─────────────────────────────────────────────────────
       // Re-attach every time to avoid stale closures after a sweep.
       stop();
-      unsubRef.current = subscribeToIncomingSms((sms) => {
+      unsubRef.current = subscribeToIncomingSms(async (sms) => {
+        // LIVE message → the device's current point ≈ where the purchase happened.
+        // Only if location permission is already granted (never prompts in the
+        // background). The backfill sweep above intentionally skips this.
+        const location = await getLocationIfGranted();
         ingestMessage(sms.body, {
           sender:     sms.originatingAddress,
           receivedAt: new Date(sms.timestamp).toISOString(),
+          ...(location ? { location } : {}),
           // Live messages don't carry an _id — content-based dedup applies.
           // Advance the date cursor so the next sweep skips this message too.
         });

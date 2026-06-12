@@ -71,6 +71,13 @@ export interface GroupSettlement {
 }
 
 /** Payload emitted by GroupExpenseSheet → addGroupExpense / tagTransactionToGroup. */
+export interface TxnLocation {
+  latitude: number;
+  longitude: number;
+  /** ISO timestamp of the fix. */
+  capturedAt: string;
+}
+
 export interface GroupExpenseData {
   amount: number;
   merchant: string;
@@ -80,4 +87,6 @@ export interface GroupExpenseData {
   paidByName: string;
   shares: GroupShare[];
   accountId?: string | null;
+  /** Captured at save time for manual adds (point of purchase). Optional. */
+  location?: TxnLocation;
 }

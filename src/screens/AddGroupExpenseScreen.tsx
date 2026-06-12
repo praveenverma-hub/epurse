@@ -21,6 +21,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, spacing, typography as typographyBase } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import GroupExpenseForm from '../components/GroupExpenseForm';
+import { requestAndGetLocation } from '../services/locationService';
 import type { Group, GroupExpenseData } from '../types/group';
 
 interface NavProp {
@@ -37,8 +38,10 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
   ) as Group | null;
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense) as (id: string, data: GroupExpenseData) => void;
 
-  const handleAdd = (expenseData: GroupExpenseData) => {
-    if (groupId) addGroupExpense(groupId, expenseData);
+  const handleAdd = async (expenseData: GroupExpenseData) => {
+    // Manual add → capture the point of purchase (prompts first time; never blocks).
+    const location = await requestAndGetLocation();
+    if (groupId) addGroupExpense(groupId, location ? { ...expenseData, location } : expenseData);
     navigation.goBack();
   };
 

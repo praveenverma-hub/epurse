@@ -9,6 +9,7 @@ import {
   FlatList,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -35,6 +36,7 @@ import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
+import { useToast } from '../components/Toast';
 import type { Group, GroupExpenseData } from '../types/group';
 
 /** Mix a hex colour toward white by `amt` (0..1) — used for the soft "glow" on the active tile. */
@@ -88,6 +90,9 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string) => void;
   const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
   const updateTwoTierCategory = useEPurseStore((s: any) => s.updateTwoTierCategory) as (id: string, parent: string, child: string) => void;
+  const activeGroupZoneId = useEPurseStore((s: any) => s.activeGroupZoneId) as string | null;
+  const setGroupZone = useEPurseStore((s: any) => s.setGroupZone) as (id: string | null) => void;
+  const toast = useToast();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createVisible, setCreateVisible] = useState(false);
@@ -210,6 +215,14 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   };
 
   const openCreate = () => { setEditTarget(null); setCreateVisible(true); };
+
+  // Group Zone toggle — exclusive (one at a time). Toast on switch-on.
+  const handleToggleZone = (g: Group, on: boolean) => {
+    setGroupZone(on ? g.id : null);
+    if (on) {
+      toast.info(`${g.name} zone on`, 'New transactions will be added to this group by default.');
+    }
+  };
 
   // ── Tiles ──
   const renderTiles = () => (
@@ -336,6 +349,21 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
                 })}
               </View>
             )}
+
+            {/* Group Zone toggle — switch on the right; on = auto-tag new txns here */}
+            <View style={styles.zoneRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.zoneTitle}>🧭 Group Zone</Text>
+                <Text style={styles.zoneSub}>Auto-add new transactions to this group</Text>
+              </View>
+              <Switch
+                value={activeGroupZoneId === g.id}
+                onValueChange={(on) => handleToggleZone(g, on)}
+                trackColor={{ true: g.color || theme.primary, false: '#D1D5DB' }}
+                thumbColor="#fff"
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
           </View>
         </View>
 
@@ -555,6 +583,18 @@ const styles = StyleSheet.create({
   balanceSub: { ...typography.tiny, fontWeight: '700', marginTop: 1 },
   settleBtn:  { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, marginLeft: spacing.sm },
   settleBtnTxt:{ ...typography.small, fontWeight: '700' },
+
+  // Group Zone toggle row
+  zoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  zoneTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
+  zoneSub:   { ...typography.tiny, color: colors.textMuted, marginTop: 1 },
 
   // Transactions list
   txnHeader: { marginBottom: spacing.sm },

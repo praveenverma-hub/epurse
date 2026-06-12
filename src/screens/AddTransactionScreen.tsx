@@ -52,6 +52,7 @@ import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { canSplitTransaction, SPLIT_BLOCKED_CATEGORY_IDS } from '../utils/split';
 import { PARENT_CATEGORIES, ParentCat, ChildCat } from '../constants/twoTierCategories';
+import { requestAndGetLocation } from '../services/locationService';
 
 // ─── Category mappings (two-tier → legacy) ───────────────────────────────────
 // Used to derive categoryId for budget checks and split validation.
@@ -355,13 +356,17 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
    * LB contact-picker flow can call it AFTER the user picks a contact
    * (passing the contactInfo through so the store can spawn an LB entry).
    */
-  const commitTransaction = (contactInfo?: { person: string; phone: string | null; contactId: string | null }) => {
+  const commitTransaction = async (contactInfo?: { person: string; phone: string | null; contactId: string | null }) => {
     const num = parseFloat(amount);
     const wantSplit = isSplit && canSplitHere;
+    // Manual add → you're at the point of purchase; capture the current point
+    // (prompts for permission the first time). Optional, never blocks the save.
+    const location = await requestAndGetLocation();
     addTransaction({
       amount: num,
       type,
       accountId: resolvedAccountId,
+      ...(location ? { location } : {}),
       categoryId:      legacyCategoryId,
       parentCategory,
       childCategory,

@@ -553,6 +553,11 @@ export const useEPurseStore = create(
       //   excludeFromTotals, totalSpend, settlements[], createdAt }
       groups: [],
 
+      // Group Zone: while set, NEW spend transactions (SMS + manual) are auto-tagged
+      // to this group by default (user can still untag/edit, e.g. in the review queue).
+      // Only ONE zone at a time — setting one replaces any other.
+      activeGroupZoneId: null,
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -1090,10 +1095,32 @@ export const useEPurseStore = create(
             resolvedAccounts = ensured;
             newTxn.accountId = resolvedAccountId;
           }
+
+          // Group Zone: auto-tag a plain expense to the active zone group (no split —
+          // the user refines/untags later). Skips income, self/LB, splits, already-tagged.
+          let zoneGroups = s.groups;
+          const zoneId = s.activeGroupZoneId;
+          if (
+            zoneId &&
+            !newTxn.groupId &&
+            !newTxn.isSplit &&
+            newTxn.type === TRANSACTION_TYPES.DEBIT &&
+            !NON_SPEND_CATS.has(newTxn.categoryId) &&
+            s.groups.some((g) => g.id === zoneId)
+          ) {
+            newTxn.groupId = zoneId;
+            zoneGroups = s.groups.map((g) =>
+              g.id === zoneId
+                ? { ...g, totalSpend: (g.totalSpend || 0) + (Number(newTxn.amount) || 0), lastActivityAt: new Date().toISOString() }
+                : g,
+            );
+          }
+
           return {
             transactions: [newTxn, ...s.transactions],
             accounts: applyDelta(resolvedAccounts, resolvedAccountId, newTxn),
             lentBorrowed: nextLent,
+            ...(zoneGroups !== s.groups ? { groups: zoneGroups } : {}),
             ...(useProvidedId ? {} : { manualTxnSeq: nextSeq }),
           };
         });
@@ -1137,9 +1164,14 @@ export const useEPurseStore = create(
         }));
       },
 
+      /** Turn a group zone on (groupId) or off (null). Exclusive — one zone at a time. */
+      setGroupZone: (groupId) => set({ activeGroupZoneId: groupId || null }),
+
       deleteGroup: (id) => {
         set((s) => ({
           groups: s.groups.filter((g) => g.id !== id),
+          // Deleting the active-zone group turns the zone off.
+          ...(s.activeGroupZoneId === id ? { activeGroupZoneId: null } : {}),
           // Drop this group's debt rows; clearing groupSplit + rows together keeps spend/debt
           // consistent (the expense reverts to a plain personal spend — no orphan double-count).
           lentBorrowed: s.lentBorrowed.filter((l) => l.groupId !== id),
@@ -1229,7 +1261,7 @@ export const useEPurseStore = create(
        * paidByMemberId: 'me' | group member's memberId
        * If paidBy !== 'me': isGroupMemo=true, no account balance change.
        */
-      addGroupExpense: (groupId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, date } = {}) => {
+      addGroupExpense: (groupId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, date, location } = {}) => {
         const s = get();
         const group = s.groups.find((g) => g.id === groupId);
         if (!group || !amount || amount <= 0 || amount > MAX_ALLOWED_AMOUNT) return null;
@@ -1262,6 +1294,7 @@ export const useEPurseStore = create(
           groupId,
           ...(groupSplit   ? { groupSplit }        : {}),
           ...(isGroupMemo ? { isGroupMemo: true }  : {}),
+          ...(location ? { location } : {}),
         };
 
         let resolvedAccountId = accountId || null;
@@ -1505,6 +1538,10 @@ export const useEPurseStore = create(
 
           const candidate = { ...txn, isReviewed: false };
           if (smsId) candidate.smsId = smsId;
+          // Live incoming SMS may carry the device's current point (caller passes it
+          // only for real-time messages, never the backfill sweep). Optional + backward
+          // compatible — older txns simply have no `location`.
+          if (opts.location) candidate.location = opts.location;
           // TODO: remove rawSms/rawSender before production — preview-only debug fields
           if (IS_PREVIEW_BUILD) {
             const txnAge = Date.now() - new Date(candidate.createdAt || Date.now()).getTime();
@@ -1621,6 +1658,25 @@ export const useEPurseStore = create(
         }
 
         set({ transactions: nextTransactions, accounts: nextAccounts, archivedTransactions: nextArchived });
+
+        // Group Zone: auto-tag freshly-added SMS expenses to the active zone group
+        // (no split — they stay isReviewed:false so the user can edit/untag in the
+        // review queue). Reuses tagTransactionToGroup (totals + lastActivity). Skips
+        // income, self/LB, splits, and already-tagged rows. (Onboarding's archived
+        // sweep never reaches here — those rows aren't in `added`.)
+        const zoneId = get().activeGroupZoneId;
+        if (zoneId && added.length && get().groups.some((g) => g.id === zoneId)) {
+          added.forEach((t) => {
+            if (
+              t.type === TRANSACTION_TYPES.DEBIT &&
+              !t.groupId &&
+              !t.isSplit &&
+              !NON_SPEND_CATS.has(t.categoryId)
+            ) {
+              get().tagTransactionToGroup(t.id, zoneId);
+            }
+          });
+        }
 
         // Check budget breach for each unique category affected by this ingest.
         const affectedCats = new Set();
@@ -3004,6 +3060,7 @@ export const useEPurseStore = create(
         welcomeReviewSeen: state.welcomeReviewSeen ?? false,
         planBannerDismissed: state.planBannerDismissed ?? false,
         groups: state.groups ?? [],
+        activeGroupZoneId: state.activeGroupZoneId ?? null,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;
