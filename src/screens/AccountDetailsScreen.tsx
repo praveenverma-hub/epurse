@@ -174,6 +174,9 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const accounts    = useEPurseStore((s: any) => s.accounts)     as Account[];
   const transactions = useEPurseStore((s: any) => s.transactions) as Txn[];
+  // Historical SMS captured at onboarding — shown ONLY here, for reference. They
+  // don't count toward balances or any totals (see store: archivedTransactions).
+  const archivedTransactions = useEPurseStore((s: any) => s.archivedTransactions || []) as Txn[];
   const userName    = useEPurseStore((s: any) => s.userName)      as string;
 
   const account = useMemo(
@@ -251,19 +254,42 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Transactions for this account only. Prefer direct accountId link; fall back
   // to type + mask for legacy rows that predate stable account ids.
+  const belongsToAccount = useCallback(
+    (t: Txn) => {
+      if (!account) return false;
+      if (t.isIgnored) return false;
+      if (t.accountId) return t.accountId === account.id;
+      if (account.mask && t.accountMask) {
+        return t.accountMask === account.mask && t.accountType === account.type;
+      }
+      return false;
+    },
+    [account],
+  );
+
   const ledger = useMemo(() => {
     if (!account) return [];
     return transactions
-      .filter((t) => {
-        if (t.isIgnored) return false;
-        if (t.accountId) return t.accountId === account.id;
-        if (account.mask && t.accountMask) {
-          return t.accountMask === account.mask && t.accountType === account.type;
-        }
-        return false;
-      })
+      .filter(belongsToAccount)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [transactions, account]);
+  }, [transactions, account, belongsToAccount]);
+
+  // Historical (pre-onboarding) rows for this account — reference only.
+  const archivedLedger = useMemo(() => {
+    if (!account) return [];
+    return archivedTransactions
+      .filter(belongsToAccount)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [archivedTransactions, account, belongsToAccount]);
+
+  // Active rows first, then a labelled "earlier / not counted" block of history.
+  const ledgerData = useMemo(
+    () =>
+      archivedLedger.length
+        ? [...ledger, { id: '__earlier_sep__', __sep: true } as any, ...archivedLedger]
+        : ledger,
+    [ledger, archivedLedger],
+  );
 
   // ── Shared nav header ──────────────────────────────────────────────────────
   const renderHeader = () => (
@@ -397,16 +423,27 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
               reads as the lip of a physical card sleeve. */}
       <View style={styles.pocketSheetWrap}>
         <FlatList
-          data={ledger}
+          data={ledgerData}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.txnRow}>
-              <TransactionItem
-                txn={item}
-                onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
-              />
-            </View>
-          )}
+          renderItem={({ item }) => {
+            if ((item as any).__sep) {
+              return (
+                <View style={styles.earlierSep}>
+                  <Text style={[styles.earlierSepText, { color: theme.textMuted }]}>
+                    Earlier · imported at sign-up (not counted)
+                  </Text>
+                </View>
+              );
+            }
+            return (
+              <View style={[styles.txnRow, (item as any).preOnboarding && styles.archivedRow]}>
+                <TransactionItem
+                  txn={item}
+                  onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
+                />
+              </View>
+            );
+          }}
           ListHeaderComponent={listHeaderComponent}
           ListEmptyComponent={
             <EmptyState
@@ -578,6 +615,18 @@ const styles = StyleSheet.create({
 
   listContent: { paddingBottom: spacing.xxl * 2 },
   txnRow: { paddingHorizontal: 16 },
+  archivedRow: { opacity: 0.55 },
+  earlierSep: {
+    paddingHorizontal: 16,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xs,
+  },
+  earlierSepText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   emptyLedger: { marginTop: spacing.lg },
   missingState: { marginTop: spacing.xxl },
 

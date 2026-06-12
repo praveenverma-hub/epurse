@@ -15,13 +15,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, spacing, typography as typographyBase } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
-import { useGradient } from '../hooks/useTheme';
 import GroupExpenseForm from '../components/GroupExpenseForm';
 import type { Group, GroupExpenseData } from '../types/group';
 
@@ -33,7 +31,6 @@ interface RouteProp {
 }
 
 export default function AddGroupExpenseScreen({ navigation, route }: { navigation: NavProp; route: RouteProp }) {
-  const gradient = useGradient();
   const groupId = route?.params?.groupId;
   const group = useEPurseStore((s: any) =>
     (s.groups as Group[]).find((g) => g.id === groupId) || null,
@@ -47,26 +44,19 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
-      <LinearGradient
-        colors={gradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGrad}
-      >
-        <SafeAreaView edges={['top']}>
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={24} color="#fff" />
-            </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Add transaction</Text>
-              {group && <Text style={styles.subtitle} numberOfLines={1}>{group.name}</Text>}
-            </View>
+      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>Add transaction</Text>
+            {group && <Text style={styles.subtitle} numberOfLines={1}>{group.name}</Text>}
           </View>
-        </SafeAreaView>
-      </LinearGradient>
+        </View>
+      </SafeAreaView>
 
       {group ? (
         <KeyboardAvoidingView
@@ -92,21 +82,22 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
-  headerGrad: {
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
+  headerSafe: {
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.md,
     gap: spacing.xs,
   },
   backBtn: { padding: 4 },
-  title:    { ...typography.h2, color: '#fff' },
-  subtitle: { ...typography.small, color: '#FFFFFFCC', marginTop: 1 },
+  title:    { ...typography.h2, color: colors.textPrimary },
+  subtitle: { ...typography.small, color: colors.textSecondary, marginTop: 1 },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   missingTxt: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },

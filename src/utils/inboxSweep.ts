@@ -10,7 +10,7 @@
 import { readInbox } from '../services/smsService';
 
 export interface SweepActions {
-  ingestMessage: (body: string, opts: { sender?: string; receivedAt?: string; smsId?: string }) => unknown;
+  ingestMessage: (body: string, opts: { sender?: string; receivedAt?: string; smsId?: string; preOnboarding?: boolean }) => unknown;
   setLastSmsDate: (date: number) => void;
   setLastSmsSync: (ts: number) => void;
   compactTransactions: (force?: boolean) => void;
@@ -74,6 +74,9 @@ export async function runInitialInboxSweep(
         sender: m.address,
         receivedAt: new Date(m.date || Date.now()).toISOString(),
         smsId: String(m._id), // Android SMS unique ID — prevents re-ingestion
+        // Fresh start: everything swept at onboarding is historical — archived for
+        // account discovery + Account Details reference only, never counted.
+        preOnboarding: true,
       });
       if ((m.date || 0) > maxSmsDate) maxSmsDate = m.date || 0;
     });

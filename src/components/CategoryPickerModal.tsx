@@ -331,16 +331,43 @@ const CategoryPickerModal: React.FC<Props> = ({
             </ScrollView>
           )}
 
-          {canSplit && !isIgnored && onPressSplit ? (
-            <TouchableOpacity
-              style={styles.splitBillBtn}
-              activeOpacity={0.85}
-              onPress={onPressSplit}
-            >
-              <Text style={styles.splitBillText}>
-                {isSplitTxn ? 'Edit split' : 'Split bill'}
-              </Text>
-            </TouchableOpacity>
+          {/* Manage actions — Private · Ignore · Split share one row. */}
+          {(onToggleHidden || onIgnore || onRestore || (canSplit && !isIgnored && onPressSplit)) ? (
+            <View style={styles.actionRow}>
+              {onToggleHidden ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, isHidden ? styles.unhideHalf : styles.hideHalf]}
+                  activeOpacity={0.85}
+                  onPress={() => onToggleHidden(!isHidden)}
+                >
+                  <Text style={[styles.hideIgnoreText, isHidden && styles.unhideText]}>
+                    {isHidden ? 'Public' : 'Private'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {(onIgnore || onRestore) ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, isIgnored ? styles.restoreHalf : styles.ignoreHalf]}
+                  activeOpacity={0.85}
+                  onPress={isIgnored ? onRestore : onIgnore}
+                >
+                  <Text style={isIgnored ? styles.restoreText : styles.ignoreText}>
+                    {isIgnored ? 'Restore' : 'Ignore'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {canSplit && !isIgnored && onPressSplit ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.splitAction]}
+                  activeOpacity={0.85}
+                  onPress={onPressSplit}
+                >
+                  <Text style={styles.splitBillText} numberOfLines={1}>
+                    {isSplitTxn ? 'Edit split' : 'Split'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           ) : null}
 
           {!isIgnored && (onPressAddToGroup || onPressRemoveFromGroup) ? (
@@ -366,34 +393,6 @@ const CategoryPickerModal: React.FC<Props> = ({
               ) : null
             )
           ) : null}
-
-          {(onToggleHidden || onIgnore || onRestore) && (
-            <View style={styles.hideIgnoreRow}>
-              {onToggleHidden && (
-                <TouchableOpacity
-                  style={[styles.hideIgnoreHalf, isHidden ? styles.unhideHalf : styles.hideHalf]}
-                  onPress={() => onToggleHidden(!isHidden)}
-                >
-                  <Text style={[styles.hideIgnoreText, isHidden && styles.unhideText]}>
-                    {isHidden ? 'Public' : 'Private'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              {(onIgnore || onRestore) && (
-                <TouchableOpacity
-                  style={[
-                    styles.hideIgnoreHalf,
-                    isIgnored ? styles.restoreHalf : styles.ignoreHalf,
-                  ]}
-                  onPress={isIgnored ? onRestore : onIgnore}
-                >
-                  <Text style={isIgnored ? styles.restoreText : styles.ignoreText}>
-                    {isIgnored ? 'Restore' : 'Ignore'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
 
           {onDelete && (
             <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
@@ -544,6 +543,24 @@ const styles = StyleSheet.create({
     color: colors.info,
     ...typography.bodyBold,
     fontWeight: '700',
+  },
+  // Single row: Private · Ignore · Split (equal columns).
+  actionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  actionBtn: {
+    flex: 1,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splitAction: {
+    backgroundColor: colors.info + '18',
+    borderWidth: 1,
+    borderColor: colors.info + '55',
   },
   groupAddBtn: {
     backgroundColor: colors.primary + '18',

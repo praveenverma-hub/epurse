@@ -58,6 +58,8 @@ const BudgetWidget = ({ onPress }) => {
   const categories    = useEPurseStore((s) => s.categories);
   const budgetStreak  = useEPurseStore((s) => s.budgetStreak);
   const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
+  const planBannerDismissed = useEPurseStore((s) => s.planBannerDismissed);
+  const dismissPlanBanner   = useEPurseStore((s) => s.dismissPlanBanner);
 
   // Recomputes whenever budget OR transactions change
   const usage = useMemo(() => getBudgetUsage(), [budget, transactions, getBudgetUsage]);
@@ -72,6 +74,8 @@ const BudgetWidget = ({ onPress }) => {
 
   // ── Empty state ──────────────────────────────────────────────────────────
   if (!budget) {
+    // User dismissed the CTA — don't nag. They can still plan from the Budget tab.
+    if (planBannerDismissed) return null;
     return (
       <TouchableOpacity
         style={[styles.emptyCard, { borderColor: theme.primary + '44' }]}
@@ -87,7 +91,15 @@ const BudgetWidget = ({ onPress }) => {
             Set rough caps for the categories you care about. Track spend in real time.
           </Text>
         </View>
-        <Text style={[styles.emptyArrow, { color: theme.primary }]}>›</Text>
+        <TouchableOpacity
+          style={styles.emptyClose}
+          onPress={dismissPlanBanner}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss plan reminder"
+        >
+          <Text style={styles.emptyCloseText}>✕</Text>
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   }
@@ -212,6 +224,8 @@ const styles = StyleSheet.create({
   emptyTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   emptySub:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2, lineHeight: 15 },
   emptyArrow: { fontSize: 28, fontWeight: '300' },
+  emptyClose: { alignSelf: 'flex-start', padding: 4, marginLeft: spacing.xs },
+  emptyCloseText: { fontSize: 14, color: colors.textMuted, fontWeight: '700' },
 
   // ── Active state ──
   card: {

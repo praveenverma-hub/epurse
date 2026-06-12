@@ -53,6 +53,10 @@ const STACK_SCALE  = [1,    0.96,  0.92];
 const STACK_OFFSET = [0,    10,    20];   // translateY downward from top
 const STACK_ALPHA  = [1,    0.82,  0.60];
 
+// Synthetic first-run tutorial card (NOT a real transaction). Teaches the
+// swipe-to-approve mechanic; dismissing it flips welcomeReviewSeen in the store.
+const WELCOME_CARD = { id: '__welcome__', __welcome: true };
+
 // =============================================================================
 // InboxZero — shown briefly after the last card is cleared
 // =============================================================================
@@ -214,28 +218,44 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
           </Animated.View>
 
           {/* ── Card content ── */}
-          <View style={styles.cardTop}>
-            <View style={styles.cardCatBadge}>
-              <Text style={styles.cardEmoji}>{cat?.emoji ?? '📌'}</Text>
+          {txn.__welcome ? (
+            <View style={styles.welcomeInner}>
+              <Text style={styles.welcomeEmoji}>👋</Text>
+              <Text style={styles.welcomeTitle}>Welcome to ePurse</Text>
+              <Text style={styles.welcomeBody} numberOfLines={2}>
+                New transactions land here to review. Swipe right to approve, left to fix the category.
+              </Text>
+              <View style={styles.swipeHints}>
+                <Text style={styles.hintLeft}>← edit</Text>
+                <Text style={styles.hintRight}>got it →</Text>
+              </View>
             </View>
-            <View style={styles.cardMeta}>
-              <Text style={styles.cardMerchant} numberOfLines={1}>{txn.merchant || 'Unknown'}</Text>
-              <Text style={styles.cardCatName} numberOfLines={1}>{cat?.name ?? 'Uncategorised'}</Text>
-            </View>
-            <Text style={[styles.cardAmount, { color: amountColor }]}>
-              {isDebit ? '−' : '+'}{formatCurrency(txn.amount)}
-            </Text>
-          </View>
+          ) : (
+            <>
+              <View style={styles.cardTop}>
+                <View style={styles.cardCatBadge}>
+                  <Text style={styles.cardEmoji}>{cat?.emoji ?? '📌'}</Text>
+                </View>
+                <View style={styles.cardMeta}>
+                  <Text style={styles.cardMerchant} numberOfLines={1}>{txn.merchant || 'Unknown'}</Text>
+                  <Text style={styles.cardCatName} numberOfLines={1}>{cat?.name ?? 'Uncategorised'}</Text>
+                </View>
+                <Text style={[styles.cardAmount, { color: amountColor }]}>
+                  {isDebit ? '−' : '+'}{formatCurrency(txn.amount)}
+                </Text>
+              </View>
 
-          <View style={styles.cardDivider} />
+              <View style={styles.cardDivider} />
 
-          <View style={styles.cardBottom}>
-            <Text style={styles.cardDate}>{formatDateTime(txn.createdAt)}</Text>
-            <View style={styles.swipeHints}>
-              <Text style={styles.hintLeft}>← edit</Text>
-              <Text style={styles.hintRight}>approve →</Text>
-            </View>
-          </View>
+              <View style={styles.cardBottom}>
+                <Text style={styles.cardDate}>{formatDateTime(txn.createdAt)}</Text>
+                <View style={styles.swipeHints}>
+                  <Text style={styles.hintLeft}>← edit</Text>
+                  <Text style={styles.hintRight}>approve →</Text>
+                </View>
+              </View>
+            </>
+          )}
         </Animated.View>
       </GestureDetector>
 
@@ -257,6 +277,8 @@ const DailyQueueStack = () => {
   const theme      = useTheme();
   const navigation = useNavigation();
   const queue    = useEPurseStore(selectUnreviewedQueue);
+  const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
+  const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);
   const totalRP    = useRewardStore(selectTotalRP);
   const awareStreak = useRewardStore(selectAwareStreak);
   const recordReview = useRewardStore((s) => s.recordReview);
@@ -303,6 +325,12 @@ const DailyQueueStack = () => {
    * pre-formatted label.
    */
   const handleApprove = useCallback((id, fireDrift) => {
+    // The welcome tutorial card isn't a real txn — swiping it just dismisses the
+    // one-time coach mark (no review reward, no markReviewed lookup).
+    if (id === WELCOME_CARD.id) {
+      setWelcomeReviewSeen(true);
+      return;
+    }
     const result = recordReview();
     markReviewed(id);
     if (fireDrift) {
@@ -312,9 +340,11 @@ const DailyQueueStack = () => {
         fireDrift(result.message);
       }
     }
-  }, [markReviewed, recordReview]);
+  }, [markReviewed, recordReview, setWelcomeReviewSeen]);
 
   const handlePickCategory = useCallback((txn) => {
+    // The welcome card has no category to edit — left-swipe is a no-op.
+    if (txn?.__welcome) return;
     setPickerTxn(txn);
   }, []);
 
@@ -431,10 +461,15 @@ const DailyQueueStack = () => {
     });
   }, [pickerTxn, deleteTransaction]);
 
-  // Nothing to show — section is hidden
-  if (queue.length === 0 && !showZero) return null;
+  // Brand-new users see a one-time welcome card atop the queue that teaches the
+  // swipe mechanic. It lives only in the rendered list (not the store ledger).
+  const showWelcome = !welcomeReviewSeen;
+  const displayQueue = showWelcome ? [WELCOME_CARD, ...queue] : queue;
 
-  const visible = queue.slice(0, 3); // show at most 3 stacked cards
+  // Nothing to show — section is hidden (unless the welcome card is pending).
+  if (displayQueue.length === 0 && !showZero) return null;
+
+  const visible = displayQueue.slice(0, 3); // show at most 3 stacked cards
 
   return (
     <View style={styles.container}>
@@ -454,7 +489,9 @@ const DailyQueueStack = () => {
           </TouchableOpacity>
         </View>
         <View style={styles.headerRow}>
-          {queue.length > 0 ? (
+          {showWelcome ? (
+            <Text style={styles.headerSub}>Getting started</Text>
+          ) : queue.length > 0 ? (
             <Text style={styles.headerSub}>
               {queue.length} transaction{queue.length !== 1 ? 's' : ''} to review
             </Text>
@@ -473,7 +510,7 @@ const DailyQueueStack = () => {
       </View>
 
       {/* ── Stack or InboxZero ── */}
-      {queue.length === 0 ? (
+      {displayQueue.length === 0 ? (
         <InboxZero />
       ) : (
         <View style={[styles.stackContainer, { height: CARD_H + BACK_PEEK }]}>
@@ -494,7 +531,7 @@ const DailyQueueStack = () => {
       )}
 
       {/* ── Swipe hint footer ── */}
-      {queue.length > 0 && (
+      {displayQueue.length > 0 && (
         <Text style={styles.footerHint}>
           Swipe right to approve · left to re-categorise
         </Text>
@@ -749,6 +786,12 @@ const styles = StyleSheet.create({
   swipeHints: { flexDirection: 'row', gap: spacing.sm },
   hintLeft:  { ...typography.tiny, color: colors.warning, fontWeight: '600' },
   hintRight: { ...typography.tiny, color: colors.success, fontWeight: '600' },
+
+  // ── Welcome tutorial card ──
+  welcomeInner: { flex: 1, justifyContent: 'center', gap: 4 },
+  welcomeEmoji: { fontSize: 26 },
+  welcomeTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
+  welcomeBody:  { ...typography.small, color: colors.textSecondary, lineHeight: 18 },
 
   // RP / EPC drift badge (was xpBadge)
   driftBadge: {

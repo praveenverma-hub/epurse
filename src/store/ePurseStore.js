@@ -453,7 +453,11 @@ export const useEPurseStore = create(
     (set, get) => ({
       // ----- state -------------------------------------------------------
       accounts: [],          // populated lazily by ingestMessage
-      transactions: [],      // raw, max 3 months
+      transactions: [],      // raw, max 3 months — ACTIVE ledger (drives everything)
+      // Historical SMS captured during the one-time onboarding sweep. Used ONLY to
+      // discover accounts (at balance 0) and for read-only reference in Account
+      // Details. Never feed totals/insights/budgets/balances/queue — a clean start.
+      archivedTransactions: [],
       monthlyAggregates: {}, // { 'YYYY-MM': { totalSpend, totalIncome, byCategory, byAccount } }
       categories: DEFAULT_CATEGORIES,
       lentBorrowed: [],
@@ -535,6 +539,11 @@ export const useEPurseStore = create(
       // `reviewStreak` tracks consecutive calendar days with at least one review.
       xp: 0,
       reviewStreak: { current: 0, best: 0, lastReviewDate: null },
+      // One-time tutorial: a sample "welcome" card shown atop the review queue for
+      // brand-new users, teaching the swipe-to-approve mechanic. Set true on dismiss.
+      welcomeReviewSeen: false,
+      // User dismissed the dashboard "Plan your month" CTA banner (the ✕). Hides it.
+      planBannerDismissed: false,
 
       // Two-tier user-defined automation rules — keyed by SCREAMING_SNAKE_CASE merchant.
       userCustomRules: {},
@@ -573,6 +582,10 @@ export const useEPurseStore = create(
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
       /** Stamp the moment onboarding completes (defaults to now). */
       setUserOnboardedAt: (ts) => set({ userOnboardedAt: ts ?? Date.now() }),
+      /** Mark the review-queue welcome tutorial card as dismissed. */
+      setWelcomeReviewSeen: (v = true) => set({ welcomeReviewSeen: !!v }),
+      /** User dismissed the dashboard plan-CTA banner. */
+      dismissPlanBanner: () => set({ planBannerDismissed: true }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
 
@@ -1421,6 +1434,9 @@ export const useEPurseStore = create(
       ingestMessage: (rawMessage, opts = {}) => {
         const parsedResult = parseMessageDetailed(rawMessage, opts);
         if (!parsedResult?.ok) {
+          // Historical onboarding sweep: never surface CC prompts / bill reminders
+          // or mutate balances for months-old messages — fresh start = clean slate.
+          if (opts.preOnboarding) return null;
           if (
             parsedResult?.error?.code === 'credit_card_payment_notification' &&
             parsedResult.ccPayment
@@ -1476,8 +1492,10 @@ export const useEPurseStore = create(
         const state = get();
 
         let nextTransactions = [...state.transactions];
+        let nextArchived = [...(state.archivedTransactions || [])];
         let nextAccounts = [...state.accounts];
         const added = [];
+        let archivedCount = 0;
 
         parsedTxns.forEach((txn, idx) => {
           if (!txn?.amount || txn.amount <= 0 || txn.amount > MAX_ALLOWED_AMOUNT) return;
@@ -1539,7 +1557,7 @@ export const useEPurseStore = create(
             subHistory,
           );
 
-          if (isDuplicate(nextTransactions, candidate, smsId, state.suppressedSmsIds || [])) return;
+          if (isDuplicate([...nextTransactions, ...nextArchived], candidate, smsId, state.suppressedSmsIds || [])) return;
 
           const { accounts: accountsWithMatch, account } = ensureAccountForParsed(nextAccounts, candidate);
           candidate.accountId = account?.id || null;
@@ -1549,6 +1567,18 @@ export const useEPurseStore = create(
           const userMasks = accountsWithMatch.map((a) => a.mask).filter(Boolean);
           if (isSelfTransfer(candidate, userMasks, state.userPhones, state.userName)) {
             Object.assign(candidate, SELF_TXN_FIELDS);
+          }
+
+          // Historical onboarding sweep: discover the account (above) but DON'T
+          // touch balances or the active ledger. The txn is archived for
+          // reference-only display in Account Details — a clean fresh start.
+          if (opts.preOnboarding) {
+            candidate.preOnboarding = true;
+            candidate.isReviewed = true;
+            nextAccounts = accountsWithMatch;
+            nextArchived = [candidate, ...nextArchived];
+            archivedCount += 1;
+            return;
           }
 
           // Skip balance delta for transactions older than a manual anchor — the
@@ -1562,39 +1592,42 @@ export const useEPurseStore = create(
           added.push(candidate);
         });
 
-        if (added.length === 0) return null;
+        if (added.length === 0 && archivedCount === 0) return null;
 
         // Reconcile self-transfer tags: a dual-leg transfer's counterpart account
         // is often only learned from its OWN later SMS, so re-check earlier
         // candidates against the now-grown account set. Re-tagging only changes
         // the category (balances already applied), so it's safe to run anytime.
-        // User-edited / LB-locked transactions are left untouched.
-        const finalMasks = nextAccounts.map((a) => a.mask).filter(Boolean);
-        const userPhones = state.userPhones || [];
-        const userName   = state.userName || '';
-        nextTransactions = nextTransactions.map((t) => {
-          if (!t || t.userEditedCategory || t.lbLocked || t.categoryId === 'self') return t;
-          if (!t.selfDualLeg && !t.counterpartyPhone && !t.counterpartyName) return t;
-          return isSelfTransfer(t, finalMasks, userPhones, userName)
-            ? { ...t, ...SELF_TXN_FIELDS }
-            : t;
-        });
+        // User-edited / LB-locked transactions are left untouched. Only the active
+        // ledger needs this — archived (historical) rows are reference-only.
+        if (added.length > 0) {
+          const finalMasks = nextAccounts.map((a) => a.mask).filter(Boolean);
+          const userPhones = state.userPhones || [];
+          const userName   = state.userName || '';
+          nextTransactions = nextTransactions.map((t) => {
+            if (!t || t.userEditedCategory || t.lbLocked || t.categoryId === 'self') return t;
+            if (!t.selfDualLeg && !t.counterpartyPhone && !t.counterpartyName) return t;
+            return isSelfTransfer(t, finalMasks, userPhones, userName)
+              ? { ...t, ...SELF_TXN_FIELDS }
+              : t;
+          });
 
-        // Cross-leg linkage: the two banks involved in one self transfer each
-        // send their own SMS, both carrying the same IMPS/UPI reference. Once
-        // either leg is tagged self (above), propagate that to the other leg
-        // via the shared reference — handles the receiving-bank credit whose
-        // only counterparty signal is a heavily-masked phone.
-        nextTransactions = propagateSelfByRef(nextTransactions, finalMasks);
+          // Cross-leg linkage: the two banks involved in one self transfer each
+          // send their own SMS, both carrying the same IMPS/UPI reference. Once
+          // either leg is tagged self (above), propagate that to the other leg
+          // via the shared reference — handles the receiving-bank credit whose
+          // only counterparty signal is a heavily-masked phone.
+          nextTransactions = propagateSelfByRef(nextTransactions, finalMasks);
+        }
 
-        set({ transactions: nextTransactions, accounts: nextAccounts });
+        set({ transactions: nextTransactions, accounts: nextAccounts, archivedTransactions: nextArchived });
 
         // Check budget breach for each unique category affected by this ingest.
         const affectedCats = new Set();
         added.forEach((t) => { if (t.categoryId) affectedCats.add(t.categoryId); });
         affectedCats.forEach((catId) => get().checkBudgetBreach(catId));
 
-        return added[0];
+        return added[0] || null;
       },
 
       deleteTransaction: (id) =>
@@ -2587,7 +2620,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 19,
+      version: 20,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -2918,12 +2951,25 @@ export const useEPurseStore = create(
           }
         }
 
+        // v20: fresh-start onboarding fields. Existing users keep their data as-is
+        // (we don't retroactively archive their history) — just seed the new keys
+        // and skip the review-queue welcome tutorial (they've already used the app).
+        if (version < 20) {
+          state = {
+            ...state,
+            archivedTransactions: Array.isArray(state.archivedTransactions) ? state.archivedTransactions : [],
+            welcomeReviewSeen: true,
+            planBannerDismissed: state.planBannerDismissed ?? false,
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         accounts: state.accounts,
         transactions: state.transactions,
+        archivedTransactions: state.archivedTransactions ?? [],
         monthlyAggregates: state.monthlyAggregates,
         categories: state.categories,
         lentBorrowed: state.lentBorrowed,
@@ -2955,6 +3001,8 @@ export const useEPurseStore = create(
         reviewStreak: state.reviewStreak,
         userCustomRules: state.userCustomRules,
         anchorNudgeDismissed: state.anchorNudgeDismissed,
+        welcomeReviewSeen: state.welcomeReviewSeen ?? false,
+        planBannerDismissed: state.planBannerDismissed ?? false,
         groups: state.groups ?? [],
       }),
       onRehydrateStorage: () => (state) => {
