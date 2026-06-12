@@ -210,7 +210,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   onPressAddToGroup,
   onPressRemoveFromGroup,
 }) => {
-  useTheme();
+  const theme = useTheme();
   const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
 
   // Auto-expand the active parent when the sheet opens
@@ -251,7 +251,18 @@ const CategoryPickerModal: React.FC<Props> = ({
 
         <View style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.title}>Manage transaction</Text>
+          <View style={styles.headerRow}>
+            <Text style={styles.title}>Manage transaction</Text>
+            {/* Changes apply on tap — Save just confirms + closes the sheet. */}
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+              onPress={onClose}
+              hitSlop={8}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.saveBtnTxt}>Save</Text>
+            </TouchableOpacity>
+          </View>
 
           {categoryLocked ? (
             <View style={styles.lockedNotice}>
@@ -432,11 +443,28 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: spacing.md,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
   title: {
     ...typography.h2,
     fontWeight: '700' as const,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
+    flex: 1,
+  },
+  saveBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    marginLeft: spacing.sm,
+  },
+  saveBtnTxt: {
+    ...typography.bodyBold,
+    fontWeight: '700' as const,
+    color: '#fff',
   },
   list: { maxHeight: 380 },
 

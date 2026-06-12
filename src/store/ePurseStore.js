@@ -1465,11 +1465,17 @@ export const useEPurseStore = create(
       },
 
       ingestMessage: (rawMessage, opts = {}) => {
+        // Fresh start: ANY message dated before the user's onboarding moment is
+        // historical — archived for Account-Details reference only, never activated.
+        // Gating on `userOnboardedAt` (not just opts.preOnboarding) covers EVERY path:
+        // the onboarding sweep AND the background backfill sweep (which carries no flag),
+        // so nothing pre-onboarding leaks into the ledger / totals / balances / queue.
+        const onboardedMs = get().userOnboardedAt || 0;
         const parsedResult = parseMessageDetailed(rawMessage, opts);
         if (!parsedResult?.ok) {
-          // Historical onboarding sweep: never surface CC prompts / bill reminders
-          // or mutate balances for months-old messages — fresh start = clean slate.
-          if (opts.preOnboarding) return null;
+          // Historical message: never surface CC prompts / bill reminders or mutate
+          // balances for pre-onboarding messages — fresh start = clean slate.
+          if (opts.preOnboarding || (onboardedMs > 0 && opts.receivedAt && new Date(opts.receivedAt).getTime() < onboardedMs)) return null;
           if (
             parsedResult?.error?.code === 'credit_card_payment_notification' &&
             parsedResult.ccPayment
@@ -1606,10 +1612,13 @@ export const useEPurseStore = create(
             Object.assign(candidate, SELF_TXN_FIELDS);
           }
 
-          // Historical onboarding sweep: discover the account (above) but DON'T
-          // touch balances or the active ledger. The txn is archived for
-          // reference-only display in Account Details — a clean fresh start.
-          if (opts.preOnboarding) {
+          // Historical (dated before onboarding) — discover the account (above) but
+          // DON'T touch balances or the active ledger. Archived for reference-only
+          // display in Account Details. Covers the onboarding sweep AND the backfill
+          // sweep (the latter passes no flag, so the timestamp check catches it).
+          const txnTime  = new Date(candidate.createdAt || Date.now()).getTime();
+          const historical = opts.preOnboarding || (onboardedMs > 0 && txnTime < onboardedMs);
+          if (historical) {
             candidate.preOnboarding = true;
             candidate.isReviewed = true;
             nextAccounts = accountsWithMatch;
@@ -1621,7 +1630,6 @@ export const useEPurseStore = create(
           // Skip balance delta for transactions older than a manual anchor — the
           // anchor already reflects the correct balance up to that point.
           const anchoredAt = account?.anchoredAt ?? 0;
-          const txnTime    = new Date(candidate.createdAt || Date.now()).getTime();
           nextAccounts = (anchoredAt && txnTime < anchoredAt)
             ? accountsWithMatch
             : applyDelta(accountsWithMatch, account?.id, candidate);
@@ -2676,7 +2684,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 20,
+      version: 21,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -3018,6 +3026,11 @@ export const useEPurseStore = create(
             planBannerDismissed: state.planBannerDismissed ?? false,
           };
         }
+
+        // NOTE: fresh-start is intentionally NOT applied retroactively. Existing users
+        // keep all their transactions/balances as-is — we never migrate their history
+        // into the archive. The clean slate is for NEW onboards only, enforced at
+        // ingestion time (the `userOnboardedAt` gate in `ingestMessage`).
 
         return state;
       },
