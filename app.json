@@ -23,6 +23,12 @@
           "theme": "light",
           "backgroundColor": "#FFFFFF"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ePurse tags your transactions with where you made them, so you can see your spending on a map."
+        }
       ]
     ],
     "ios": {
@@ -46,7 +52,9 @@
         "android.permission.READ_CONTACTS",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.DETECT_SCREEN_CAPTURE"
+        "android.permission.DETECT_SCREEN_CAPTURE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
