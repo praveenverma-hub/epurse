@@ -4,7 +4,7 @@
 // (Dashboard / Transactions / DailyQueueStack). The Groups-tab "+" FAB uses the
 // full-screen AddGroupExpenseScreen instead — both share GroupExpenseForm.
 // =============================================================================
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -19,7 +19,10 @@ import { colors, radius, spacing, typography as typographyBase } from '../consta
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import GroupExpenseForm from './GroupExpenseForm';
+import GradientButtonBase from './GradientButton';
 import type { Group, GroupExpenseData } from '../types/group';
+
+const GradientButton = GradientButtonBase as React.FC<{ title: string; onPress: () => void; style?: object }>;
 
 interface GroupExpenseSheetProps {
   visible: boolean;
@@ -32,6 +35,7 @@ interface GroupExpenseSheetProps {
 }
 
 export default function GroupExpenseSheet({ visible, group, onClose, onAdd, presetAmount }: GroupExpenseSheetProps) {
+  const submitRef = useRef<(() => void) | null>(null);
   if (!group) return null;
 
   return (
@@ -45,6 +49,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
           <View style={styles.sheet}>
             <View style={styles.handle} />
             <ScrollView
+              style={styles.body}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.bodyContent}
@@ -56,12 +61,23 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
                 visible={visible}
                 presetAmount={presetAmount}
                 onAdd={onAdd}
+                hideCategory
+                hideSubmit
+                submitRef={submitRef}
               />
+            </ScrollView>
 
-              <TouchableOpacity style={styles.cancel} onPress={onClose}>
+            {/* Pinned footer — Cancel + Add side by side. */}
+            <View style={styles.footer}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8}>
                 <Text style={styles.cancelTxt}>Cancel</Text>
               </TouchableOpacity>
-            </ScrollView>
+              <GradientButton
+                title="Add Expense"
+                onPress={() => submitRef.current?.()}
+                style={styles.submitBtn}
+              />
+            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -86,7 +102,15 @@ const styles = StyleSheet.create({
     alignSelf: 'center', marginBottom: spacing.md,
   },
   title: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.md },
+  // flexShrink lets the body yield height to the pinned footer when content is tall.
+  body: { flexShrink: 1 },
   bodyContent: { paddingBottom: spacing.sm },
-  cancel:      { marginTop: spacing.sm, alignItems: 'center' },
-  cancelTxt:   { ...typography.body, color: colors.textSecondary },
+  // Pinned footer: Cancel (ghost) + Add (primary) side by side.
+  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  cancelBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.divider,
+  },
+  cancelTxt:   { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
+  submitBtn:   { flex: 1 },
 });

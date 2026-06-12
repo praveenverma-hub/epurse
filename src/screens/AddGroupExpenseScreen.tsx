@@ -3,7 +3,7 @@
 // opened by the Groups-tab "+" FAB. Wraps the shared GroupExpenseForm under a
 // themed gradient header. (Tagging an existing txn still uses GroupExpenseSheet.)
 // =============================================================================
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -13,32 +13,49 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import GroupExpenseForm from '../components/GroupExpenseForm';
+import GradientButtonBase from '../components/GradientButton';
 import { requestAndGetLocation } from '../services/locationService';
 import type { Group, GroupExpenseData } from '../types/group';
+
+const GradientButton = GradientButtonBase as React.FC<{ title: string; onPress: () => void; style?: object }>;
 
 interface NavProp {
   goBack: () => void;
 }
 interface RouteProp {
-  params?: { groupId?: string };
+  params?: { groupId?: string; editTxnId?: string };
 }
 
 export default function AddGroupExpenseScreen({ navigation, route }: { navigation: NavProp; route: RouteProp }) {
   const groupId = route?.params?.groupId;
+  const editTxnId = route?.params?.editTxnId;
   const group = useEPurseStore((s: any) =>
     (s.groups as Group[]).find((g) => g.id === groupId) || null,
   ) as Group | null;
+  const editTxn = useEPurseStore((s: any) =>
+    (editTxnId ? (s.transactions as any[]).find((t) => t.id === editTxnId) : null) || null,
+  ) as any | null;
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense) as (id: string, data: GroupExpenseData) => void;
+  const updateGroupExpense = useEPurseStore((s: any) => s.updateGroupExpense) as (id: string, data: GroupExpenseData) => void;
+  const isEdit = !!editTxnId;
+  const insets = useSafeAreaInsets();
+  const submitRef = useRef<(() => void) | null>(null);
 
   const handleAdd = async (expenseData: GroupExpenseData) => {
+    if (isEdit && editTxnId) {
+      // Keep the existing location/createdAt — editing shouldn't re-stamp them.
+      updateGroupExpense(editTxnId, expenseData);
+      navigation.goBack();
+      return;
+    }
     // Manual add → capture the point of purchase (prompts first time; never blocks).
     const location = await requestAndGetLocation();
     if (groupId) addGroupExpense(groupId, location ? { ...expenseData, location } : expenseData);
@@ -55,7 +72,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Add transaction</Text>
+            <Text style={styles.title}>{isEdit ? 'Edit transaction' : 'Add transaction'}</Text>
             {group && <Text style={styles.subtitle} numberOfLines={1}>{group.name}</Text>}
           </View>
         </View>
@@ -67,12 +84,30 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <ScrollView
+            style={{ flex: 1 }}
             contentContainerStyle={styles.scroll}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <GroupExpenseForm group={group} onAdd={handleAdd} />
+            <GroupExpenseForm
+              group={group}
+              onAdd={handleAdd}
+              editTxn={isEdit ? editTxn : undefined}
+              // Tagged SMS txns keep their parsed amount locked; manual ones stay editable.
+              presetAmount={isEdit && editTxn && editTxn.source !== 'manual' ? editTxn.amount : undefined}
+              hideSubmit
+              submitRef={submitRef}
+            />
           </ScrollView>
+
+          {/* Pinned bottom bar — single primary action. */}
+          <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
+            <GradientButton
+              title={isEdit ? 'Save changes' : 'Add Expense'}
+              onPress={() => submitRef.current?.()}
+              style={{ width: '100%' }}
+            />
+          </View>
         </KeyboardAvoidingView>
       ) : (
         <View style={styles.missing}>
@@ -101,7 +136,14 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   title:    { ...typography.h2, color: colors.textPrimary },
   subtitle: { ...typography.small, color: colors.textSecondary, marginTop: 1 },
-  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   missingTxt: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
 });

@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
@@ -33,9 +34,11 @@ interface GroupTxnDetailSheetProps {
   /** The tapped group transaction; null when closed. */
   txn: GroupTxn | null;
   onClose: () => void;
+  /** When provided, an Edit pill opens the prefilled add-group-transaction flow. */
+  onEdit?: (txn: GroupTxn) => void;
 }
 
-export default function GroupTxnDetailSheet({ txn, onClose }: GroupTxnDetailSheetProps) {
+export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDetailSheetProps) {
   const theme = useTheme();
   if (!txn) return null;
 
@@ -55,7 +58,20 @@ export default function GroupTxnDetailSheet({ txn, onClose }: GroupTxnDetailShee
           <View style={styles.handle} />
 
           {/* Header — full expense */}
-          <Text style={styles.merchant} numberOfLines={1}>{txn.merchant || 'Group Expense'}</Text>
+          <View style={styles.topRow}>
+            <Text style={styles.merchant} numberOfLines={1}>{txn.merchant || 'Group Expense'}</Text>
+            {onEdit ? (
+              <TouchableOpacity
+                style={[styles.editBtn, { borderColor: theme.primary }]}
+                onPress={() => onEdit(txn)}
+                hitSlop={10}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="create-outline" size={15} color={theme.primary} />
+                <Text style={[styles.editTxt, { color: theme.primary }]}>Edit</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           {txn.createdAt ? <Text style={styles.date}>{formatDateTime(txn.createdAt)}</Text> : null}
           <Text style={styles.total}>{formatCurrency(amount)}</Text>
           <View style={[styles.paidByChip, { backgroundColor: theme.primary + '14', borderColor: theme.primary + '44' }]}>
@@ -140,7 +156,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider,
     alignSelf: 'center', marginBottom: spacing.md,
   },
-  merchant: { ...typography.h2, color: colors.textPrimary },
+  topRow:   { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  merchant: { ...typography.h2, color: colors.textPrimary, flex: 1, marginRight: spacing.sm },
+  editBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1, borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm + 2, paddingVertical: 4,
+  },
+  editTxt:  { ...typography.small, fontWeight: '700' },
   date:     { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   total:    { ...typography.display, color: colors.textPrimary, marginTop: spacing.sm },
   paidByChip: {

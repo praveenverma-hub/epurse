@@ -253,14 +253,9 @@ const CategoryPickerModal: React.FC<Props> = ({
           <View style={styles.handle} />
           <View style={styles.headerRow}>
             <Text style={styles.title}>Manage transaction</Text>
-            {/* Changes apply on tap — Save just confirms + closes the sheet. */}
-            <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: theme.primary }]}
-              onPress={onClose}
-              hitSlop={8}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.saveBtnTxt}>Save</Text>
+            {/* Changes apply on tap — Save just confirms + closes the sheet. Plain text button. */}
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.6}>
+              <Text style={[styles.saveBtnTxt, { color: theme.primary }]}>Save</Text>
             </TouchableOpacity>
           </View>
 
@@ -455,16 +450,10 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     flex: 1,
   },
-  saveBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    marginLeft: spacing.sm,
-  },
   saveBtnTxt: {
     ...typography.bodyBold,
     fontWeight: '700' as const,
-    color: '#fff',
+    marginLeft: spacing.sm,
   },
   list: { maxHeight: 380 },
 

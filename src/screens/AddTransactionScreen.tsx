@@ -15,7 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -206,6 +206,7 @@ interface NavigationProp {
 
 const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const categories  = useEPurseStore((s: any) => s.categories);
   const accounts    = useEPurseStore((s: any) => s.accounts);
   const addTransaction = useEPurseStore((s: any) => s.addTransaction);
@@ -496,6 +497,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
         style={{ flex: 1 }}
       >
         <ScrollView
+          style={{ flex: 1 }}
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -716,12 +718,6 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
               </Text>
             )}
 
-            <GradientButton
-              title="Save transaction"
-              onPress={handleSave}
-              style={{ marginTop: spacing.xl }}
-            />
-
             <SplitConfigModal
               visible={splitModalOpen}
               transaction={splitDraftTxn}
@@ -782,6 +778,15 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             />
           </>
         </ScrollView>
+
+        {/* Pinned bottom bar — single primary action. */}
+        <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
+          <GradientButton
+            title="Save transaction"
+            onPress={handleSave}
+            style={{ width: '100%' }}
+          />
+        </View>
       </KeyboardAvoidingView>
 
       {/* ── Two-tier category picker sheet ──────────────────────────────── */}
@@ -914,7 +919,14 @@ const styles = StyleSheet.create({
   tabText: { ...typography.bodyBold, fontWeight: '600' as const, color: colors.textSecondary },
   tabTextActive: { color: '#fff' },
 
-  scroll: { padding: spacing.lg, paddingBottom: spacing.xl },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
 
   field: { marginBottom: spacing.lg },
   fieldLabel: {

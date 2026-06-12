@@ -92,7 +92,7 @@ const InboxZero = () => {
 // =============================================================================
 // SwipeableCard — a single review card (top card is gesture-interactive)
 // =============================================================================
-const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) => {
+const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCategory }) => {
   const isTop = index === 0;
 
   // Gesture shared values (only used by the top card)
@@ -248,7 +248,14 @@ const SwipeableCard = ({ txn, index, categories, onApprove, onPickCategory }) =>
               <View style={styles.cardDivider} />
 
               <View style={styles.cardBottom}>
-                <Text style={styles.cardDate}>{formatDateTime(txn.createdAt)}</Text>
+                <View style={styles.cardBottomLeft}>
+                  <Text style={styles.cardDate}>{formatDateTime(txn.createdAt)}</Text>
+                  {groupName ? (
+                    <View style={styles.groupChip}>
+                      <Text style={styles.groupChipTxt} numberOfLines={1}>🗂 {groupName}</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <View style={styles.swipeHints}>
                   <Text style={styles.hintLeft}>← edit</Text>
                   <Text style={styles.hintRight}>approve →</Text>
@@ -277,6 +284,7 @@ const DailyQueueStack = () => {
   const theme      = useTheme();
   const navigation = useNavigation();
   const queue    = useEPurseStore(selectUnreviewedQueue);
+  const groups   = useEPurseStore((s) => s.groups);
   const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
   const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);
   const totalRP    = useRewardStore(selectTotalRP);
@@ -516,12 +524,18 @@ const DailyQueueStack = () => {
         <View style={[styles.stackContainer, { height: CARD_H + BACK_PEEK }]}>
           {[...visible].reverse().map((txn, revIdx) => {
             const idx = visible.length - 1 - revIdx;
+            // If a Group Zone is on (or this txn was tagged), surface the group
+            // name on the card so the user can confirm/override it in the queue.
+            const groupName = txn.groupId
+              ? (groups.find((g) => g.id === txn.groupId)?.name || null)
+              : null;
             return (
               <SwipeableCard
                 key={txn.id}
                 txn={txn}
                 index={idx}
                 categories={categories}
+                groupName={groupName}
                 onApprove={handleApprove}
                 onPickCategory={handlePickCategory}
               />
@@ -783,6 +797,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cardDate: { ...typography.tiny, color: colors.textMuted },
+  cardBottomLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 1 },
+  groupChip: {
+    backgroundColor: colors.primary + '14',
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    maxWidth: 130,
+  },
+  groupChipTxt: { ...typography.tiny, color: colors.primary, fontWeight: '700' },
   swipeHints: { flexDirection: 'row', gap: spacing.sm },
   hintLeft:  { ...typography.tiny, color: colors.warning, fontWeight: '600' },
   hintRight: { ...typography.tiny, color: colors.success, fontWeight: '600' },

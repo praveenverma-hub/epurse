@@ -54,9 +54,27 @@ interface GroupExpenseFormProps {
    * Screen shells omit it (defaults to visible) — the form resets once on mount.
    */
   visible?: boolean;
+  /**
+   * Hide the category picker. Set when the form is reached from the manage
+   * modal (review queue / Activity tagging) — the category was already chosen
+   * there, so showing it again is redundant.
+   */
+  hideCategory?: boolean;
+  /**
+   * When set, the form opens in EDIT mode: fields are prefilled from this
+   * existing group transaction and the submit button reads "Save changes".
+   */
+  editTxn?: any;
+  /**
+   * Hide the form's own submit button. The shell then renders a pinned footer
+   * button and triggers submit via `submitRef`.
+   */
+  hideSubmit?: boolean;
+  /** Shells assign the latest submit handler here to drive their footer button. */
+  submitRef?: React.MutableRefObject<(() => void) | null>;
 }
 
-export default function GroupExpenseForm({ group, onAdd, presetAmount, visible = true }: GroupExpenseFormProps) {
+export default function GroupExpenseForm({ group, onAdd, presetAmount, visible = true, hideCategory = false, editTxn, hideSubmit = false, submitRef }: GroupExpenseFormProps) {
   const theme = useTheme();
   const toast = useToast();
   const accounts = useEPurseStore((s: any) => s.accounts) as AccountLike[];
@@ -82,13 +100,53 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     return ms;
   }, [group]);
   const amount = parseAmount(amountRaw);
+  // memberId of the currently-selected payer — drives the "Paid / owes" labels.
+  const payerMemberId = allMembers[payerIdx]?.memberId;
   // Tagging an existing txn → amount comes from that txn and is fixed (so the
   // split math matches the real transaction). Manual add → free entry.
   const amountLocked = typeof presetAmount === 'number' && presetAmount > 0;
 
-  // Reset on open (sheet) / mount (screen).
+  // Reset on open (sheet) / mount (screen). In edit mode, prefill from editTxn.
   useEffect(() => {
     if (visible === false) return;
+    setCatSheet(false);
+
+    if (editTxn) {
+      const eg = editTxn.groupSplit;
+      setAmountRaw(String(editTxn.amount ?? ''));
+      // 'Group Expense' is the placeholder default — show it as empty so the hint shows.
+      setMerchant(editTxn.merchant && editTxn.merchant !== 'Group Expense' ? editTxn.merchant : '');
+      setParentCat(editTxn.parentCategory ?? null);
+      setChildCat(editTxn.childCategory ?? null);
+      setAccountId(editTxn.accountId ?? accounts[0]?.id ?? null);
+
+      if (eg && eg.shares?.length) {
+        const pIdx = allMembers.findIndex((m) => m.memberId === eg.paidByMemberId);
+        setPayerIdx(pIdx >= 0 ? pIdx : 0);
+        // Stored shares are absolute ₹ amounts → prefill in 'amount' mode faithfully.
+        setSplitMode('amount');
+        const amt = Number(editTxn.amount) || 0;
+        setShares(
+          eg.shares.map((sh: any) => ({
+            memberId: sh.memberId,
+            name: sh.name,
+            shareAmount: Number(sh.shareAmount) || 0,
+            percent: amt > 0 ? Math.round(((Number(sh.shareAmount) || 0) / amt) * 100) : 0,
+          })),
+        );
+      } else {
+        setPayerIdx(0);
+        setSplitMode('equal');
+        if (group?.members) {
+          setShares(group.members.map((m) => ({
+            memberId: m.memberId, name: m.name, shareAmount: 0,
+            percent: Math.round(100 / group.members.length),
+          })));
+        }
+      }
+      return;
+    }
+
     setAmountRaw(amountLocked ? String(presetAmount) : '');
     setMerchant('');
     setPayerIdx(0);
@@ -96,7 +154,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     setAccountId(accounts[0]?.id || null);
     setParentCat(null);
     setChildCat(null);
-    setCatSheet(false);
     if (group?.members) {
       setShares(
         group.members.map((m) => ({
@@ -107,7 +164,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         })),
       );
     }
-  }, [visible, group, accounts, amountLocked, presetAmount]);
+  }, [visible, group, accounts, amountLocked, presetAmount, editTxn, allMembers]);
 
   // Recompute equal shares when amount changes in equal mode
   useEffect(() => {
@@ -188,6 +245,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     onAdd(expenseData);
   };
 
+  // Expose the latest submit handler so a shell can drive its pinned footer button.
+  useEffect(() => { if (submitRef) submitRef.current = handleAdd; });
+
   return (
     <>
       {/* Amount — prefilled & locked when tagging an existing transaction */}
@@ -214,16 +274,18 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         maxLength={60}
       />
 
-      {/* Category */}
-      <TouchableOpacity style={styles.catRow} onPress={() => setCatSheet(true)} activeOpacity={0.75}>
-        <Text style={styles.catLabel}>Category</Text>
-        <View style={styles.catValueWrap}>
-          <Text style={[styles.catValue, !childCat && styles.catValueMuted]} numberOfLines={1}>
-            {childCat ? `${parentCat} › ${childCat}` : 'Other (tap to choose)'}
-          </Text>
-          <Text style={styles.catChevron}>›</Text>
-        </View>
-      </TouchableOpacity>
+      {/* Category — hidden when reached from the manage modal (already set there) */}
+      {!hideCategory && (
+        <TouchableOpacity style={styles.catRow} onPress={() => setCatSheet(true)} activeOpacity={0.75}>
+          <Text style={styles.catLabel}>Category</Text>
+          <View style={styles.catValueWrap}>
+            <Text style={[styles.catValue, !childCat && styles.catValueMuted]} numberOfLines={1}>
+              {childCat ? `${parentCat} › ${childCat}` : 'Other (tap to choose)'}
+            </Text>
+            <Text style={styles.catChevron}>›</Text>
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* Account — personal groups (no payer concept) */}
       {!isShared && accounts.length > 1 && (
@@ -310,13 +372,25 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
           </View>
 
           {/* Per-member breakdown — always visible. Equal mode shows the computed
-              share read-only; percent/amount modes are editable. */}
+              share read-only; percent/amount modes are editable. Each row is
+              annotated with who paid vs. who owes (relative to the selected payer)
+              so the debt direction is explicit. */}
           <View style={styles.sharesList}>
-            {shares.map((s, idx) => (
+            {shares.map((s, idx) => {
+              const isPayer = s.memberId === payerMemberId;
+              const isMe = s.memberId === 'me';
+              // Payer fronted the bill; everyone else owes them their share.
+              const oweLabel = isPayer ? '✓ Paid' : isMe ? 'You owe' : 'Owes';
+              return (
               <View key={s.memberId} style={styles.shareRow}>
-                <Text style={styles.shareName} numberOfLines={1}>
-                  {s.memberId === 'me' ? '👤 You' : s.name}
-                </Text>
+                <View style={styles.shareNameWrap}>
+                  <Text style={styles.shareName} numberOfLines={1}>
+                    {isMe ? '👤 You' : s.name}
+                  </Text>
+                  <Text style={[styles.shareOwe, isPayer && styles.sharePaid]} numberOfLines={1}>
+                    {oweLabel}
+                  </Text>
+                </View>
                 {splitMode === 'equal' ? (
                   <Text style={styles.shareEqualAmt}>{formatCurrency(Number(s.shareAmount) || 0)}</Text>
                 ) : (
@@ -334,20 +408,23 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
                   </>
                 )}
               </View>
-            ))}
+              );
+            })}
           </View>
         </>
       )}
 
-      <GradientButton
-        title="Add Expense"
-        onPress={handleAdd}
-        disabled={amount <= 0}
-        style={{ marginTop: spacing.md }}
-      />
+      {!hideSubmit && (
+        <GradientButton
+          title={editTxn ? 'Save changes' : 'Add Expense'}
+          onPress={handleAdd}
+          disabled={amount <= 0}
+          style={{ marginTop: spacing.md }}
+        />
+      )}
 
       <TwoTierCategorySheet
-        visible={catSheet}
+        visible={catSheet && !hideCategory}
         merchant={merchant.trim() || 'Group Expense'}
         currentParent={parentCat || undefined}
         currentChild={childCat || undefined}
@@ -433,7 +510,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     marginBottom: spacing.xs,
   },
-  shareName: { flex: 1, ...typography.body, color: colors.textPrimary },
+  shareNameWrap: { flex: 1, marginRight: spacing.sm },
+  shareName: { ...typography.body, color: colors.textPrimary },
+  shareOwe: { ...typography.tiny, color: colors.textMuted, fontWeight: '600', marginTop: 1 },
+  sharePaid: { color: colors.success },
   shareInput: {
     width: 64, backgroundColor: colors.background,
     borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 6,

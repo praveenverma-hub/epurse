@@ -1330,6 +1330,90 @@ export const useEPurseStore = create(
       },
 
       /**
+       * Edit an existing group transaction in place (keeps the same txn id).
+       * Reverses the OLD effects (account balance, group total, debt rows) and
+       * re-applies the NEW ones — so editing amount / payer / split / category
+       * stays consistent across balances, group totals, and Lent/Borrowed.
+       * Works for both manual group expenses and tagged SMS transactions.
+       */
+      updateGroupExpense: (txnId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, location } = {}) => {
+        const s = get();
+        const old = s.transactions.find((t) => t.id === txnId);
+        if (!old || !old.groupId) return null;
+        const group = s.groups.find((g) => g.id === old.groupId);
+        if (!group) return null;
+
+        const newAmount = Number(amount) || 0;
+        if (newAmount <= 0 || newAmount > MAX_ALLOWED_AMOUNT) return null;
+
+        const wasMemo     = !!old.isGroupMemo;
+        const isGroupMemo = paidByMemberId !== 'me';
+        const groupSplit  = (shares && shares.length > 0)
+          ? { paidByMemberId, paidByName: paidByName || paidByMemberId, shares }
+          : null;
+        const resolvedCategoryId =
+          categoryId || twoTierToLegacyCatId(parentCategory, childCategory) || old.categoryId || 'other';
+
+        // Resolve the paying account (only when YOU paid).
+        let resolvedAccountId = isGroupMemo ? null : (accountId || old.accountId || null);
+        let workingAccounts   = s.accounts;
+        if (!isGroupMemo && !resolvedAccountId) {
+          const { accounts: ensured, account } = ensureAccountForParsed(s.accounts, { ...old, amount: newAmount });
+          resolvedAccountId = account?.id || null;
+          workingAccounts   = ensured;
+        }
+
+        // Build the updated transaction — preserve id / createdAt / source / smsId.
+        const updatedTxn = {
+          ...old,
+          type: TRANSACTION_TYPES.DEBIT,
+          amount: newAmount,
+          merchant: (merchant || old.merchant || 'Group Expense').trim(),
+          categoryId: resolvedCategoryId,
+        };
+        if (parentCategory) updatedTxn.parentCategory = parentCategory; else delete updatedTxn.parentCategory;
+        if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
+        if (groupSplit)  updatedTxn.groupSplit  = groupSplit;  else delete updatedTxn.groupSplit;
+        if (isGroupMemo) updatedTxn.isGroupMemo = true;        else delete updatedTxn.isGroupMemo;
+        if (isGroupMemo) delete updatedTxn.accountId; else updatedTxn.accountId = resolvedAccountId;
+        if (location) updatedTxn.location = location;
+
+        // Reverse the OLD account effect (old was a debit → add the amount back),
+        // then apply the NEW one. Net is zero when account + amount are unchanged.
+        let accounts = workingAccounts;
+        if (!wasMemo && old.accountId) {
+          accounts = applyDelta(accounts, old.accountId, { ...old, type: TRANSACTION_TYPES.CREDIT });
+        }
+        if (!isGroupMemo && resolvedAccountId) {
+          accounts = applyDelta(accounts, resolvedAccountId, updatedTxn);
+        }
+
+        const nowIso = new Date().toISOString();
+        const groups = s.groups.map((g) =>
+          g.id === group.id
+            ? { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) - (old.amount || 0) + newAmount), lastActivityAt: nowIso }
+            : g
+        );
+
+        // Rebuild this txn's debt rows from scratch (drop prior rows for this source).
+        const lbRows = buildGroupLbRows(group, updatedTxn);
+        const lentBorrowed = [
+          ...lbRows,
+          ...s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId),
+        ];
+
+        set({
+          transactions: s.transactions.map((t) => (t.id === txnId ? updatedTxn : t)),
+          accounts,
+          groups,
+          lentBorrowed,
+        });
+
+        if (!isGroupMemo && updatedTxn.categoryId) get().checkBudgetBreach(updatedTxn.categoryId);
+        return txnId;
+      },
+
+      /**
        * Group-scoped settle: settle ONLY this group's portion of a person's balance.
        * Sums the person's lentBorrowed rows tagged with this groupId and writes one
        * counterpart settled row (also tagged groupId) for the net — leaving their

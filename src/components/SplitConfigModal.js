@@ -4,6 +4,7 @@ import {
   View,
   Text,
   StyleSheet,
+  ScrollView,
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
@@ -316,6 +317,11 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
+          <ScrollView
+            style={styles.body}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
           <View style={styles.titleRow}>
             <Text style={styles.title}>Split expense</Text>
             {transaction?.isSplit ? (
@@ -501,18 +507,24 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
                 </View>
               )}
 
-              <GradientButton
-                title={selected.size === 0 ? 'Select people' : `Apply split`}
-                onPress={handleApply}
-                disabled={selected.size === 0 || loading || !valid}
-                style={{ marginTop: spacing.sm }}
-              />
             </>
           )}
+          </ScrollView>
 
-          <TouchableOpacity style={styles.cancelOut} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+          {/* Pinned footer — Cancel + Apply side by side. */}
+          <View style={styles.footer}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            {!blocked && (
+              <GradientButton
+                title={selected.size === 0 ? 'Select people' : 'Apply split'}
+                onPress={handleApply}
+                disabled={selected.size === 0 || loading || !valid}
+                style={styles.submitBtn}
+              />
+            )}
+          </View>
         </View>
       </View>
 
@@ -686,8 +698,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   permBtnText: { color: colors.primary, fontWeight: '700' },
-  cancelOut: { marginTop: spacing.md, alignItems: 'center' },
-  cancelText: { color: colors.textSecondary, ...typography.body },
+  // flexShrink lets the body yield height to the pinned footer when content is tall.
+  body: { flexShrink: 1 },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  cancelBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.divider,
+  },
+  cancelText: { color: colors.textSecondary, ...typography.bodyBold, fontWeight: '700' },
+  submitBtn: { flex: 1 },
 });
 
 export default SplitConfigModal;

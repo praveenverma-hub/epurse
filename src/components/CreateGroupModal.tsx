@@ -141,6 +141,7 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <ScrollView
+            style={styles.body}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.bodyContent}
@@ -292,16 +293,20 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
             </TouchableOpacity>
           )}
 
-          <GradientButton
-            title={group ? 'Save Changes' : 'Create Group'}
-            onPress={handleSave}
-            disabled={!nameValid}
-            style={{ marginTop: spacing.md }}
-          />
-          <TouchableOpacity style={styles.cancel} onPress={onClose}>
-            <Text style={styles.cancelTxt}>Cancel</Text>
-          </TouchableOpacity>
           </ScrollView>
+
+          {/* Pinned footer — Cancel + Save side by side. */}
+          <View style={styles.footer}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8}>
+              <Text style={styles.cancelTxt}>Cancel</Text>
+            </TouchableOpacity>
+            <GradientButton
+              title={group ? 'Save Changes' : 'Create Group'}
+              onPress={handleSave}
+              disabled={!nameValid}
+              style={styles.submitBtn}
+            />
+          </View>
         </View>
       </View>
       </KeyboardAvoidingView>
@@ -312,6 +317,8 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
 const styles = StyleSheet.create({
   backdrop:       { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   dismiss:        { flex: 1 },
+  // flexShrink lets the body yield height to the pinned footer when content is tall.
+  body:           { flexShrink: 1 },
   bodyContent:    { paddingBottom: spacing.sm },
   sheet: {
     backgroundColor: colors.card,
@@ -426,6 +433,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 }, elevation: 2,
   },
   toggleThumbOn: { transform: [{ translateX: 18 }] },
-  cancel: { marginTop: spacing.sm, alignItems: 'center' },
-  cancelTxt: { ...typography.body, color: colors.textSecondary },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  cancelBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.divider,
+  },
+  cancelTxt: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
+  submitBtn: { flex: 1 },
 });

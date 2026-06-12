@@ -412,6 +412,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         <FlatList
           ref={listRef}
           data={groupTxns}
+          style={styles.flatList}
           keyExtractor={(t) => t.id}
           ListHeaderComponent={renderHeader()}
           renderItem={({ item: t }) => (
@@ -458,7 +459,14 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         onSave={handleSaveGroup}
       />
 
-      <GroupTxnDetailSheet txn={detailTxn} onClose={() => setDetailTxn(null)} />
+      <GroupTxnDetailSheet
+        txn={detailTxn}
+        onClose={() => setDetailTxn(null)}
+        onEdit={(t: any) => {
+          setDetailTxn(null);
+          navigation.navigate('AddGroupExpense', { groupId: t.groupId, editTxnId: t.id });
+        }}
+      />
 
       {/* Category-only picker (manage modal restricted to switching category) */}
       <CategoryPickerModal
@@ -520,6 +528,9 @@ const styles = StyleSheet.create({
   heading:    { ...typography.h1, color: '#fff' },
   infoBtn:    { marginLeft: spacing.xs, padding: 2 },
   subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
+  // flex:1 bounds the list to the viewport below the header so its content
+  // (card detail + transactions) is fully scrollable instead of clipped.
+  flatList:   { flex: 1 },
   list:       { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
 
   // Tiles. flexGrow:1 fills the viewport when there are few tiles so the row isn't

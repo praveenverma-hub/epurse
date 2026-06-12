@@ -297,31 +297,32 @@ const LinkContactModal = ({
             </>
           )}
 
-          {/* ── Action buttons ── */}
-          {selected ? (
-            <GradientButton
-              title="Confirm"
-              onPress={handleConfirmContact}
-              style={{ marginTop: spacing.md }}
-            />
-          ) : (!hasContactMatch && !loading && (manualPhone.trim() || (isPhoneQuery && query.trim()))) ? (
-            <GradientButton
-              title="Save & link"
-              onPress={() => {
-                const phone = manualPhone.trim() || query.trim();
-                const err = validatePhone(phone);
-                if (err) { setPhoneError(err); return; }
-                setPhoneError('');
-                const person = manualName.trim() || 'Friend';
-                onConfirm({ person, phone: formatPhone(phone), contactId: null });
-              }}
-              style={{ marginTop: spacing.md }}
-            />
-          ) : null}
-
-          <TouchableOpacity style={styles.skipBtn} onPress={onSkip}>
-            <Text style={styles.skipText}>Skip — just change category</Text>
-          </TouchableOpacity>
+          {/* ── Action footer — Skip + primary side by side ── */}
+          <View style={styles.footer}>
+            <TouchableOpacity style={styles.skipBtn} onPress={onSkip} activeOpacity={0.8}>
+              <Text style={styles.skipText}>Skip</Text>
+            </TouchableOpacity>
+            {selected ? (
+              <GradientButton
+                title="Confirm"
+                onPress={handleConfirmContact}
+                style={styles.submitBtn}
+              />
+            ) : (!hasContactMatch && !loading && (manualPhone.trim() || (isPhoneQuery && query.trim()))) ? (
+              <GradientButton
+                title="Save & link"
+                onPress={() => {
+                  const phone = manualPhone.trim() || query.trim();
+                  const err = validatePhone(phone);
+                  if (err) { setPhoneError(err); return; }
+                  setPhoneError('');
+                  const person = manualName.trim() || 'Friend';
+                  onConfirm({ person, phone: formatPhone(phone), contactId: null });
+                }}
+                style={styles.submitBtn}
+              />
+            ) : null}
+          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -444,8 +445,14 @@ const styles = StyleSheet.create({
   textInputError: { borderColor: colors.danger },
   errorText: { ...typography.tiny, color: colors.danger, marginTop: spacing.xs },
 
-  skipBtn: { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
-  skipText: { ...typography.small, color: colors.textSecondary, textDecorationLine: 'underline' },
+  // Pinned action footer — Skip (ghost) + primary side by side.
+  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  skipBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.divider,
+  },
+  skipText: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
+  submitBtn: { flex: 1 },
 
   // Suggestions (quick-pick from LB records)
   suggestionsWrap: { marginBottom: spacing.sm },
