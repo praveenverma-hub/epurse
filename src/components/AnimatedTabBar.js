@@ -20,9 +20,9 @@ import { colors } from '../constants/theme';
 const TAB_CONFIG = [
   { name: 'Dashboard',    label: 'Home',     icon: 'home',           iconOutline: 'home-outline' },
   { name: 'Transactions', label: 'Activity', icon: 'receipt',        iconOutline: 'receipt-outline' },
+  { name: 'Groups',       label: 'Groups',   icon: 'people',         iconOutline: 'people-outline' },
   { name: 'Insights',     label: 'Insights', icon: 'bar-chart',      iconOutline: 'bar-chart-outline' },
   { name: 'Accounts',     label: 'Accounts', icon: 'card',           iconOutline: 'card-outline' },
-  { name: 'Groups',       label: 'Groups',   icon: 'people',         iconOutline: 'people-outline' },
 ];
 
 export default function AnimatedTabBar({ state, navigation }) {

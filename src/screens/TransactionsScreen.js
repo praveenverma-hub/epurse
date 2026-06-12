@@ -58,6 +58,7 @@ import CenterModal from '../components/CenterModal';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
+import { formatCurrency } from '../utils/format';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -423,6 +424,18 @@ const TransactionsScreen = ({ navigation, route }) => {
     );
   }, [transactions, quickChip, search, applied]);
 
+  // Debit (spend) + credit (inflow) totals across the filtered list — shown
+  // alongside the count. Debit uses the user's share (split-aware), like each row.
+  const filteredTotals = useMemo(() => {
+    let debit = 0;
+    let credit = 0;
+    for (const t of filtered) {
+      if (t.type === 'credit') credit += t.amount || 0;
+      else debit += debitDisplayAmount(t);
+    }
+    return { debit, credit };
+  }, [filtered]);
+
   const activeFilterCount = useMemo(
     () => Object.values(applied).reduce((n, s) => n + s.size, 0),
     [applied],
@@ -712,9 +725,14 @@ const TransactionsScreen = ({ navigation, route }) => {
             )}
 
             {filtered.length > 0 && (
-              <Text style={styles.listCount}>
-                {filtered.length} transaction{filtered.length !== 1 ? 's' : ''}
-              </Text>
+              <View style={styles.listCountRow}>
+                <Text style={styles.listCountTxt}>
+                  {filtered.length} transaction{filtered.length !== 1 ? 's' : ''}
+                </Text>
+                <Text style={styles.listCountTxt}>
+                  {formatCurrency(filteredTotals.debit)} out · {formatCurrency(filteredTotals.credit)} in
+                </Text>
+              </View>
             )}
           </>
         }
@@ -1153,6 +1171,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     paddingTop: spacing.md,
     paddingBottom: spacing.xs,
+  },
+  // Count + debit/credit totals share one row, same muted styling.
+  listCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  listCountTxt: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
   },
   empty: { alignItems: 'center', paddingTop: 64, gap: spacing.sm },
   emptyTitle: { ...typography.h3, color: colors.textPrimary },

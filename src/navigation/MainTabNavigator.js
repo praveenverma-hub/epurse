@@ -22,9 +22,9 @@ export default function MainTabNavigator() {
       >
         <Tab.Screen name="Dashboard"    component={DashboardScreen} />
         <Tab.Screen name="Transactions" component={TransactionsScreen} />
+        <Tab.Screen name="Groups"       component={GroupsScreen} />
         <Tab.Screen name="Insights"     component={InsightsScreen} />
         <Tab.Screen name="Accounts"     component={AccountsScreen} />
-        <Tab.Screen name="Groups"       component={GroupsScreen} />
       </Tab.Navigator>
     </TabBarVisibilityProvider>
   );

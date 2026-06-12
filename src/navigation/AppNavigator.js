@@ -7,6 +7,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import OnboardingDeck, { AccountFilterScreen } from '../screens/OnboardingExperience';
 import MainTabNavigator    from './MainTabNavigator';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
+import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import AccountDetailsScreen from '../screens/AccountDetailsScreen';
 import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
@@ -46,12 +47,9 @@ export default function AppNavigator() {
         {/* Main tab navigator — Dashboard / Transactions / Insights / Accounts */}
         <Stack.Screen name="Main" component={MainTabNavigator} options={{ animation: 'fade' }} />
 
-        {/* Modal-style stack screens pushed on top of the tab bar */}
-        <Stack.Screen
-          name="AddTransaction"
-          component={AddTransactionScreen}
-          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }}
-        />
+        {/* Full-screen "add" flows pushed on top of the tab bar */}
+        <Stack.Screen name="AddTransaction"  component={AddTransactionScreen} />
+        <Stack.Screen name="AddGroupExpense" component={AddGroupExpenseScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />
         <Stack.Screen name="LentBorrowed"   component={LentBorrowedScreen} />

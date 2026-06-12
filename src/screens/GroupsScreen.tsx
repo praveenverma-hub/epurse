@@ -4,7 +4,7 @@
 // summary + balances + transactions render inline below. FAB adds an expense to
 // the selected group; the first tile creates a new group.
 // =============================================================================
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   ScrollView,
@@ -22,7 +22,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 import { debitDisplayAmount } from '../utils/split';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
@@ -31,16 +31,11 @@ import FAB from '../components/FAB';
 import EmptyState from '../components/EmptyState';
 import TransactionItemRaw from '../components/TransactionItem';
 import CreateGroupModal, { type CreateGroupData } from '../components/CreateGroupModal';
-import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
 import type { Group, GroupExpenseData } from '../types/group';
-
-// Groups gets its OWN distinct gradient header (indigo→violet) — themed like the rest of the
-// app's gradient headers, but a different hue so Groups reads as its own space.
-const GROUP_HEADER_GRADIENT: string[] = ['#6D28D9', '#8B5CF6'];
 
 /** Mix a hex colour toward white by `amt` (0..1) — used for the soft "glow" on the active tile. */
 function lightenHex(hex: string, amt = 0.4): string {
@@ -76,9 +71,11 @@ interface ConfirmState {
   onSecondary?: () => void;
 }
 
-export default function GroupsScreen() {
+export default function GroupsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
+  const gradient = useGradient();
   const insets = useSafeAreaInsets();
+  const listRef = useRef<FlatList<any>>(null);
   const groups = useEPurseStore((s: any) => s.groups) as Group[];
   const transactions = useEPurseStore((s: any) => s.transactions) as any[];
   const lentBorrowed = useEPurseStore((s: any) => s.lentBorrowed) as any[];
@@ -95,7 +92,6 @@ export default function GroupsScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createVisible, setCreateVisible] = useState(false);
   const [editTarget, setEditTarget] = useState<Group | null>(null);
-  const [expenseVisible, setExpenseVisible] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
@@ -179,11 +175,6 @@ export default function GroupsScreen() {
     setCreateVisible(false);
   };
 
-  const handleAddExpense = (expenseData: GroupExpenseData) => {
-    if (selectedGroupId) addGroupExpense(selectedGroupId, expenseData);
-    setExpenseVisible(false);
-  };
-
   const handleSettle = (pb: GroupBalanceRow) => {
     if (!selectedGroupId) return;
     const owesYou = pb.net > 0;
@@ -241,7 +232,7 @@ export default function GroupsScreen() {
             key={g.id}
             // Outer ring with a 1px transparent gap to the fill.
             style={[styles.tileWrap, { borderColor: active ? accent : colors.divider }]}
-            onPress={() => setSelectedId(g.id)}
+            onPress={() => { setSelectedId(g.id); listRef.current?.scrollToOffset({ offset: 0, animated: true }); }}
             activeOpacity={0.85}
           >
             {active ? (
@@ -278,9 +269,16 @@ export default function GroupsScreen() {
       <View>
         {renderTiles()}
 
-        {/* Expense summary card */}
-        <View style={[styles.expenseCard, { borderLeftColor: g.color || '#6366F1' }]}>
-          <View style={styles.expenseTop}>
+        {/* Expense summary card — accent on the BOTTOM edge */}
+        <View style={[styles.expenseCard, { borderBottomColor: g.color || '#6366F1' }]}>
+          {/* Header strip: gray→white gradient (white by ~70%), inset 1px from the card edge */}
+          <LinearGradient
+            colors={['#E9EBEF', '#FFFFFF']}
+            locations={[0, 0.7]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.cardHeaderGrad}
+          >
             <Text style={styles.cardEmoji}>{g.emoji || (isShared ? '👥' : '📁')}</Text>
             <View style={{ flex: 1 }}>
               <Text style={styles.cardName} numberOfLines={1}>{g.name}</Text>
@@ -297,57 +295,53 @@ export default function GroupsScreen() {
                 <Ionicons name="trash-outline" size={18} color={colors.danger} />
               </TouchableOpacity>
             </View>
-          </View>
+          </LinearGradient>
 
-          <View style={styles.amountRow}>
-            {isShared ? (
-              <>
-                <Text style={styles.amountBig}>{formatCurrency(myShare)}</Text>
-                <Text style={styles.amountSub}>your share · of {formatCurrency(total)}</Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.amountBig}>{formatCurrency(total)}</Text>
-                <Text style={styles.amountSub}>total spend</Text>
-              </>
+          <View style={styles.cardBody}>
+            <View style={styles.amountRow}>
+              {isShared ? (
+                <>
+                  <Text style={styles.amountBig}>{formatCurrency(myShare)}</Text>
+                  <Text style={styles.amountSub}>your share · of {formatCurrency(total)}</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.amountBig}>{formatCurrency(total)}</Text>
+                  <Text style={styles.amountSub}>total spend</Text>
+                </>
+              )}
+            </View>
+
+            {/* Balances (shared) */}
+            {isShared && groupBalances.length > 0 && (
+              <View style={styles.balancesBox}>
+                {groupBalances.map((pb) => {
+                  const owesYou = pb.net > 0;
+                  return (
+                    <View key={pb.personKey} style={styles.balanceRow}>
+                      <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
+                        <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.balanceName} numberOfLines={1}>{pb.person}</Text>
+                        <Text style={[styles.balanceSub, { color: owesYou ? colors.success : colors.danger }]}>
+                          {owesYou ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(pb.net))}
+                        </Text>
+                      </View>
+                      <TouchableOpacity style={[styles.settleBtn, { borderColor: theme.primary }]} onPress={() => handleSettle(pb)}>
+                        <Text style={[styles.settleBtnTxt, { color: theme.primary }]}>Settle</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </View>
             )}
           </View>
-
-          {/* Balances (shared) */}
-          {isShared && groupBalances.length > 0 && (
-            <View style={styles.balancesBox}>
-              {groupBalances.map((pb) => {
-                const owesYou = pb.net > 0;
-                return (
-                  <View key={pb.personKey} style={styles.balanceRow}>
-                    <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
-                      <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.balanceName} numberOfLines={1}>{pb.person}</Text>
-                      <Text style={[styles.balanceSub, { color: owesYou ? colors.success : colors.danger }]}>
-                        {owesYou ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(pb.net))}
-                      </Text>
-                    </View>
-                    <TouchableOpacity style={[styles.settleBtn, { borderColor: theme.primary }]} onPress={() => handleSettle(pb)}>
-                      <Text style={[styles.settleBtnTxt, { color: theme.primary }]}>Settle</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          )}
         </View>
 
-        {/* Expenses sub-header */}
+        {/* Transactions sub-header */}
         <View style={styles.txnHeader}>
-          <Text style={styles.sectionTitle}>Expenses ({groupTxns.length})</Text>
-          <TouchableOpacity
-            style={[styles.addExpenseBtn, { backgroundColor: theme.primary }]}
-            onPress={() => setExpenseVisible(true)}
-          >
-            <Text style={styles.addExpenseTxt}>+ Add</Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>Transactions ({groupTxns.length})</Text>
         </View>
       </View>
     );
@@ -358,7 +352,7 @@ export default function GroupsScreen() {
       <StatusBar style="light" />
 
       <LinearGradient
-        colors={GROUP_HEADER_GRADIENT}
+        colors={gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.headerGrad}
@@ -368,10 +362,10 @@ export default function GroupsScreen() {
             <View style={styles.headingRow}>
               <Text style={styles.heading}>Groups</Text>
               <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-                <Ionicons name="information-circle-outline" size={20} color="#FFFFFFCC" />
+                <Ionicons name="information-circle-outline" size={15} color="#FFFFFFCC" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.subheading}>Track shared and personal expenses</Text>
+            <Text style={styles.subheading}>Track shared and personal transactions</Text>
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -388,6 +382,7 @@ export default function GroupsScreen() {
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           data={groupTxns}
           keyExtractor={(t) => t.id}
           ListHeaderComponent={renderHeader()}
@@ -408,8 +403,8 @@ export default function GroupsScreen() {
             <EmptyState
               compact
               emoji="🧾"
-              title="No expenses yet"
-              subtitle={'Tap "Add" to record one, or tag existing transactions from the Activity tab.'}
+              title="No transactions yet"
+              subtitle={'Tap + to add one, or tag existing transactions from the Activity tab.'}
               style={styles.emptyTxn}
             />
           }
@@ -419,9 +414,13 @@ export default function GroupsScreen() {
         />
       )}
 
-      {/* FAB → add an expense to the selected group */}
+      {/* FAB → add a transaction to the selected group (full screen) */}
       {selectedGroup && (
-        <FAB onPress={() => setExpenseVisible(true)} icon="+" bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
+        <FAB
+          onPress={() => navigation.navigate('AddGroupExpense', { groupId: selectedGroupId })}
+          icon="+"
+          bottomInset={TAB_BAR_HEIGHT + insets.bottom}
+        />
       )}
 
       <CreateGroupModal
@@ -429,13 +428,6 @@ export default function GroupsScreen() {
         group={editTarget}
         onClose={() => { setCreateVisible(false); setEditTarget(null); }}
         onSave={handleSaveGroup}
-      />
-
-      <GroupExpenseSheet
-        visible={expenseVisible}
-        group={selectedGroup}
-        onClose={() => setExpenseVisible(false)}
-        onAdd={handleAddExpense}
       />
 
       <GroupTxnDetailSheet txn={detailTxn} onClose={() => setDetailTxn(null)} />
@@ -527,23 +519,32 @@ const styles = StyleSheet.create({
   tileLabel:   { ...typography.tiny, fontWeight: '700', marginTop: 6, maxWidth: TILE - 12, textAlign: 'center' },
   tileLabelActive: { color: '#fff' },
 
-  // Expense summary card
+  // Expense summary card — accent on the BOTTOM edge
   expenseCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
-    padding: spacing.md,
     marginTop: spacing.xs,
     marginBottom: spacing.sm,
-    borderLeftWidth: 4,
+    borderBottomWidth: 4,
     ...shadows.card,
   },
-  expenseTop: { flexDirection: 'row', alignItems: 'center' },
+  // Gray→white gradient header strip; 1px inset reveals a thin card-coloured edge around it.
+  cardHeaderGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 1,
+    borderTopLeftRadius: radius.lg - 1,
+    borderTopRightRadius: radius.lg - 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  cardBody:   { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
   cardEmoji:  { fontSize: 26, marginRight: spacing.sm },
   cardName:   { ...typography.h3, color: colors.textPrimary },
   cardMeta:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   cardActions:{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   cardActionBtn: { padding: 4 },
-  amountRow:  { marginTop: spacing.md },
+  amountRow:  { marginTop: spacing.sm },
   amountBig:  { ...typography.display, color: colors.textPrimary },
   amountSub:  { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   balancesBox:{ marginTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: spacing.sm },
@@ -555,14 +556,13 @@ const styles = StyleSheet.create({
   settleBtn:  { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, marginLeft: spacing.sm },
   settleBtnTxt:{ ...typography.small, fontWeight: '700' },
 
-  // Expenses list
-  txnHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  // Transactions list
+  txnHeader: { marginBottom: spacing.sm },
   sectionTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
-  addExpenseBtn: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill },
-  addExpenseTxt: { color: '#fff', fontWeight: '700', ...typography.small },
   txnWrapper: { marginBottom: 2 },
   memoTag: { ...typography.tiny, color: colors.textMuted, marginBottom: 2, marginLeft: spacing.xs },
-  emptyTxn: { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm, ...shadows.card },
+  // Plain (no card) — just centred text + emoji.
+  emptyTxn: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },
 
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
 });

@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,8 +15,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 
-const WINDOW_H = Dimensions.get('window').height;
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useAnimatedStyle,
@@ -31,7 +32,7 @@ import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useGradient } from '../hooks/useTheme';
 import GradientButtonBase from '../components/GradientButton';
 
 // Cast to typed interface — GradientButton.js has no TS declarations
@@ -204,6 +205,7 @@ interface NavigationProp {
 
 const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) => {
   const theme = useTheme();
+  const gradient = useGradient();
   const categories  = useEPurseStore((s: any) => s.categories);
   const accounts    = useEPurseStore((s: any) => s.accounts);
   const addTransaction = useEPurseStore((s: any) => s.addTransaction);
@@ -473,23 +475,33 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
       : parentCategory || 'Select category';
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.overlay}
-    >
-      {/* Tap the dark area above to dismiss */}
-      <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => navigation.goBack()} />
+    <View style={styles.root}>
+      <StatusBar style="light" />
 
-      <View style={styles.container}>
-        <View style={styles.sheetHandle} />
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Add transaction</Text>
-        </View>
+      <LinearGradient
+        colors={gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGrad}
+      >
+        <SafeAreaView edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.title}>Add transaction</Text>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
-          style={{ maxHeight: WINDOW_H * 0.72 }}
+          keyboardShouldPersistTaps="handled"
         >
           <>
             <Field label="Amount (₹) · Max 10 crore">
@@ -773,7 +785,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             />
           </>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
       {/* ── Two-tier category picker sheet ──────────────────────────────── */}
       <Modal
@@ -810,7 +822,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -869,30 +881,21 @@ const Seg = ({
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: '#0006',
-    justifyContent: 'flex-end',
+  root: { flex: 1, backgroundColor: colors.background },
+  headerGrad: {
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
   },
-  container: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+    gap: spacing.xs,
   },
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.divider,
-    alignSelf: 'center',
-    marginBottom: spacing.sm,
-  },
-  headerRow: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  title: { ...typography.h2, fontWeight: '700' as const, color: colors.textPrimary },
+  backBtn: { padding: 4 },
+  title: { ...typography.h2, fontWeight: '700' as const, color: '#fff' },
 
   tabs: {
     flexDirection: 'row',
