@@ -47,7 +47,7 @@ import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
-  txn: Txn; onLongPress?: () => void;
+  txn: Txn; onLongPress?: () => void; muted?: boolean;
 }>;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -436,9 +436,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
               );
             }
             return (
-              <View style={[styles.txnRow, (item as any).preOnboarding && styles.archivedRow]}>
+              <View style={styles.txnRow}>
                 <TransactionItem
                   txn={item}
+                  muted={!!(item as any).preOnboarding}
                   onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
                 />
               </View>
@@ -615,7 +616,6 @@ const styles = StyleSheet.create({
 
   listContent: { paddingBottom: spacing.xxl * 2 },
   txnRow: { paddingHorizontal: 16 },
-  archivedRow: { opacity: 0.55 },
   earlierSep: {
     paddingHorizontal: 16,
     paddingTop: spacing.lg,

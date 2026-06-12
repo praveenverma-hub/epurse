@@ -7,7 +7,7 @@ import { formatCurrency, formatDateTime } from '../utils/format';
 import { debitDisplayAmount, splitParticipantsLabel } from '../utils/split';
 import CategoryIcon from './CategoryIcon';
 
-const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip, hideGroupChip = false }) => {
+const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip, hideGroupChip = false, muted = false }) => {
   const categories = useEPurseStore((s) => s.categories);
   const groups = useEPurseStore((s) => s.groups);
   const category = useMemo(
@@ -35,7 +35,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
       activeOpacity={cardPressable ? 0.8 : 1}
       onPress={cardPressable ? onPress : undefined}
       disabled={!cardPressable}
-      style={styles.card}
+      style={[styles.card, muted && styles.cardMuted]}
     >
       <TouchableOpacity
         activeOpacity={onPressCategory ? 0.75 : 1}
@@ -115,6 +115,19 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm + 2,
     ...shadows.card,
+  },
+  // Archived / pre-onboarding rows: flat, recessed card. NO elevation — dimming an
+  // elevation-shadow card via a container `opacity` makes Android draw a hard grey
+  // shadow box (the "distorted" look). A flat bordered card de-emphasises cleanly.
+  cardMuted: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   categoryTap: { borderRadius: radius.md },
   middle: { flex: 1, marginLeft: spacing.md },
