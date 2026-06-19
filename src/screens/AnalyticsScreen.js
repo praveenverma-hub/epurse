@@ -46,6 +46,26 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
 
+  // Account-wise breakdown
+  const accountBreakdown = useMemo(() => {
+    const filtered = transactions.filter((t) => {
+      const txDate = new Date(t.timestamp);
+      return (
+        t.type === 'debit' &&
+        txDate.getMonth() === date.getMonth() &&
+        txDate.getFullYear() === date.getFullYear()
+      );
+    });
+    const byAccount = {};
+    filtered.forEach((t) => {
+      const key = t.accountType || 'Unknown';
+      byAccount[key] = (byAccount[key] || 0) + t.amount;
+    });
+    return Object.entries(byAccount)
+      .map(([name, total]) => ({ name, total }))
+      .sort((a, b) => b.total - a.total);
+  }, [transactions, date]);
+
   const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
   // Empty-state flags. `noDataEver` = truly fresh user (no transactions at all)
@@ -174,6 +194,21 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               </View>
             ) : null}
 
+             {/* Account-wise expenses */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Spend by account</Text>
+              {accountBreakdown.length === 0 ? (
+                <EmptyState
+                  compact
+                  emoji="💳"
+                  title="No spending this month"
+                  subtitle="Switch months above, or add an expense to see the breakdown."
+                />
+              ) : (
+                <HorizontalBarChart data={accountBreakdown} />
+              )}
+            </View>
+
             {/* ── Behavioral Insights ── */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>📈 Spending Pace</Text>
@@ -229,6 +264,40 @@ const SummaryStatLight = ({ label, value }) => (
     </Text>
   </View>
 );
+
+// ---- HorizontalBarChart ----------------------------------------------------
+const HorizontalBarChart = ({ data }) => {
+  const maxVal = Math.max(...data.map((d) => d.total));
+  const barHeight = 32;
+  const gap = 12;
+
+  return (
+    <View>
+      {data.map((d, i) => {
+        const widthPercent = (d.total / maxVal) * 100;
+        return (
+          <View key={i} style={{ marginBottom: i < data.length - 1 ? gap : 0 }}>
+            <View style={styles.hBarRow}>
+              <Text style={styles.hBarLabel}>{d.name}</Text>
+              <Text style={styles.hBarAmount}>{formatCurrency(d.total)}</Text>
+            </View>
+            <View style={styles.hBarTrack}>
+              <View
+                style={[
+                  styles.hBarFill,
+                  {
+                    width: `${widthPercent}%`,
+                    backgroundColor: colors.primary,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+};
 
 // ---- BarChart ---------------------------------------------------------------
 const BarChart = ({ data }) => {
@@ -435,6 +504,13 @@ const styles = StyleSheet.create({
   },
   statLabelLight:  { ...typography.tiny, color: colors.textSecondary },
   statValueLight:  { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 2 },
+
+  // Horizontal bar chart
+  hBarRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  hBarLabel: { ...typography.body, color: colors.textPrimary },
+  hBarAmount: { ...typography.bodyBold, color: colors.textPrimary },
+  hBarTrack: { height: 8, backgroundColor: colors.divider, borderRadius: 4, overflow: 'hidden' },
+  hBarFill: { height: '100%', borderRadius: 4 },
 });
 
 export default AnalyticsScreen;
