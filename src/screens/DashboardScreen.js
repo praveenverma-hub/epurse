@@ -828,12 +828,11 @@ const styles = StyleSheet.create({
   },
   viewAll: { ...typography.small, color: colors.primary, fontWeight: '700' },
 
+  // Plain (no card) empty state — just emoji + text, like the Groups empty list.
   emptyCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
     alignItems: 'center',
-    ...shadows.card,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
   },
   emptyEmoji: { fontSize: 36 },
   emptyTitle: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },

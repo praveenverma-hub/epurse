@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   Easing,
   FadeInUp,
@@ -106,8 +107,8 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* ── Region A: Header ──────────────────────────────────────── */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.7}>
-            <Text style={styles.backText}>←</Text>
+          <TouchableOpacity onPress={handleBack} hitSlop={10} activeOpacity={0.7}>
+            <Ionicons name="chevron-back" size={24} color={D.white} />
           </TouchableOpacity>
           <Text style={styles.screenTitle}>Profile & Perks</Text>
           <View style={{ width: 40 }} />
@@ -501,17 +502,6 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 12,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: D.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: D.border,
-  },
-  backText: { fontSize: 22, color: D.white, marginTop: -2 },
   screenTitle: {
     fontSize: 18,
     fontWeight: '800' as const,

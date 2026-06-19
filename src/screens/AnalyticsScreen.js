@@ -126,6 +126,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       >
         {noDataEver ? (
           <EmptyState
+            compact
             emoji="📊"
             title="No analytics yet"
             subtitle="Once your transactions start flowing in, you'll see category breakdowns, spending pace, habit leaks and subscriptions here."

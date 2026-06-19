@@ -85,14 +85,27 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
               <ScrollView style={styles.splitList} showsVerticalScrollIndicator={false}>
                 {shares.map((s) => {
                   const isMe = s.memberId === 'me';
+                  const rowIsPayer = s.memberId === gs.paidByMemberId;
                   const label = isMe ? 'You' : (s.name || 'Member');
+                  const shareAmt = Number(s.shareAmount) || 0;
                   return (
                     <View key={s.memberId} style={styles.splitRow}>
                       <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
                         <Text style={[styles.avatarTxt, { color: theme.primary }]}>{label.charAt(0).toUpperCase()}</Text>
                       </View>
-                      <Text style={[styles.splitName, isMe && styles.splitNameMe]} numberOfLines={1}>{label}</Text>
-                      <Text style={styles.splitAmt}>{formatCurrency(Number(s.shareAmount) || 0)}</Text>
+                      <View style={styles.splitNameWrap}>
+                        <Text style={[styles.splitName, isMe && styles.splitNameMe]} numberOfLines={1}>{label}</Text>
+                        {rowIsPayer ? <Text style={styles.splitPaidTag}>paid the bill</Text> : null}
+                      </View>
+                      {rowIsPayer ? (
+                        <Text style={[styles.splitAmt, { color: colors.success }]}>
+                          {shareAmt > 0 ? formatCurrency(shareAmt) : '✓ Paid'}
+                        </Text>
+                      ) : shareAmt > 0 ? (
+                        <Text style={styles.splitAmt}>{formatCurrency(shareAmt)}</Text>
+                      ) : (
+                        <Text style={styles.splitNotInvolved}>Not involved</Text>
+                      )}
                     </View>
                   );
                 })}
@@ -187,8 +200,11 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   avatarTxt:   { fontWeight: '800', fontSize: 12 },
-  splitName:   { flex: 1, ...typography.body, color: colors.textPrimary },
+  splitNameWrap: { flex: 1 },
+  splitName:   { ...typography.body, color: colors.textPrimary },
   splitNameMe: { fontWeight: '700' },
+  splitPaidTag: { ...typography.tiny, color: colors.success, fontWeight: '700', marginTop: 1 },
+  splitNotInvolved: { ...typography.small, color: colors.textMuted, fontStyle: 'italic', fontWeight: '600' },
   splitAmt:    { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   positionBox: {
     marginTop: spacing.lg,

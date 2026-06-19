@@ -7,6 +7,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  Modal,
   ScrollView,
   StyleSheet,
   Switch,
@@ -90,6 +91,11 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string) => void;
   const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
   const updateTwoTierCategory = useEPurseStore((s: any) => s.updateTwoTierCategory) as (id: string, parent: string, child: string) => void;
+  const setTransactionHidden = useEPurseStore((s: any) => s.setTransactionHidden) as (id: string, hidden: boolean) => void;
+  const ignoreTransaction = useEPurseStore((s: any) => s.ignoreTransaction) as (id: string) => void;
+  const unignoreTransaction = useEPurseStore((s: any) => s.unignoreTransaction) as (id: string) => void;
+  const deleteTransaction = useEPurseStore((s: any) => s.deleteTransaction) as (id: string) => void;
+  const untagTransactionFromGroup = useEPurseStore((s: any) => s.untagTransactionFromGroup) as (id: string) => void;
   const activeGroupZoneId = useEPurseStore((s: any) => s.activeGroupZoneId) as string | null;
   const setGroupZone = useEPurseStore((s: any) => s.setGroupZone) as (id: string | null) => void;
   const toast = useToast();
@@ -101,6 +107,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   const [infoVisible, setInfoVisible] = useState(false);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
+  const [balancesVisible, setBalancesVisible] = useState(false);
   const scrollProps = useTabBarScroll();
 
   // Groups newest-activity first.
@@ -216,11 +223,13 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
 
   const openCreate = () => { setEditTarget(null); setCreateVisible(true); };
 
-  // Group Zone toggle — exclusive (one at a time). Toast on switch-on.
+  // Group Zone toggle — exclusive (one at a time). Toast on switch-on and switch-off.
   const handleToggleZone = (g: Group, on: boolean) => {
     setGroupZone(on ? g.id : null);
     if (on) {
       toast.info(`${g.name} zone on`, 'New transactions will be added to this group by default.');
+    } else {
+      toast.info(`${g.name} zone off`, `New transactions won't be auto-tagged to this group.`);
     }
   };
 
@@ -277,80 +286,93 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
     const isShared = g.type === 'shared';
     const total = g.totalSpend || 0;
     const myShare = myShareByGroup[g.id] || 0;
+    // Net across everyone in this group: > 0 you're owed, < 0 you owe.
+    const netBalance = groupBalances.reduce((acc, pb) => acc + pb.net, 0);
 
     return (
       <View>
         {renderTiles()}
 
-        {/* Expense summary card — accent on the BOTTOM edge */}
+        {/* Expense summary card — accent on the BOTTOM edge. The whole card (header
+            + amount + balances) opens the members/settle modal; only the Group Zone
+            area below is excluded so its switch keeps working. */}
         <View style={[styles.expenseCard, { borderBottomColor: g.color || '#6366F1' }]}>
-          {/* Header strip: gray→white gradient (white by ~70%), inset 1px from the card edge */}
-          <LinearGradient
-            colors={['#E9EBEF', '#FFFFFF']}
-            locations={[0, 0.7]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.cardHeaderGrad}
-          >
-            <Text style={styles.cardEmoji}>{g.emoji || (isShared ? '👥' : '📁')}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardName} numberOfLines={1}>{g.name}</Text>
-              <Text style={styles.cardMeta}>
-                {isShared ? `${g.members?.length ?? 0} members` : 'Personal'}
-                {g.excludeFromTotals ? ' · excluded from totals' : ''}
-              </Text>
-            </View>
-            <View style={styles.cardActions}>
-              <TouchableOpacity onPress={handleEditGroup} hitSlop={8} style={styles.cardActionBtn}>
-                <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDeleteGroup} hitSlop={8} style={styles.cardActionBtn}>
-                <Ionicons name="trash-outline" size={18} color={colors.danger} />
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
+          {(() => {
+            const cardTop = (
+              <>
+                {/* Header strip: gray→white gradient (white by ~70%), inset 1px from the card edge */}
+                <LinearGradient
+                  colors={['#E9EBEF', '#FFFFFF']}
+                  locations={[0, 0.7]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cardHeaderGrad}
+                >
+                  <Text style={styles.cardEmoji}>{g.emoji || (isShared ? '👥' : '📁')}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardName} numberOfLines={1}>{g.name}</Text>
+                    <Text style={styles.cardMeta}>
+                      {isShared ? `${g.members?.length ?? 0} members` : 'Personal'}
+                      {g.excludeFromTotals ? ' · excluded from totals' : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity onPress={handleEditGroup} hitSlop={8} style={styles.cardActionBtn}>
+                      <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleDeleteGroup} hitSlop={8} style={styles.cardActionBtn}>
+                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </LinearGradient>
 
-          <View style={styles.cardBody}>
-            <View style={styles.amountRow}>
-              {isShared ? (
-                <>
-                  <Text style={styles.amountBig}>{formatCurrency(myShare)}</Text>
-                  <Text style={styles.amountSub}>your share · of {formatCurrency(total)}</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.amountBig}>{formatCurrency(total)}</Text>
-                  <Text style={styles.amountSub}>total spend</Text>
-                </>
-              )}
-            </View>
+                <View style={styles.cardSummary}>
+                  <View style={styles.amountRow}>
+                    {isShared ? (
+                      <>
+                        <Text style={styles.amountBig}>{formatCurrency(myShare)}</Text>
+                        <Text style={styles.amountSub}>your share · of {formatCurrency(total)}</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.amountBig}>{formatCurrency(total)}</Text>
+                        <Text style={styles.amountSub}>total spend</Text>
+                      </>
+                    )}
+                  </View>
 
-            {/* Balances (shared) */}
-            {isShared && groupBalances.length > 0 && (
-              <View style={styles.balancesBox}>
-                {groupBalances.map((pb) => {
-                  const owesYou = pb.net > 0;
-                  return (
-                    <View key={pb.personKey} style={styles.balanceRow}>
-                      <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
-                        <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.balanceName} numberOfLines={1}>{pb.person}</Text>
-                        <Text style={[styles.balanceSub, { color: owesYou ? colors.success : colors.danger }]}>
-                          {owesYou ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(pb.net))}
-                        </Text>
-                      </View>
-                      <TouchableOpacity style={[styles.settleBtn, { borderColor: theme.primary }]} onPress={() => handleSettle(pb)}>
-                        <Text style={[styles.settleBtnTxt, { color: theme.primary }]}>Settle</Text>
-                      </TouchableOpacity>
+                  {isShared && groupBalances.length > 0 && (
+                    <View style={styles.balancesSummary}>
+                      <View style={[{ flex: 1 }, groupBalances.length === 0 && { justifyContent: 'center' }]}>
+                          <>
+                            <Text style={styles.balancesSummaryTitle}>
+                              Balances · {groupBalances.length} {groupBalances.length === 1 ? 'person' : 'people'}
+                            </Text>
+                            <Text style={[styles.balancesSummarySub, { color: netBalance >= 0 ? colors.success : colors.danger }]}>
+                              {Math.abs(netBalance) < 0.01
+                                ? 'Even overall · tap to view'
+                                : netBalance > 0
+                                  ? `You're owed ${formatCurrency(netBalance)} · tap to settle`
+                                  : `You owe ${formatCurrency(Math.abs(netBalance))} · tap to settle`}
+                            </Text>
+                          </>
+                        </View>
+                      <Text style={styles.balancesChevron}>›</Text>
                     </View>
-                  );
-                })}
-              </View>
-            )}
+                  )}
+                </View>
+              </>
+            );
+            // Shared groups → the whole top opens the members/settle modal.
+            return isShared ? (
+              <TouchableOpacity activeOpacity={0.85} onPress={() => setBalancesVisible(true)}>
+                {cardTop}
+              </TouchableOpacity>
+            ) : cardTop;
+          })()}
 
-            {/* Group Zone toggle — switch on the right; on = auto-tag new txns here */}
+          {/* Group Zone — OUTSIDE the card tap so its switch toggles independently */}
+          <View style={styles.zoneArea}>
             <View style={styles.zoneRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.zoneTitle}>🧭 Group Zone</Text>
@@ -468,18 +490,69 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         }}
       />
 
-      {/* Category-only picker (manage modal restricted to switching category) */}
+      {/* Member balances + settle — opened from the group card (kept off the card
+          so a long member list never stretches it). */}
+      <Modal
+        visible={balancesVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setBalancesVisible(false)}
+      >
+        <View style={styles.sheetBackdrop}>
+          <TouchableOpacity style={styles.sheetDismiss} activeOpacity={1} onPress={() => setBalancesVisible(false)} />
+          <View style={styles.balancesSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle} numberOfLines={1}>
+              {selectedGroup?.emoji || '👥'} {selectedGroup?.name} · Balances
+            </Text>
+            {groupBalances.length > 0 ? (
+              <ScrollView style={styles.balancesSheetList} showsVerticalScrollIndicator={false}>
+                {groupBalances.map((pb) => {
+                  const owesYou = pb.net > 0;
+                  return (
+                    <View key={pb.personKey} style={styles.balanceRow}>
+                      <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
+                        <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.balanceName} numberOfLines={1}>{pb.person}</Text>
+                        <Text style={[styles.balanceSub, { color: owesYou ? colors.success : colors.danger }]}>
+                          {owesYou ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(pb.net))}
+                        </Text>
+                      </View>
+                      <TouchableOpacity style={[styles.settleBtn, { borderColor: theme.primary }]} onPress={() => handleSettle(pb)}>
+                        <Text style={[styles.settleBtnTxt, { color: theme.primary }]}>Settle</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <Text style={styles.balancesEmpty}>✓ Everyone&apos;s settled up in this group.</Text>
+            )}
+            <TouchableOpacity style={styles.balancesClose} onPress={() => setBalancesVisible(false)}>
+              <Text style={styles.balancesCloseTxt}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Manage modal — full parity with a normal transaction (category, Private,
+          Ignore, Delete, Remove-from-group). Split is omitted (it conflicts with the
+          group's own split) and Lent/Borrowed linkage is not offered (the group
+          already posts its own LB legs — onSelectLentBorrow intentionally unset). */}
       <CategoryPickerModal
         visible={!!categoryTxn}
         categories={categories}
         selectedCategoryId={categoryTxn?.categoryId}
         selectedParent={categoryTxn?.parentCategory}
         selectedChild={categoryTxn?.childCategory}
-        isHidden={false}
-        isIgnored={false}
+        isHidden={!!categoryTxn?.isHidden}
+        isIgnored={!!categoryTxn?.isIgnored}
         canSplit={false}
         isSplitTxn={false}
         categoryLocked={!!categoryTxn?.lbLocked}
+        currentGroupId={categoryTxn?.groupId || null}
         onSelectCategory={(categoryId) => {
           if (categoryTxn) updateTransactionCategory(categoryTxn.id, categoryId);
           setCategoryTxn(null);
@@ -487,6 +560,46 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         onSelectTwoTier={(parent, child) => {
           if (categoryTxn) updateTwoTierCategory(categoryTxn.id, parent, child);
           setCategoryTxn(null);
+        }}
+        onToggleHidden={(hidden) => {
+          if (categoryTxn) setTransactionHidden(categoryTxn.id, hidden);
+          setCategoryTxn(null);
+        }}
+        onIgnore={() => {
+          const t = categoryTxn;
+          setCategoryTxn(null);
+          if (!t) return;
+          setConfirm({
+            title: 'Ignore transaction?',
+            message: 'It will be removed from balances, totals and charts — as if it never happened.',
+            primaryText: 'Ignore',
+            secondaryText: 'Cancel',
+            destructive: true,
+            onPrimary: () => { ignoreTransaction(t.id); setConfirm(null); },
+            onSecondary: () => setConfirm(null),
+          });
+        }}
+        onRestore={() => {
+          if (categoryTxn) unignoreTransaction(categoryTxn.id);
+          setCategoryTxn(null);
+        }}
+        onPressRemoveFromGroup={() => {
+          if (categoryTxn) untagTransactionFromGroup(categoryTxn.id);
+          setCategoryTxn(null);
+        }}
+        onDelete={() => {
+          const t = categoryTxn;
+          setCategoryTxn(null);
+          if (!t) return;
+          setConfirm({
+            title: 'Delete transaction?',
+            message: 'This action cannot be undone.',
+            primaryText: 'Delete',
+            secondaryText: 'Cancel',
+            destructive: true,
+            onPrimary: () => { deleteTransaction(t.id); setConfirm(null); },
+            onSecondary: () => setConfirm(null),
+          });
         }}
         onClose={() => setCategoryTxn(null)}
       />
@@ -578,7 +691,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
   },
-  cardBody:   { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  // Tappable top region (amount + balances summary). Zone area is separate below.
+  cardSummary: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  zoneArea:    { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
   cardEmoji:  { fontSize: 26, marginRight: spacing.sm },
   cardName:   { ...typography.h3, color: colors.textPrimary },
   cardMeta:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
@@ -587,7 +702,17 @@ const styles = StyleSheet.create({
   amountRow:  { marginTop: spacing.sm },
   amountBig:  { ...typography.display, color: colors.textPrimary },
   amountSub:  { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
-  balancesBox:{ marginTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: spacing.sm },
+  // Compact, tappable balances summary on the card (full breakdown is in the modal).
+  balancesSummary: {
+    flexDirection: 'row', alignItems: 'center',
+    marginTop: spacing.md, paddingTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.divider,
+  },
+  balancesSummaryTitle: { ...typography.small, color: colors.textPrimary, fontWeight: '700' },
+  balancesSummarySub:   { ...typography.tiny, fontWeight: '700', marginTop: 1 },
+  balancesSettled: { ...typography.small, color: colors.success, fontWeight: '700', paddingVertical: 2 },
+  balancesChevron:      { ...typography.h2, color: colors.textMuted, marginLeft: spacing.sm },
+  // balanceRow/avatar/settleBtn are shared by the card summary and the balances modal.
   balanceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.xs },
   avatar:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
   avatarTxt:  { fontWeight: '800', fontSize: 12 },
@@ -595,6 +720,21 @@ const styles = StyleSheet.create({
   balanceSub: { ...typography.tiny, fontWeight: '700', marginTop: 1 },
   settleBtn:  { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, marginLeft: spacing.sm },
   settleBtnTxt:{ ...typography.small, fontWeight: '700' },
+
+  // Balances bottom-sheet modal (opened from the card)
+  sheetBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
+  sheetDismiss:  { flex: 1 },
+  balancesSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    padding: spacing.lg, paddingBottom: spacing.xl, maxHeight: '80%',
+  },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md },
+  sheetTitle:  { ...typography.h3, color: colors.textPrimary, fontWeight: '700', marginBottom: spacing.md },
+  balancesSheetList: { maxHeight: 360 },
+  balancesEmpty: { ...typography.body, color: colors.textSecondary, paddingVertical: spacing.lg, textAlign: 'center' },
+  balancesClose: { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
+  balancesCloseTxt: { ...typography.body, color: colors.textSecondary },
 
   // Group Zone toggle row
   zoneRow: {

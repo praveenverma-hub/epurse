@@ -16,6 +16,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView } from 'react-native-tab-view';
+import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
 
 import EmptyState from '../components/EmptyState';
@@ -470,9 +471,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             <View style={styles.headerRow}>
               <TouchableOpacity
                 onPress={() => navigation.goBack()}
-                style={styles.backBtn}
+                hitSlop={10}
               >
-                <Text style={styles.backText}>←</Text>
+                <Ionicons name="chevron-back" size={24} color="#fff" />
               </TouchableOpacity>
               <Text style={styles.title}>
                 {kind === 'lent' ? 'You Lent' : 'You Borrowed'}
@@ -656,15 +657,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: spacing.sm,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF22',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backText: { fontSize: 22, color: '#fff' },
+
   title: { color: '#fff', ...typography.h2 },
   subLabel: {
     color: '#FFFFFFCC',

@@ -520,13 +520,12 @@ const styles = StyleSheet.create({
   phoneAddBtnDisabled: { opacity: 0.4 },
   phoneAddText: { color: colors.card, ...typography.bodyBold, fontWeight: '700' },
 
+  // Plain (no card) empty state — just emoji + text, like the Groups empty list.
   emptyCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
     alignItems: 'center',
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
     marginTop: spacing.md,
-    ...shadows.card,
   },
   emptyEmoji: { fontSize: 36 },
   emptyTitle: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },

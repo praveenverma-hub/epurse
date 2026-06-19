@@ -164,25 +164,31 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
             </Text>
           )}
 
-          {/* Type toggle */}
-          <View style={styles.typeRow}>
-            {TYPE_OPTIONS.map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[styles.typeChip, type === t && { backgroundColor: theme.primary + '20', borderColor: theme.primary }]}
-                onPress={() => setType(t)}
-              >
-                <Text style={[styles.typeChipTxt, type === t && { color: theme.primary, fontWeight: '700' }]}>
-                  {t === 'personal' ? '👤 Personal' : '👥 Shared'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {type === 'personal' && (
-            <Text style={styles.typeHint}>Just you — track costs under a theme (house build, solo trip…).</Text>
-          )}
-          {type === 'shared' && (
-            <Text style={styles.typeHint}>Multiple people — split expenses and track who owes whom.</Text>
+          {/* Type toggle — only when CREATING. A group's type is fixed once made
+              (changing personal↔shared would orphan members/balances), so it's
+              hidden on edit. */}
+          {!group && (
+            <>
+              <View style={styles.typeRow}>
+                {TYPE_OPTIONS.map((t) => (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.typeChip, type === t && { backgroundColor: theme.primary + '20', borderColor: theme.primary }]}
+                    onPress={() => setType(t)}
+                  >
+                    <Text style={[styles.typeChipTxt, type === t && { color: theme.primary, fontWeight: '700' }]}>
+                      {t === 'personal' ? '👤 Personal' : '👥 Shared'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {type === 'personal' && (
+                <Text style={styles.typeHint}>Just you — track costs under a theme (house build, solo trip…).</Text>
+              )}
+              {type === 'shared' && (
+                <Text style={styles.typeHint}>Multiple people — split expenses and track who owes whom.</Text>
+              )}
+            </>
           )}
 
           {/* Emoji row */}
@@ -196,10 +202,16 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
                 !EMOJIS.includes(emoji) && { borderColor: theme.primary, backgroundColor: theme.primary + '14' },
               ]}
               value={EMOJIS.includes(emoji) ? '' : emoji}
-              onChangeText={(t) => { const e = Array.from(t.trim())[0]; if (e) setEmoji(e); }}
+              // Take the LAST glyph typed so a new emoji REPLACES the current one
+              // (taking the first kept the old one, so the field looked unclearable).
+              onChangeText={(t) => {
+                const chars = Array.from(t.trim());
+                const e = chars[chars.length - 1];
+                if (e) setEmoji(e);
+              }}
               placeholder="⌨️"
               placeholderTextColor={colors.textMuted}
-              maxLength={4}
+              maxLength={8}
             />
             {EMOJIS.map((e) => (
               <TouchableOpacity

@@ -26,6 +26,15 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
   const sign = isCredit ? '+' : '−';
   const amountColor = isCredit ? colors.success : colors.textPrimary;
   const displayAmount = isCredit ? txn.amount : debitDisplayAmount(txn);
+  // In a group, a 0 personal share means I owe nothing → "Not involved".
+  // Exception: if I'm the payer (fronted the bill, e.g. Full-owed split), I AM
+  // involved — show what I actually paid instead.
+  const isGroupTxn = !!txn.groupId;
+  const iPaidGroup = txn.groupSplit?.paidByMemberId === 'me';
+  const notInvolved = isGroupTxn && !isCredit && !iPaidGroup && (Number(displayAmount) || 0) === 0;
+  const shownAmount = isGroupTxn && iPaidGroup && (Number(displayAmount) || 0) === 0
+    ? (Number(txn.amount) || 0)
+    : displayAmount;
   const splitLabel = txn.isSplit ? splitParticipantsLabel(txn.splitWith) : '';
   const statusChip = getStatusChip(txn);
   const cardPressable = typeof onPress === 'function';
@@ -80,9 +89,13 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
           activeOpacity={onLongPress ? 0.6 : 1}
           disabled={!onLongPress}
         >
-          <Text style={[styles.amount, { color: amountColor }]}>
-            {sign} {formatCurrency(displayAmount)}
-          </Text>
+          {notInvolved ? (
+            <Text style={styles.notInvolved}>Not involved</Text>
+          ) : (
+            <Text style={[styles.amount, { color: amountColor }]}>
+              {sign} {formatCurrency(shownAmount)}
+            </Text>
+          )}
         </TouchableOpacity>
         {txn.isSplit ? (
           <TouchableOpacity
@@ -184,6 +197,7 @@ const styles = StyleSheet.create({
   time: { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   right: { alignItems: 'flex-end' },
   amount: { ...typography.bodyBold, fontWeight: '700' },
+  notInvolved: { ...typography.small, color: colors.textMuted, fontStyle: 'italic', fontWeight: '600' },
   splitTag: {
     marginTop: 4,
     alignItems: 'flex-end',

@@ -13,7 +13,6 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 
 const MiniRing = ({ pct, color, size = 56, strokeWidth = 6 }) => {
@@ -52,7 +51,6 @@ const statusLabelFor = (pct, daysElapsedPct, hasCap) => {
 };
 
 const BudgetWidget = ({ onPress }) => {
-  const theme         = useTheme();
   const budget        = useEPurseStore((s) => s.budget);
   const transactions  = useEPurseStore((s) => s.transactions);
   const categories    = useEPurseStore((s) => s.categories);
@@ -78,7 +76,7 @@ const BudgetWidget = ({ onPress }) => {
     if (planBannerDismissed) return null;
     return (
       <TouchableOpacity
-        style={[styles.emptyCard, { borderColor: theme.primary + '44' }]}
+        style={styles.emptyCard}
         onPress={onPress}
         activeOpacity={0.85}
       >
@@ -210,8 +208,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     gap: spacing.md,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
     marginTop: spacing.xl,
     ...shadows.card,
   },

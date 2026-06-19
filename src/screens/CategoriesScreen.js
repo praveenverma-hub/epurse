@@ -11,7 +11,7 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -133,8 +133,8 @@ const CategoriesScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>Categories & Settings</Text>
         <View style={{ width: 40 }} />
@@ -345,13 +345,9 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadows.card,
   },
-  backText: { fontSize: 22, color: colors.textPrimary },
   title: { ...typography.h2, color: colors.textPrimary },
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },

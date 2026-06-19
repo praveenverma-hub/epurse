@@ -301,7 +301,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         accessibilityRole="button"
         accessibilityLabel="Go back"
       >
-        <Ionicons name="arrow-back" size={22} color={theme.textPrimary} />
+        <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
       </TouchableOpacity>
       <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
       <View style={styles.navBtn} />

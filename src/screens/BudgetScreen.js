@@ -659,11 +659,11 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
         {/* Header — hidden when embedded inside InsightsScreen */}
         {!headerless && (
           <View style={styles.headerRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Text style={styles.backText}>←</Text>
+            <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
+              <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.title}>{monthName} Budget</Text>
-            <View style={{ width: 60 }} />
+            <View style={{ width: 40 }} />
           </View>
         )}
 
@@ -758,13 +758,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: colors.card,
-    alignItems: 'center', justifyContent: 'center',
-    ...shadows.card,
-  },
-  backText: { fontSize: 22, color: colors.textPrimary },
   title:    { ...typography.h2, color: colors.textPrimary },
 
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl + 24 },

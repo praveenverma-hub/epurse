@@ -241,7 +241,7 @@ const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-
 // Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
 // Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
 const MERCHANT_REGEX =
-  /(?:to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate)\b|\s+to\s+your\b|\.|,|;|$)/i;
+  /(?:to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate)\b|\s+to\s+your\b|\.|,|;|\/(?![A-Za-z])|$)/i;
 
 const MERCHANT_STOP =
   /\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate)\b.*$/i;

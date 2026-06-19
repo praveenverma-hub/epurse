@@ -300,6 +300,15 @@ const REAL_WORLD = [
     expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 3331, accountMask: '9532', merchant: 'CRED Club' },
   },
   {
+    // Payee name ends with a "/" before the UPI ref ("GULAFSHA  D/. UPI:...").
+    // The trailing "/" must terminate the merchant (not break it like "A/c"),
+    // else the regex skips ahead to the dispute phone and falls back to sender.
+    name: 'UPI debit to payee with trailing slash',
+    sender: 'INDIANBK',
+    sms: 'A/c *9532 debited Rs. 690.00 on 11-06-26 to GULAFSHA  D/. UPI:338920462510. Not you? SMS BLOCK to 9289592895, Dial 1930 for Cyber Fraud - Indian Bank',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 690, accountMask: '9532', merchant: 'GULAFSHA D' },
+  },
+  {
     name: 'HDFC CC payment received (uppercase)',
     sender: 'HDFCBK',
     sms: 'DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 3348.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 2170 ON 9-5-2026.YOUR AVAILABLE LIMIT IS RS. 249999.76',
