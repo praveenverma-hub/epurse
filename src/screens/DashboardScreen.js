@@ -94,7 +94,9 @@ const DashboardScreen = ({ navigation }) => {
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const budget              = useEPurseStore((s) => s.budget);
   const setTransactionSplit = useEPurseStore((s) => s.setTransactionSplit);
+  const groups                  = useEPurseStore((s) => s.groups);
   const tagTransactionToGroup   = useEPurseStore((s) => s.tagTransactionToGroup);
+  const updateGroupExpense      = useEPurseStore((s) => s.updateGroupExpense);
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
   const addGroupExpense = useEPurseStore((s) => s.addGroupExpense);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
@@ -113,7 +115,8 @@ const DashboardScreen = ({ navigation }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [debugTxn, setDebugTxn] = useState(null);
   const [groupPickerTxn, setGroupPickerTxn] = useState(null);
-  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group }
+  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
+  const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
   const settingsSlide = useState(() => new Animated.Value(0))[0];
   // Dev-only: long-press vault to cycle tiers for visual preview.
@@ -415,6 +418,17 @@ const DashboardScreen = ({ navigation }) => {
           untagTransactionFromGroup(activeTxn.id);
           setActiveTxn(null);
         }}
+        onPressEditGroup={
+          activeTxn?.groupId && groups.find((g) => g.id === activeTxn.groupId)?.type === 'shared'
+            ? () => {
+                const group = groups.find((g) => g.id === activeTxn.groupId);
+                const fresh = useEPurseStore.getState().transactions.find((t) => t.id === activeTxn.id) || activeTxn;
+                setActiveTxn(null);
+                setEditGroupTxn({ txn: fresh, group });
+              }
+            : undefined
+        }
+        groupHasSplit={!!activeTxn?.groupSplit}
         onPressSplit={() => {
           const t = activeTxn;
           setActiveTxn(null);
@@ -609,6 +623,22 @@ const DashboardScreen = ({ navigation }) => {
               shares: expenseData.shares,
             } : null);
             setGroupExpenseTxn(null);
+          }}
+        />
+      )}
+
+      {editGroupTxn && (
+        <GroupExpenseSheet
+          visible={!!editGroupTxn}
+          group={editGroupTxn.group}
+          editTxn={editGroupTxn.txn}
+          presetAmount={editGroupTxn.txn?.amount}
+          showCategory
+          lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
+          onClose={() => setEditGroupTxn(null)}
+          onAdd={(expenseData) => {
+            updateGroupExpense(editGroupTxn.txn.id, expenseData);
+            setEditGroupTxn(null);
           }}
         />
       )}

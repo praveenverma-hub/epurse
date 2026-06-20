@@ -71,6 +71,13 @@ interface Props {
   currentGroupId?: string | null;
   onPressAddToGroup?: () => void;
   onPressRemoveFromGroup?: () => void;
+  /**
+   * Set who-owes / edit the group split. Provided ONLY for shared-group-tagged txns
+   * (the parent knows the group type) — opens the group-expense editor. `groupHasSplit`
+   * just toggles the button label (set vs edit).
+   */
+  onPressEditGroup?: () => void;
+  groupHasSplit?: boolean;
 }
 
 // ─── ParentRow ───────────────────────────────────────────────────────────────
@@ -209,6 +216,8 @@ const CategoryPickerModal: React.FC<Props> = ({
   currentGroupId,
   onPressAddToGroup,
   onPressRemoveFromGroup,
+  onPressEditGroup,
+  groupHasSplit,
 }) => {
   const theme = useTheme();
   const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
@@ -374,6 +383,19 @@ const CategoryPickerModal: React.FC<Props> = ({
                 </TouchableOpacity>
               ) : null}
             </View>
+          ) : null}
+
+          {/* Shared-group txn → set who owes / edit the split (drives the LB legs). */}
+          {!isIgnored && currentGroupId && onPressEditGroup ? (
+            <TouchableOpacity
+              style={[styles.splitBillBtn, styles.groupSplitBtn]}
+              activeOpacity={0.85}
+              onPress={onPressEditGroup}
+            >
+              <Text style={styles.groupSplitText}>
+                {groupHasSplit ? '🧮 Edit split · who owes' : '🧮 Set who owes'}
+              </Text>
+            </TouchableOpacity>
           ) : null}
 
           {!isIgnored && (onPressAddToGroup || onPressRemoveFromGroup) ? (
@@ -584,6 +606,15 @@ const styles = StyleSheet.create({
     borderColor: colors.primary + '55',
   },
   groupAddText: {
+    color: colors.primary,
+    ...typography.bodyBold,
+    fontWeight: '700',
+  },
+  groupSplitBtn: {
+    backgroundColor: colors.primary + '18',
+    borderColor: colors.primary + '55',
+  },
+  groupSplitText: {
     color: colors.primary,
     ...typography.bodyBold,
     fontWeight: '700',

@@ -302,13 +302,15 @@ const DailyQueueStack = () => {
   const deleteTransaction         = useEPurseStore((s) => s.deleteTransaction);
   const tagTransactionToGroup     = useEPurseStore((s) => s.tagTransactionToGroup);
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
+  const updateGroupExpense        = useEPurseStore((s) => s.updateGroupExpense);
 
   // Category picker state
   const [pickerTxn,  setPickerTxn]  = useState(null);
   const [lbLinkData, setLbLinkData] = useState(null); // { txn, categoryId }
   const [splitTxn,   setSplitTxn]   = useState(null);
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
-  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group }
+  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
+  const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split on a grouped txn
   const [confirm,    setConfirm]    = useState(null);
   const [showCapInfo, setShowCapInfo] = useState(false);
 
@@ -415,6 +417,19 @@ const DailyQueueStack = () => {
     clearAsReviewed(pickerTxn.id);
     setPickerTxn(null);
   }, [pickerTxn, untagTransactionFromGroup, clearAsReviewed]);
+
+  // Set / edit "who owes" on a shared-group-tagged txn (e.g. one auto-tagged by a
+  // Group Zone). Opens the group-expense editor — paid by me + equal split by default,
+  // category shown — and persists via updateGroupExpense (keeps account/total/LB in sync).
+  const handleEditGroup = useCallback(() => {
+    if (!pickerTxn) return;
+    const group = groups.find((g) => g.id === pickerTxn.groupId);
+    if (!group || group.type !== 'shared') return;
+    // Read the freshest txn from the store (category may have just changed in the modal).
+    const fresh = useEPurseStore.getState().transactions.find((t) => t.id === pickerTxn.id) || pickerTxn;
+    setPickerTxn(null);
+    setEditGroupTxn({ txn: fresh, group });
+  }, [pickerTxn, groups]);
 
   const handleOpenSplit = useCallback(() => {
     const t = pickerTxn;
@@ -569,6 +584,12 @@ const DailyQueueStack = () => {
         onSelectLentBorrow={handleSelectLentBorrow}
         onPressAddToGroup={handleAddToGroup}
         onPressRemoveFromGroup={handleRemoveFromGroup}
+        onPressEditGroup={
+          pickerTxn?.groupId && groups.find((g) => g.id === pickerTxn.groupId)?.type === 'shared'
+            ? handleEditGroup
+            : undefined
+        }
+        groupHasSplit={!!pickerTxn?.groupSplit}
         onPressSplit={handleOpenSplit}
         onToggleHidden={handleToggleHidden}
         onIgnore={handleIgnore}
@@ -630,6 +651,24 @@ const DailyQueueStack = () => {
             } : null);
             clearAsReviewed(groupExpenseTxn.txn.id);
             setGroupExpenseTxn(null);
+          }}
+        />
+      )}
+
+      {/* ── Set / edit who-owes on an already-grouped txn (e.g. Group-Zone-tagged) ── */}
+      {editGroupTxn && (
+        <GroupExpenseSheet
+          visible={!!editGroupTxn}
+          group={editGroupTxn.group}
+          editTxn={editGroupTxn.txn}
+          presetAmount={editGroupTxn.txn?.amount}
+          showCategory
+          lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
+          onClose={() => setEditGroupTxn(null)}
+          onAdd={(expenseData) => {
+            updateGroupExpense(editGroupTxn.txn.id, expenseData);
+            clearAsReviewed(editGroupTxn.txn.id);
+            setEditGroupTxn(null);
           }}
         />
       )}

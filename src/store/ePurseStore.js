@@ -50,6 +50,8 @@ import {
   computePercentSplit,
   canSplitTransaction,
   debitDisplayAmount,
+  isGroupExcluded,
+  buildGroupLbRows,
 } from '../utils/split';
 
 // =============================================================================
@@ -244,17 +246,10 @@ const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid'
  */
 const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 
-/**
- * Returns true when a transaction should be excluded from ALL spend/income totals
- * because of its group membership — either it's a group-memo (paid by someone else)
- * or it belongs to a personal group the user has toggled off from main totals.
- */
-const isGroupExcluded = (txn, groups) => {
-  if (!txn.groupId) return false;
-  if (txn.isGroupMemo) return true;
-  const g = (groups || []).find((gr) => gr.id === txn.groupId);
-  return !!(g?.excludeFromTotals);
-};
+// `isGroupExcluded` + `buildGroupLbRows` are pure helpers imported from ../utils/split
+// (co-located with the rest of the split math + `debitDisplayAmount`, and unit-tested in
+// groupExpense.test.mjs). They live there so the zero-dep .mjs runner can import them
+// without loading this store's React-Native/AsyncStorage dependency graph.
 
 /** Shared groups always carry the built-in 'me' member (deduped, listed first). Personal → []. */
 const ensureSelfMember = (type, members = []) => {
@@ -269,62 +264,6 @@ const adjustGroupTotal = (groups, groupId, delta) => {
   return (groups || []).map((g) =>
     g.id === groupId ? { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) + delta) } : g
   );
-};
-
-/**
- * Build the user's-leg lent/borrowed rows for a shared-group expense — the SINGLE source of
- * truth for who-owes-whom (mirrors the direct-split → lent pipeline). Tagged with `groupId` +
- * `sourceTxnId` so they net per-person across all groups and are removed when the txn is.
- *   • Paid by me            → one `lent` row per other member's share (they owe me).
- *   • Paid by another (memo) → one `borrowed` row for my own share (I owe the payer).
- * Returns [] for personal groups or txns without a groupSplit.
- */
-const buildGroupLbRows = (group, txn) => {
-  if (!group || group.type !== 'shared' || !txn?.groupSplit) return [];
-  const { paidByMemberId, paidByName, shares } = txn.groupSplit;
-  if (!Array.isArray(shares) || shares.length === 0) return [];
-  const stamp = Date.now();
-  const note = `Group · ${group.name}`;
-  const memberById = new Map((group.members || []).map((m) => [m.memberId, m]));
-  const rnd = () => Math.random().toString(36).slice(2, 8);
-
-  if (paidByMemberId === 'me') {
-    return shares
-      .filter((sh) => sh.memberId !== 'me' && (Number(sh.shareAmount) || 0) > 0)
-      .map((sh, i) => {
-        const m = memberById.get(sh.memberId) || {};
-        return {
-          id: `lb_${stamp}_${i}_${rnd()}`,
-          kind: 'lent',
-          person: m.name || sh.name || 'Member',
-          contactId: m.contactId || null,
-          phone: m.phone || null,
-          amount: Number(sh.shareAmount) || 0,
-          note,
-          date: txn.createdAt,
-          sourceTxnId: txn.id,
-          groupId: group.id,
-        };
-      });
-  }
-
-  // Someone else paid → I owe my own share → borrowed (only the user's leg is tracked globally).
-  const myShare = shares.find((sh) => sh.memberId === 'me');
-  const amt = Number(myShare?.shareAmount) || 0;
-  if (amt <= 0) return [];
-  const payer = memberById.get(paidByMemberId) || {};
-  return [{
-    id: `lb_${stamp}_0_${rnd()}`,
-    kind: 'borrowed',
-    person: payer.name || paidByName || 'Member',
-    contactId: payer.contactId || null,
-    phone: payer.phone || null,
-    amount: amt,
-    note,
-    date: txn.createdAt,
-    sourceTxnId: txn.id,
-    groupId: group.id,
-  }];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -350,10 +350,10 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
                             </Text>
                             <Text style={[styles.balancesSummarySub, { color: netBalance >= 0 ? colors.success : colors.danger }]}>
                               {Math.abs(netBalance) < 0.01
-                                ? 'Even overall · tap to view'
+                                ? 'Settled up · tap to view'
                                 : netBalance > 0
-                                  ? `You're owed ${formatCurrency(netBalance)} · tap to settle`
-                                  : `You owe ${formatCurrency(Math.abs(netBalance))} · tap to settle`}
+                                  ? `You lent ${formatCurrency(netBalance)} · tap to settle`
+                                  : `You borrowed ${formatCurrency(Math.abs(netBalance))} · tap to settle`}
                             </Text>
                           </>
                         </View>
@@ -438,17 +438,14 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
           keyExtractor={(t) => t.id}
           ListHeaderComponent={renderHeader()}
           renderItem={({ item: t }) => (
-            <View style={styles.txnWrapper}>
-              {t.isGroupMemo && (
-                <Text style={styles.memoTag}>Paid by {t.groupSplit?.paidByName || 'other'}</Text>
-              )}
-              <TransactionItem
-                txn={t}
-                hideGroupChip
-                onPress={() => setDetailTxn(t)}
-                onPressCategory={() => setCategoryTxn(t)}
-              />
-            </View>
+            // The card's LENT/BORROWED chip now conveys who-paid framing (was a "Paid by X"
+            // line here); the full payer + per-member breakdown lives in the detail sheet.
+            <TransactionItem
+              txn={t}
+              hideGroupChip
+              onPress={() => setDetailTxn(t)}
+              onPressCategory={() => setCategoryTxn(t)}
+            />
           )}
           ListEmptyComponent={
             <EmptyState
@@ -751,8 +748,6 @@ const styles = StyleSheet.create({
   // Transactions list
   txnHeader: { marginBottom: spacing.sm },
   sectionTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
-  txnWrapper: { marginBottom: 2 },
-  memoTag: { ...typography.tiny, color: colors.textMuted, marginBottom: 2, marginLeft: spacing.xs },
   // Plain (no card) — just centred text + emoji.
   emptyTxn: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },
 

@@ -32,11 +32,22 @@ interface GroupExpenseSheetProps {
   onAdd: (expenseData: GroupExpenseData) => void;
   /** When tagging an EXISTING transaction, its amount — prefilled and locked here. */
   presetAmount?: number;
+  /**
+   * EDIT/COMPLETE mode: prefill from this already-grouped txn (amount, category, who
+   * paid, split) so the user can set/adjust "who owes" + category in one place. Used
+   * by the review queue for Group-Zone-tagged txns (default: paid by me, equal split).
+   */
+  editTxn?: any;
+  /** Show the in-form category picker (default hidden — set when category isn't chosen elsewhere). */
+  showCategory?: boolean;
+  /** Lock the payer to "You" (real account debit — see GroupExpenseForm). */
+  lockPayerToMe?: boolean;
 }
 
-export default function GroupExpenseSheet({ visible, group, onClose, onAdd, presetAmount }: GroupExpenseSheetProps) {
+export default function GroupExpenseSheet({ visible, group, onClose, onAdd, presetAmount, editTxn, showCategory = false, lockPayerToMe = false }: GroupExpenseSheetProps) {
   const submitRef = useRef<(() => void) | null>(null);
   if (!group) return null;
+  const isEdit = !!editTxn;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -54,14 +65,21 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.bodyContent}
             >
-              <Text style={styles.title}>Add Expense · {group.name}</Text>
+              <Text style={[styles.title, !isEdit && { marginBottom: spacing.md }]}>
+                {isEdit ? `Who owes? · ${group.name}` : `Add Expense · ${group.name}`}
+              </Text>
+              {isEdit ? (
+                <Text style={styles.subtitle}>Paid by you by default — set how it splits and the category.</Text>
+              ) : null}
 
               <GroupExpenseForm
                 group={group}
                 visible={visible}
                 presetAmount={presetAmount}
+                editTxn={editTxn}
+                lockPayerToMe={lockPayerToMe}
                 onAdd={onAdd}
-                hideCategory
+                hideCategory={!showCategory}
                 hideSubmit
                 submitRef={submitRef}
               />
@@ -73,7 +91,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
                 <Text style={styles.cancelTxt}>Cancel</Text>
               </TouchableOpacity>
               <GradientButton
-                title="Add Expense"
+                title={isEdit ? 'Save' : 'Add Expense'}
                 onPress={() => submitRef.current?.()}
                 style={styles.submitBtn}
               />
@@ -101,7 +119,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider,
     alignSelf: 'center', marginBottom: spacing.md,
   },
-  title: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.md },
+  title: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.xs },
+  subtitle: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
   // flexShrink lets the body yield height to the pinned footer when content is tall.
   body: { flexShrink: 1 },
   bodyContent: { paddingBottom: spacing.sm },

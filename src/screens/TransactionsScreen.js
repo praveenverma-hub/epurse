@@ -57,7 +57,7 @@ import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
-import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
+import { canSplitTransaction, debitDisplayAmount, isGroupExcluded } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 
 // ---------------------------------------------------------------------------
@@ -180,6 +180,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const unignoreTransaction                  = useEPurseStore((s) => s.unignoreTransaction);
   const setTransactionSplit                  = useEPurseStore((s) => s.setTransactionSplit);
   const tagTransactionToGroup    = useEPurseStore((s) => s.tagTransactionToGroup);
+  const updateGroupExpense       = useEPurseStore((s) => s.updateGroupExpense);
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
 
   // ── Route params ───────────────────────────────────────────────────────────
@@ -213,7 +214,8 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [confirm,         setConfirm]         = useState(null);
   const [debugTxn,        setDebugTxn]        = useState(null);
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
-  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null);
+  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
+  const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split
 
   // ── Route param reactivity ─────────────────────────────────────────────────
   useEffect(() => {
@@ -430,11 +432,15 @@ const TransactionsScreen = ({ navigation, route }) => {
     let debit = 0;
     let credit = 0;
     for (const t of filtered) {
+      // Memos (someone else paid → you owe) and "excluded from totals" group rows
+      // aren't your own money movement — keep them out of the spend/inflow figures
+      // (matches Home's selectExpenseStats). They still appear in the list.
+      if (isGroupExcluded(t, groups)) continue;
       if (t.type === 'credit') credit += t.amount || 0;
       else debit += debitDisplayAmount(t);
     }
     return { debit, credit };
-  }, [filtered]);
+  }, [filtered, groups]);
 
   const activeFilterCount = useMemo(
     () => Object.values(applied).reduce((n, s) => n + s.size, 0),
@@ -924,6 +930,17 @@ const TransactionsScreen = ({ navigation, route }) => {
           untagTransactionFromGroup(activeTxn.id);
           setActiveTxn(null);
         }}
+        onPressEditGroup={
+          activeTxn?.groupId && groups.find((g) => g.id === activeTxn.groupId)?.type === 'shared'
+            ? () => {
+                const group = groups.find((g) => g.id === activeTxn.groupId);
+                const fresh = useEPurseStore.getState().transactions.find((t) => t.id === activeTxn.id) || activeTxn;
+                setActiveTxn(null);
+                setEditGroupTxn({ txn: fresh, group });
+              }
+            : undefined
+        }
+        groupHasSplit={!!activeTxn?.groupSplit}
         onPressSplit={() => {
           const t = activeTxn;
           setActiveTxn(null);
@@ -1030,6 +1047,22 @@ const TransactionsScreen = ({ navigation, route }) => {
               shares: expenseData.shares,
             } : null);
             setGroupExpenseTxn(null);
+          }}
+        />
+      )}
+
+      {editGroupTxn && (
+        <GroupExpenseSheet
+          visible={!!editGroupTxn}
+          group={editGroupTxn.group}
+          editTxn={editGroupTxn.txn}
+          presetAmount={editGroupTxn.txn?.amount}
+          showCategory
+          lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
+          onClose={() => setEditGroupTxn(null)}
+          onAdd={(expenseData) => {
+            updateGroupExpense(editGroupTxn.txn.id, expenseData);
+            setEditGroupTxn(null);
           }}
         />
       )}
