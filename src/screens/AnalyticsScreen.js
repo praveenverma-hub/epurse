@@ -167,7 +167,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             ) : null}
 
             {/* Progress rings — only when there's a breakdown to show */}
-            {breakdown.length > 2 ? (
+            {breakdown.length > 0 ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Category breakdown</Text>
                 <View style={styles.ringsRow}>
