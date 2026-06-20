@@ -136,13 +136,8 @@ export default function AccountsScreen({ navigation }) {
         style={styles.header}
       >
         <SafeAreaView edges={['top']}>
-          <View style={styles.headerRow}>
-            <View>
-              <Text style={styles.headerLabel}>Net Worth</Text>
-              <Text style={styles.headerBalance}>
-                {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
-              </Text>
-            </View>
+          <View style={styles.headerHeading}>
+            <Text style={styles.headerTitle}>Accounts</Text>
             <View style={styles.headerActions}>
               <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
                 <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
@@ -151,6 +146,12 @@ export default function AccountsScreen({ navigation }) {
                 <Ionicons name="add" size={22} color="#fff" />
               </TouchableOpacity>
             </View>
+          </View>
+          <View style={styles.headerRow}>
+            <Text style={styles.headerLabel}>Net Worth</Text>
+            <Text style={styles.headerBalance}>
+              {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
+            </Text>
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -350,13 +351,13 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.xl,
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xxs,
   },
+  headerHeading:  { flexDirection: 'row', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  headerTitle:    { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: '#fff' },
   headerLabel:   { color: '#FFFFFFCC', ...typography.small },
-  headerBalance: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 4, letterSpacing: -0.5 },
+  headerBalance: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
   headerActions: { flexDirection: 'row', gap: spacing.sm },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,

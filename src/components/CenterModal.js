@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 
 /**
  * Generic centered modal for confirmations and info messages.
@@ -18,6 +19,8 @@ export default function CenterModal({
   destructive = false,
   onClose,
 }) {
+  const theme = useTheme();
+  const primaryBg = destructive ? colors.danger : theme.primary;
   return (
     <Modal visible={!!visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -38,7 +41,7 @@ export default function CenterModal({
             ) : null}
 
             <TouchableOpacity
-              style={[styles.primaryBtn, destructive && styles.primaryBtnDanger]}
+              style={[styles.primaryBtn, { backgroundColor: primaryBg }]}
               activeOpacity={0.85}
               onPress={onPrimary}
             >
@@ -97,9 +100,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     paddingVertical: spacing.md,
     alignItems: 'center',
-    backgroundColor: colors.primary,
   },
-  primaryBtnDanger: { backgroundColor: colors.danger },
   primaryText: { ...typography.bodyBold, color: '#fff', fontWeight: '900' },
 });
 

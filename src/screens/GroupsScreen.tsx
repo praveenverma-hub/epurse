@@ -296,16 +296,16 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         {/* Expense summary card — accent on the BOTTOM edge. The whole card (header
             + amount + balances) opens the members/settle modal; only the Group Zone
             area below is excluded so its switch keeps working. */}
-        <View style={[styles.expenseCard, { borderBottomColor: g.color || '#6366F1' }]}>
+        <View style={[styles.expenseCard, { borderBottomColor: (g.color || '#6366F1') + '76' }]}>
           {(() => {
             const cardTop = (
               <>
-                {/* Header strip: gray→white gradient (white by ~70%), inset 1px from the card edge */}
+                {/* Header strip: group-color tint → white, inset 1px from the card edge */}
                 <LinearGradient
-                  colors={['#E9EBEF', '#FFFFFF']}
-                  locations={[0, 0.7]}
+                  colors={[lightenHex(g.color || '#6366F1', 0.72), '#FFFFFF']}
+                  locations={[0, 1]}
                   start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
+                  end={{ x: 0, y: 1 }}
                   style={styles.cardHeaderGrad}
                 >
                   <Text style={styles.cardEmoji}>{g.emoji || (isShared ? '👥' : '📁')}</Text>
@@ -411,8 +411,9 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
           <View style={styles.header}>
             <View style={styles.headingRow}>
               <Text style={styles.heading}>Groups</Text>
+              <View style={{ flex: 1 }} />
               <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-                <Ionicons name="information-circle-outline" size={15} color="#FFFFFFCC" />
+                <Ionicons name="information-circle-outline" size={22} color="#FFFFFFCC" />
               </TouchableOpacity>
             </View>
             <Text style={styles.subheading}>Track shared and personal transactions</Text>
@@ -604,7 +605,8 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
       <InfoSheet
         visible={infoVisible}
         onClose={() => setInfoVisible(false)}
-        title="🗂 About Groups"
+        icon={<Ionicons name="people" size={36} color="#6366F1" />}
+        title="About Groups"
         body="Group shared and personal expenses together. Shared-group splits flow into your Lent/Borrowed balances, so a friend across several groups nets to one total you can settle in one place."
         bullets={[
           { label: 'Shared', value: 'Split expenses; balances appear in Lent/Borrowed.' },
@@ -635,7 +637,7 @@ const styles = StyleSheet.create({
   headerGrad: { borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   headingRow: { flexDirection: 'row', alignItems: 'center' },
-  heading:    { ...typography.h1, color: '#fff' },
+  heading:    { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: '#fff' },
   infoBtn:    { marginLeft: spacing.xs, padding: 2 },
   subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
   // flex:1 bounds the list to the viewport below the header so its content

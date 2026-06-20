@@ -758,7 +758,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
   },
-  title:    { ...typography.h2, color: colors.textPrimary },
+  title:    { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: colors.textPrimary },
 
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl + 24 },
 

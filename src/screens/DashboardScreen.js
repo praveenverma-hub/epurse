@@ -418,16 +418,15 @@ const DashboardScreen = ({ navigation }) => {
           untagTransactionFromGroup(activeTxn.id);
           setActiveTxn(null);
         }}
-        onPressEditGroup={
-          activeTxn?.groupId && groups.find((g) => g.id === activeTxn.groupId)?.type === 'shared'
-            ? () => {
-                const group = groups.find((g) => g.id === activeTxn.groupId);
-                const fresh = useEPurseStore.getState().transactions.find((t) => t.id === activeTxn.id) || activeTxn;
-                setActiveTxn(null);
-                setEditGroupTxn({ txn: fresh, group });
-              }
-            : undefined
-        }
+        onPressEditGroup={(() => {
+          const g = activeTxn?.groupId ? groups.find((grp) => grp.id === activeTxn.groupId) : null;
+          if (!g || g.type !== 'shared' || (g.members?.length ?? 0) <= 1) return undefined;
+          return () => {
+            const fresh = useEPurseStore.getState().transactions.find((t) => t.id === activeTxn.id) || activeTxn;
+            setActiveTxn(null);
+            setEditGroupTxn({ txn: fresh, group: g });
+          };
+        })()}
         groupHasSplit={!!activeTxn?.groupSplit}
         onPressSplit={() => {
           const t = activeTxn;
@@ -803,7 +802,7 @@ const styles = StyleSheet.create({
   balanceLabel: { color: '#FFFFFFCC', ...typography.small },
   balanceValue: {
     color: '#fff', fontSize: 36, fontWeight: '800',
-    marginTop: spacing.xs, letterSpacing: -0.5,
+    marginTop: spacing.xxs, letterSpacing: -0.5,
   },
 
   // Period toggle
@@ -811,7 +810,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing.lg,
+    marginTop: spacing.sm,
   },
   periodPills: { flexDirection: 'row', gap: 6 },
   pill: {

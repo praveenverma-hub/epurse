@@ -408,7 +408,20 @@ const TransactionsScreen = ({ navigation, route }) => {
     }
 
     // Applied sheet filters
-    if (applied.method.size > 0)     list = list.filter((t) => applied.method.has(t.accountId ?? ''));
+    // Primary match: accountId (UUID). Fallback for transactions that were ingested
+    // from SMS without a 4-digit mask (accountId stays null): try mask match, then
+    // accountType match so those transactions still surface under the right account.
+    if (applied.method.size > 0) {
+      const selAccts  = accounts.filter((a) => applied.method.has(a.id));
+      const selMasks  = new Set(selAccts.map((a) => a.mask).filter(Boolean));
+      const selTypes  = new Set(selAccts.map((a) => a.type));
+      list = list.filter((t) => {
+        if (t.accountId && applied.method.has(t.accountId))   return true;
+        if (t.accountMask && selMasks.has(t.accountMask))      return true;
+        if (!t.accountId && selTypes.has(t.accountType))       return true;
+        return false;
+      });
+    }
     if (applied.type.size > 0)       list = list.filter((t) => applied.type.has(t.type));
     if (applied.categories.size > 0) list = list.filter((t) => applied.categories.has(t.categoryId));
     if (applied.groups.size > 0)     list = list.filter((t) => t.groupId && applied.groups.has(t.groupId));

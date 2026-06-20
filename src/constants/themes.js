@@ -50,6 +50,16 @@ export const THEMES = {
     gradientStart: '#0284C7',
     gradientEnd: '#38BDF8',
   },
+  indigo: {
+    id: 'indigo',
+    label: 'Indigo',
+    swatch: '#6366F1',
+    primary: '#6366F1',
+    primaryDark: '#4F46E5',
+    primaryLight: '#818CF8',
+    gradientStart: '#4F46E5',
+    gradientEnd: '#6366F1',
+  },
 };
 
 export const DEFAULT_THEME_ID = 'orange';

@@ -66,7 +66,6 @@ export default function AnimatedTabBar({ state, navigation }) {
             <Text style={[styles.label, { color: isFocused ? activeColor : colors.textSecondary }]}>
               {cfg.label}
             </Text>
-            {isFocused && <View style={[styles.dot, { backgroundColor: activeColor }]} />}
           </TouchableOpacity>
         );
       })}
@@ -102,12 +101,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     letterSpacing: 0.1,
-  },
-  dot: {
-    position: 'absolute',
-    top: 6,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
   },
 });

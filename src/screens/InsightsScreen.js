@@ -111,7 +111,9 @@ const styles = StyleSheet.create({
   },
   screenTitle: {
     color: '#FFFFFF',
-    ...typography.h2,
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: -0.5,
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },

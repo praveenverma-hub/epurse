@@ -74,9 +74,6 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
           </View>
           {txn.createdAt ? <Text style={styles.date}>{formatDateTime(txn.createdAt)}</Text> : null}
           <Text style={styles.total}>{formatCurrency(amount)}</Text>
-          <View style={[styles.paidByChip, { backgroundColor: theme.primary + '14', borderColor: theme.primary + '44' }]}>
-            <Text style={[styles.paidByTxt, { color: theme.primary }]}>Paid by {payerName}</Text>
-          </View>
 
           {gs ? (
             <>
@@ -179,15 +176,6 @@ const styles = StyleSheet.create({
   editTxt:  { ...typography.small, fontWeight: '700' },
   date:     { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   total:    { ...typography.display, color: colors.textPrimary, marginTop: spacing.sm },
-  paidByChip: {
-    alignSelf: 'flex-start',
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  paidByTxt: { ...typography.small, fontWeight: '700' },
   sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.lg, marginBottom: spacing.xs },
   splitList: { maxHeight: 220 },
   splitRow: {

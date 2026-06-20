@@ -10,7 +10,7 @@
 // the sheet itself sits on top of the screen darkness, not inside it).
 // =============================================================================
 
-import React, { useEffect } from 'react';
+import React, { useEffect, type ReactNode } from 'react';
 import {
   Dimensions,
   Modal,
@@ -53,6 +53,8 @@ export interface InfoSheetProps {
   body:       string;
   /** Optional structured bullet list rendered below the body. */
   bullets?:   InfoSheetBullet[];
+  /** Optional icon rendered above the headline (pass an <Ionicons> node). */
+  icon?:      ReactNode;
   /** Override the CTA button label. Default: "Got it". */
   ctaText?:   string;
   /** Optional override for the host wrapper (rarely needed). */
@@ -74,6 +76,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   eyebrow,
   body,
   bullets,
+  icon,
   ctaText = 'Got it',
   style,
 }) => {
@@ -129,6 +132,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
         <Animated.View style={[styles.sheet, sheetStyle]}>
           <View style={styles.handle} />
 
+          {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
           <Text style={styles.headline}>{title}</Text>
           {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
 
@@ -182,6 +186,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
     alignSelf:       'center',
     marginBottom:    14,
+  },
+  iconWrap: {
+    marginBottom: 10,
   },
   headline: {
     color:         '#1C1C1E',

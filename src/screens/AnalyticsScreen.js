@@ -19,7 +19,8 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { selectTransactions } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, isSameMonth } from '../utils/format';
+import { debitDisplayAmount, isGroupExcluded } from '../utils/split';
 import { getDailyCumulative, getMerchantBubbles, detectSubscriptions } from '../analytics/behavioralSelectors';
 import GhostLineChart from '../components/GhostLineChart';
 import HabitLeakMatrix from '../components/HabitLeakMatrix';
@@ -46,25 +47,26 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
 
-  // Account-wise breakdown
+  const groups = useEPurseStore((s) => s.groups);
+
+  // Account-wise breakdown — mirrors getMonthlySpend: debit only, same month,
+  // no NON_SPEND_CATS, no group memos. Uses debitDisplayAmount so group txns
+  // count the user's share, not the full fronted amount.
+  const NON_SPEND = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
   const accountBreakdown = useMemo(() => {
-    const filtered = transactions.filter((t) => {
-      const txDate = new Date(t.timestamp);
-      return (
-        t.type === 'debit' &&
-        txDate.getMonth() === date.getMonth() &&
-        txDate.getFullYear() === date.getFullYear()
-      );
-    });
     const byAccount = {};
-    filtered.forEach((t) => {
+    transactions.forEach((t) => {
+      if (t.type !== 'debit') return;
+      if (!isSameMonth(t.createdAt, date)) return;
+      if (NON_SPEND.has(t.categoryId)) return;
+      if (isGroupExcluded(t, groups)) return;
       const key = t.accountType || 'Unknown';
-      byAccount[key] = (byAccount[key] || 0) + t.amount;
+      byAccount[key] = (byAccount[key] || 0) + debitDisplayAmount(t);
     });
     return Object.entries(byAccount)
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total);
-  }, [transactions, date]);
+  }, [transactions, date, groups]);
 
   const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
@@ -156,23 +158,16 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           />
         ) : (
           <>
-            {/* Bar chart */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Spend by category</Text>
-              {breakdown.length === 0 ? (
-                <EmptyState
-                  compact
-                  emoji="🧮"
-                  title="No spending this month"
-                  subtitle="Switch months above, or add an expense to see the breakdown."
-                />
-              ) : (
+            {/* Bar chart + detail rows — shown only when spend spans 3+ categories */}
+            {breakdown.length > 2 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Spend by category</Text>
                 <BarChart data={breakdown} />
-              )}
-            </View>
+              </View>
+            ) : null}
 
             {/* Progress rings — only when there's a breakdown to show */}
-            {breakdown.length > 0 ? (
+            {breakdown.length > 2 ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Category breakdown</Text>
                 <View style={styles.ringsRow}>
@@ -242,7 +237,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           </>
         )}
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 100 }} />
       </ScrollView>
     </View>
   );
@@ -265,33 +260,28 @@ const SummaryStatLight = ({ label, value }) => (
   </View>
 );
 
+// Palette for the 5 account bars — distinct colours so each account reads clearly.
+const HBAR_COLORS = ['#6366F1', '#0EA5E9', '#10B981', '#F59E0B', '#EC4899'];
+
 // ---- HorizontalBarChart ----------------------------------------------------
+// Shows top-5 accounts as horizontal bars (thinner than the vertical category chart).
+// Left: fixed-width account name. Middle: proportional fill. Right: amount.
 const HorizontalBarChart = ({ data }) => {
-  const maxVal = Math.max(...data.map((d) => d.total));
-  const barHeight = 32;
-  const gap = 12;
+  const top5 = data.slice(0, 5);
+  const maxVal = Math.max(...top5.map((d) => d.total), 1);
 
   return (
-    <View>
-      {data.map((d, i) => {
-        const widthPercent = (d.total / maxVal) * 100;
+    <View style={{ gap: 10 }}>
+      {top5.map((d, i) => {
+        const pct = d.total / maxVal;
+        const barColor = HBAR_COLORS[i % HBAR_COLORS.length];
         return (
-          <View key={i} style={{ marginBottom: i < data.length - 1 ? gap : 0 }}>
-            <View style={styles.hBarRow}>
-              <Text style={styles.hBarLabel}>{d.name}</Text>
-              <Text style={styles.hBarAmount}>{formatCurrency(d.total)}</Text>
-            </View>
+          <View key={i} style={styles.hBarRow}>
+            <Text style={styles.hBarLabel} numberOfLines={1}>{d.name}</Text>
             <View style={styles.hBarTrack}>
-              <View
-                style={[
-                  styles.hBarFill,
-                  {
-                    width: `${widthPercent}%`,
-                    backgroundColor: colors.primary,
-                  },
-                ]}
-              />
+              <View style={[styles.hBarFill, { width: `${pct * 100}%`, backgroundColor: barColor }]} />
             </View>
+            <Text style={styles.hBarAmount}>{formatCurrency(d.total)}</Text>
           </View>
         );
       })}
@@ -394,7 +384,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   backText: { fontSize: 22, color: '#fff' },
-  title: { color: '#fff', ...typography.h2 },
+  title: { color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
 
   monthSwitcher: {
     flexDirection: 'row',
@@ -426,7 +416,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     padding: spacing.lg,
     borderRadius: radius.lg,
-    marginBottom: spacing.md,
+    marginBottom: spacing.xl,
     ...shadows.card,
   },
   sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
@@ -505,12 +495,12 @@ const styles = StyleSheet.create({
   statLabelLight:  { ...typography.tiny, color: colors.textSecondary },
   statValueLight:  { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 2 },
 
-  // Horizontal bar chart
-  hBarRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  hBarLabel: { ...typography.body, color: colors.textPrimary },
-  hBarAmount: { ...typography.bodyBold, color: colors.textPrimary },
-  hBarTrack: { height: 8, backgroundColor: colors.divider, borderRadius: 4, overflow: 'hidden' },
-  hBarFill: { height: '100%', borderRadius: 4 },
+  // Horizontal bar chart — account name | bar | amount in one row
+  hBarRow:    { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  hBarLabel:  { width: 80, ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
+  hBarTrack:  { flex: 1, height: 18, backgroundColor: colors.divider + '66', borderRadius: radius.sm, overflow: 'hidden' },
+  hBarFill:   { height: '100%', borderRadius: radius.sm },
+  hBarAmount: { width: 72, ...typography.tiny, color: colors.textPrimary, fontWeight: '700', textAlign: 'right' },
 });
 
 export default AnalyticsScreen;
