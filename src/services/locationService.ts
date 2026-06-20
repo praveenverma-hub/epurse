@@ -40,6 +40,24 @@ async function readPosition(): Promise<TxnLocation | null> {
   }
 }
 
+/**
+ * First-launch / onboarding: surface the OS location prompt and report the
+ * outcome. We only ask for permission here — we don't read a fix (the user is
+ * still in onboarding, not making a purchase). Once granted, live incoming SMS
+ * will stamp transactions via getLocationIfGranted() with no further prompts.
+ */
+export async function requestLocationPermission(): Promise<boolean> {
+  try {
+    let { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      ({ status } = await Location.requestForegroundPermissionsAsync());
+    }
+    return status === 'granted';
+  } catch {
+    return false;
+  }
+}
+
 /** Manual add: prompt for permission if needed, then read the current point. */
 export async function requestAndGetLocation(): Promise<TxnLocation | null> {
   try {

@@ -64,6 +64,8 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing, radius } from '../constants/theme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
+import { requestLocationPermission } from '../services/locationService';
+import { requestContactsPermission } from '../services/contactsService';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone, sanitizeAmount } from '../utils/validation';
 
@@ -355,6 +357,16 @@ export default function OnboardingDeck({
           /* permission denied / dismissed — continue; user can grant later */
         }
       }
+
+      // Ask for the remaining runtime permissions up-front while the user is in
+      // the "grant access" mindset, so the app is fully wired on first launch:
+      //   • Location — lets live incoming SMS stamp each transaction with where
+      //     it happened (getLocationIfGranted, never prompts later).
+      //   • Contacts — powers the split-with / Lent-Borrowed people picker.
+      // Each is isolated so denying one never blocks the others, and a denial
+      // is non-fatal — the matching feature simply stays dormant until granted.
+      try { await requestLocationPermission(); } catch { /* optional */ }
+      try { await requestContactsPermission(); } catch { /* optional */ }
 
       setHasOnboarded?.(true);
       navAfter(accountFilterRoute);

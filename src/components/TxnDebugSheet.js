@@ -34,6 +34,11 @@ const TxnDebugSheet = ({ txn, onClose }) => {
 
   if (!txn) return null;
 
+  const loc = txn.location;
+  const locStr = loc && typeof loc.latitude === 'number'
+    ? `${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)}`
+    : '—';
+
   const rows = [
     ['type',        txn.type],
     ['amount',      formatCurrency(txn.amount)],
@@ -47,6 +52,7 @@ const TxnDebugSheet = ({ txn, onClose }) => {
     ['isSubscr.',   txn.isSubscription ? 'yes' : 'no'],
     ['selfDualLeg', txn.selfDualLeg ? 'yes' : 'no'],
     ['transferRef', txn.transferRef || '—'],
+    ['location',    locStr],
     ['smsId',       txn.smsId || '—'],
     ['sender',      txn.rawSender || '—'],
   ];

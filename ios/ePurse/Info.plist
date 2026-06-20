@@ -46,6 +46,12 @@
     <string>ePurse uses your contacts so you can pick friends when splitting an expense.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>ePurse uses Face ID to protect your account balances.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>ePurse tags your transactions with where you made them, so you can see your spending on a map.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
