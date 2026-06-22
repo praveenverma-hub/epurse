@@ -132,8 +132,10 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
         <Animated.View style={[styles.sheet, sheetStyle]}>
           <View style={styles.handle} />
 
-          {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
-          <Text style={styles.headline}>{title}</Text>
+          <View style={styles.titleRow}>
+            {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
+            <Text style={[styles.headline, styles.headlineFlex]}>{title}</Text>
+          </View>
           {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
 
           <Text style={styles.body}>{body}</Text>
@@ -187,15 +189,20 @@ const styles = StyleSheet.create({
     alignSelf:       'center',
     marginBottom:    14,
   },
-  iconWrap: {
-    marginBottom: 10,
+  // Icon + heading on one row.
+  titleRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           10,
   },
+  iconWrap: {},
   headline: {
     color:         '#1C1C1E',
     fontSize:      19,
     fontWeight:    '800',
     letterSpacing: -0.3,
   },
+  headlineFlex: { flex: 1 },
   eyebrow: {
     color:         '#FF5A1F',
     fontSize:      11,

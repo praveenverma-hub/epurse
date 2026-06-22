@@ -39,6 +39,7 @@ import { cleanMerchantName, detectIsSubscription } from '../utils/merchantEnrich
 import {
   isSelfTransfer,
   propagateSelfByRef,
+  maskMatch,
   SELF_TXN_FIELDS,
 } from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
@@ -117,7 +118,16 @@ const matchAccount = (accounts, parsed) => {
   if (parsed.accountMask) {
     // Specific mask given — only match by mask, never fall back to type.
     // A type-only fallback would attach the txn to a different card of the same type.
-    return accounts.find((a) => a.mask === parsed.accountMask) || null;
+    // `aliasMasks` lets a bank account also own its linked debit-card mask(s) — a
+    // debit card is just an access point to the bank, so a card-referenced SMS
+    // lands on the unified bank account instead of spawning a separate balance.
+    return (
+      accounts.find(
+        (a) =>
+          a.mask === parsed.accountMask ||
+          (a.aliasMasks || []).includes(parsed.accountMask),
+      ) || null
+    );
   }
   return accounts.find((a) => a.type === parsed.accountType) || null;
 };
@@ -160,6 +170,14 @@ const ensureAccountForParsed = (accounts, parsed) => {
     mask: parsed.accountMask,
     balance: 0,
     color: colorByType[parsed.accountType] || '#6B7280',
+    // `aliasMasks` = linked debit-card masks folded into a bank account (a card is
+    // just an access point to the bank — same money). See linkDebitCardToBank.
+    aliasMasks: [],
+    // TODO(cc-limits): NOT built yet. When credit-card limits / billing dates land,
+    // add to this object — `creditLimit` (number), `limitGroupId` (string: cards that
+    // SHARE one limit are grouped by this id, e.g. an add-on card on the primary's
+    // limit), `statementDay` (1–31), `dueDay` (1–31). Until then, net worth treats a
+    // CC purely as a liability (outstanding balance) — see selectEPurseNetWorth.
   };
   return { accounts: [...accounts, auto], account: auto };
 };
@@ -170,6 +188,72 @@ const applyDelta = (accounts, accountId, parsed) => {
   return accounts.map((a) =>
     a.id === accountId ? { ...a, balance: a.balance + sign * parsed.amount } : a
   );
+};
+
+/** Stable key for a debit-card↔bank pairing (order-independent on the masks). */
+const linkKey = (cardMask, bankMask) => `${cardMask || ''}:${bankMask || ''}`;
+
+const oppositeType = (type) =>
+  type === TRANSACTION_TYPES.DEBIT ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
+
+/**
+ * Synthesize the COUNTERPARTY leg of a *combined* dual-leg self transfer.
+ *
+ * A single SMS like "A/c X debited Rs.5000 & A/c Y credited" parses to ONE debit
+ * leg (on X) — so Y never receives its matching credit and net worth wrongly drifts
+ * by the amount. When BOTH X and Y are the user's own accounts (the txn is tagged
+ * `self`), we mirror the opposite delta onto Y so the transfer nets to zero.
+ *
+ * Guarded against double-counting: skips if Y's leg already exists — the bank also
+ * sent a SEPARATE SMS for it — matched by shared transfer ref, or by amount + that
+ * account + opposite type within the dedup window. The synthetic leg carries the
+ * transferRef so a LATER real Y-SMS dedups against it (isDuplicate Tier 1.5).
+ *
+ * @returns {{ accounts, leg } | null}  new accounts + the synthetic leg, or null.
+ */
+const buildSelfCounterLeg = (accounts, transactions, leg) => {
+  if (!leg || leg.categoryId !== 'self' || !leg.selfDualLeg || !leg.counterpartyMask) return null;
+  if (leg.derivedSelfLeg) return null; // never mirror a synthetic leg
+  // Counterparty is one of the user's OWN accounts (self-tagging required its mask
+  // to be in the user's masks), so it already exists — find it, don't create.
+  const cp = accounts.find(
+    (a) => maskMatch(a.mask, leg.counterpartyMask)
+      || (a.aliasMasks || []).some((m) => maskMatch(m, leg.counterpartyMask)),
+  );
+  if (!cp || cp.id === leg.accountId) return null;
+
+  const wantType = oppositeType(leg.type);
+  const ts = new Date(leg.createdAt || Date.now()).getTime();
+  const WINDOW = 10 * 60 * 1000;
+  const alreadyBooked = transactions.some((t) => {
+    if (!t || t.isIgnored || t.id === leg.id) return false;
+    if (t.amount !== leg.amount || t.type !== wantType) return false;
+    if (leg.transferRef && t.transferRef === leg.transferRef) return true;
+    const onCp = t.accountId === cp.id || maskMatch(t.accountMask, cp.mask);
+    return onCp && Math.abs(new Date(t.createdAt).getTime() - ts) <= WINDOW;
+  });
+  if (alreadyBooked) return null;
+
+  const synthetic = {
+    id: `txn_self_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    amount: leg.amount,
+    type: wantType,
+    accountType: cp.type,
+    accountMask: cp.mask || leg.counterpartyMask,
+    accountId: cp.id,
+    bankName: cp.bankName || null,
+    merchant: 'Self transfer',
+    source: 'sms',
+    isReviewed: true,
+    isSplit: false,
+    splitWith: [],
+    createdAt: leg.createdAt || new Date().toISOString(),
+    transferRef: leg.transferRef || null,
+    ...SELF_TXN_FIELDS,
+    derivedSelfLeg: true,        // synthetic counterpart — has no SMS of its own
+    derivedFromTxnId: leg.id,
+  };
+  return { accounts: applyDelta(accounts, cp.id, synthetic), leg: synthetic };
 };
 
 // ── Self-transfer detection ──────────────────────────────────────────────────
@@ -209,6 +293,20 @@ const isDuplicate = (transactions, parsed, smsId = null, suppressedSmsIds = []) 
   if (smsId) {
     if (suppressedSmsIds.includes(smsId)) return true;
     if (transactions.some((t) => t.smsId === smsId && !t.isIgnored)) return true;
+  }
+
+  // Tier 1.5 — transfer-reference match. The two legs of one transfer share an
+  // IMPS/UPI ref but have OPPOSITE types, so a ref + SAME-type + amount match means
+  // the same leg reported twice — e.g. a real SMS arriving after we synthesized its
+  // counterpart leg (buildSelfCounterLeg). Opposite-type legs differ in `type`, so a
+  // genuine two-SMS transfer is NOT merged. Time-independent (unlike Tier 2).
+  if (parsed.transferRef && parsed.amount) {
+    if (transactions.some(
+      (t) => !t.isIgnored
+        && t.transferRef === parsed.transferRef
+        && t.type === parsed.type
+        && t.amount === parsed.amount,
+    )) return true;
   }
 
   // Tier 2 — near-time content fingerprint (for messages without smsId)
@@ -496,6 +594,10 @@ export const useEPurseStore = create(
       // to this group by default (user can still untag/edit, e.g. in the review queue).
       // Only ONE zone at a time — setting one replaces any other.
       activeGroupZoneId: null,
+
+      // Debit-card↔bank pairs the user explicitly declined to merge (keys via
+      // linkKey(cardMask, bankMask)) — so we never re-suggest a rejected pairing.
+      declinedAccountLinks: [],
 
       hydrated: false,
 
@@ -921,6 +1023,55 @@ export const useEPurseStore = create(
           // Unlink transactions that were attached to this account
           transactions: s.transactions.map((t) =>
             t.accountId === accountId ? { ...t, accountId: null } : t
+          ),
+        })),
+
+      /**
+       * Merge a Debit Card account into its Bank account — they're the SAME money
+       * (the card just draws from the bank). After this there is ONE balance:
+       *   • the card's mask is recorded in the bank's `aliasMasks`, so future
+       *     card-referenced SMS match the bank account directly (see matchAccount);
+       *   • all of the card's transactions (live + archived) re-point to the bank;
+       *   • the card's accumulated balance folds into the bank's;
+       *   • the standalone Debit Card account is removed.
+       * No-op unless `dcId` is a Debit Card and `bankId` is a Bank. Idempotent-safe.
+       */
+      linkDebitCardToBank: (dcId, bankId) =>
+        set((s) => {
+          const dc = s.accounts.find((a) => a.id === dcId);
+          const bank = s.accounts.find((a) => a.id === bankId);
+          if (!dc || !bank) return s;
+          if (dc.type !== ACCOUNT_TYPES.DEBIT_CARD || bank.type !== ACCOUNT_TYPES.BANK) return s;
+
+          const aliasMasks = Array.from(
+            new Set([...(bank.aliasMasks || []), dc.mask].filter(Boolean)),
+          );
+          const accounts = s.accounts
+            .filter((a) => a.id !== dcId)
+            .map((a) =>
+              a.id === bankId
+                ? { ...a, balance: (a.balance || 0) + (dc.balance || 0), aliasMasks }
+                : a,
+            );
+          const repoint = (list) =>
+            (list || []).map((t) => (t.accountId === dcId ? { ...t, accountId: bankId } : t));
+
+          return {
+            accounts,
+            transactions: repoint(s.transactions),
+            archivedTransactions: repoint(s.archivedTransactions),
+            // Remember we've resolved this pair so the suggestion never re-surfaces.
+            declinedAccountLinks: Array.from(
+              new Set([...(s.declinedAccountLinks || []), linkKey(dc.mask, bank.mask)]),
+            ),
+          };
+        }),
+
+      /** User said "no, these are different accounts" — stop suggesting this pair. */
+      dismissAccountLinkSuggestion: (cardMask, bankMask) =>
+        set((s) => ({
+          declinedAccountLinks: Array.from(
+            new Set([...(s.declinedAccountLinks || []), linkKey(cardMask, bankMask)]),
           ),
         })),
 
@@ -1686,6 +1837,22 @@ export const useEPurseStore = create(
           // via the shared reference — handles the receiving-bank credit whose
           // only counterparty signal is a heavily-masked phone.
           nextTransactions = propagateSelfByRef(nextTransactions, finalMasks);
+
+          // Combined dual-leg self transfers ("A/c X debited & A/c Y credited") book
+          // only the X leg above, so mirror the opposite delta onto Y — otherwise the
+          // money "leaves" X but never "arrives" at Y and net worth drifts. Operates on
+          // the FINAL tagged set (so reconciliation-tagged legs are covered) and only
+          // for legs added THIS batch; guarded against double-counting a real Y-SMS.
+          const addedIds = new Set(added.map((t) => t.id));
+          const syntheticLegs = [];
+          nextTransactions.forEach((t) => {
+            if (!addedIds.has(t.id)) return;
+            const r = buildSelfCounterLeg(nextAccounts, [...nextTransactions, ...syntheticLegs], t);
+            if (r) { nextAccounts = r.accounts; syntheticLegs.push(r.leg); }
+          });
+          // Persisted via nextTransactions; intentionally NOT added to `added` — these
+          // mirror legs aren't user-reviewable and must not trigger zone-tag/budget/XP.
+          if (syntheticLegs.length) nextTransactions = [...syntheticLegs, ...nextTransactions];
         }
 
         set({ transactions: nextTransactions, accounts: nextAccounts, archivedTransactions: nextArchived });
@@ -1721,11 +1888,16 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
-          // Already reversed when ignored — only drop the row. Group total was also
+          // A combined self-transfer's synthetic counterpart leg (derivedFromTxnId)
+          // rides along — drop it too and reverse its balance, else the mirror credit
+          // lingers and net worth drifts. Children have no groupId / LB rows.
+          const children = s.transactions.filter((t) => t.derivedFromTxnId === id);
+          const dropIds = new Set([id, ...children.map((c) => c.id)]);
+          // Already reversed when ignored — only drop the rows. Group total was also
           // already decremented at ignore time, so don't decrement again here.
           if (txn.isIgnored) {
             return {
-              transactions: s.transactions.filter((t) => t.id !== id),
+              transactions: s.transactions.filter((t) => !dropIds.has(t.id)),
               accounts: s.accounts,
               lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
               ...(txn.smsId
@@ -1737,15 +1909,13 @@ export const useEPurseStore = create(
                 : {}),
             };
           }
-          const reverse = {
-            ...txn,
-            type: txn.type === TRANSACTION_TYPES.DEBIT
-              ? TRANSACTION_TYPES.CREDIT
-              : TRANSACTION_TYPES.DEBIT,
-          };
+          let accounts = applyDelta(s.accounts, txn.accountId, { ...txn, type: oppositeType(txn.type) });
+          children.forEach((c) => {
+            if (!c.isIgnored) accounts = applyDelta(accounts, c.accountId, { ...c, type: oppositeType(c.type) });
+          });
           return {
-            transactions: s.transactions.filter((t) => t.id !== id),
-            accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            transactions: s.transactions.filter((t) => !dropIds.has(t.id)),
+            accounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
             lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
             ...(txn.smsId
@@ -1763,17 +1933,17 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn || txn.isIgnored) return s;
-          const reverse = {
-            ...txn,
-            type: txn.type === TRANSACTION_TYPES.DEBIT
-              ? TRANSACTION_TYPES.CREDIT
-              : TRANSACTION_TYPES.DEBIT,
-          };
+          // Cascade to the synthetic self-transfer counterpart leg so both balances
+          // back out together (keeps the transfer net-zero across ignore/unignore).
+          const children = s.transactions.filter((t) => t.derivedFromTxnId === id && !t.isIgnored);
+          const ignoreIds = new Set([id, ...children.map((c) => c.id)]);
+          let accounts = applyDelta(s.accounts, txn.accountId, { ...txn, type: oppositeType(txn.type) });
+          children.forEach((c) => { accounts = applyDelta(accounts, c.accountId, { ...c, type: oppositeType(c.type) }); });
           return {
             transactions: s.transactions.map((t) =>
-              t.id === id ? { ...t, isIgnored: true } : t
+              ignoreIds.has(t.id) ? { ...t, isIgnored: true } : t
             ),
-            accounts: applyDelta(s.accounts, txn.accountId, reverse),
+            accounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
             lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
             ...(txn.smsId
@@ -1791,13 +1961,17 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn || !txn.isIgnored) return s;
-          const nextAccounts = applyDelta(s.accounts, txn.accountId, txn);
+          // Re-apply the synthetic self-transfer counterpart leg alongside the parent.
+          const children = s.transactions.filter((t) => t.derivedFromTxnId === id && t.isIgnored);
+          const restoreIds = new Set([id, ...children.map((c) => c.id)]);
+          let nextAccounts = applyDelta(s.accounts, txn.accountId, txn);
+          children.forEach((c) => { nextAccounts = applyDelta(nextAccounts, c.accountId, c); });
           const suppressedSmsIds = txn.smsId
             ? (s.suppressedSmsIds || []).filter((sid) => sid !== txn.smsId)
             : s.suppressedSmsIds || [];
           return {
             transactions: s.transactions.map((t) =>
-              t.id === id ? { ...t, isIgnored: false } : t
+              restoreIds.has(t.id) ? { ...t, isIgnored: false } : t
             ),
             accounts: nextAccounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, txn.amount || 0),
@@ -2707,7 +2881,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 21,
+      version: 22,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -3055,6 +3229,22 @@ export const useEPurseStore = create(
         // into the archive. The clean slate is for NEW onboards only, enforced at
         // ingestion time (the `userOnboardedAt` gate in `ingestMessage`).
 
+        // v22: debit-card↔bank unification. Seed the new fields — `aliasMasks` on
+        // every account (linked card masks fold into a bank; see linkDebitCardToBank)
+        // and the `declinedAccountLinks` ledger. Existing standalone Debit Card
+        // accounts are LEFT AS-IS (no auto-merge) — the user merges them via the
+        // onboarding/Accounts suggestion or the manual link, per the agreed UX.
+        if (version < 22) {
+          state = {
+            ...state,
+            accounts: (state.accounts || []).map((a) => ({
+              aliasMasks: Array.isArray(a.aliasMasks) ? a.aliasMasks : [],
+              ...a,
+            })),
+            declinedAccountLinks: Array.isArray(state.declinedAccountLinks) ? state.declinedAccountLinks : [],
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -3097,6 +3287,7 @@ export const useEPurseStore = create(
         planBannerDismissed: state.planBannerDismissed ?? false,
         groups: state.groups ?? [],
         activeGroupZoneId: state.activeGroupZoneId ?? null,
+        declinedAccountLinks: state.declinedAccountLinks ?? [],
       }),
       onRehydrateStorage: () => (state) => {
         if (state) state.hydrated = true;
@@ -3257,13 +3448,74 @@ export const selectExpenseStats = (period) => (state) => {
  * counted because they reflect actual money movement; the privacy flag is a
  * display preference, not a "this didn't happen" flag.
  *
- * Computed as: sum over accounts of (currentStoredBalance) — the per-account
- * balance is already kept in sync via applyDelta on every txn insert / undo,
- * which is itself driven by all non-ignored transactions. Treating ignored
- * txns is handled at the insert/toggle path (balance is reversed on ignore).
+ * Computed as: assets − credit-card liabilities.
+ *   • Bank / Cash / Wallet / Debit Card balances ADD as assets (a debit card is
+ *     unified into its bank via aliasMasks, so it isn't a separate pool — see
+ *     linkDebitCardToBank; an unlinked card still adds, same as before).
+ *   • A Credit Card's outstanding SUBTRACTS as a liability. Its `balance` runs
+ *     negative as you spend (applyDelta debit = −amount), so summing it already
+ *     subtracts; we clamp to `min(balance, 0)` so a positive/zero CC balance
+ *     (overpaid or freshly true'd-up) never inflates net worth as if it were cash.
+ * The per-account balance is kept in sync via applyDelta on every txn insert /
+ * undo; ignored txns are reversed at the insert/toggle path.
  */
 export const selectEPurseNetWorth = (s) =>
-  (s.accounts || []).reduce((sum, a) => sum + (a.balance ?? 0), 0);
+  (s.accounts || []).reduce((sum, a) => {
+    const bal = a.balance ?? 0;
+    if (a.type === ACCOUNT_TYPES.CREDIT_CARD) return sum + Math.min(bal, 0);
+    return sum + bal;
+  }, 0);
+
+/**
+ * Debit-card↔bank merge SUGGESTIONS — pairs we think are the same money.
+ * Derived (not stored): scans transactions for a `coAccountMask` co-reference
+ * (one SMS named both a card and the a/c it draws from — see the parser), then
+ * keeps a pair only when BOTH accounts exist, exactly one is a Debit Card and the
+ * other a Bank, they aren't already linked (alias), and the user hasn't declined it.
+ * Returns [{ cardId, cardMask, cardName, bankId, bankMask, bankName }].
+ * Powers the onboarding prompt + the Accounts-screen suggestion card.
+ */
+export const selectAccountLinkSuggestions = (s) => {
+  const accounts = s.accounts || [];
+  if (accounts.length < 2) return [];
+  const declined = new Set(s.declinedAccountLinks || []);
+  const byMask = new Map();
+  accounts.forEach((a) => {
+    if (a.mask) byMask.set(a.mask, a);
+  });
+
+  const seen = new Set();
+  const out = [];
+  // Recent raw txns carry coAccountMask; archived/compacted ones may too (harmless).
+  const scan = [...(s.transactions || []), ...(s.archivedTransactions || [])];
+  for (const t of scan) {
+    const primary = t.accountMask;
+    const co = t.coAccountMask;
+    if (!primary || !co || primary === co) continue;
+    const a1 = byMask.get(primary);
+    const a2 = byMask.get(co);
+    if (!a1 || !a2) continue;
+
+    // Exactly one Debit Card + one Bank.
+    let card = null;
+    let bank = null;
+    if (a1.type === ACCOUNT_TYPES.DEBIT_CARD && a2.type === ACCOUNT_TYPES.BANK) { card = a1; bank = a2; }
+    else if (a2.type === ACCOUNT_TYPES.DEBIT_CARD && a1.type === ACCOUNT_TYPES.BANK) { card = a2; bank = a1; }
+    if (!card || !bank) continue;
+
+    // Already linked (card mask folded into the bank) → nothing to suggest.
+    if ((bank.aliasMasks || []).includes(card.mask)) continue;
+
+    const key = linkKey(card.mask, bank.mask);
+    if (declined.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      cardId: card.id, cardMask: card.mask, cardName: card.name,
+      bankId: bank.id, bankMask: bank.mask, bankName: bank.bankName || bank.name,
+    });
+  }
+  return out;
+};
 
 /**
  * Show the "set your real balances" onboarding card on the Accounts screen

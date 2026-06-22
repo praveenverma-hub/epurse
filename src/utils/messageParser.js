@@ -216,6 +216,12 @@ const FIRST_ACCOUNT_EVENT_REGEX =
 const ACCOUNT_MASK_GLOBAL =
   /(?:a\/c|acct\.?|account)\.?\s*(?:no\.?)?\s*[xX*•·]{0,8}\s*(\d{3,6})/ig;
 
+// Every masked CARD number in the body (global). ACCOUNT_MASK_GLOBAL only catches
+// a/c-style refs, so this complements it for the debit-card↔bank co-reference
+// (e.g. "Debit Card xx1234 … A/c xx5678" — we need BOTH masks to pair them).
+const CARD_MASK_GLOBAL =
+  /card(?:\s+(?:no\.?|number|ending|ent))?\.?\s*[xX*•·]{0,8}\s*(\d{3,6})/ig;
+
 // Counterparty mobile number — "credited … by a/c linked to mobile 9XXXXXX33221".
 // Captures the (possibly masked) token; trailing digits are extracted in code.
 const COUNTERPARTY_PHONE_REGEX =
@@ -850,6 +856,28 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // the sending and receiving banks (see propagateSelfByRef in the store).
   const transferRef = text.match(TRANSFER_REF_REGEX)?.[1] || null;
 
+  // Debit-card↔bank co-reference: one SMS that names BOTH a card and an a/c
+  // (e.g. "spent on Debit Card xx1234 from A/c xx5678") — surface the OTHER mask
+  // so the store can suggest merging the card into its bank. Gated on the SMS
+  // actually mentioning both a card and an account so an ordinary dual-bank
+  // self-transfer doesn't masquerade as a card link (the store also type-checks).
+  const mentionsCard = /\b(?:debit\s*card|credit\s*card|atm|dr\s*card|card\s*(?:ending|no\.?|number))\b|\bcard\b/i.test(text);
+  const mentionsAcct = /\ba\/?c\b|\baccount\b/i.test(text);
+  // Pool BOTH a/c masks and card masks, then pick whichever differs from the
+  // primary accountMask. Works in both directions: a card spend that names its
+  // source a/c, or an a/c debit that names the card used.
+  const cardMasks = [];
+  let cmm;
+  while ((cmm = CARD_MASK_GLOBAL.exec(text)) !== null) {
+    if (cmm[1]) cardMasks.push(cmm[1]);
+  }
+  CARD_MASK_GLOBAL.lastIndex = 0;
+  const coMaskPool = [...new Set([...distinctMasks, ...cardMasks])];
+  const coAccountMask =
+    mentionsCard && mentionsAcct
+      ? (coMaskPool.find((m) => m && m !== accountMask) || null)
+      : null;
+
   const single = buildTransaction({
     amount,
     type: inferredTypeFromFirstVerb,
@@ -865,6 +893,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
     counterpartyName,
     transferRef,
     selfDualLeg,
+    coAccountMask,
   });
 
   return {
@@ -896,6 +925,7 @@ function buildTransaction({
   counterpartyName = null,
   transferRef = null,
   selfDualLeg = false,
+  coAccountMask = null,
 }) {
   return {
     id:          `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -917,6 +947,10 @@ function buildTransaction({
     counterpartyName,
     transferRef,
     selfDualLeg,
+    // Debit-card↔bank link hint: the OTHER mask when one SMS names both a card and
+    // an a/c (e.g. "spent on Debit Card xx1234 from A/c xx5678"). The store pairs a
+    // Debit Card account with a Bank account from this to SUGGEST a merge (same money).
+    coAccountMask,
   };
 }
 

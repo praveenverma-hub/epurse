@@ -39,15 +39,23 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   }, [monthOffset]);
 
   const transactions = useEPurseStore(selectTransactions);
-  const dailyData = useMemo(() => getDailyCumulative(transactions, date), [transactions, date]);
-  const merchantBubbles = useMemo(() => getMerchantBubbles(transactions, date), [transactions, date]);
-  const allSubscriptions = useMemo(() => detectSubscriptions(transactions), [transactions]);
+  const groups = useEPurseStore((s) => s.groups);
+
+  // Drop transactions tagged to a group flagged "exclude from totals" (and group
+  // memos) before the chart selectors run — so the spend pace, merchant bubbles
+  // and subscription detection match the Spent/Earned summary, which already
+  // excludes them via getMonthlySpend / getCategoryBreakdown.
+  const visibleTxns = useMemo(
+    () => transactions.filter((t) => !isGroupExcluded(t, groups)),
+    [transactions, groups],
+  );
+  const dailyData = useMemo(() => getDailyCumulative(visibleTxns, date), [visibleTxns, date]);
+  const merchantBubbles = useMemo(() => getMerchantBubbles(visibleTxns, date), [visibleTxns, date]);
+  const allSubscriptions = useMemo(() => detectSubscriptions(visibleTxns), [visibleTxns]);
 
   const breakdown = useEPurseStore((s) => s.getCategoryBreakdown(date));
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
-
-  const groups = useEPurseStore((s) => s.groups);
 
   // Account-wise breakdown — mirrors getMonthlySpend: debit only, same month,
   // no NON_SPEND_CATS, no group memos. Uses debitDisplayAmount so group txns

@@ -474,7 +474,7 @@ const FrontFace: React.FC<FrontFaceProps> = ({
                 <Text style={styles.fullyPaidText}>FULLY PAID</Text>
               </View>
             ) : (
-              <Text style={styles.balance}>
+              <Text style={styles.balance} numberOfLines={1}>
                 {isCreditCard
                   ? formatCompact(outstanding ?? 0)
                   : formatCompact(account.balance)}
@@ -660,6 +660,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginTop: 2,
+    // Android clips the trailing glyph of bold text (the "k"/"L"/"Cr" unit) when the
+    // Text view measures a hair narrower than it renders — a little right padding +
+    // includeFontPadding gives the last character room so it's never cut off.
+    paddingRight: 3,
+    includeFontPadding: false,
   },
   balanceMasked: {
     color: '#FFFFFF99',

@@ -62,7 +62,7 @@ import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius } from '../constants/theme';
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountLinkSuggestions } from '../store/ePurseStore';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { requestLocationPermission } from '../services/locationService';
 import { requestContactsPermission } from '../services/contactsService';
@@ -546,6 +546,13 @@ export function AccountFilterScreen({
   const accounts: Account[] = useEPurseStore((s: any) => s.accounts) || [];
   const deleteAccount = useEPurseStore((s: any) => s.deleteAccount);
 
+  // Debit-card↔bank merge suggestions surfaced from the just-completed sweep.
+  const linkSuggestions = useEPurseStore(selectAccountLinkSuggestions) as Array<{
+    cardId: string; cardMask: string; bankId: string; bankMask: string; bankName: string;
+  }>;
+  const linkDebitCardToBank = useEPurseStore((s: any) => s.linkDebitCardToBank);
+  const dismissAccountLinkSuggestion = useEPurseStore((s: any) => s.dismissAccountLinkSuggestion);
+
   // Local enable map — default every discovered account ON.
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
   const isOn = useCallback((id: string) => enabled[id] ?? true, [enabled]);
@@ -634,6 +641,37 @@ export function AccountFilterScreen({
             );
           })
         )}
+
+        {/* Same-account merge suggestions — a debit card + the bank it draws from */}
+        {linkSuggestions.length > 0 ? (
+          <View style={styles.mergeBlock}>
+            <Text style={styles.mergeHeading}>Looks like the same account</Text>
+            {linkSuggestions.map((sug) => (
+              <View key={`${sug.cardMask}:${sug.bankMask}`} style={styles.mergeCard}>
+                <Text style={styles.mergeBody}>
+                  Your debit card{' '}
+                  <Text style={styles.mergeStrong}>••{sug.cardMask}</Text> and{' '}
+                  <Text style={styles.mergeStrong}>{sug.bankName} ••{sug.bankMask}</Text> appear to be
+                  the same account. Link them so the balance isn&apos;t counted twice?
+                </Text>
+                <View style={styles.mergeActions}>
+                  <Pressable
+                    style={({ pressed }) => [styles.mergeLink, { backgroundColor: theme.primary }, pressed && styles.primaryBtnPressed]}
+                    onPress={() => linkDebitCardToBank(sug.cardId, sug.bankId)}
+                  >
+                    <Text style={styles.mergeLinkTxt}>Yes, link</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.mergeKeep}
+                    onPress={() => dismissAccountLinkSuggestion(sug.cardMask, sug.bankMask)}
+                  >
+                    <Text style={styles.mergeKeepTxt}>Keep separate</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
@@ -1102,6 +1140,26 @@ const filterStyles = (t: Theme) =>
     primaryBtn: { borderRadius: radius.md, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
     primaryBtnPressed: { opacity: 0.9 },
     primaryBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+
+    // Debit-card↔bank merge suggestions
+    mergeBlock: { marginTop: spacing.lg },
+    mergeHeading: { fontSize: 13, fontWeight: '700', color: t.textSecondary, marginBottom: spacing.sm, paddingHorizontal: spacing.lg },
+    mergeCard: {
+      backgroundColor: t.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: t.divider,
+      padding: spacing.md,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.sm,
+    },
+    mergeBody: { fontSize: 13, lineHeight: 19, color: t.textSecondary },
+    mergeStrong: { color: t.textPrimary, fontWeight: '700' },
+    mergeActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+    mergeLink: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 3, borderRadius: radius.pill },
+    mergeLinkTxt: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+    mergeKeep: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 3, borderRadius: radius.pill, borderWidth: 1, borderColor: t.divider },
+    mergeKeepTxt: { color: t.textSecondary, fontSize: 13, fontWeight: '700' },
   });
 
 const vendorStyles = (t: Theme) =>

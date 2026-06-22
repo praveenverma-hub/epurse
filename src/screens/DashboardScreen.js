@@ -132,8 +132,8 @@ const DashboardScreen = ({ navigation }) => {
   // Returns { debits, credits, net, count, recent }.
   // Excludes ignored, private (isHidden), and Lent/Borrowed categories.
   const periodStats = useMemo(
-    () => selectExpenseStats(period)({ transactions, monthlyAggregates: monthlyAggs }),
-    [period, transactions, monthlyAggs]
+    () => selectExpenseStats(period)({ transactions, monthlyAggregates: monthlyAggs, groups }),
+    [period, transactions, monthlyAggs, groups]
   );
 
   // ── Sync date-range label ────────────────────────────────────────────────

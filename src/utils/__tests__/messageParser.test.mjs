@@ -796,6 +796,18 @@ const CREDIT_LIMIT_MANDATE = [
     expect: { accept: true, type: 'debit', amount: 3082, accountType: 'Bank', accountMask: '5960', merchantIncludes: 'JAYPEE' } },
 ];
 
+// SUITE 11 — Debit-card↔bank co-reference (coAccountMask). One SMS that names
+// BOTH a card and the a/c it draws from → surface the OTHER mask so the store can
+// suggest merging the card into its bank. A plain single-account SMS must NOT set it.
+const DC_BANK_COREF = [
+  { name: 'Debit-card spend names its source a/c → coAccountMask = the a/c',
+    sender: 'HDFCBK', sms: 'Rs.1,200.00 spent on HDFC Debit Card xx1234 at SWIGGY on 06-Jun-26, linked to A/c xx5678. Avl Bal Rs.20,300.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 1200, accountMask: '1234', coAccountMask: '5678' } },
+  { name: 'Plain bank debit (single mask) → no coAccountMask',
+    sender: 'HDFCBK', sms: 'Rs.450.00 debited from A/c xx1234 on 06-Jun-26 to SWIGGY via UPI. Avl bal Rs.42,310.50',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 450, accountMask: '1234', coAccountMask: null } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -807,6 +819,7 @@ const SUITES = [
   ['UPI / CC / DC / NACH sweep (Jun-26)', UPI_CC_DC_NACH],
   ['Investments / FASTag / fuel-waiver / EMI-loan (Jun-26)', INVEST_FASTAG_EMI],
   ['Credit-limit & mandate-setup (Jun-26)', CREDIT_LIMIT_MANDATE],
+  ['Debit-card↔bank co-reference (Jun-26)', DC_BANK_COREF],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -833,6 +846,7 @@ function checkCase({ sender, sms, expect }) {
     cmp('counterpartyPhone', t.counterpartyPhone, expect.counterpartyPhone);
     cmp('counterpartyName', t.counterpartyName, expect.counterpartyName);
     cmp('transferRef', t.transferRef, expect.transferRef);
+    cmp('coAccountMask', t.coAccountMask, expect.coAccountMask);
     if (expect.merchantIncludes !== undefined && !(t.merchant || '').includes(expect.merchantIncludes))
       fails.push(`merchant: expected to include ${JSON.stringify(expect.merchantIncludes)}, got ${JSON.stringify(t.merchant)}`);
   } else {

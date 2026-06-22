@@ -10,7 +10,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
-  TextInput, Keyboard,
+  TextInput, Keyboard, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ import {
   useEPurseStore,
   selectEPurseNetWorth,
   selectShouldShowAnchorNudge,
+  selectAccountLinkSuggestions,
 } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
@@ -32,6 +33,7 @@ import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import AccountCard    from '../components/AccountCard';
 import AddAccountModal from '../components/AddAccountModal';
 import CenterModal    from '../components/CenterModal';
+import InfoSheet      from '../components/InfoSheet';
 
 const TYPE_ORDER = {
   [ACCOUNT_TYPES.CASH]:        0,
@@ -67,6 +69,14 @@ export default function AccountsScreen({ navigation }) {
   const addAccount   = useEPurseStore((s) => s.addAccount);
   const deleteAccount = useEPurseStore((s) => s.deleteAccount);
 
+  // Debit-card↔bank unification: auto-detected merge suggestions + the actions.
+  const linkSuggestions          = useEPurseStore(selectAccountLinkSuggestions);
+  const linkDebitCardToBank      = useEPurseStore((s) => s.linkDebitCardToBank);
+  const dismissAccountLinkSuggestion = useEPurseStore((s) => s.dismissAccountLinkSuggestion);
+  // Manual link: the Debit Card the user chose to fold into a bank (opens picker).
+  const [linkTarget, setLinkTarget] = useState(null);
+  const [linkInfoVisible, setLinkInfoVisible] = useState(false);
+
   const userPhones     = useEPurseStore((s) => s.userPhones);
   const addUserPhone   = useEPurseStore((s) => s.addUserPhone);
   const removeUserPhone = useEPurseStore((s) => s.removeUserPhone);
@@ -93,6 +103,12 @@ export default function AccountsScreen({ navigation }) {
 
   const sortedAccounts = useMemo(
     () => [...accounts].sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9)),
+    [accounts],
+  );
+
+  // Bank accounts a Debit Card can be merged into (manual link picker).
+  const bankAccounts = useMemo(
+    () => accounts.filter((a) => a.type === ACCOUNT_TYPES.BANK),
     [accounts],
   );
 
@@ -189,6 +205,50 @@ export default function AccountsScreen({ navigation }) {
           </View>
         ) : null}
 
+        {/* Merge suggestions — "this card & this bank look like the same money" */}
+        {linkSuggestions.map((sug) => (
+          <View key={`${sug.cardMask}:${sug.bankMask}`} style={styles.linkSuggest}>
+            <View style={styles.linkSuggestIcon}>
+              <Ionicons name="git-merge-outline" size={20} color={theme.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkSuggestTitle} numberOfLines={2}>
+                Same account?
+              </Text>
+              <Text style={styles.linkSuggestBody}>
+                Your debit card ··{sug.cardMask} and {sug.bankName} ··{sug.bankMask} look like the
+                same account. Link them so the balance and net worth aren't counted twice.
+              </Text>
+              <View style={styles.linkSuggestActions}>
+                <TouchableOpacity
+                  style={[styles.linkBtn, { backgroundColor: theme.primary }]}
+                  onPress={() =>
+                    setConfirm({
+                      title: 'Link card to bank?',
+                      message: `We'll treat debit card ··${sug.cardMask} as part of ${sug.bankName} ··${sug.bankMask} — one balance, counted once. This can't be auto-undone.`,
+                      primaryText: 'Link them',
+                      destructive: false,
+                      secondaryText: 'Cancel',
+                      onSecondary: () => setConfirm(null),
+                      onConfirm: () => { linkDebitCardToBank(sug.cardId, sug.bankId); setConfirm(null); },
+                    })
+                  }
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.linkBtnText}>Link them</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.linkBtnGhost}
+                  onPress={() => dismissAccountLinkSuggestion(sug.cardMask, sug.bankMask)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.linkBtnGhostText}>Not the same</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ))}
+
         {/* CRED-style cards — hidden when no accounts */}
         {sortedAccounts.length > 0 ? (
           <ScrollView
@@ -222,18 +282,25 @@ export default function AccountsScreen({ navigation }) {
           </ScrollView>
         ) : null}
 
-        {/* Anchor-adjustment hint */}
+        {/* Anchor-adjustment hint — plain text, no pill */}
         {sortedAccounts.length > 0 ? (
-          <View style={styles.flipHint}>
-            <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
-            <Text style={styles.flipHintText}>
-              Tap the chip or balance on any card to adjust its balance.
-            </Text>
-          </View>
+          <Text style={styles.flipHintText}>
+            Tap the chip or balance on any card to adjust its balance.
+          </Text>
         ) : null}
 
         {/* Flat account list */}
-        <Text style={styles.listTitle}>All accounts</Text>
+        <View style={styles.listHeaderRow}>
+          <Text style={styles.listTitle}>All accounts</Text>
+          <TouchableOpacity
+            onPress={() => setLinkInfoVisible(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="About linking cards and banks"
+          >
+            <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
         {sortedAccounts.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyEmoji}>💳</Text>
@@ -253,8 +320,24 @@ export default function AccountsScreen({ navigation }) {
               </View>
               <View style={{ flex: 1, marginRight: spacing.sm }}>
                 <Text style={styles.listName} numberOfLines={1} ellipsizeMode="tail">{a.name}</Text>
-                <Text style={styles.listType} numberOfLines={1}>{TYPE_LABEL[a.type] ?? a.type}</Text>
+                <Text style={styles.listType} numberOfLines={1}>
+                  {TYPE_LABEL[a.type] ?? a.type}
+                  {(a.aliasMasks?.length ?? 0) > 0 ? ` · card ··${a.aliasMasks[0]}` : ''}
+                </Text>
               </View>
+              {/* Debit cards can be folded into a bank (same money) */}
+              {a.type === ACCOUNT_TYPES.DEBIT_CARD && bankAccounts.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.rowLinkBtn}
+                  onPress={() => setLinkTarget(a)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Link to a bank account"
+                >
+                  <Ionicons name="git-merge-outline" size={16} color={theme.primary} />
+                  <Text style={[styles.rowLinkTxt, { color: theme.primary }]}>Link</Text>
+                </TouchableOpacity>
+              ) : null}
               <Text
                 style={[styles.listBalance, { color: (a.balance ?? 0) < 0 ? colors.danger : colors.textPrimary }]}
                 numberOfLines={1}
@@ -268,7 +351,7 @@ export default function AccountsScreen({ navigation }) {
         )}
 
         {/* Linked mobile numbers — powers self-transfer detection */}
-        <Text style={styles.listTitle}>Your mobile numbers</Text>
+        <Text style={[styles.listTitle, styles.listTitleStandalone]}>Your mobile numbers</Text>
         <View style={styles.phoneCard}>
           <Text style={styles.phoneHelp}>
             Add the mobile number(s) linked to your bank accounts. When money moves
@@ -337,6 +420,66 @@ export default function AccountsScreen({ navigation }) {
         onClose={() => setConfirm(null)}
         onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
+
+      {/* What "linking" a card to a bank means */}
+      <InfoSheet
+        visible={linkInfoVisible}
+        onClose={() => setLinkInfoVisible(false)}
+        icon={<Ionicons name="git-merge-outline" size={28} color={theme.primary} />}
+        title="Linking cards & banks"
+        body="A debit card spends from a bank account — it's the same money. Link them so your balance and net worth aren't counted twice. Tap “Link” on a debit card to merge it into its bank."
+      />
+
+      {/* Manual link: pick which bank a debit card draws from → merge into it */}
+      <Modal
+        visible={!!linkTarget}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLinkTarget(null)}
+      >
+        <View style={styles.pickBackdrop}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setLinkTarget(null)} />
+          <View style={styles.pickSheet}>
+            <View style={styles.pickHandle} />
+            <Text style={styles.pickTitle}>Link {linkTarget?.name} to…</Text>
+            <Text style={styles.pickHelp}>
+              Pick the bank account this debit card draws from. They'll share one balance and
+              be counted once in net worth.
+            </Text>
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {bankAccounts.map((b) => (
+                <TouchableOpacity
+                  key={b.id}
+                  style={styles.pickRow}
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    const dc = linkTarget;
+                    setLinkTarget(null);
+                    setConfirm({
+                      title: 'Link card to bank?',
+                      message: `We'll treat "${dc.name}" as part of "${b.name}" — one balance, counted once. This can't be auto-undone.`,
+                      primaryText: 'Link them',
+                      secondaryText: 'Cancel',
+                      onSecondary: () => setConfirm(null),
+                      onConfirm: () => { linkDebitCardToBank(dc.id, b.id); setConfirm(null); },
+                    });
+                  }}
+                >
+                  <Text style={{ fontSize: 20, marginRight: spacing.sm }}>{TYPE_EMOJI[b.type]}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pickRowName} numberOfLines={1}>{b.name}</Text>
+                    {b.mask ? <Text style={styles.pickRowSub}>··{b.mask}</Text> : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.pickCancel} onPress={() => setLinkTarget(null)}>
+              <Text style={styles.pickCancelTxt}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -420,28 +563,28 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  flipHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    alignSelf: 'center',
-    marginTop: spacing.xs,
-    ...shadows.card,
-  },
   flipHintText: {
     ...typography.tiny,
     color: colors.textSecondary,
     fontWeight: '500',
-    flexShrink: 1,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.lg,
   },
 
+  listHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+  },
   listTitle: {
     ...typography.h3,
     color: colors.textPrimary,
+  },
+  // Standalone section titles (not inside listHeaderRow) keep their own spacing.
+  listTitleStandalone: {
     marginTop: spacing.xl,
     marginBottom: spacing.sm,
   },
@@ -531,4 +674,64 @@ const styles = StyleSheet.create({
   emptyEmoji: { fontSize: 36 },
   emptyTitle: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },
   emptyHelp:  { ...typography.small, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs },
+
+  // Debit-card↔bank merge suggestion card
+  linkSuggest: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    ...shadows.card,
+  },
+  linkSuggestIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.background,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  linkSuggestTitle: { ...typography.bodyBold, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
+  linkSuggestBody:  { ...typography.small, color: colors.textSecondary, lineHeight: 18 },
+  linkSuggestActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  linkBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+  },
+  linkBtnText: { color: '#fff', ...typography.small, fontWeight: '700' },
+  linkBtnGhost: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  linkBtnGhostText: { color: colors.textSecondary, ...typography.small, fontWeight: '700' },
+
+  // Per-row "Link" affordance on debit-card rows
+  rowLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 4 },
+  rowLinkTxt: { ...typography.tiny, fontWeight: '700' },
+
+  // Bank-picker bottom sheet (manual link)
+  pickBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
+  pickSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    padding: spacing.lg, paddingBottom: spacing.xl,
+  },
+  pickHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md },
+  pickTitle:  { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
+  pickHelp:   { ...typography.small, color: colors.textSecondary, lineHeight: 18, marginTop: spacing.xs, marginBottom: spacing.sm },
+  pickRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1, borderBottomColor: colors.divider,
+  },
+  pickRowName: { ...typography.bodyBold, color: colors.textPrimary },
+  pickRowSub:  { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
+  pickCancel:  { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
+  pickCancelTxt: { ...typography.body, color: colors.textSecondary },
 });
