@@ -19,7 +19,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectExpenseStats } from '../store/ePurseStore';
+import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats } from '../store/ePurseStore';
 import {
   useRewardStore,
   selectLevel,
@@ -195,14 +195,19 @@ const DashboardScreen = ({ navigation }) => {
   // current queue is always empty at morning open — using it caused a false
   // SAVINGS bonus every single day.
   useEffect(() => {
-    const sub = navigation.addListener('focus', () => {
-      const yesterdayCount = selectYesterdayTransactionCount(useEPurseStore.getState());
-      checkIn(yesterdayCount);
-    });
+    // Pass yesterday's count (Zero-Transaction Day / SAVINGS eligibility) AND the
+    // missed-days count so a skipped app-open on a no-transaction day doesn't break
+    // the Aware Run (selectGapTransactionCount → forgivenGap in the reward store).
+    const runCheckIn = () => {
+      const st = useEPurseStore.getState();
+      const yesterdayCount = selectYesterdayTransactionCount(st);
+      const gapCount = selectGapTransactionCount(st, useRewardStore.getState().lastCheckedInDate);
+      checkIn(yesterdayCount, gapCount);
+    };
+    const sub = navigation.addListener('focus', runCheckIn);
     // Fire once on initial mount as well (focus listener doesn't fire on the
     // first render because the screen is already focused).
-    const yesterdayCount = selectYesterdayTransactionCount(useEPurseStore.getState());
-    checkIn(yesterdayCount);
+    runCheckIn();
     return sub;
   }, [navigation, checkIn]);
 

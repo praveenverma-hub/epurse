@@ -103,21 +103,18 @@ const CelebrationModal = ({ visible, onClose, onPlanNext }) => {
   const theme = useTheme();
   const pending      = useEPurseStore((s) => s.pendingCelebration);
   const budgetStreak = useEPurseStore((s) => s.budgetStreak);
+  const categories   = useEPurseStore((s) => s.categories);
 
-  if (!visible || !pending) return null;
-
-  const isUnder = pending.status === 'under';
-  const isOver  = pending.status === 'over';
-  const monthName = (() => {
-    if (!pending.monthKey) return '';
-    const [y, m] = pending.monthKey.split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'long' });
-  })();
+  // ⚠️ ALL hooks must run before any early return — `visible`/`pending` toggle as
+  // the modal opens/closes, so a `return null` above these would change the hook
+  // count between renders and crash ("rendered fewer hooks than expected").
+  const isUnder = pending?.status === 'under';
+  const isOver  = pending?.status === 'over';
 
   // Top 3 category "wins" — categories that were budgeted and stayed under cap
   // (sorted by absolute amount saved). Only computed for the under-budget case.
   const wins = useMemo(() => {
-    if (!isUnder) return [];
+    if (!isUnder || !pending) return [];
     return Object.entries(pending.perCategory || {})
       .map(([catId, v]) => ({ catId, saved: Math.max(0, v.cap - v.actual), ...v }))
       .filter((r) => r.cap > 0 && r.saved > 0)
@@ -125,12 +122,20 @@ const CelebrationModal = ({ visible, onClose, onPlanNext }) => {
       .slice(0, 3);
   }, [pending, isUnder]);
 
-  const categories = useEPurseStore((s) => s.categories);
   const categoryById = useMemo(() => {
     const map = new Map();
     categories.forEach((c) => map.set(c.id, c));
     return map;
   }, [categories]);
+
+  // Safe to bail now that every hook has run.
+  if (!visible || !pending) return null;
+
+  const monthName = (() => {
+    if (!pending.monthKey) return '';
+    const [y, m] = pending.monthKey.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'long' });
+  })();
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>

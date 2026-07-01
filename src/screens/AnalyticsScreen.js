@@ -40,6 +40,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
   const transactions = useEPurseStore(selectTransactions);
   const groups = useEPurseStore((s) => s.groups);
+  const accounts = useEPurseStore((s) => s.accounts);
 
   // Drop transactions tagged to a group flagged "exclude from totals" (and group
   // memos) before the chart selectors run — so the spend pace, merchant bubbles
@@ -57,24 +58,36 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
 
-  // Account-wise breakdown — mirrors getMonthlySpend: debit only, same month,
-  // no NON_SPEND_CATS, no group memos. Uses debitDisplayAmount so group txns
-  // count the user's share, not the full fronted amount.
+  // Per-account spend breakdown — one bar per INDIVIDUAL bank / card (not lumped
+  // by type). Resolves each txn to its account by id, then mask/aliasMasks (a
+  // linked debit card rolls into its bank); maskless txns with no account fall
+  // back to a type bucket. Mirrors getMonthlySpend filters (debit, same month,
+  // no NON_SPEND_CATS, no group memos) and uses the user's share for group txns.
   const NON_SPEND = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
   const accountBreakdown = useMemo(() => {
-    const byAccount = {};
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    const byMask = new Map();
+    accounts.forEach((a) => {
+      if (a.mask) byMask.set(a.mask, a);
+      (a.aliasMasks || []).forEach((m) => byMask.set(m, a));
+    });
+    const buckets = {};
     transactions.forEach((t) => {
       if (t.type !== 'debit') return;
       if (!isSameMonth(t.createdAt, date)) return;
       if (NON_SPEND.has(t.categoryId)) return;
       if (isGroupExcluded(t, groups)) return;
-      const key = t.accountType || 'Unknown';
-      byAccount[key] = (byAccount[key] || 0) + debitDisplayAmount(t);
+      const acct =
+        (t.accountId && byId.get(t.accountId)) ||
+        (t.accountMask && byMask.get(t.accountMask)) ||
+        null;
+      const key  = acct ? acct.id : (t.accountType || 'Unknown');
+      const name = acct ? (acct.name || acct.bankName || acct.type) : (t.accountType || 'Unknown');
+      if (!buckets[key]) buckets[key] = { name, total: 0, color: acct?.color };
+      buckets[key].total += debitDisplayAmount(t);
     });
-    return Object.entries(byAccount)
-      .map(([name, total]) => ({ name, total }))
-      .sort((a, b) => b.total - a.total);
-  }, [transactions, date, groups]);
+    return Object.values(buckets).sort((a, b) => b.total - a.total);
+  }, [transactions, date, groups, accounts]);
 
   const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
@@ -282,7 +295,9 @@ const HorizontalBarChart = ({ data }) => {
     <View style={{ gap: 10 }}>
       {top5.map((d, i) => {
         const pct = d.total / maxVal;
-        const barColor = HBAR_COLORS[i % HBAR_COLORS.length];
+        // Use the account's own colour when available so bars match the cards;
+        // fall back to the palette for type-bucket rows without an account.
+        const barColor = d.color || HBAR_COLORS[i % HBAR_COLORS.length];
         return (
           <View key={i} style={styles.hBarRow}>
             <Text style={styles.hBarLabel} numberOfLines={1}>{d.name}</Text>
@@ -505,7 +520,7 @@ const styles = StyleSheet.create({
 
   // Horizontal bar chart — account name | bar | amount in one row
   hBarRow:    { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  hBarLabel:  { width: 80, ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
+  hBarLabel:  { width: 104, ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
   hBarTrack:  { flex: 1, height: 18, backgroundColor: colors.divider + '66', borderRadius: radius.sm, overflow: 'hidden' },
   hBarFill:   { height: '100%', borderRadius: radius.sm },
   hBarAmount: { width: 72, ...typography.tiny, color: colors.textPrimary, fontWeight: '700', textAlign: 'right' },

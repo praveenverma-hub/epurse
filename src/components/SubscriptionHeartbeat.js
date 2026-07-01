@@ -83,16 +83,10 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
   const scrollRef = useRef(null);
   const lastHapticDay = useRef(null);
 
-  if (!subscriptions || subscriptions.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>
-          {'No recurring subscriptions detected yet.\nThey appear after 2+ months of the same charge.'}
-        </Text>
-      </View>
-    );
-  }
-
+  // NOTE: no early return here — the hooks below (useMemo/useEffect) must run on
+  // every render, so `subscriptions` toggling empty↔non-empty can't change the
+  // hook count. The empty-state return lives AFTER all hooks.
+  const subs = subscriptions || [];
   const targetDate = date || new Date();
   const y = targetDate.getFullYear();
   const m = targetDate.getMonth();
@@ -104,13 +98,13 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
   // Build a map of day → charges
   const dayCharges = useMemo(() => {
     const map = new Map();
-    subscriptions.forEach((sub) => {
+    subs.forEach((sub) => {
       const day = Math.max(1, Math.min(daysInMonth, sub.dayOfMonth));
       if (!map.has(day)) map.set(day, []);
       map.get(day).push(sub);
     });
     return map;
-  }, [subscriptions, daysInMonth]);
+  }, [subs, daysInMonth]);
 
   const maxAmount = useMemo(() => {
     let max = 0;
@@ -149,6 +143,10 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
           peakY,
           charges,
           hasHike: charges.some((c) => c.priceHike),
+          // In the current month, a charge dated after today hasn't happened yet —
+          // it's the expected/recurring day. Rendered dimmed so day-1 reads as a
+          // forecast of the month, not a repeat of last month's actuals.
+          upcoming: isCurrentMonth && d > currentDay,
         });
       }
     }
@@ -157,7 +155,7 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
     path += ` L ${totalWidth} ${BASELINE}`;
 
     return { ekgPath: path, spikePositions: spikes };
-  }, [dayCharges, daysInMonth, maxAmount]);
+  }, [dayCharges, daysInMonth, maxAmount, isCurrentMonth, currentDay]);
 
   const totalWidth = LEAD + daysInMonth * DAY_W + 12;
 
@@ -192,7 +190,18 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
     }
   }, [isCurrentMonth, currentDay]);
 
-  const hikingSubscriptions = subscriptions.filter((s) => s.priceHike);
+  const hikingSubscriptions = subs.filter((s) => s.priceHike);
+
+  // Empty state — AFTER all hooks so the hook count is render-stable.
+  if (subs.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>
+          {'No recurring subscriptions detected yet.\nThey appear after 2+ months of the same charge.'}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -203,7 +212,7 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
         contentContainerStyle={styles.chipsContainer}
         style={styles.chipsScroll}
       >
-        {subscriptions.map((sub) => (
+        {subs.map((sub) => (
           <View key={sub.merchantKey} style={styles.chip}>
             <Text style={styles.chipName} numberOfLines={1}>
               {sub.merchant}
@@ -244,31 +253,22 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
               fill="none"
             />
 
-            {/* Spike top dots */}
-            {spikePositions.map((sp) =>
-              sp.hasHike ? (
-                <SvgCircle
-                  key={sp.day}
-                  cx={sp.cx}
-                  cy={sp.peakY}
-                  r={4.5}
-                  fill="#EF4444"
-                />
-              ) : (
-                <SvgCircle
-                  key={sp.day}
-                  cx={sp.cx}
-                  cy={sp.peakY}
-                  r={4}
-                  fill="#3B82F6"
-                />
-              )
-            )}
+            {/* Spike top dots — upcoming (not-yet-charged this month) are dimmed */}
+            {spikePositions.map((sp) => (
+              <SvgCircle
+                key={sp.day}
+                cx={sp.cx}
+                cy={sp.peakY}
+                r={sp.hasHike ? 4.5 : 4}
+                fill={sp.hasHike ? '#EF4444' : '#3B82F6'}
+                fillOpacity={sp.upcoming ? 0.35 : 1}
+              />
+            ))}
           </Svg>
 
-          {/* Hike pulse rings (absolutely positioned over SVG) */}
+          {/* Hike pulse rings — only for charges that have ALREADY happened */}
           {spikePositions
-            .filter((sp) => sp.hasHike)
+            .filter((sp) => sp.hasHike && !sp.upcoming)
             .map((sp) => (
               <HikePulse key={`hike-${sp.day}`} x={sp.cx} y={sp.peakY} />
             ))}

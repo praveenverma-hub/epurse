@@ -31,6 +31,7 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 import { INPUT_LIMITS } from '../utils/validation';
+import { PARENT_CATEGORIES } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
@@ -79,6 +80,13 @@ const ringColor = (pct, daysElapsedPct) => {
 // Groceries) roll up into their parent (Food & Dining) in the store, so there's
 // no separate "groceries" budget line.
 const BUDGETABLE_IDS = ['food', 'travel', 'bills', 'shopping', 'entertainment', 'health', 'fuel', 'investments', 'education'];
+
+// How many sub-categories are DEFINED under each parent (from the taxonomy, not
+// from spending). A parent is drillable when it has >1 defined sub-category —
+// regardless of whether every sub has spending this month.
+const DEFINED_SUBCOUNT = Object.fromEntries(
+  PARENT_CATEGORIES.map((p) => [p.id, (p.children || []).length]),
+);
 // Categories pre-added when creating the very first plan (no history to seed from).
 const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
 
@@ -392,15 +400,20 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                   style={styles.catCard}
                   activeOpacity={0.75}
                   onPress={() => {
-                    const rows = getBudgetChildBreakdown(r.catId);
-                    const parentName = categoryById.get(r.catId)?.name;
-                    const realSubs = parentName ? rows.filter((row) => row.label !== parentName) : rows;
-                    if (realSubs.length > 1) {
+                    // Open the breakdown when this category has SOME spend AND the
+                    // parent defines more than one sub-category — even if not every
+                    // sub has spending (the sheet shows whatever's there). Only block
+                    // when there's nothing to break down (no spend, or a single-sub
+                    // parent like Fuel/Entertainment where a drill is meaningless).
+                    const definedSubs = DEFINED_SUBCOUNT[r.catId] || 0;
+                    if (r.actual > 0 && definedSubs > 1) {
                       setDrillCatId(r.catId);
                     } else {
                       toast.info(
                         'No sub-category breakdown',
-                        `${cat.name} has no sub-category spending to drill into this month.`,
+                        r.actual > 0
+                          ? `${cat.name} has only one sub-category — nothing to break down.`
+                          : `${cat.name} has no spending to drill into this month.`,
                       );
                     }
                   }}

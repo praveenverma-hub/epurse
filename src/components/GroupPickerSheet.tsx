@@ -1,7 +1,7 @@
 // =============================================================================
 // GroupPickerSheet — bottom sheet to assign an existing transaction to a group.
 // =============================================================================
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -13,7 +13,8 @@ import {
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, monthKey } from '../utils/format';
+import { debitDisplayAmount } from '../utils/split';
 import type { Group } from '../types/group';
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
@@ -38,7 +39,21 @@ export default function GroupPickerSheet({
 }: GroupPickerSheetProps) {
   const theme = useTheme();
   const groups = useEPurseStore((s: any) => s.groups) as Group[];
+  const transactions = useEPurseStore((s: any) => s.transactions) as any[];
   const [selected, setSelected] = useState<string | null>(null);
+
+  // Current-month total per group (your share) — personal groups track monthly,
+  // so the subtitle must match the Groups tab's "this month" figure, not all-time.
+  const monthTotalByGroup = useMemo(() => {
+    const mk = monthKey(new Date());
+    const m: Record<string, number> = {};
+    for (const t of transactions) {
+      if (!t.groupId || t.isIgnored) continue;
+      if (monthKey(t.createdAt) !== mk) continue;
+      m[t.groupId] = (m[t.groupId] || 0) + debitDisplayAmount(t);
+    }
+    return m;
+  }, [transactions]);
 
   const handlePick = (g: Group) => {
     setSelected(g.id);
@@ -77,7 +92,7 @@ export default function GroupPickerSheet({
                   <Text style={styles.rowMeta}>
                     {g.type === 'shared'
                       ? `${g.members?.length ?? 0} members · ${formatCurrency(g.totalSpend || 0)} spent`
-                      : `Personal · ${formatCurrency(g.totalSpend || 0)} spent`}
+                      : `Personal · ${formatCurrency(monthTotalByGroup[g.id] || 0)} this month`}
                   </Text>
                 </View>
                 {selected === g.id && (

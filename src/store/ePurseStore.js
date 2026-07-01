@@ -2433,7 +2433,9 @@ export const useEPurseStore = create(
       },
 
       // ----- derived selectors ------------------------------------------
-      getTotalBalance: () => get().accounts.reduce((sum, a) => sum + (a.balance || 0), 0),
+      // Single source of truth — same assets−CC-liability rule as the Accounts
+      // screen. Don't re-sum balances here (that would drift from net worth).
+      getTotalBalance: () => selectEPurseNetWorth(get()),
 
       getTotalLent: () =>
         get().getPersonBalances()
@@ -3339,6 +3341,30 @@ export const selectYesterdayTransactionCount = (s) => {
     if (t.source !== 'sms' || t.isIgnored) return false;
     const ts = new Date(t.createdAt).getTime();
     return ts >= start && ts <= end;
+  }).length;
+};
+
+/**
+ * Count of SMS transactions during the MISSED days of an Aware Run gap — every
+ * day strictly after `lastCheckedInDate` and up to the end of yesterday. Lets the
+ * streak survive a skipped app-open on a day that had nothing to be aware of: if
+ * the missed days held zero transactions, the run isn't broken. Returns 0 when
+ * there's no full missed day (`lastCheckedInDate` was today or yesterday / null).
+ */
+export const selectGapTransactionCount = (s, lastCheckedInDate) => {
+  if (!lastCheckedInDate) return 0;
+  const [y, m, d] = String(lastCheckedInDate).split('-').map(Number);
+  if (!y || !m || !d) return 0;
+  const now = new Date();
+  // First missed day = the day AFTER the last check-in.
+  const gapStart = new Date(y, m - 1, d + 1, 0, 0, 0, 0).getTime();
+  // Last missed day = yesterday (today isn't "missed").
+  const gapEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
+  if (gapStart > gapEnd) return 0; // checked in today or yesterday → no missed day
+  return s.transactions.filter((t) => {
+    if (t.source !== 'sms' || t.isIgnored) return false;
+    const ts = new Date(t.createdAt).getTime();
+    return ts >= gapStart && ts <= gapEnd;
   }).length;
 };
 

@@ -25,7 +25,7 @@ import { colors, radius, spacing, typography as typographyBase, shadows } from '
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme, useGradient } from '../hooks/useTheme';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, monthKey } from '../utils/format';
 import { debitDisplayAmount } from '../utils/split';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
@@ -37,6 +37,7 @@ import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
+import MonthDivider from '../components/MonthDivider';
 import { useToast } from '../components/Toast';
 import type { Group, GroupExpenseData } from '../types/group';
 
@@ -129,14 +130,9 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   }, [selectedId, groups, orderedGroups]);
   const selectedGroupId = selectedGroup?.id || null;
 
-  // Tile order: selected first, then the rest by recency.
-  const tileGroups = useMemo(() => {
-    if (!selectedGroupId) return orderedGroups;
-    return [
-      ...orderedGroups.filter((g) => g.id === selectedGroupId),
-      ...orderedGroups.filter((g) => g.id !== selectedGroupId),
-    ];
-  }, [orderedGroups, selectedGroupId]);
+  // Tile order: purely by recency (most recently updated first). We do NOT hoist
+  // the selected tile to the front — that made tiles jump around on every tap.
+  const tileGroups = orderedGroups;
 
   // Your share per group (live, raw window) for the card primary figure.
   const myShareByGroup = useMemo(() => {
@@ -154,6 +150,32 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [transactions, selectedGroupId],
   );
+
+  // Per-calendar-month total for this group (your share via debitDisplayAmount).
+  // Personal-group tracking is monthly — the card headline shows the CURRENT
+  // month and each older month gets its own total on a divider.
+  const groupMonthTotals = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const t of groupTxns) m[monthKey(t.createdAt)] = (m[monthKey(t.createdAt)] || 0) + debitDisplayAmount(t);
+    return m;
+  }, [groupTxns]);
+  const currentMonthTotal = groupMonthTotals[monthKey(new Date())] || 0;
+
+  // Transactions with month-boundary dividers (each older month's divider carries
+  // that month's total). No divider above the first/current group; none if one month.
+  const groupListData = useMemo(() => {
+    const out: any[] = [];
+    let lastMonth: string | null = null;
+    for (const t of groupTxns) {
+      const mk = monthKey(t.createdAt);
+      if (lastMonth !== null && mk !== lastMonth) {
+        out.push({ _divider: true, id: `div-${mk}`, monthKey: mk, total: groupMonthTotals[mk] || 0 });
+      }
+      lastMonth = mk;
+      out.push(t);
+    }
+    return out;
+  }, [groupTxns, groupMonthTotals]);
 
   // My balances for the selected group, from the global LB ledger.
   const groupBalances = useMemo<GroupBalanceRow[]>(() => {
@@ -335,8 +357,10 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
                       </>
                     ) : (
                       <>
-                        <Text style={styles.amountBig}>{formatCurrency(total)}</Text>
-                        <Text style={styles.amountSub}>total spend</Text>
+                        {/* Personal-group tracking is monthly — headline = THIS month;
+                            older months live on the list dividers below. */}
+                        <Text style={styles.amountBig}>{formatCurrency(currentMonthTotal)}</Text>
+                        <Text style={styles.amountSub}>this month</Text>
                       </>
                     )}
                   </View>
@@ -434,20 +458,26 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
       ) : (
         <FlatList
           ref={listRef}
-          data={groupTxns}
+          data={groupListData}
           style={styles.flatList}
           keyExtractor={(t) => t.id}
           ListHeaderComponent={renderHeader()}
-          renderItem={({ item: t }) => (
-            // The card's LENT/BORROWED chip now conveys who-paid framing (was a "Paid by X"
-            // line here); the full payer + per-member breakdown lives in the detail sheet.
-            <TransactionItem
-              txn={t}
-              hideGroupChip
-              onPress={() => setDetailTxn(t)}
-              onPressCategory={() => setCategoryTxn(t)}
-            />
-          )}
+          renderItem={({ item: t }) =>
+            t._divider ? (
+              // Month boundary — a rounded container in the middle carries that
+              // month's total (personal-group tracking is monthly).
+              <MonthDivider monthKey={t.monthKey} total={t.total} />
+            ) : (
+              // The card's LENT/BORROWED chip now conveys who-paid framing (was a "Paid by X"
+              // line here); the full payer + per-member breakdown lives in the detail sheet.
+              <TransactionItem
+                txn={t}
+                hideGroupChip
+                onPress={() => setDetailTxn(t)}
+                onPressCategory={() => setCategoryTxn(t)}
+              />
+            )
+          }
           ListEmptyComponent={
             <EmptyState
               compact
@@ -610,7 +640,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         body="Group shared and personal expenses together. Shared-group splits flow into your Lent/Borrowed balances, so a friend across several groups nets to one total you can settle in one place."
         bullets={[
           { label: 'Shared', value: 'Split expenses; balances appear in Lent/Borrowed.' },
-          { label: 'Personal', value: 'Track a theme (house, trip); optionally exclude from totals.' },
+          { label: 'Personal', value: 'Track a theme (house, trip); optionally exclude from totals. The total resets each month — the card shows this month, older months sit on the list dividers.' },
           { label: 'Auto-cleanup', value: 'Groups you haven’t touched in 6 months are removed once everyone is settled.' },
         ]}
       />

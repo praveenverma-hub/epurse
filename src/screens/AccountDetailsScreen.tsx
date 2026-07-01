@@ -42,6 +42,8 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import TransactionItemRaw from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import EmptyState from '../components/EmptyState';
+import MonthDivider from '../components/MonthDivider';
+import { monthKey } from '../utils/format';
 import { AccountAnchorBanner } from './OnboardingExperience';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 
@@ -62,6 +64,8 @@ type Account = {
   balance: number;
   color?: string;
   ccPaymentsTracked?: boolean;
+  /** Linked debit-card masks folded into this (bank) account — see matchAccount. */
+  aliasMasks?: string[];
 };
 
 type Txn = {
@@ -260,7 +264,11 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       if (t.isIgnored) return false;
       if (t.accountId) return t.accountId === account.id;
       if (account.mask && t.accountMask) {
-        return t.accountMask === account.mask && t.accountType === account.type;
+        if (t.accountMask === account.mask && t.accountType === account.type) return true;
+        // A debit card merged into this bank keeps its own (card) mask + type, so
+        // match the bank's linked card masks too (mirrors matchAccount in the store).
+        if ((account.aliasMasks || []).includes(t.accountMask)) return true;
+        return false;
       }
       return false;
     },
@@ -282,12 +290,30 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [archivedTransactions, account, belongsToAccount]);
 
-  // Active rows first, then a labelled "earlier / not counted" block of history.
+  // Interleave month dividers into a date-desc row list — only at a month
+  // boundary (never above the first group, none when it's all one month).
+  const withMonthDividers = (rows: Txn[]): any[] => {
+    const out: any[] = [];
+    let lastMonth: string | null = null;
+    for (const t of rows) {
+      const mk = monthKey(t.createdAt);
+      if (lastMonth !== null && mk !== lastMonth) {
+        out.push({ id: `div-${mk}`, __divider: true, monthKey: mk });
+      }
+      lastMonth = mk;
+      out.push(t);
+    }
+    return out;
+  };
+
+  // Active rows (with month dividers) first, then a labelled "earlier / not
+  // counted" block of history. Archived rows stay un-dividered — they're a
+  // reference block, already separated by their own header.
   const ledgerData = useMemo(
     () =>
       archivedLedger.length
-        ? [...ledger, { id: '__earlier_sep__', __sep: true } as any, ...archivedLedger]
-        : ledger,
+        ? [...withMonthDividers(ledger), { id: '__earlier_sep__', __sep: true } as any, ...archivedLedger]
+        : withMonthDividers(ledger),
     [ledger, archivedLedger],
   );
 
@@ -426,6 +452,9 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           data={ledgerData}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
+            if ((item as any).__divider) {
+              return <MonthDivider monthKey={(item as any).monthKey} />;
+            }
             if ((item as any).__sep) {
               return (
                 <View style={styles.earlierSep}>

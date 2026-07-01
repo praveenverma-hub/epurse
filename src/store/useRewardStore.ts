@@ -124,7 +124,7 @@ interface RewardState {
   } | null;
 
   // ── Actions ───────────────────────────────────────────────────────────
-  checkIn:                  (yesterdayTransactionCount: number) => CheckInResult;
+  checkIn:                  (yesterdayTransactionCount: number, gapTransactionCount?: number) => CheckInResult;
   /** Credits pendingSavingsReward balances and clears the pending state. */
   claimSavingsBonus:        () => void;
   recordReview:             () => ReviewResult;
@@ -186,7 +186,7 @@ export const useRewardStore = create<RewardState>()(
       // the previous calendar day (00:00–23:59 yesterday). Callers must query
       // this from the transaction store before calling; passing the current
       // unreviewed queue is WRONG (queue is always empty at morning open).
-      checkIn: (yesterdayTransactionCount) => {
+      checkIn: (yesterdayTransactionCount, gapTransactionCount = 0) => {
         const state = get();
         const today     = toCalendarDate();
         const yesterday = toCalendarDate(new Date(Date.now() - 86_400_000));
@@ -210,12 +210,19 @@ export const useRewardStore = create<RewardState>()(
         // gap === Infinity means lastCheckedInDate was null → very first check-in ever.
         const isFirstCheckIn = state.lastCheckedInDate === null;
 
-        const newStreak  = gap === 1
+        // Grace: a skipped day only breaks the run if the user actually MISSED
+        // being aware — i.e. the missed day(s) had transactions to review. A gap
+        // over days with zero transactions (nothing to be aware of) continues the
+        // run instead of resetting it. `gapTransactionCount` = SMS txns during the
+        // missed days (see selectGapTransactionCount); 0 → forgiven.
+        const forgivenGap = gap > 1 && gapTransactionCount === 0;
+
+        const newStreak  = (gap === 1 || forgivenGap)
           ? state.awareStreak + 1
           : REWARD_CONFIG.STREAK_BASELINE;
 
         const multiplier = multiplierForStreak(newStreak);
-        const isReset    = gap > 1;
+        const isReset    = gap > 1 && !forgivenGap;
 
         // SAVINGS: yesterday had zero SMS txns, bonus not yet claimed for that
         // day, and not already sitting in pendingSavingsReward (re-open guard).

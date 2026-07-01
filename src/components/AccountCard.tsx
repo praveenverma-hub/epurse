@@ -262,7 +262,7 @@ const AccountCard: React.FC<Props> = ({
   }));
 
   return (
-    <View style={{ position: 'relative', marginRight: spacing.md }}>
+    <View style={{ position: 'relative' }}>
       <View style={[styles.flipContainer, { width, height }]}>
         {/* ── Front face ── */}
         <Animated.View
@@ -474,7 +474,12 @@ const FrontFace: React.FC<FrontFaceProps> = ({
                 <Text style={styles.fullyPaidText}>FULLY PAID</Text>
               </View>
             ) : (
-              <Text style={styles.balance} numberOfLines={1}>
+              <Text
+                style={styles.balance}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
+              >
                 {isCreditCard
                   ? formatCompact(outstanding ?? 0)
                   : formatCompact(account.balance)}

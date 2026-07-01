@@ -10,7 +10,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
-  TextInput, Keyboard, Modal,
+  TextInput, Keyboard, Modal, Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -60,6 +60,18 @@ const TYPE_LABEL = {
 
 // Balances reflecting real bank money are gated behind biometric reveal.
 const BALANCE_SENSITIVE = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT_CARD]);
+
+// ── Centered card carousel geometry ──────────────────────────────────────────
+// The active card sits CENTERED; its neighbours peek on both sides and stay put
+// (no drift to the left edge as you swipe). Math:
+//   • CARD_W caps at 300 but shrinks on narrow phones so a peek is always visible.
+//   • SIDE = (screen − card) / 2  → padding that centers the first & last cards.
+//   • snap interval = CARD_W + CARD_GAP, snapped from the start edge, so each card
+//     lands centered. Neighbour peek = SIDE − CARD_GAP.
+const SCREEN_W  = Dimensions.get('window').width;
+const CARD_GAP  = 14;
+const CARD_W    = Math.min(300, SCREEN_W - 88);
+const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
@@ -249,35 +261,39 @@ export default function AccountsScreen({ navigation }) {
           </View>
         ))}
 
-        {/* CRED-style cards — hidden when no accounts */}
+        {/* CRED-style cards — centered peeking carousel (hidden when no accounts) */}
         {sortedAccounts.length > 0 ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.cardsScroll}
             contentContainerStyle={styles.cardsRow}
-            snapToInterval={296}
+            snapToInterval={CARD_W + CARD_GAP}
+            snapToAlignment="start"
+            disableIntervalMomentum
             decelerationRate="fast"
           >
             {sortedAccounts.map((a) => (
-              <AccountCard
-                key={a.id}
-                account={a}
-                active={isFocused}
-                showBalance={!BALANCE_SENSITIVE.has(a.type) || balancesVisible}
-                holderName={userName}
-                onDelete={() =>
-                  setConfirm({
-                    title: 'Remove account?',
-                    message: `Remove "${a.name}"?\n\nTransactions will be kept but unlinked.`,
-                    primaryText: 'Remove',
-                    destructive: true,
-                    secondaryText: 'Cancel',
-                    onSecondary: () => setConfirm(null),
-                    onConfirm: () => { deleteAccount(a.id); setConfirm(null); },
-                  })
-                }
-              />
+              <View key={a.id} style={styles.cardSlot}>
+                <AccountCard
+                  account={a}
+                  width={CARD_W}
+                  active={isFocused}
+                  showBalance={!BALANCE_SENSITIVE.has(a.type) || balancesVisible}
+                  holderName={userName}
+                  onDelete={() =>
+                    setConfirm({
+                      title: 'Remove account?',
+                      message: `Remove "${a.name}"?\n\nTransactions will be kept but unlinked.`,
+                      primaryText: 'Remove',
+                      destructive: true,
+                      secondaryText: 'Cancel',
+                      onSecondary: () => setConfirm(null),
+                      onConfirm: () => { deleteAccount(a.id); setConfirm(null); },
+                    })
+                  }
+                />
+              </View>
             ))}
           </ScrollView>
         ) : null}
@@ -512,13 +528,16 @@ const styles = StyleSheet.create({
   body:        { flex: 1, marginTop: -spacing.lg },
   bodyContent: { paddingTop: spacing.lg, paddingHorizontal: spacing.lg },
 
+  // Full-width breakout so the carousel can center cards against the SCREEN edges
+  // (CARD_SIDE is computed from screen width), not the padded body.
   cardsScroll: { marginHorizontal: -spacing.lg },
   cardsRow:    {
     paddingTop: 14,
     paddingBottom: spacing.md,
-    paddingLeft: spacing.lg,
-    paddingRight: spacing.lg,
+    paddingHorizontal: CARD_SIDE, // centers the first & last card
+    columnGap: CARD_GAP,          // peek gap; pairs with snapToInterval
   },
+  cardSlot:    { width: CARD_W },
   addCardPlaceholder: {
     width: 280, height: 170,
     borderRadius: radius.lg,

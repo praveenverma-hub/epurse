@@ -47,6 +47,7 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import TransactionItem from '../components/TransactionItem';
+import MonthDivider from '../components/MonthDivider';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import CategoryPickerModal from '../components/CategoryPickerModal';
@@ -58,7 +59,7 @@ import CenterModal from '../components/CenterModal';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import { canSplitTransaction, debitDisplayAmount, isGroupExcluded } from '../utils/split';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, monthKey } from '../utils/format';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -76,9 +77,9 @@ const PERIOD_TO_CHIP = { D: 'all', W: 'all', M: 'month', Y: 'all' };
 
 const QUICK_CHIPS = [
   { id: 'all',   label: 'All Transactions', icon: 'list-outline'     },
+  { id: 'month', label: 'This Month',       icon: 'calendar-outline' },
   { id: 'bank',  label: 'Bank Accounts',    icon: 'business-outline' },
   { id: 'cc',    label: 'Credit Cards',     icon: 'card-outline'     },
-  { id: 'month', label: 'This Month',       icon: 'calendar-outline' },
 ];
 
 const FILTER_PANELS = [
@@ -392,8 +393,10 @@ const TransactionsScreen = ({ navigation, route }) => {
       return true;
     });
 
-    // Quick chip pre-filter
-    if (quickChip === 'bank')  list = list.filter((t) => t.accountType === 'Bank Account');
+    // Quick chip pre-filter. NOTE: accountType values come from ACCOUNT_TYPES —
+    // the bank type is 'Bank' (NOT 'Bank Account'); the old string matched nothing.
+    // A debit card draws from a bank, so it counts under "Bank" too.
+    if (quickChip === 'bank')  list = list.filter((t) => t.accountType === 'Bank' || t.accountType === 'Debit Card');
     if (quickChip === 'cc')    list = list.filter((t) => t.accountType === 'Credit Card');
     if (quickChip === 'month') list = list.filter((t) => new Date(t.createdAt) >= startOfMonth);
 
@@ -413,7 +416,9 @@ const TransactionsScreen = ({ navigation, route }) => {
     // accountType match so those transactions still surface under the right account.
     if (applied.method.size > 0) {
       const selAccts  = accounts.filter((a) => applied.method.has(a.id));
-      const selMasks  = new Set(selAccts.map((a) => a.mask).filter(Boolean));
+      // Include linked debit-card masks (aliasMasks) so filtering a bank also
+      // surfaces its merged card's transactions (mirrors matchAccount).
+      const selMasks  = new Set(selAccts.flatMap((a) => [a.mask, ...(a.aliasMasks || [])]).filter(Boolean));
       const selTypes  = new Set(selAccts.map((a) => a.type));
       list = list.filter((t) => {
         if (t.accountId && applied.method.has(t.accountId))   return true;
@@ -438,6 +443,24 @@ const TransactionsScreen = ({ navigation, route }) => {
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
   }, [transactions, quickChip, search, applied]);
+
+  // Interleave month dividers into the (date-desc) list. A divider is inserted
+  // only at a month BOUNDARY — never above the first group, and never at all when
+  // every transaction is in one month. It labels the older month starting below it
+  // (i.e. it appears right after the previous month ends).
+  const listData = useMemo(() => {
+    const out = [];
+    let lastMonth = null;
+    for (const t of filtered) {
+      const mk = monthKey(t.createdAt);
+      if (lastMonth !== null && mk !== lastMonth) {
+        out.push({ _divider: true, id: `div-${mk}`, monthKey: mk });
+      }
+      lastMonth = mk;
+      out.push(t);
+    }
+    return out;
+  }, [filtered]);
 
   // Debit (spend) + credit (inflow) totals across the filtered list — shown
   // alongside the count. Debit uses the user's share (split-aware), like each row.
@@ -684,17 +707,21 @@ const TransactionsScreen = ({ navigation, route }) => {
 
       {/* ── Transaction list ────────────────────────────────────────────── */}
       <FlatList
-        data={filtered}
+        data={listData}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <TransactionItem
-            txn={item}
-            onPressCategory={() => setActiveTxn(item)}
-            onPressSplitChip={() => setSplitDetailsTxn(item)}
-            onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
-          />
-        )}
+        renderItem={({ item }) =>
+          item._divider ? (
+            <MonthDivider monthKey={item.monthKey} />
+          ) : (
+            <TransactionItem
+              txn={item}
+              onPressCategory={() => setActiveTxn(item)}
+              onPressSplitChip={() => setSplitDetailsTxn(item)}
+              onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
+            />
+          )
+        }
         ListHeaderComponent={
           <>
             {/* Inline chip ribbon — scrolls away with the list */}
