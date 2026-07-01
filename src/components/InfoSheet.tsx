@@ -29,6 +29,9 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+
+import { useGradient, useTheme } from '../hooks/useTheme';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +85,11 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
 }) => {
   const opacity   = useSharedValue<number>(0);
   const translate = useSharedValue<number>(SCREEN_H);
+
+  // CTA follows the active accent (gradient pill), so the sheet matches the
+  // theme the user picked instead of a hardcoded orange.
+  const gradient = useGradient();
+  const { textOnGradient } = useTheme();
 
   useEffect(() => {
     if (visible) {
@@ -154,8 +162,15 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
             </View>
           ) : null}
 
-          <Pressable style={styles.cta} onPress={handleDismiss}>
-            <Text style={styles.ctaText}>{ctaText}</Text>
+          <Pressable style={styles.ctaWrap} onPress={handleDismiss}>
+            <LinearGradient
+              colors={gradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.cta}
+            >
+              <Text style={[styles.ctaText, { color: textOnGradient }]}>{ctaText}</Text>
+            </LinearGradient>
           </Pressable>
         </Animated.View>
       </Animated.View>
@@ -248,13 +263,19 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop:  1,
   },
+  // Wrapper owns position + clip so the gradient respects the pill radius on Android.
+  ctaWrap: {
+    alignSelf:    'flex-end',
+    marginTop:    22,
+    borderRadius: 999,
+    overflow:     'hidden',
+  },
   cta: {
-    alignSelf:         'flex-end',
-    marginTop:         22,
     paddingHorizontal: 24,
     paddingVertical:   10,
     borderRadius:      999,
-    backgroundColor:   '#FF5A1F',
+    alignItems:        'center',
+    justifyContent:    'center',
   },
   ctaText: {
     color:         '#FFFFFF',
