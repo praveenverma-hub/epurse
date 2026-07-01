@@ -778,7 +778,7 @@ const styles = StyleSheet.create({
   zoneSub:   { ...typography.tiny, color: colors.textMuted, marginTop: 1 },
 
   // Transactions list
-  txnHeader: { marginBottom: spacing.sm },
+  txnHeader: { marginTop: spacing.md, marginBottom: spacing.md },
   sectionTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   // Plain (no card) — just centred text + emoji.
   emptyTxn: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },
