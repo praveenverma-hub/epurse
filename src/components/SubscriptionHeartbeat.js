@@ -261,7 +261,9 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
                 cy={sp.peakY}
                 r={sp.hasHike ? 4.5 : 4}
                 fill={sp.hasHike ? '#EF4444' : '#3B82F6'}
-                fillOpacity={sp.upcoming ? 0.35 : 1}
+                // Upcoming (not-yet-charged this month) dots are dimmed, but only
+                // lightly — enough to read as "expected" without looking ghosted.
+                fillOpacity={sp.upcoming ? 0.6 : 1}
               />
             ))}
           </Svg>

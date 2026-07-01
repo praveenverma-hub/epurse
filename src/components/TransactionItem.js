@@ -152,17 +152,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    // 12px between rows. Group-chip cards add marginTop:10 which exactly cancels the
-    // chip's 10px upward poke, so the whitespace above every row stays equal to this.
-    marginBottom: spacing.md,
+    // 16px between normal rows.
+    marginBottom: spacing.lg,
     // Let the floating group badge poke above the top edge (don't clip it on Android).
     overflow: 'visible',
     ...shadows.card,
   },
-  // When the floating group badge is present it pokes 10 px above the card top
+  // When the floating group badge is present it pokes 4 px above the card top
   // (translateY: -10). Without a matching marginTop the badge clips into the card
   // above it; this gap exactly clears the overflow.
-  cardWithBadge: { marginTop: 10 },
+  cardWithBadge: { marginTop: 4 },
   // Archived / pre-onboarding rows: flat, recessed card. NO elevation — dimming an
   // elevation-shadow card via a container `opacity` makes Android draw a hard grey
   // shadow box (the "distorted" look). A flat bordered card de-emphasises cleanly.

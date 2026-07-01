@@ -474,12 +474,7 @@ const FrontFace: React.FC<FrontFaceProps> = ({
                 <Text style={styles.fullyPaidText}>FULLY PAID</Text>
               </View>
             ) : (
-              <Text
-                style={styles.balance}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.6}
-              >
+              <Text style={styles.balance}>
                 {isCreditCard
                   ? formatCompact(outstanding ?? 0)
                   : formatCompact(account.balance)}
@@ -665,9 +660,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginTop: 2,
-    // Android clips the trailing glyph of bold text (the "k"/"L"/"Cr" unit) when the
-    // Text view measures a hair narrower than it renders — a little right padding +
-    // includeFontPadding gives the last character room so it's never cut off.
+    // formatCompact output is always short (≤ ~"₹99.99Cr"), so we deliberately DON'T
+    // set numberOfLines={1}/adjustsFontSizeToFit here: that combo is the Android bug
+    // that clips the trailing glyph (the "k"/"L"/"Cr" unit) of single-line bold text.
+    // Left unconstrained it measures & renders in full. paddingRight is belt-and-braces.
     paddingRight: 3,
     includeFontPadding: false,
   },
