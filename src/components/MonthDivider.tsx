@@ -50,8 +50,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+    // The transaction card above already has 12px (spacing.md) bottom margin, so a
+    // small top margin here balances the visual gap above (12+2) vs. below (14) the divider.
+    marginTop: spacing.xxs,
+    marginBottom: spacing.md + 2,
   },
   line: { flex: 1, height: 1, backgroundColor: colors.divider },
   pill: {

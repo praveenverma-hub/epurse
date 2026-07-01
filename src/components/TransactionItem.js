@@ -152,7 +152,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    marginBottom: spacing.sm + 2,
+    // 12px between rows. Group-chip cards add marginTop:10 which exactly cancels the
+    // chip's 10px upward poke, so the whitespace above every row stays equal to this.
+    marginBottom: spacing.md,
     // Let the floating group badge poke above the top edge (don't clip it on Android).
     overflow: 'visible',
     ...shadows.card,

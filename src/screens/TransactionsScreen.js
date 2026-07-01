@@ -932,13 +932,13 @@ const TransactionsScreen = ({ navigation, route }) => {
 
               </View>
 
-              {/* Sticky footer */}
+              {/* Sticky footer — 40% Clear / 60% Apply */}
               <View style={styles.sheetFooter}>
                 <Pressable style={styles.clearAllBtn} onPress={clearAllDraft}>
                   <Text style={styles.clearAllText}>Clear All</Text>
                 </Pressable>
-                <View style={{ flex: 1 }}>
-                  <GradientButton title="Apply Filters" onPress={applyFilters} />
+                <View style={styles.applyBtnWrap}>
+                  <GradientButton title="Apply" onPress={applyFilters} />
                 </View>
               </View>
 
@@ -1351,8 +1351,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider,
     backgroundColor: colors.card,
   },
-  clearAllBtn:  { paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
-  clearAllText: { fontSize: 15, color: colors.textSecondary, fontWeight: '600' },
+  clearAllBtn:  {
+    flex: 0.4,
+    alignItems: 'center', justifyContent: 'center',
+    paddingVertical: spacing.md + 2,
+    borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.divider,
+  },
+  clearAllText: { fontSize: 15, color: colors.textSecondary, fontWeight: '700' },
+  applyBtnWrap: { flex: 0.6 },
 });
 
 export default TransactionsScreen;

@@ -14,6 +14,7 @@ import {
 import Svg, { Circle, G, Rect } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { selectTransactions } from '../store/ePurseStore';
@@ -26,12 +27,30 @@ import GhostLineChart from '../components/GhostLineChart';
 import HabitLeakMatrix from '../components/HabitLeakMatrix';
 import SubscriptionHeartbeat from '../components/SubscriptionHeartbeat';
 import EmptyState from '../components/EmptyState';
+import InfoSheet from '../components/InfoSheet';
 
 const SCREEN_W = Dimensions.get('window').width;
+
+// Explainers for the behavioural cards (tap the ⓘ on each section header).
+const SECTION_INFO = {
+  pace: {
+    title: 'Spending Pace',
+    body: 'Your running total for this month (solid) drawn against last month at the same point (dashed "ghost"). If the solid line sits above the ghost, you\'re spending faster than last month; below means you\'re pacing slower.',
+  },
+  habit: {
+    title: 'Habit Leaks',
+    body: 'Merchants you paid more than once this month, sized by how much they add up to. Small repeat charges (a daily coffee, frequent deliveries) quietly leak money — this surfaces them so you can spot the pattern.',
+  },
+  heartbeat: {
+    title: 'Subscription Heartbeat',
+    body: 'A monthly timeline of recurring charges (Netflix, Spotify, rent…) on the day they hit. Charges dated later than today are dimmed — they\'re expected, not yet paid. A red pulse flags a detected price hike.',
+  },
+};
 
 const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const theme = useTheme();
   const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
+  const [infoKey, setInfoKey] = useState(null); // which section explainer is open
   const date = useMemo(() => {
     const d = new Date();
     d.setMonth(d.getMonth() + monthOffset);
@@ -227,7 +246,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
             {/* ── Behavioral Insights ── */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📈 Spending Pace</Text>
+              <View style={styles.sectionHead}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>📈 Spending Pace</Text>
+                <TouchableOpacity onPress={() => setInfoKey('pace')} hitSlop={10}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.sectionSubtitle}>Your trajectory vs last month — drag to compare any day.</Text>
               {hasPace ? (
                 <GhostLineChart data={dailyData} />
@@ -237,7 +261,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>⚡ Habit Leaks</Text>
+              <View style={styles.sectionHead}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>⚡ Habit Leaks</Text>
+                <TouchableOpacity onPress={() => setInfoKey('habit')} hitSlop={10}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.sectionSubtitle}>Frequency vs. spend — find the sneaky drains. Tap a bubble.</Text>
               {hasBubbles ? (
                 <HabitLeakMatrix bubbles={merchantBubbles} />
@@ -247,7 +276,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>💓 Subscription Heartbeat</Text>
+              <View style={styles.sectionHead}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>💓 Subscription Heartbeat</Text>
+                <TouchableOpacity onPress={() => setInfoKey('heartbeat')} hitSlop={10}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.sectionSubtitle}>Recurring charges visualised as an EKG. Scroll to explore.</Text>
               {hasSubs ? (
                 <SubscriptionHeartbeat subscriptions={allSubscriptions} date={date} />
@@ -260,6 +294,13 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <InfoSheet
+        visible={!!infoKey}
+        onClose={() => setInfoKey(null)}
+        title={infoKey ? SECTION_INFO[infoKey].title : ''}
+        body={infoKey ? SECTION_INFO[infoKey].body : ''}
+      />
     </View>
   );
 };
@@ -443,6 +484,8 @@ const styles = StyleSheet.create({
     ...shadows.card,
   },
   sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  sectionTitleInline: { marginBottom: 0, flexShrink: 1 },
   sectionSubtitle: {
     ...typography.small,
     color: colors.textSecondary,

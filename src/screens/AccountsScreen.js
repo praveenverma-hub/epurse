@@ -7,7 +7,7 @@
 //   • Plain account list below for quick balance scanning
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
   TextInput, Keyboard, Modal, Dimensions,
@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 
 import {
   useEPurseStore,
@@ -72,6 +72,7 @@ const SCREEN_W  = Dimensions.get('window').width;
 const CARD_GAP  = 14;
 const CARD_W    = Math.min(300, SCREEN_W - 88);
 const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
+const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
@@ -98,6 +99,17 @@ export default function AccountsScreen({ navigation }) {
   const [confirm,            setConfirm]            = useState(null);
   const [phoneInput,         setPhoneInput]         = useState('');
 
+  // StatusBar: light glyphs over the gradient header — but ONLY while focused.
+  // A declarative <StatusBar> stays mounted in the tab navigator and would keep
+  // forcing light-content onto the (light-topped) Activity screen, turning its
+  // text invisible. Gating on focus lets each screen own the bar while it's up.
+  useFocusEffect(
+    useCallback(() => {
+      StatusBar.setBarStyle('light-content');
+      StatusBar.setBackgroundColor?.('transparent');
+    }, []),
+  );
+
   const handleAddPhone = () => {
     const digits = phoneInput.replace(/\D/g, '');
     if (digits.length < 4) return;
@@ -123,6 +135,40 @@ export default function AccountsScreen({ navigation }) {
     () => accounts.filter((a) => a.type === ACCOUNT_TYPES.BANK),
     [accounts],
   );
+
+  // ── Looping card carousel ──────────────────────────────────────────────────
+  // With 2+ cards we clone the last card before the first and the first after the
+  // last, then start scrolled onto the first REAL card. That way the previous card
+  // always peeks on the left (no empty gap on card 1) and it wraps seamlessly. On
+  // momentum end, if we've landed on a clone we jump (no animation) to its twin.
+  const carouselRef = useRef(null);
+  const loopEnabled = sortedAccounts.length >= 2;
+  const carouselData = useMemo(() => {
+    const real = sortedAccounts.map((a) => ({ a, key: a.id }));
+    if (!loopEnabled) return real;
+    const first = sortedAccounts[0];
+    const last  = sortedAccounts[sortedAccounts.length - 1];
+    return [
+      { a: last,  key: `clone-left-${last.id}` },
+      ...real,
+      { a: first, key: `clone-right-${first.id}` },
+    ];
+  }, [sortedAccounts, loopEnabled]);
+
+  // Start on the first real card (index 1) so the last card peeks on its left.
+  useEffect(() => {
+    if (!loopEnabled) return;
+    const id = setTimeout(() => carouselRef.current?.scrollTo({ x: CARD_ITV, animated: false }), 0);
+    return () => clearTimeout(id);
+  }, [loopEnabled, sortedAccounts.length]);
+
+  const handleCarouselMomentum = useCallback((e) => {
+    if (!loopEnabled) return;
+    const n = sortedAccounts.length;
+    const idx = Math.round(e.nativeEvent.contentOffset.x / CARD_ITV);
+    if (idx === 0)         carouselRef.current?.scrollTo({ x: CARD_ITV * n, animated: false });      // clone-of-last → real last
+    else if (idx === n + 1) carouselRef.current?.scrollTo({ x: CARD_ITV, animated: false });          // clone-of-first → real first
+  }, [loopEnabled, sortedAccounts.length]);
 
   // Net Worth — your real money across all accounts. Includes private
   // transactions (they reflect actual money movement). See selectEPurseNetWorth
@@ -155,7 +201,8 @@ export default function AccountsScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      {/* StatusBar is driven imperatively via useFocusEffect (above) so it doesn't
+          leak light-content onto other tabs. */}
 
       {/* ── Gradient header ── */}
       <LinearGradient
@@ -261,20 +308,23 @@ export default function AccountsScreen({ navigation }) {
           </View>
         ))}
 
-        {/* CRED-style cards — centered peeking carousel (hidden when no accounts) */}
+        {/* CRED-style cards — centered, looping peek carousel (hidden when none) */}
         {sortedAccounts.length > 0 ? (
           <ScrollView
+            ref={carouselRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.cardsScroll}
             contentContainerStyle={styles.cardsRow}
-            snapToInterval={CARD_W + CARD_GAP}
+            snapToInterval={CARD_ITV}
             snapToAlignment="start"
             disableIntervalMomentum
             decelerationRate="fast"
+            onMomentumScrollEnd={handleCarouselMomentum}
+            {...(loopEnabled ? { contentOffset: { x: CARD_ITV, y: 0 } } : {})}
           >
-            {sortedAccounts.map((a) => (
-              <View key={a.id} style={styles.cardSlot}>
+            {carouselData.map(({ a, key }) => (
+              <View key={key} style={styles.cardSlot}>
                 <AccountCard
                   account={a}
                   width={CARD_W}
