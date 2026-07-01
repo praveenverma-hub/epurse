@@ -26,7 +26,6 @@ import {
   TouchableOpacity,
   FlatList,
   StatusBar,
-  Platform,
   AppState,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
@@ -246,16 +245,6 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => sub.remove();
   }, [isSensitive, authenticate]);
 
-  useEffect(() => {
-    const apply = () => {
-      StatusBar.setBarStyle('dark-content');
-      if (Platform.OS === 'android') StatusBar.setBackgroundColor(theme.background);
-    };
-    apply();
-    const unsub = navigation.addListener('focus', apply);
-    return unsub;
-  }, [navigation, theme.background]);
-
   // Transactions for this account only. Prefer direct accountId link; fall back
   // to type + mask for legacy rows that predate stable account ids.
   const belongsToAccount = useCallback(
@@ -318,8 +307,20 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   );
 
   // ── Shared nav header ──────────────────────────────────────────────────────
+  // The status bar is driven by a DECLARATIVE <StatusBar> (not an imperative
+  // setBarStyle) because this screen is pushed on top of the always-mounted tab
+  // navigator, whose tabs keep their own <StatusBar barStyle="light-content">
+  // entries in RN's global props-stack. An imperative call gets reverted to that
+  // merged "light" on the next props-stack recompute. Mounting our own entry last
+  // (this screen sits on top) makes "dark" win the merge while shown, and cleanly
+  // yields back to the tabs on pop. Dark-mode-aware so text stays legible.
   const renderHeader = () => (
-    <View style={styles.navBar}>
+    <>
+      <StatusBar
+        barStyle={theme.darkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+      <View style={styles.navBar}>
       <TouchableOpacity
         onPress={() => navigation.goBack()}
         style={styles.navBtn}
@@ -331,7 +332,8 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       </TouchableOpacity>
       <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
       <View style={styles.navBtn} />
-    </View>
+      </View>
+    </>
   );
 
   // ── Guard: account missing (e.g. deleted) ─────────────────────────────────
