@@ -808,6 +808,203 @@ const DC_BANK_COREF = [
     expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 450, accountMask: '1234', coAccountMask: null } },
 ];
 
+// Jul-26 stress batch — OTP delivery, declined/failed/blocked txns, CC bill-pay
+// reminders, "processed for a transaction of" card usage, foreign-currency spends,
+// and mask extraction for "CC XX####" / "account ending ####". Senders mirror the
+// live probe. NOTE: a few accepts document KNOWN account-type gaps ("Card ending"
+// / "<Bank> Card XX" without the word "credit" → Debit Card) — asserting only the
+// fields that are stable (amount / mask / merchant), not the mis-inferred type.
+const JUL26_STRESS = [
+  // ── OTP delivery → never a transaction ──
+  { name: 'OTP for CC transaction (Flipkart)',
+    sender: 'ICICIB', sms: '817982 is One-Time Password for INR 87456.00 transaction towards Flipkart In using ICICI Bank Credit Card XX2001. OTPs are SECRET. DO NOT disclose',
+    expect: { accept: false, code: 'otp_message' } },
+  { name: 'OTP (do not share) + foreign amount',
+    sender: 'AMEX', sms: 'Do not share your OTP. 432109 is the OTP for your transaction of USD 45.00 at AMAZON US on Amex Card ending 3002.',
+    expect: { accept: false, code: 'otp_message' } },
+
+  // ── Declined / failed / blocked → no money moved ──
+  { name: 'Transaction declined (insufficient funds)',
+    sender: 'HDFCBK', sms: 'TRANSACTION DECLINED: Your request for INR 3,200.00 at ZOMATO on HDFC Bank Card XX9876 failed due to Insufficient Funds.',
+    expect: { accept: false, code: 'transaction_failed' } },
+  { name: 'Transaction failed (reversed if debited)',
+    sender: 'HDFCBK', sms: 'TRANSACTION FAILED: Rs. 5,000.00 to A/c XX4321 failed at 14:22 on 04-Jul-26. Amount will be reversed if debited.',
+    expect: { accept: false, code: 'transaction_failed' } },
+  { name: 'Transaction blocked (suspected activity)',
+    sender: 'AXISBK', sms: 'Txn of INR 12,500.00 on Axis Bank Debit Card XX9981 at Croma was BLOCKED due to suspected activity. Call bank if this was you.',
+    expect: { accept: false, code: 'transaction_failed' } },
+
+  // ── CC bill-pay reminder (with bank name between "your" and "credit card") ──
+  { name: 'Pay your <bank> credit card bill before <date> → ccDue',
+    sender: 'HDFCBK', sms: 'Pay your HDFC credit card bill of Rs.45,120.00 before 10-Jul to avoid late fees. Click hdfc.com/pay.',
+    expect: { accept: false, code: 'cc_bill_reminder' } },
+
+  // ── Promotional / limit / loan ──
+  { name: 'Credit limit increased → promo',
+    sender: 'SBICRD', sms: 'Congratulations! The credit limit on your SBI Card XX1004 has been increased to INR 3,00,000. T&C Apply.',
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'Pre-approved car loan → promo',
+    sender: 'ICICIB', sms: 'Pre-approved! Get a pre-approved car loan of up to INR 12,00,000 from ICICI Bank today. Check offer in iMobile app.',
+    expect: { accept: false, code: 'promotional_offer' } },
+
+  // ── Real spends ──
+  { name: 'Bank debit "towards Amazon India" → merchant recovered',
+    sender: 'HDFCBK', sms: 'Alert: INR 2,450.00 debited from HDFC Bank A/c XX9876 on 04-Jul-26 towards Amazon India. Clr Bal: INR 45,120.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 2450, accountMask: '9876', merchant: 'Amazon India', categoryId: 'shopping' } },
+  { name: 'CC spend at Swiggy (Avl Limit ignored)',
+    sender: 'ICICIB', sms: 'Spent Rs.450.00 on ICICI Bank Credit Card XX4002 at SWIGGY on 04/07/26. Avl Limit: Rs.1,20,000.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 450, accountMask: '4002', categoryId: 'food' } },
+  { name: '"processed for a transaction of ₹X at MERCHANT" → accepted',
+    sender: 'SBICRD', sms: 'Your SBI Card ending 1004 has been processed for a transaction of ₹12,999.00 at Apple Store on 04 Jul 26.',
+    expect: { accept: true, type: 'debit', amount: 12999, accountMask: '1004', merchant: 'Apple Store' } },
+  { name: 'CC spend at PVR',
+    sender: 'KOTAKB', sms: 'Thank you for using Kotak Credit Card XX8812 for INR 1,240.50 at PVR CINEMAS on 04/07/26.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1240.5, accountMask: '8812' } },
+  { name: 'Bank debit "towards MAKE MY TRIP" → merchant recovered',
+    sender: 'FEDBNK', sms: 'Transaction alert: Rs 4,230.00 debited from Federal Bank A/c XX1293 on 04-07-26 towards MAKE MY TRIP.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 4230, accountMask: '1293', merchant: 'MAKE MY TRIP' } },
+  { name: 'Metro via UPI, balance-in-A/c mask',
+    sender: 'BOBTXN', sms: 'Paid ₹320.00 to BLR METRO via UPI Ref 6192039482. Balance in Bank of Baroda A/c XX4412: ₹12,400.00.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 320, accountMask: '4412', categoryId: 'travel' } },
+  { name: 'Foreign USD (approx INR) picks INR amount, "CC XX####" mask',
+    sender: 'ICICIB', sms: 'Txn of USD 15.00 (approx INR 1,260.00) done on ICICI Bank CC XX2001 at NETFLIX.COM on 04-Jul-26.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1260, accountMask: '2001', merchant: 'NETFLIX.COM' } },
+  { name: 'Foreign JPY with "Approx INR X debited" picks INR',
+    sender: 'ICICIB', sms: 'Spent JPY 4,500 at 7-ELEVEN TOKYO on ICICI Card XX2001. Approx INR 2,450.00 debited.',
+    expect: { accept: true, type: 'debit', amount: 2450, accountMask: '2001' } },
+
+  // ── Credits ──
+  { name: 'Salary credit (NEFT)',
+    sender: 'SBIINB', sms: 'Your a/c no. XXXXXX1234 has been credited with Salary of Rs 85,000.00 on 01-Jul-26 by NEFT (P2A).',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 85000, accountMask: '1234', categoryId: 'salary' } },
+  { name: 'CC reversal credited back, "CC XX####" mask',
+    sender: 'ICICIB', sms: 'REVERSAL: Rs 1,499.00 has been credited back to your ICICI Bank CC XX2001 from FLIPKART on 05-Jul-26.',
+    expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 1499, accountMask: '2001', merchant: 'FLIPKART' } },
+  { name: 'Refund credit, "account ending ####" mask',
+    sender: 'HDFCBK', sms: 'REFUND: Your account ending 4321 has been credited with ₹850.00 from UBER INDIA.',
+    expect: { accept: true, type: 'credit', amount: 850, accountMask: '4321', merchant: 'UBER INDIA' } },
+  { name: 'Dividend credit',
+    sender: 'HDFCBK', sms: 'Dividend of INR 1,200.00 credited to your HDFC Bank A/c XX9876 by TCS LTD on 03-Jul-26.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 1200, accountMask: '9876' } },
+
+  // ── Merchant edge cases (anchored payee w/ noise; NEFT remitter w/ no anchor) ──
+  { name: 'UPI debit "to NAME/." + fraud footer → clean payee, not the footer number',
+    sender: 'INDBNK', sms: 'A/c *9532 debited Rs. 690.00 on 11-06-26 to GULAFSHA  D/. UPI:338920462510. Not you? SMS BLOCK to 9289592895, Dial 1930 for Cyber Fraud - Indian Bank',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 690, accountMask: '9532', merchant: 'GULAFSHA D' } },
+  { name: 'NEFT credit remitter from ref string (no to/from anchor)',
+    sender: 'ICICIB', sms: 'ICICI Bank Account XX171 credited:Rs. 47,997.00 on 30-May-26. Info NEFT-AXISP00802935830-MOONSH. Available Balance is Rs. 1,75,406.96.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 47997, accountMask: '171', merchant: 'MOONSH' } },
+];
+
+// Jul-26 merchant/verb batch (#51-88) — "charged"/"for using" card-usage verbs, merchant
+// cleanup ("using"/"(" stops, "order at"/"auto-renewal of"/"ride with" filler strip),
+// "towards MERCHANT" and NEFT/IMPS "from REMITTER" recovery, subscriptions & VPAs.
+const MERCHANT_JUL26 = [
+  // "charged" as a standalone card-usage verb (was dropped when no "credit"/"debit" word present)
+  { name: '"was charged INR X for auto-renewal of MERCHANT" (Amazon Prime)',
+    sender: 'HDFCBK', sms: 'Your HDFC Bank Card XX9876 was charged INR 1,499.00 for auto-renewal of AMAZON PRIME MEMBERSHIP.',
+    expect: { accept: true, type: 'debit', amount: 1499, accountMask: '9876', merchant: 'AMAZON PRIME MEMBERSHIP' } },
+  { name: '"has been charged ₹X towards MERCHANT" (Spotify SI)',
+    sender: 'SBICRD', sms: 'SI Alert: Your SBI Card ending 1004 has been charged ₹179.00 towards SPOTIFY INDIA.',
+    expect: { accept: true, type: 'debit', amount: 179, accountMask: '1004', merchant: 'SPOTIFY INDIA', categoryId: 'entertainment' } },
+  { name: '"Thank you for using <Card> for INR X at MERCHANT" (plain Card, IRCTC)',
+    sender: 'AXISBK', sms: 'Thank you for using Axis Card XX1102 for INR 4,250.00 at IRCTC TICKETING.',
+    expect: { accept: true, type: 'debit', amount: 4250, accountMask: '1102', merchant: 'IRCTC TICKETING', categoryId: 'travel' } },
+
+  // Merchant boundary/cleanup fixes
+  { name: '"to MERCHANT (UPI Ref …)" — "(" stops the merchant, no sender leak',
+    sender: 'AXISBK', sms: 'Money transferred: ₹350.00 from Axis A/c XX1122 to SWIGGY FOOD DELIVERY (UPI Ref 6182739).',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 350, accountMask: '1122', merchant: 'SWIGGY FOOD DELIVERY' } },
+  { name: '"at MERCHANT using <Card>" — "using" stops the merchant',
+    sender: 'SBICRD', sms: 'Spent ₹1,050.00 at BBDaily using SBI Card XX1004. Avl Limit: ₹94,000.00.',
+    expect: { accept: true, type: 'debit', amount: 1050, accountMask: '1004', merchant: 'BBDaily' } },
+  { name: '"for order at MERCHANT" — filler stripped (Paytm wallet)',
+    sender: 'PAYTM', sms: 'Your Paytm Wallet was debited by Rs.420.00 for order at BIGBASKET SUPERMARKET.',
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 420, merchant: 'BIGBASKET SUPERMARKET' } },
+  { name: '"for order at MERCHANT" — filler stripped (CC)',
+    sender: 'AXISBK', sms: 'Your Axis Bank Credit Card XX1102 was charged Rs.14,999 for order at FLIPKART PAYMENTS.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 14999, accountMask: '1102', merchant: 'FLIPKART PAYMENTS' } },
+  { name: '"for ride with MERCHANT" — filler stripped (Ola on wallet)',
+    sender: 'PAYTM', sms: 'Txn of Rs.220.00 done on Paytm Wallet for ride with OLA CABS on 04-Jul-26.',
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 220, merchant: 'OLA CABS', categoryId: 'travel' } },
+
+  // "towards MERCHANT" recovery (recurring/subscription)
+  { name: 'debit "towards AMAZON SELLER SERVICES"',
+    sender: 'HDFCBK', sms: 'Alert: INR 2,340.80 debited from HDFC Bank A/c XX9876 towards AMAZON SELLER SERVICES.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 2340.8, accountMask: '9876', merchant: 'AMAZON SELLER SERVICES' } },
+  { name: 'Recurring Txn "towards NETFLIX INDIA" on CC',
+    sender: 'ICICIB', sms: 'Recurring Txn: Rs.649.00 debited from ICICI Bank CC XX2001 towards NETFLIX INDIA on 04-Jul-26.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 649, accountMask: '2001', merchant: 'NETFLIX INDIA', categoryId: 'entertainment' } },
+
+  // Credits — NEFT/IMPS remitter + salary
+  { name: 'Salary credit "via NEFT from VECTOSCALAR"',
+    sender: 'HDFCBK', sms: 'Your HDFC Bank A/c XX9876 has been credited with Salary of INR 1,25,000.00 via NEFT from VECTOSCALAR.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 125000, accountMask: '9876', merchant: 'VECTOSCALAR', categoryId: 'salary' } },
+  { name: 'IMPS credit "from ORANGEMANTRA TECH. Ref No:"',
+    sender: 'SBIINB', sms: 'Account XX4321 credited with ₹45,000.00 via IMPS from ORANGEMANTRA TECH. Ref No: 6192837.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 45000, accountMask: '4321', merchant: 'ORANGEMANTRA TECH' } },
+  { name: 'Dividend credit "from ZERODHA"',
+    sender: 'KOTAKB', sms: 'Your Kotak Bank A/c XX8812 has been credited with Rs.3,240.00 via dividend payout from ZERODHA.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 3240, accountMask: '8812', merchant: 'ZERODHA' } },
+
+  // VPA payees kept as-is at parser level (store enricher strips @suffix)
+  { name: 'UPI VPA payee (zepto@ybl)',
+    sender: 'KOTAKB', sms: 'Paid ₹85.00 to zepto@ybl via UPI from your Kotak Bank A/c XX8812.',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 85, accountMask: '8812', merchant: 'zepto@ybl' } },
+];
+
+// Jul-26 edge batch (#89-118) — holds/pre-auth & reversals & disputes, EMI/SIP,
+// foreign→INR, "AC XX####" mask, "sent from" transfers, merchant filler cleanup.
+const EDGE_JUL26 = [
+  // Non-transactions
+  { name: 'EMI conversion of existing purchase → not a new txn',
+    sender: 'ICICIB', sms: 'Your txn of INR 45,000.00 at APPLE STORE on ICICI Bank CC XX2001 has been converted to 6M EMI. Rs.8,120.00 pm will be debited.',
+    expect: { accept: false, code: 'emi_conversion' } },
+  { name: 'Pre-auth hold "held … This is not a charge" → not a spend',
+    sender: 'ICICIB', sms: 'Pre-Auth Alert: INR 5,000.00 held on your ICICI Bank Credit Card XX2001 at TAJ HOTELS RESORTS. This is not a charge.',
+    expect: { accept: false, code: 'preauth_hold' } },
+  { name: 'Refundable security deposit "will be released" → not a spend',
+    sender: 'SBICRD', sms: 'Blocked: ₹3,000.00 on SBI Card XX1004 for Zoomcar Security Deposit. Amount will be released post trip completion.',
+    expect: { accept: false, code: 'preauth_hold' } },
+
+  // Spends
+  { name: 'SIP installment processed → debit, investments',
+    sender: 'HDFCBK', sms: 'Auto-debit ALERT: Your SIP installment of ₹5,000.00 towards NIPPON INDIA MUTUAL FUND was processed from HDFC Bank A/c XX4321.',
+    expect: { accept: true, type: 'debit', amount: 5000, accountMask: '4321', merchant: 'NIPPON INDIA MUTUAL FUND', categoryId: 'investments' } },
+  { name: 'Foreign SGD auto-renewal picks "Equiv INR", merchant recovered',
+    sender: 'AMEX', sms: 'Auto-Renewal Notice: Your Amex card ending 3002 was debited SGD 12.00 towards LINKEDIN PREMIUM. Equiv INR 745.22. Taxes extra.',
+    expect: { accept: true, type: 'debit', amount: 745.22, accountMask: '3002', merchant: 'LINKEDIN PREMIUM' } },
+  { name: 'Annual fee "+ GST" stops merchant (no sender leak)',
+    sender: 'AXISBK', sms: 'Your Axis bank Credit card XX1102 has been charged INR 2,499.00 for Annual Membership Fee + GST. Accum. Reward Points: 4,500.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 2499, accountMask: '1102', merchant: 'Annual Membership Fee' } },
+  { name: 'Fuel spend picks base amount, not the surcharge',
+    sender: 'HDFCBK', sms: 'Spent Rs.1,200.00 at SHELL FUEL STATION on HDFC Card XX9876. Fuel Surcharge of Rs.12.00 applied (Waiver pending).',
+    expect: { accept: true, type: 'debit', amount: 1200, accountMask: '9876', merchant: 'SHELL FUEL STATION', categoryId: 'fuel' } },
+  { name: '"shopping at MERCHANT" filler stripped',
+    sender: 'IDFCFB', sms: 'Thank you for shopping at RELIANCE RETAIL MART. ₹3,421.00 charged via UPI on your IDFC First Bank A/c XX5543.',
+    expect: { accept: true, type: 'debit', amount: 3421, accountMask: '5543', merchant: 'RELIANCE RETAIL MART' } },
+  { name: 'UPI Autopay subscription (YouTube Premium)',
+    sender: 'SBIINB', sms: 'UPI Autopay: ₹199.00 debited from SBI A/c XX1004 towards YOUTUBE PREMIUM RECURRING.',
+    expect: { accept: true, type: 'debit', amount: 199, accountMask: '1004', merchant: 'YOUTUBE PREMIUM RECURRING', categoryId: 'entertainment' } },
+  { name: 'ATM withdrawal "AC XX####" (no slash) yields mask',
+    sender: 'HDFCBK', sms: 'HDFCBank AC XX9876 Debited INR 4,500; ATM WDL; OMNI ATM BLR. Bal INR 12,000.',
+    expect: { accept: true, type: 'debit', amount: 4500, accountMask: '9876' } },
+  { name: '"Transfer: … sent from your A/c" → booked as debit',
+    sender: 'SBIINB', sms: "Transfer: Rs.15,000.00 sent from your SBI A/c XX4321 to sister's account via IMPS. Net Bal: Rs.45,000.",
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 15000, accountMask: '4321' } },
+
+  // Credits — reversal / dispute / refund
+  { name: 'Reversal "cancelled and reversed to your account" → CREDIT',
+    sender: 'SBICRD', sms: 'REVERSAL: Txn of Rs.12,999.00 at FLIPKART on SBI Card XX1004 has been cancelled and reversed to your account.',
+    expect: { accept: true, type: 'credit', amount: 12999, accountMask: '1004', merchant: 'FLIPKART' } },
+  { name: 'Dispute settled credit, merchant "at UBER" recovered',
+    sender: 'KOTAKB', sms: 'Dispute Settled: Your Kotak Bank A/c XX8812 has been credited with INR 3,200.00 for disputed transaction at UBER.',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 3200, accountMask: '8812', merchant: 'UBER' } },
+  { name: 'Partial refund to CC (credit)',
+    sender: 'HDFCBK', sms: 'Partial Refund: Rs.420.00 credited back to your HDFC Credit Card XX9876 from BLINKIT GROCERY.',
+    expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 420, accountMask: '9876', merchant: 'BLINKIT GROCERY' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -820,6 +1017,9 @@ const SUITES = [
   ['Investments / FASTag / fuel-waiver / EMI-loan (Jun-26)', INVEST_FASTAG_EMI],
   ['Credit-limit & mandate-setup (Jun-26)', CREDIT_LIMIT_MANDATE],
   ['Debit-card↔bank co-reference (Jun-26)', DC_BANK_COREF],
+  ['Jul-26 stress (OTP/decline/CC-bill/foreign)', JUL26_STRESS],
+  ['Jul-26 merchant/verb (#51-88)', MERCHANT_JUL26],
+  ['Jul-26 edge (holds/reversals/EMI/#89-118)', EDGE_JUL26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
