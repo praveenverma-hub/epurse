@@ -1,13 +1,15 @@
 // =============================================================================
-// InfoSheet.tsx — reusable bottom-sheet explainer.
+// InfoSheet.tsx — reusable "what is this?" explainer, triggered by an (i) icon.
 //
-// Pure presentation surface for short "what is this?" definitions triggered
-// by tapping a (i) icon. Slides up with a spring, dismisses on backdrop tap
-// or via the "Got it" CTA. Animation graph runs entirely on the UI thread.
+// Two presentations, one component (pick with `variant`):
+//   • 'sheet'  (default) — slides up from the bottom, drag-handle on top.
+//   • 'center'           — fades + scales into the middle of the screen.
+// Everything else (content, gradient CTA, dismiss-on-backdrop) is shared, so a
+// caller can flip between the two by changing a single prop. The whole animation
+// graph runs on the UI thread off one `progress` shared value.
 //
-// Render in dark or light mode? Light only for now — these sheets surface on
-// top of light-mode contexts (RewardShop hero card on dark backdrop too, but
-// the sheet itself sits on top of the screen darkness, not inside it).
+// Render in dark or light mode? Light only for now — these surfaces sit on top of
+// the (dimmed) screen, not inside a themed container.
 // =============================================================================
 
 import React, { useEffect, type ReactNode } from 'react';
@@ -40,7 +42,12 @@ export interface InfoSheetBullet {
   label: string;
   /** Detail line beside the label. */
   value: string;
+  /** Optional leading emoji — renders a badge instead of the accent dot. */
+  emoji?: string;
 }
+
+/** How the explainer is presented. Default 'sheet'. */
+export type InfoSheetVariant = 'sheet' | 'center';
 
 export interface InfoSheetProps {
   visible:    boolean;
@@ -52,14 +59,16 @@ export interface InfoSheetProps {
    * Used as a subheading clarifying the term.
    */
   eyebrow?:   string;
-  /** Main body paragraph. */
-  body:       string;
+  /** Main body paragraph. Optional — omit for a title + bullet-list only sheet. */
+  body?:      string;
   /** Optional structured bullet list rendered below the body. */
   bullets?:   InfoSheetBullet[];
   /** Optional icon rendered above the headline (pass an <Ionicons> node). */
   icon?:      ReactNode;
   /** Override the CTA button label. Default: "Got it". */
   ctaText?:   string;
+  /** Bottom sheet (default) or centered modal. */
+  variant?:   InfoSheetVariant;
   /** Optional override for the host wrapper (rarely needed). */
   style?:     StyleProp<ViewStyle>;
 }
@@ -81,10 +90,12 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   bullets,
   icon,
   ctaText = 'Got it',
+  variant = 'sheet',
   style,
 }) => {
-  const opacity   = useSharedValue<number>(0);
-  const translate = useSharedValue<number>(SCREEN_H);
+  const isCenter = variant === 'center';
+  // Single 0→1 progress drives both presentations (0 = hidden, 1 = shown).
+  const progress = useSharedValue<number>(0);
 
   // CTA follows the active accent (gradient pill), so the sheet matches the
   // theme the user picked instead of a hardcoded orange.
@@ -92,26 +103,16 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   const { textOnGradient } = useTheme();
 
   useEffect(() => {
-    if (visible) {
-      opacity.value   = withTiming(1, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
-      translate.value = withTiming(0, { duration: ENTER_MS, easing: Easing.out(Easing.cubic) });
-    } else {
-      opacity.value   = withTiming(0, { duration: EXIT_MS });
-      translate.value = withTiming(SCREEN_H, {
-        duration: EXIT_MS,
-        easing:   Easing.in(Easing.cubic),
-      });
-    }
-    return () => {
-      cancelAnimation(opacity);
-      cancelAnimation(translate);
-    };
+    progress.value = withTiming(visible ? 1 : 0, {
+      duration: visible ? ENTER_MS : EXIT_MS,
+      easing:   visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+    });
+    return () => cancelAnimation(progress);
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDismiss = (): void => {
-    opacity.value = withTiming(0, { duration: EXIT_MS });
-    translate.value = withTiming(
-      SCREEN_H,
+    progress.value = withTiming(
+      0,
       { duration: EXIT_MS, easing: Easing.in(Easing.cubic) },
       (finished) => {
         if (finished) runOnJS(onClose)();
@@ -119,12 +120,12 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
     );
   };
 
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translate.value }],
-  }));
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const cardStyle = useAnimatedStyle(() =>
+    isCenter
+      ? { opacity: progress.value, transform: [{ scale: 0.92 + progress.value * 0.08 }] }
+      : { transform: [{ translateY: (1 - progress.value) * SCREEN_H }] },
+  );
 
   return (
     <Modal
@@ -134,11 +135,11 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
       statusBarTranslucent
       onRequestClose={handleDismiss}
     >
-      <Animated.View style={[styles.backdrop, backdropStyle, style]}>
+      <Animated.View style={[styles.backdrop, isCenter && styles.backdropCenter, backdropStyle, style]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
 
-        <Animated.View style={[styles.sheet, sheetStyle]}>
-          <View style={styles.handle} />
+        <Animated.View style={[styles.sheet, isCenter && styles.centerCard, cardStyle]}>
+          {isCenter ? null : <View style={styles.handle} />}
 
           <View style={styles.titleRow}>
             {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
@@ -146,13 +147,19 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
           </View>
           {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
 
-          <Text style={styles.body}>{body}</Text>
+          {body ? <Text style={styles.body}>{body}</Text> : null}
 
           {bullets?.length ? (
             <View style={styles.bulletWrap}>
               {bullets.map((b, i) => (
                 <View key={`${b.label}-${i}`} style={styles.bulletRow}>
-                  <View style={styles.bulletDot} />
+                  {b.emoji ? (
+                    <View style={styles.bulletBadge}>
+                      <Text style={styles.bulletBadgeText}>{b.emoji}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.bulletDot} />
+                  )}
                   <View style={styles.bulletText}>
                     <Text style={styles.bulletLabel}>{b.label}</Text>
                     <Text style={styles.bulletValue}>{b.value}</Text>
@@ -188,6 +195,11 @@ const styles = StyleSheet.create({
     backgroundColor:  'rgba(5, 8, 16, 0.65)',
     justifyContent:   'flex-end',
   },
+  // Centered variant: middle of the screen with side gutters.
+  backdropCenter: {
+    justifyContent:    'center',
+    paddingHorizontal: 24,
+  },
   sheet: {
     backgroundColor:      '#FFFFFF',
     paddingHorizontal:    22,
@@ -195,6 +207,16 @@ const styles = StyleSheet.create({
     paddingBottom:        34,
     borderTopLeftRadius:  28,
     borderTopRightRadius: 28,
+  },
+  // Centered card: all four corners rounded, no drag handle, symmetric padding.
+  centerCard: {
+    alignSelf:               'stretch',
+    paddingTop:              22,
+    paddingBottom:           22,
+    borderTopLeftRadius:     24,
+    borderTopRightRadius:    24,
+    borderBottomLeftRadius:  24,
+    borderBottomRightRadius: 24,
   },
   handle: {
     width:           38,
@@ -234,7 +256,7 @@ const styles = StyleSheet.create({
   },
   bulletWrap: {
     marginTop: 14,
-    gap:       10,
+    gap:       12,
   },
   bulletRow: {
     flexDirection: 'row',
@@ -248,6 +270,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF5A1F',
     marginTop:       7,
   },
+  // Emoji badge (used when a bullet has an `emoji`) — small rounded tile.
+  bulletBadge: {
+    width:           32,
+    height:          32,
+    borderRadius:    9,
+    backgroundColor: '#F1F3F5',
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
+  bulletBadgeText: { fontSize: 16 },
   bulletText: {
     flex: 1,
   },

@@ -66,6 +66,8 @@ const KIND_TINT: Record<NotificationKind, string> = {
 };
 
 // ─── Time-ago helper ────────────────────────────────────────────────────────
+// Under a day: relative ("just now" / "Xm ago" / "Xh ago"). A day or older: the
+// actual date (e.g. "4 Jul", or "4 Jul 2025" across years) — clearer than "3d"/"2w".
 
 const timeAgo = (ms: number): string => {
   const diff = Math.max(0, Date.now() - ms);
@@ -74,10 +76,14 @@ const timeAgo = (ms: number): string => {
   if (m < 60)   return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24)   return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7)    return `${d}d ago`;
-  const w = Math.floor(d / 7);
-  return `${w}w ago`;
+  // ≥ 1 day ago → show the date. Include the year only when it differs from now.
+  const dt  = new Date(ms);
+  const now = new Date();
+  const opts: Intl.DateTimeFormatOptions =
+    dt.getFullYear() === now.getFullYear()
+      ? { day: 'numeric', month: 'short' }
+      : { day: 'numeric', month: 'short', year: 'numeric' };
+  return dt.toLocaleDateString('en-IN', opts);
 };
 
 // ─── Component ──────────────────────────────────────────────────────────────

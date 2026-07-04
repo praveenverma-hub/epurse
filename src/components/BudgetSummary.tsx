@@ -5,6 +5,7 @@ import Animated, { useAnimatedProps, useSharedValue, withTiming } from 'react-na
 import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import InfoSheet from './InfoSheet';
 
 // Essential (survival) categories — keyed by the first-level BUDGET parent ids
 // the plan actually uses (groceries rolls into food, utilities→bills,
@@ -284,53 +285,18 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
         </View>
       )}
 
-      {/* INFO MODAL */}
-      <Modal visible={showInfo} transparent animationType="slide" onRequestClose={() => setShowInfo(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowInfo(false)}>
-          <View style={[styles.bottomSheet, { backgroundColor: theme.card }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: theme.divider }]} />
-            <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>Budget Features</Text>
-            <ScrollView style={styles.sheetScroll}>
-              <View style={styles.featureItem}>
-                <View style={[styles.featureBadge, { backgroundColor: theme.background }]}>
-                  <Text style={styles.featureBadgeText}>⚖️</Text>
-                </View>
-                <View style={styles.featureContent}>
-                  <Text style={[styles.featureName, { color: theme.textPrimary }]}>Smart Rebalancing</Text>
-                  <Text style={[styles.featureDesc, { color: theme.textSecondary }]}>
-                    Move funds from under-budget categories to cover overages without increasing total spend.
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.featureItem}>
-                <View style={[styles.featureBadge, { backgroundColor: theme.background }]}>
-                  <Text style={styles.featureBadgeText}>⚡</Text>
-                </View>
-                <View style={styles.featureContent}>
-                  <Text style={[styles.featureName, { color: theme.textPrimary }]}>Cooldown Freezes</Text>
-                  <Text style={[styles.featureDesc, { color: theme.textSecondary }]}>
-                    Lock spending for remaining days to preserve budget. Ideal for month-end discipline.
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.featureItem}>
-                <View style={[styles.featureBadge, { backgroundColor: theme.background }]}>
-                  <Text style={styles.featureBadgeText}>🔒</Text>
-                </View>
-                <View style={styles.featureContent}>
-                  <Text style={[styles.featureName, { color: theme.textPrimary }]}>Essential Mode</Text>
-                  <Text style={[styles.featureDesc, { color: theme.textSecondary }]}>
-                    Filters view to survival categories only (Groceries, Utilities, Transport). Hides discretionary spend.
-                  </Text>
-                </View>
-              </View>
-            </ScrollView>
-            <TouchableOpacity style={[styles.closeButton, { backgroundColor: theme.textPrimary }]} onPress={() => setShowInfo(false)}>
-              <Text style={styles.closeButtonText}>Got it</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* INFO SHEET — unified explainer (bottom sheet; switchable to center via variant) */}
+      <InfoSheet
+        visible={showInfo}
+        onClose={() => setShowInfo(false)}
+        title="Budget Features"
+        body="Smart tools that help you stay within budget:"
+        bullets={[
+          { emoji: '⚖️', label: 'Smart Rebalancing', value: 'Move funds from under-budget categories to cover overages without increasing total spend.' },
+          { emoji: '⚡', label: 'Cooldown Freezes',  value: 'Lock spending for remaining days to preserve budget. Ideal for month-end discipline.' },
+          { emoji: '🔒', label: 'Essential Mode',    value: 'Filters view to survival categories only (Groceries, Utilities, Transport). Hides discretionary spend.' },
+        ]}
+      />
 
       {/* REBALANCE MODAL */}
       <Modal visible={showRebalance} transparent animationType="slide" onRequestClose={() => setShowRebalance(false)}>

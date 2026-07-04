@@ -4,7 +4,7 @@
 // Right swipe  → approve  → recordReview() → +RP / +EPC drift animation
 // Left swipe   → category picker → mark reviewed after selection
 // Empty queue  → InboxZero celebration card
-// ⓘ icon       → opens QueueCapInfoSheet explaining the 20/day earning cap
+// ⓘ icon       → opens InfoSheet explaining the 20/day earning cap
 // =============================================================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -40,7 +40,8 @@ import SplitConfigModal from './SplitConfigModal';
 import GroupPickerSheet from './GroupPickerSheet';
 import GroupExpenseSheet from './GroupExpenseSheet';
 import CenterModal from './CenterModal';
-import QueueCapInfoSheet from './QueueCapInfoSheet';
+import InfoSheet from './InfoSheet';
+import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_H         = 152;
@@ -687,9 +688,12 @@ const DailyQueueStack = () => {
       />
 
       {/* ── Daily cap explainer ── */}
-      <QueueCapInfoSheet
+      <InfoSheet
         visible={showCapInfo}
         onClose={() => setShowCapInfo(false)}
+        title={REWARD_COPY.CAP_HEADLINE}
+        eyebrow={`${REWARD_CONFIG.DAILY_REVIEW_CAP}/day · resets daily`}
+        body={REWARD_COPY.CAP_DESCRIPTION}
       />
     </View>
   );
