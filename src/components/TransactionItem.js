@@ -126,17 +126,20 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         ) : null}
       </View>
 
-      {/* Floating group badge — straddles the top-right corner (≈50% in / 50% out). */}
+      {/* Group ribbon — a banner attached flush to the card's top-right corner. */}
       {showGroupChip ? (
         <View
           style={[
-            styles.groupChipFloat,
-            { backgroundColor: colors.card, borderColor: (group.color || colors.info) + '55' },
+            styles.groupBanner,
+            {
+              backgroundColor: (group.color || colors.info) + '1A',
+              borderColor: (group.color || colors.info) + '33',
+            },
           ]}
           pointerEvents="none"
         >
-          <Text style={styles.groupChipFloatEmoji}>{group.emoji || '🗂'}</Text>
-          <Text style={[styles.groupChipFloatText, { color: group.color || colors.info }]} numberOfLines={1}>
+          <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text>
+          <Text style={[styles.groupBannerText, { color: group.color || colors.info }]} numberOfLines={1}>
             {groupLabel}
           </Text>
         </View>
@@ -152,16 +155,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    // 16px between normal rows.
-    marginBottom: spacing.lg,
+    // 12px between normal rows.
+    marginBottom: spacing.md,
     // Let the floating group badge poke above the top edge (don't clip it on Android).
     overflow: 'visible',
     ...shadows.card,
   },
-  // When the floating group badge is present it pokes 4 px above the card top
-  // (translateY: -10). Without a matching marginTop the badge clips into the card
-  // above it; this gap exactly clears the overflow.
-  cardWithBadge: { marginTop: 4 },
   // Archived / pre-onboarding rows: flat, recessed card. NO elevation — dimming an
   // elevation-shadow card via a container `opacity` makes Android draw a hard grey
   // shadow box (the "distorted" look). A flat bordered card de-emphasises cleanly.
@@ -190,38 +189,6 @@ const styles = StyleSheet.create({
   statusChipText: {
     ...typography.tiny,
     fontWeight: '700',
-  },
-  // Floating corner badge: half above the card's top edge (translateY = -height/2),
-  // inset from the right. Solid card-coloured fill + coloured border so it reads as a
-  // pill sitting on the edge; small elevation/zIndex so it stays above neighbours.
-  groupChipFloat: {
-    position: 'absolute',
-    top: 0,
-    right: 12,
-    transform: [{ translateY: -10 }],
-    height: 20,
-    maxWidth: 132,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    // Match the inline chips' border (radius.sm + colour + '55').
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    zIndex: 3,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-  },
-  groupChipFloatEmoji: { fontSize: 10, marginRight: 3 },
-  groupChipFloatText: {
-    ...typography.tiny,
-    fontWeight: '700',
-    flexShrink: 1,
-    textAlign: 'center',
-    includeFontPadding: false,
   },
   hiddenTag: {
     marginLeft: spacing.xs,
@@ -275,6 +242,32 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '600',
     maxWidth: 112,
+  },
+  // Ribbon tag — flush to the top-right corner of the card, no top border so it
+  // reads as a tag growing out of the card edge.
+  groupBanner: {
+    position: 'absolute',
+    top: 0,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderBottomLeftRadius: radius.sm,
+    borderBottomRightRadius: radius.sm,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    zIndex: 3,
+    elevation: 2,
+  },
+  groupBannerEmoji: { fontSize: 10, marginRight: 3 },
+  groupBannerText: {
+    ...typography.tiny,
+    fontWeight: '700',
+    flexShrink: 1,
+    includeFontPadding: false,
   },
 });
 

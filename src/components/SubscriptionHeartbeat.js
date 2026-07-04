@@ -115,46 +115,68 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
     return max || 1;
   }, [dayCharges]);
 
-  // Build EKG path
-  const { ekgPath, spikePositions } = useMemo(() => {
+  // Build EKG path.
+  // We emit TWO things so the forecast part of the chart can recede:
+  //   • solidPath  — the continuous baseline + every spike that has ALREADY happened.
+  //   • dimSpikePaths — one standalone path per UPCOMING spike (a not-yet-charged day
+  //     this month = a repeat of last month's recurring charge). These render at a low
+  //     stroke opacity so this month's actual spikes read as the real signal. A single
+  //     SVG <Path> can't vary opacity per segment, hence the split. Under a dimmed
+  //     spike the solid path just runs flat along the baseline, so the two connect.
+  const { solidPath, dimSpikePaths, spikePositions } = useMemo(() => {
     const toX = (d) => LEAD + (d - 0.5) * DAY_W;
-    let path = `M 0 ${BASELINE}`;
+    let solid = `M 0 ${BASELINE}`;
+    const dimPaths = [];
     const spikes = [];
 
     for (let d = 1; d <= daysInMonth; d++) {
       const cx = toX(d);
       if (!dayCharges.has(d)) {
-        path += ` L ${cx} ${BASELINE}`;
-      } else {
-        const charges = dayCharges.get(d);
-        const totalDayAmt = charges.reduce((s, c) => s + c.amount, 0);
-        const spikeH = MIN_SPIKE_H + (totalDayAmt / maxAmount) * (MAX_SPIKE_H - MIN_SPIKE_H);
-        const peakY = BASELINE - spikeH;
-
-        path += ` L ${cx - 6} ${BASELINE}`;
-        path += ` L ${cx - 3} ${BASELINE + 5}`;
-        path += ` L ${cx} ${peakY}`;
-        path += ` L ${cx + 4} ${BASELINE + 8}`;
-        path += ` L ${cx + 8} ${BASELINE}`;
-
-        spikes.push({
-          day: d,
-          cx,
-          peakY,
-          charges,
-          hasHike: charges.some((c) => c.priceHike),
-          // In the current month, a charge dated after today hasn't happened yet —
-          // it's the expected/recurring day. Rendered dimmed so day-1 reads as a
-          // forecast of the month, not a repeat of last month's actuals.
-          upcoming: isCurrentMonth && d > currentDay,
-        });
+        solid += ` L ${cx} ${BASELINE}`;
+        continue;
       }
+
+      const charges = dayCharges.get(d);
+      const totalDayAmt = charges.reduce((s, c) => s + c.amount, 0);
+      const spikeH = MIN_SPIKE_H + (totalDayAmt / maxAmount) * (MAX_SPIKE_H - MIN_SPIKE_H);
+      const peakY = BASELINE - spikeH;
+
+      // In the current month, a charge dated after today hasn't happened yet — it's the
+      // expected/recurring day. Dimmed so it reads as a forecast, not an actual.
+      const upcoming = isCurrentMonth && d > currentDay;
+
+      if (upcoming) {
+        // Keep the solid baseline flat under it; draw the spike itself dimmed on top.
+        solid += ` L ${cx} ${BASELINE}`;
+        dimPaths.push(
+          `M ${cx - 6} ${BASELINE}` +
+            ` L ${cx - 3} ${BASELINE + 5}` +
+            ` L ${cx} ${peakY}` +
+            ` L ${cx + 4} ${BASELINE + 8}` +
+            ` L ${cx + 8} ${BASELINE}`
+        );
+      } else {
+        solid += ` L ${cx - 6} ${BASELINE}`;
+        solid += ` L ${cx - 3} ${BASELINE + 5}`;
+        solid += ` L ${cx} ${peakY}`;
+        solid += ` L ${cx + 4} ${BASELINE + 8}`;
+        solid += ` L ${cx + 8} ${BASELINE}`;
+      }
+
+      spikes.push({
+        day: d,
+        cx,
+        peakY,
+        charges,
+        hasHike: charges.some((c) => c.priceHike),
+        upcoming,
+      });
     }
 
     const totalWidth = LEAD + daysInMonth * DAY_W + 12;
-    path += ` L ${totalWidth} ${BASELINE}`;
+    solid += ` L ${totalWidth} ${BASELINE}`;
 
-    return { ekgPath: path, spikePositions: spikes };
+    return { solidPath: solid, dimSpikePaths: dimPaths, spikePositions: spikes };
   }, [dayCharges, daysInMonth, maxAmount, isCurrentMonth, currentDay]);
 
   const totalWidth = LEAD + daysInMonth * DAY_W + 12;
@@ -244,14 +266,28 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
               />
             )}
 
-            {/* EKG path */}
+            {/* EKG path — baseline + already-happened spikes at full strength */}
             <Path
-              d={ekgPath}
+              d={solidPath}
               stroke="#3B82F6"
               strokeWidth={2}
               strokeLinecap="round"
               fill="none"
             />
+
+            {/* Upcoming (forecast) spike lines — dimmed so this month's actuals stand out.
+                Thin strokes need a lower opacity than the dots to read as "expected". */}
+            {dimSpikePaths.map((d, i) => (
+              <Path
+                key={`dim-${i}`}
+                d={d}
+                stroke="#3B82F6"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeOpacity={0.3}
+                fill="none"
+              />
+            ))}
 
             {/* Spike top dots — upcoming (not-yet-charged this month) are dimmed */}
             {spikePositions.map((sp) => (

@@ -73,9 +73,10 @@ const CARD_W    = Math.min(300, SCREEN_W - 88);
 const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
 const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
 
-// Collapsing-header geometry: the pinned title bar, and the "Net Worth" hero that
+// Collapsing-header geometry: the pinned title bar (taller so the collapsed header
+// keeps comfortable padding below the heading), and the "Net Worth" hero that
 // fades/collapses on scroll (both exclude the top safe-area inset).
-const HEADER_BAR_H  = 52;
+const HEADER_BAR_H  = 68;
 const HEADER_HERO_H = 84;
 
 export default function AccountsScreen({ navigation }) {
@@ -217,34 +218,38 @@ export default function AccountsScreen({ navigation }) {
         heroHeight={HEADER_HERO_H}
         curveRadius={radius.xl}
         contentContainerStyle={styles.bodyContent}
-        renderBar={(progress) => (
-          <View style={styles.barRow}>
-            <Text style={styles.headerTitle}>Accounts</Text>
-            <View style={styles.headerActions}>
-              {/* Compact balance chip — fades/slides in only as the hero collapses. */}
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.balChip,
-                  {
-                    opacity: progress.interpolate({ inputRange: [0.45, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
-                    transform: [{ translateX: progress.interpolate({ inputRange: [0.45, 1], outputRange: [10, 0], extrapolate: 'clamp' }) }],
-                  },
-                ]}
-              >
-                <Text style={styles.balChipText} numberOfLines={1}>
-                  {balancesVisible ? formatCompact(totalBalance) : '••••'}
-                </Text>
-              </Animated.View>
-              <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
-                <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => setAddAccountVisible(true)} activeOpacity={0.7}>
-                <Ionicons name="add" size={22} color="#fff" />
-              </TouchableOpacity>
+        renderBar={(progress) => {
+          // The eye (shown expanded) cross-fades into the balance chip (collapsed)
+          // in one slot — the eye hides on scroll to free space for the amount.
+          const eyeOpacity  = progress.interpolate({ inputRange: [0, 0.55], outputRange: [1, 0], extrapolate: 'clamp' });
+          const chipOpacity = progress.interpolate({ inputRange: [0.4, 1], outputRange: [0, 1], extrapolate: 'clamp' });
+          const chipShift   = progress.interpolate({ inputRange: [0.4, 1], outputRange: [8, 0], extrapolate: 'clamp' });
+          return (
+            <View style={styles.barRow}>
+              <Text style={styles.headerTitle}>Accounts</Text>
+              <View style={styles.headerActions}>
+                {/* Balance control: eye ⇆ chip cross-fade. Both tap to toggle. */}
+                <View style={styles.balSlot}>
+                  <Animated.View style={{ opacity: chipOpacity, transform: [{ translateX: chipShift }] }}>
+                    <TouchableOpacity style={styles.balChip} onPress={handleToggleBalances} activeOpacity={0.8}>
+                      <Text style={styles.balChipText} numberOfLines={1}>
+                        {balancesVisible ? formatCompact(totalBalance) : '••••'}
+                      </Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                  <Animated.View style={[styles.balSlotEye, { opacity: eyeOpacity }]} pointerEvents="box-none">
+                    <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
+                      <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
+                    </TouchableOpacity>
+                  </Animated.View>
+                </View>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => setAddAccountVisible(true)} activeOpacity={0.7}>
+                  <Ionicons name="add" size={22} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        )}
+          );
+        }}
         renderHero={() => (
           <View>
             <Text style={styles.headerLabel}>Net Worth</Text>
@@ -581,16 +586,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF22',
     alignItems: 'center', justifyContent: 'center',
   },
-  // Compact balance chip that slides into the bar when the hero collapses.
+  // Balance control slot: the chip sits in flow (defines the slot width) and the
+  // eye is stacked over it, so they cross-fade in place without shifting the +.
+  balSlot:    { position: 'relative', justifyContent: 'center' },
+  balSlotEye: { ...StyleSheet.absoluteFillObject, alignItems: 'flex-end', justifyContent: 'center' },
+  // Compact balance chip — same 40px height as the icon buttons.
   balChip: {
-    paddingHorizontal: 12,
-    paddingVertical:   5,
-    borderRadius:      radius.pill,
+    height:            40,
+    minWidth:          64,
+    maxWidth:          140,
+    paddingHorizontal: 14,
+    borderRadius:      20,
     backgroundColor:   '#FFFFFF26',
-    maxWidth:          130,
+    alignItems:        'center',
     justifyContent:    'center',
   },
-  balChipText: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: -0.2 },
+  balChipText: { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: -0.2 },
 
   // paddingTop is managed by CollapsingHeaderScreen (= expanded header height).
   bodyContent: { paddingHorizontal: spacing.lg },
