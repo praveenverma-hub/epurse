@@ -130,14 +130,14 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
       {/* Group ribbon — gradient tag hanging from the card's top-right edge. */}
       {showGroupChip ? (
         <LinearGradient
-          colors={[group.color || colors.info, (group.color || colors.info) + 'AA', '#FFFFFF']}
+          colors={[group.color || colors.info, (group.color || colors.info) + '55', '#FFFFFF00']}
           start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
+          end={{ x: 0, y: 0.45 }}
           style={styles.groupBanner}
           pointerEvents="none"
         >
-          <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text>
-          <View style={styles.groupBannerPill}>
+          <View style={styles.groupBannerRow}>
+            <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text>
             <Text style={[styles.groupBannerText, { color: group.color || colors.info }]} numberOfLines={1}>
               {groupLabel}
             </Text>
@@ -249,29 +249,28 @@ const styles = StyleSheet.create({
     top: 0,
     right: 14,
     width: 64,
-    paddingTop: 6,
-    paddingBottom: 8,
-    alignItems: 'flex-start',
+    height: 26,
+    justifyContent: 'flex-end',
     paddingHorizontal: 7,
+    paddingBottom: 4,
     borderBottomLeftRadius: radius.md,
     borderBottomRightRadius: radius.md,
     zIndex: 3,
     elevation: 3,
     overflow: 'hidden',
   },
-  groupBannerEmoji: { fontSize: 14, marginBottom: 4 },
-  groupBannerPill: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: radius.pill,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    width: 50,
+  groupBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
+  groupBannerEmoji: { fontSize: 10 },
   groupBannerText: {
     ...typography.tiny,
     fontWeight: '800',
     textAlign: 'left',
     includeFontPadding: false,
+    flexShrink: 1,
   },
 });
 
