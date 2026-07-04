@@ -850,7 +850,7 @@ const styles = StyleSheet.create({
 
   // Body
   body: { flex: 1, marginTop: -spacing.lg },
-  bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
+  bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, flexGrow: 1 },
 
   sectionTitle: { ...typography.h3, color: colors.textPrimary },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },

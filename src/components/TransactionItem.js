@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
@@ -126,23 +127,22 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         ) : null}
       </View>
 
-      {/* Group ribbon — a banner attached flush to the card's top-right corner. */}
+      {/* Group ribbon — gradient tag hanging from the card's top-right edge. */}
       {showGroupChip ? (
-        <View
-          style={[
-            styles.groupBanner,
-            {
-              backgroundColor: (group.color || colors.info) + '1A',
-              borderColor: (group.color || colors.info) + '33',
-            },
-          ]}
+        <LinearGradient
+          colors={[group.color || colors.info, (group.color || colors.info) + 'AA', '#FFFFFF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.groupBanner}
           pointerEvents="none"
         >
           <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text>
-          <Text style={[styles.groupBannerText, { color: group.color || colors.info }]} numberOfLines={1}>
-            {groupLabel}
-          </Text>
-        </View>
+          <View style={styles.groupBannerPill}>
+            <Text style={[styles.groupBannerText, { color: group.color || colors.info }]} numberOfLines={1}>
+              {groupLabel}
+            </Text>
+          </View>
+        </LinearGradient>
       ) : null}
     </TouchableOpacity>
   );
@@ -243,30 +243,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     maxWidth: 112,
   },
-  // Ribbon tag — flush to the top-right corner of the card, no top border so it
-  // reads as a tag growing out of the card edge.
+  // Gradient ribbon tag — dark group colour at top fading to white, hangs from card edge.
   groupBanner: {
     position: 'absolute',
     top: 0,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderBottomLeftRadius: radius.sm,
-    borderBottomRightRadius: radius.sm,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderWidth: 1,
-    borderTopWidth: 0,
+    right: 14,
+    width: 64,
+    paddingTop: 6,
+    paddingBottom: 8,
+    alignItems: 'flex-start',
+    paddingHorizontal: 7,
+    borderBottomLeftRadius: radius.md,
+    borderBottomRightRadius: radius.md,
     zIndex: 3,
-    elevation: 2,
+    elevation: 3,
+    overflow: 'hidden',
   },
-  groupBannerEmoji: { fontSize: 10, marginRight: 3 },
+  groupBannerEmoji: { fontSize: 14, marginBottom: 4 },
+  groupBannerPill: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.pill,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    width: 50,
+  },
   groupBannerText: {
     ...typography.tiny,
-    fontWeight: '700',
-    flexShrink: 1,
+    fontWeight: '800',
+    textAlign: 'left',
     includeFontPadding: false,
   },
 });

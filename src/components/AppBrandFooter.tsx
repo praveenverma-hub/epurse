@@ -42,14 +42,15 @@ export default AppBrandFooter;
 
 const styles = StyleSheet.create({
   wrap: {
-    marginHorizontal:  -GUTTER, // break out of the host's padding → full-width band
-    paddingVertical:   spacing.lg,
-    paddingLeft:       GUTTER,  // keep the wordmark on the app's left gutter
+    marginHorizontal:  -GUTTER,
+    paddingVertical:   spacing.xl,
+    paddingLeft:       GUTTER,
+    paddingBottom:     spacing.xl * 3, // absorb safe-area / nav bar space
     backgroundColor:   '#EBEEF2',
     borderTopWidth:    1,
-    borderBottomWidth: 1,
     borderColor:       colors.divider,
     alignItems:        'flex-start',
+    marginTop:         'auto',         // push to bottom when ScrollView has flexGrow:1
   },
   name: {
     fontSize:      42,
