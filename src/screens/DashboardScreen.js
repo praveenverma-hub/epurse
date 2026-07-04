@@ -38,6 +38,7 @@ import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
 import BellIcon from '../components/BellIcon';
 import NotificationsSheet from '../components/NotificationsSheet';
+import AppBrandFooter from '../components/AppBrandFooter';
 import {
   useNotificationStore,
   selectHasUnreadNotifications,
@@ -395,6 +396,8 @@ const DashboardScreen = ({ navigation }) => {
             />
           ))
         )}
+
+        <AppBrandFooter />
 
         <View style={{ height: TAB_BAR_HEIGHT + 80 }} />
       </ScrollView>
