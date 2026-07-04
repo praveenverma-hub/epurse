@@ -9,11 +9,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
+  AppState, Animated, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
   TextInput, Keyboard, Modal, Dimensions,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
@@ -26,7 +24,7 @@ import {
 } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatCompact } from '../utils/format';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
@@ -34,6 +32,7 @@ import AccountCard    from '../components/AccountCard';
 import AddAccountModal from '../components/AddAccountModal';
 import CenterModal    from '../components/CenterModal';
 import InfoSheet      from '../components/InfoSheet';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 const TYPE_ORDER = {
   [ACCOUNT_TYPES.CASH]:        0,
@@ -73,6 +72,11 @@ const CARD_GAP  = 14;
 const CARD_W    = Math.min(300, SCREEN_W - 88);
 const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
 const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
+
+// Collapsing-header geometry: the pinned title bar, and the "Net Worth" hero that
+// fades/collapses on scroll (both exclude the top safe-area inset).
+const HEADER_BAR_H  = 52;
+const HEADER_HERO_H = 84;
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
@@ -204,16 +208,34 @@ export default function AccountsScreen({ navigation }) {
       {/* StatusBar is driven imperatively via useFocusEffect (above) so it doesn't
           leak light-content onto other tabs. */}
 
-      {/* ── Gradient header ── */}
-      <LinearGradient
-        colors={[theme.gradientStart, theme.gradientEnd]}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <SafeAreaView edges={['top']}>
-          <View style={styles.headerHeading}>
+      {/* ── Collapsing themed header + scrollable body ──
+          The gradient header (with curve) slides up on scroll; the big "Net Worth"
+          hero fades out while a compact balance chip slides into the pinned bar. */}
+      <CollapsingHeaderScreen
+        gradientColors={[theme.gradientStart, theme.gradientEnd]}
+        barHeight={HEADER_BAR_H}
+        heroHeight={HEADER_HERO_H}
+        curveRadius={radius.xl}
+        contentContainerStyle={styles.bodyContent}
+        renderBar={(progress) => (
+          <View style={styles.barRow}>
             <Text style={styles.headerTitle}>Accounts</Text>
             <View style={styles.headerActions}>
+              {/* Compact balance chip — fades/slides in only as the hero collapses. */}
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.balChip,
+                  {
+                    opacity: progress.interpolate({ inputRange: [0.45, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+                    transform: [{ translateX: progress.interpolate({ inputRange: [0.45, 1], outputRange: [10, 0], extrapolate: 'clamp' }) }],
+                  },
+                ]}
+              >
+                <Text style={styles.balChipText} numberOfLines={1}>
+                  {balancesVisible ? formatCompact(totalBalance) : '••••'}
+                </Text>
+              </Animated.View>
               <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
                 <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
               </TouchableOpacity>
@@ -222,20 +244,15 @@ export default function AccountsScreen({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-          <View style={styles.headerRow}>
+        )}
+        renderHero={() => (
+          <View>
             <Text style={styles.headerLabel}>Net Worth</Text>
             <Text style={styles.headerBalance}>
               {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
             </Text>
           </View>
-        </SafeAreaView>
-      </LinearGradient>
-
-      {/* ── Scrollable body ── */}
-      <ScrollView
-        style={styles.body}
-        contentContainerStyle={styles.bodyContent}
-        showsVerticalScrollIndicator={false}
+        )}
       >
         {/* First-time anchor nudge — auto-hides once any account is anchored
             or once the user dismisses it. */}
@@ -467,7 +484,7 @@ export default function AccountsScreen({ navigation }) {
         </View>
 
         <View style={{ height: TAB_BAR_HEIGHT + 40 }} />
-      </ScrollView>
+      </CollapsingHeaderScreen>
 
       <AddAccountModal
         visible={addAccountVisible}
@@ -553,30 +570,30 @@ export default function AccountsScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
-  },
-  headerRow: {
-    marginTop: spacing.sm,
-    marginBottom: spacing.xxs,
-  },
-  headerHeading:  { flexDirection: 'row', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  // Pinned bar: "Accounts" title (flex) + right-side actions (chip / eye / add).
+  barRow:         { flexDirection: 'row', alignItems: 'center' },
   headerTitle:    { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: '#fff' },
   headerLabel:   { color: '#FFFFFFCC', ...typography.small },
   headerBalance: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
-  headerActions: { flexDirection: 'row', gap: spacing.sm },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#FFFFFF22',
     alignItems: 'center', justifyContent: 'center',
   },
-  iconBtnText: { color: '#fff', fontSize: 16 },
+  // Compact balance chip that slides into the bar when the hero collapses.
+  balChip: {
+    paddingHorizontal: 12,
+    paddingVertical:   5,
+    borderRadius:      radius.pill,
+    backgroundColor:   '#FFFFFF26',
+    maxWidth:          130,
+    justifyContent:    'center',
+  },
+  balChipText: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: -0.2 },
 
-  body:        { flex: 1, marginTop: -spacing.lg },
-  bodyContent: { paddingTop: spacing.lg, paddingHorizontal: spacing.lg },
+  // paddingTop is managed by CollapsingHeaderScreen (= expanded header height).
+  bodyContent: { paddingHorizontal: spacing.lg },
 
   // Full-width breakout so the carousel can center cards against the SCREEN edges
   // (CARD_SIDE is computed from screen width), not the padded body.
