@@ -2,7 +2,7 @@
 // AnalyticsScreen — monthly category breakdown using bar chart + progress rings
 // =============================================================================
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import Svg, { Circle, G, Rect } from 'react-native-svg';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,11 +23,17 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
 import { debitDisplayAmount, isGroupExcluded } from '../utils/split';
-import { getDailyCumulative, getMerchantBubbles, detectSubscriptions } from '../analytics/behavioralSelectors';
+import {
+  getDailyCumulative,
+  getMerchantBubbles,
+  detectSubscriptions,
+  buildCategoryBreakdown,
+} from '../analytics/behavioralSelectors';
 import GhostLineChart from '../components/GhostLineChart';
 import HabitLeakMatrix from '../components/HabitLeakMatrix';
 import SubscriptionHeartbeat from '../components/SubscriptionHeartbeat';
 import SmartLedger from '../components/SmartLedger';
+import GroupInsightCarousel from '../components/GroupInsightCarousel';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 
@@ -50,12 +57,18 @@ const SECTION_INFO = {
     title: 'What-if Ledger',
     body: 'Toggle categories off to instantly see what this month would look like without them — the adjusted total counts down and shows how much you\'d have saved. It\'s a preview only: nothing is deleted. Group expenses count just your personal share.',
   },
+  groups: {
+    title: 'Spend by group',
+    body: 'Swipe the strip to pick a group — each card shows who owes whom (Owed to you in mint, You owe in grey) and your share of the group\'s spend this month. The category chart just below re-draws for the selected group; swipe back to "All spending" for everything. Tap View details to open the group.',
+  },
 };
 
 const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const theme = useTheme();
   const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
   const [infoKey, setInfoKey] = useState(null); // which section explainer is open
+  // Group carousel focus — null = all spending. Drives the reactive line + bar charts.
+  const [focusedGroupId, setFocusedGroupId] = useState(null);
   const date = useMemo(() => {
     const d = new Date();
     d.setMonth(d.getMonth() + monthOffset);
@@ -65,6 +78,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const transactions = useEPurseStore(selectTransactions);
   const groups = useEPurseStore((s) => s.groups);
   const accounts = useEPurseStore((s) => s.accounts);
+  const categories = useEPurseStore((s) => s.categories);
 
   // Drop transactions tagged to a group flagged "exclude from totals" (and group
   // memos) before the chart selectors run — so the spend pace, merchant bubbles
@@ -81,6 +95,43 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const breakdown = useEPurseStore((s) => s.getCategoryBreakdown(date));
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
+
+  // ── Group focus (from the carousel in the "Spend by group" card) ─────────────
+  // Focusing a group re-draws ONLY the category chart in that same card from that
+  // group's month transactions (from raw `transactions` — group memos are stripped
+  // out of `visibleTxns`). The Pace chart and rings below stay whole-month.
+  const focusedGroup = useMemo(
+    () => (focusedGroupId ? groups.find((g) => g.id === focusedGroupId) || null : null),
+    [focusedGroupId, groups],
+  );
+  const focusedGroupTxns = useMemo(
+    () =>
+      focusedGroupId
+        ? transactions.filter(
+            (t) => t.groupId === focusedGroupId && !t.isIgnored && isSameMonth(t.createdAt, date),
+          )
+        : [],
+    [focusedGroupId, transactions, date],
+  );
+  const groupBreakdown = useMemo(
+    () => buildCategoryBreakdown(focusedGroupTxns, categories),
+    [focusedGroupTxns, categories],
+  );
+
+  // Category dataset for the "Spend by group" card (group-scoped when focused).
+  const barData  = focusedGroupId ? groupBreakdown : breakdown;
+  const focusKey = focusedGroupId || 'all'; // remount key → morph transition
+
+  const openGroupDetails = (gid) => {
+    if (navigation) navigation.navigate('Groups', { focusGroupId: gid });
+  };
+
+  // If the focused group is deleted while viewing, fall back to all-spending.
+  useEffect(() => {
+    if (focusedGroupId && !groups.some((g) => g.id === focusedGroupId)) {
+      setFocusedGroupId(null);
+    }
+  }, [focusedGroupId, groups]);
 
   // Per-account spend breakdown — one bar per INDIVIDUAL bank / card (not lumped
   // by type). Resolves each txn to its account by id, then mask/aliasMasks (a
@@ -207,15 +258,16 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           />
         ) : (
           <>
-            {/* Bar chart + detail rows — shown only when spend spans 3+ categories */}
-            {breakdown.length > 2 ? (
+            {/* Whole-month "Spend by category" bar chart. When the user has groups,
+                this lives inside the "Spend by group" card at the BOTTOM instead. */}
+            {groups.length === 0 && breakdown.length > 2 ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Spend by category</Text>
                 <BarChart data={breakdown} />
               </View>
             ) : null}
 
-            {/* Progress rings — only when there's a breakdown to show */}
+            {/* Progress rings + rows — whole-month category breakdown */}
             {breakdown.length > 0 ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Category breakdown</Text>
@@ -251,18 +303,6 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               ) : (
                 <HorizontalBarChart data={accountBreakdown} />
               )}
-            </View>
-
-            {/* ── What-if Ledger ── */}
-            <View style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>🔮 What-if Ledger Playground</Text>
-                <TouchableOpacity onPress={() => setInfoKey('whatif')} hitSlop={10}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.sectionSubtitle}>Toggle categories to see your month without them.</Text>
-              <SmartLedger transactions={whatIfTxns} />
             </View>
 
             {/* ── Behavioral Insights ── */}
@@ -310,6 +350,74 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
                 <EmptyState compact emoji="💓" title="No recurring charges detected" subtitle="Subscriptions like Netflix or Spotify will show up after a couple of cycles." />
               )}
             </View>
+
+            {/* ── What-if Ledger (second-to-last) ── */}
+            <View style={styles.section}>
+              <View style={styles.sectionHead}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>🔮 What-if Ledger Playground</Text>
+                <TouchableOpacity onPress={() => setInfoKey('whatif')} hitSlop={10}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.sectionSubtitle}>Toggle categories to see your month without them.</Text>
+              <SmartLedger transactions={whatIfTxns} />
+            </View>
+
+            {/* ── Spend by group — carousel selector + its category chart in ONE card (last) ── */}
+            {groups.length > 0 ? (
+              <View style={styles.section}>
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>👥 Spend by group</Text>
+                  <TouchableOpacity onPress={() => setInfoKey('groups')} hitSlop={10}>
+                    <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Group selector strip */}
+                <GroupInsightCarousel
+                  date={date}
+                  focusedGroupId={focusedGroupId}
+                  onFocusChange={setFocusedGroupId}
+                  transactions={transactions}
+                  allSpendTotal={monthSpend}
+                />
+
+                {/* Its category chart — morphs (crossfade + height) on group change */}
+                <Text style={styles.groupChartHead} numberOfLines={1}>
+                  {focusedGroup ? `${focusedGroup.emoji} ${focusedGroup.name} · by category` : 'All spending · by category'}
+                </Text>
+                <Animated.View
+                  key={`groupbar-${focusKey}`}
+                  entering={FadeIn.duration(300)}
+                  exiting={FadeOut.duration(150)}
+                  layout={LinearTransition.springify().damping(18)}
+                >
+                  {barData.length > 0 ? (
+                    <BarChart data={barData} />
+                  ) : (
+                    <EmptyState
+                      compact
+                      emoji="🧾"
+                      title={focusedGroup ? 'No spend for this group' : 'No spending this month'}
+                      subtitle={focusedGroup ? 'No transactions this month.' : 'Add an expense to see the breakdown.'}
+                    />
+                  )}
+                </Animated.View>
+
+                {focusedGroup ? (
+                  <TouchableOpacity
+                    style={[styles.viewDetailsBtn, { borderColor: theme.primary + '55' }]}
+                    onPress={() => openGroupDetails(focusedGroup.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.viewDetailsText, { color: theme.primary }]} numberOfLines={1}>
+                      View {focusedGroup.name} details
+                    </Text>
+                    <Ionicons name="arrow-forward" size={16} color={theme.primary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
           </>
         )}
 
@@ -481,6 +589,25 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
     ...shadows.card,
   },
+  // Sub-heading for the category chart inside the "Spend by group" card.
+  groupChartHead: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontWeight: '700',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  viewDetailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  viewDetailsText: { ...typography.small, fontWeight: '700' },
   sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
   sectionTitleInline: { marginBottom: 0, flexShrink: 1 },

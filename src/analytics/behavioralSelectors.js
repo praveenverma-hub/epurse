@@ -58,6 +58,31 @@ export function getDailyCumulative(transactions, targetDate = new Date()) {
 }
 
 /**
+ * Category breakdown for an ARBITRARY transaction list (e.g. one group's txns),
+ * mirroring the store's getCategoryBreakdown but on data the caller pre-filters.
+ * Pools the user's personal share (debitDisplayAmount) so split/group rows count
+ * only your portion. Excludes non-spend cats. Returns [] when nothing qualifies.
+ * Each row: { ...category, total, percent } sorted desc — shape BarChart/rings expect.
+ */
+export function buildCategoryBreakdown(transactions, categories) {
+  const totals = {};
+  let grand = 0;
+  for (const t of transactions) {
+    if (t.isIgnored || t.type !== TRANSACTION_TYPES.DEBIT || LB_CATS.has(t.categoryId)) continue;
+    const share = debitDisplayAmount(t);
+    if (share <= 0) continue;
+    totals[t.categoryId] = (totals[t.categoryId] || 0) + share;
+    grand += share;
+  }
+  if (grand <= 0) return [];
+  return categories
+    .filter((c) => !LB_CATS.has(c.id))
+    .map((c) => ({ ...c, total: totals[c.id] || 0, percent: ((totals[c.id] || 0) / grand) * 100 }))
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total);
+}
+
+/**
  * Groups debit transactions in targetDate's month by normalized merchant name.
  * Returns merchants with >= 2 transactions, sorted by total volume desc, capped at 18.
  * Each entry: { key, name, frequency, volume, avgAmount }

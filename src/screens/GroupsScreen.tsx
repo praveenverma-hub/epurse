@@ -4,7 +4,7 @@
 // summary + balances + transactions render inline below. FAB adds an expense to
 // the selected group; the first tile creates a new group.
 // =============================================================================
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Modal,
@@ -76,7 +76,7 @@ interface ConfirmState {
   onSecondary?: () => void;
 }
 
-export default function GroupsScreen({ navigation }: { navigation: any }) {
+export default function GroupsScreen({ navigation, route }: { navigation: any; route?: any }) {
   const theme = useTheme();
   const gradient = useGradient();
   const insets = useSafeAreaInsets();
@@ -130,6 +130,22 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
     return orderedGroups[0] || null;
   }, [selectedId, groups, orderedGroups]);
   const selectedGroupId = selectedGroup?.id || null;
+
+  // Deep-link: the Analytics "View Details" button navigates here with a
+  // focusGroupId param — preselect that group on focus, then clear the param so
+  // it doesn't re-apply on later visits.
+  useEffect(() => {
+    const apply = () => {
+      const gid = route?.params?.focusGroupId;
+      if (gid && groups.some((g) => g.id === gid)) {
+        setSelectedId(gid);
+        navigation.setParams?.({ focusGroupId: undefined });
+      }
+    };
+    apply();
+    const unsub = navigation.addListener?.('focus', apply);
+    return unsub;
+  }, [navigation, route?.params?.focusGroupId, groups]);
 
   // Tile order: purely by recency (most recently updated first). We do NOT hoist
   // the selected tile to the front — that made tiles jump around on every tap.
