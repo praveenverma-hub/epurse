@@ -26,6 +26,7 @@ import { getDailyCumulative, getMerchantBubbles, detectSubscriptions } from '../
 import GhostLineChart from '../components/GhostLineChart';
 import HabitLeakMatrix from '../components/HabitLeakMatrix';
 import SubscriptionHeartbeat from '../components/SubscriptionHeartbeat';
+import SmartLedger from '../components/SmartLedger';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 
@@ -44,6 +45,10 @@ const SECTION_INFO = {
   heartbeat: {
     title: 'Subscription Heartbeat',
     body: 'A monthly timeline of recurring charges (Netflix, Spotify, rent…) on the day they hit. Charges dated later than today are dimmed — they\'re expected, not yet paid. A red pulse flags a detected price hike.',
+  },
+  whatif: {
+    title: 'What-if Ledger',
+    body: 'Toggle categories off to instantly see what this month would look like without them — the adjusted total counts down and shows how much you\'d have saved. It\'s a preview only: nothing is deleted. Group expenses count just your personal share.',
   },
 };
 
@@ -82,7 +87,18 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   // linked debit card rolls into its bank); maskless txns with no account fall
   // back to a type bucket. Mirrors getMonthlySpend filters (debit, same month,
   // no NON_SPEND_CATS, no group memos) and uses the user's share for group txns.
-  const NON_SPEND = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
+  const NON_SPEND = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill']);
+
+  // Selected-month debit spends for the What-if Ledger (same filters as the summary:
+  // debit, this month, not group-excluded, not a non-spend category). Personal share
+  // is applied inside SmartLedger via debitDisplayAmount.
+  const whatIfTxns = useMemo(
+    () =>
+      visibleTxns.filter(
+        (t) => t.type === 'debit' && isSameMonth(t.createdAt, date) && !NON_SPEND.has(t.categoryId),
+      ),
+    [visibleTxns, date], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const accountBreakdown = useMemo(() => {
     const byId = new Map(accounts.map((a) => [a.id, a]));
     const byMask = new Map();
@@ -242,6 +258,18 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               ) : (
                 <HorizontalBarChart data={accountBreakdown} />
               )}
+            </View>
+
+            {/* ── What-if Ledger ── */}
+            <View style={styles.section}>
+              <View style={styles.sectionHead}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>🔮 What-if Ledger Playground</Text>
+                <TouchableOpacity onPress={() => setInfoKey('whatif')} hitSlop={10}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.sectionSubtitle}>Toggle categories to see your month without them.</Text>
+              <SmartLedger transactions={whatIfTxns} />
             </View>
 
             {/* ── Behavioral Insights ── */}
