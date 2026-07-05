@@ -50,7 +50,7 @@ const styles = StyleSheet.create({
     borderTopWidth:    1,
     borderColor:       colors.divider,
     alignItems:        'flex-start',
-    marginTop:         'auto',         // push to bottom when ScrollView has flexGrow:1
+    marginTop:         20,         // push to bottom when ScrollView has flexGrow:1
   },
   name: {
     fontSize:      42,

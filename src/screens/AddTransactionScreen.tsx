@@ -33,6 +33,7 @@ import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
+import { useCategoryTree, useCategoryMaps } from '../hooks/useCategoryTree';
 import GradientButtonBase from '../components/GradientButton';
 
 // Cast to typed interface — GradientButton.js has no TS declarations
@@ -51,42 +52,17 @@ import LinkContactModal from '../components/LinkContactModal';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { canSplitTransaction, SPLIT_BLOCKED_CATEGORY_IDS } from '../utils/split';
-import { PARENT_CATEGORIES, ParentCat, ChildCat } from '../constants/twoTierCategories';
+import {
+  ParentCat,
+  ChildCat,
+  twoTierToLegacyCatId,
+  LB_ALL_CATS,
+  SPLIT_BLOCKED_CHILD_LABELS,
+} from '../constants/twoTierCategories';
 import { requestAndGetLocation } from '../services/locationService';
 
-// ─── Category mappings (two-tier → legacy) ───────────────────────────────────
-// Used to derive categoryId for budget checks and split validation.
-
-const PARENT_TO_LEGACY: Record<string, string> = {
-  'Food & Dining':    'food',
-  'Travel & Commute': 'travel',
-  'Bills & Utilities':'bills',
-  'Shopping':         'shopping',
-  'Entertainment':    'entertainment',
-  'Health & Fitness': 'health',
-  'Fuel':             'fuel',
-  'Investments':      'investments',
-  'Transfers':        'transfer',
-  'Income':           'salary',
-};
-
-// Child overrides take precedence over parent (e.g. Lent must map to 'lent', not 'transfer')
-const CHILD_TO_LEGACY: Record<string, string> = {
-  Lent:             'lent',
-  Borrowed:         'borrowed',
-  'P2P Transfer':   'transfer',
-  Salary:           'salary',
-  Freelance:        'freelance',
-  'Stocks & Trading':'investments',
-  'Mutual Funds':   'investments',
-};
-
-// Children that block split (same set as SPLIT_BLOCKED_CATEGORY_IDS, two-tier side)
-const LB_BLOCKED_CHILDREN = new Set(['Lent', 'Borrowed']);
-
-// LB categoryIds whose save flow must prompt for a contact (so the lent/borrow
-// books stay in sync). Mirrors the store's LB_ALL_CATS.
-const LB_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+// Two-tier → legacy category conversion is centralised in twoTierCategories.ts
+// (twoTierToLegacyCatId / LB_ALL_CATS / SPLIT_BLOCKED_CHILD_LABELS).
 
 // ─── AddTxnParentRow (local accordion component) ─────────────────────────────
 
@@ -207,6 +183,8 @@ interface NavigationProp {
 const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const categoryTree = useCategoryTree();   // built-ins + user's custom categories
+  const categoryMaps = useCategoryMaps();   // custom-aware legacy lookup maps
   const categories  = useEPurseStore((s: any) => s.categories);
   const accounts    = useEPurseStore((s: any) => s.accounts);
   const addTransaction = useEPurseStore((s: any) => s.addTransaction);
@@ -245,19 +223,19 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   const resolvedAccountId = accountId ?? defaultAccountId;
 
   const selectedParentDef = useMemo(
-    () => PARENT_CATEGORIES.find((p) => p.label === parentCategory) ?? null,
-    [parentCategory],
+    () => categoryTree.find((p) => p.label === parentCategory) ?? null,
+    [parentCategory, categoryTree],
   );
 
   // Two-tier → legacy categoryId (for budget, split validation, backward compat)
   const legacyCategoryId = useMemo(
-    () => CHILD_TO_LEGACY[childCategory] ?? PARENT_TO_LEGACY[parentCategory] ?? 'other',
-    [parentCategory, childCategory],
+    () => twoTierToLegacyCatId(parentCategory, childCategory, categoryMaps) ?? 'other',
+    [parentCategory, childCategory, categoryMaps],
   );
 
   const canSplitHere =
     type === TRANSACTION_TYPES.DEBIT &&
-    !LB_BLOCKED_CHILDREN.has(childCategory) &&
+    !SPLIT_BLOCKED_CHILD_LABELS.has(childCategory) &&
     !SPLIT_BLOCKED_CATEGORY_IDS.has(legacyCategoryId);
 
   /**
@@ -322,7 +300,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   // Auto-expand the currently selected parent each time the modal opens
   useEffect(() => {
     if (catPickerOpen) {
-      const match = PARENT_CATEGORIES.find((p) => p.label === parentCategory);
+      const match = categoryTree.find((p) => p.label === parentCategory);
       setExpandedParentId(match?.id ?? null);
     }
   }, [catPickerOpen]);
@@ -336,7 +314,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
     setParentCategory(parent.label);
     setChildCategory(child.label);
     // Clear split if moving to an LB/blocked child
-    if (LB_BLOCKED_CHILDREN.has(child.label)) {
+    if (SPLIT_BLOCKED_CHILD_LABELS.has(child.label)) {
       setIsSplit(false);
       setSplitPicks([]);
     }
@@ -435,7 +413,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
     // also link to a contact — otherwise the lent/borrow ledger drifts.
     // Split-mode transactions already carry per-friend records, so the
     // contact picker is skipped there.
-    if (LB_CATEGORY_IDS.has(legacyCategoryId) && !wantSplit) {
+    if (LB_ALL_CATS.has(legacyCategoryId) && !wantSplit) {
       setLbPickerOpen(true);
       return;
     }
@@ -809,7 +787,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {PARENT_CATEGORIES.map((parent) => (
+              {categoryTree.map((parent) => (
                 <AddTxnParentRow
                   key={parent.id}
                   parent={parent}

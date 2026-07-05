@@ -1005,6 +1005,36 @@ const EDGE_JUL26 = [
     expect: { accept: true, type: 'credit', accountType: 'Credit Card', amount: 420, accountMask: '9876', merchant: 'BLINKIT GROCERY' } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Outgoing credit-card bill payments (Jul-26) — money leaving a bank account to
+// clear a card's dues. Detected as cc_payment_outgoing so it's kept OUT of the spend
+// ledger (the card purchases were already counted). Only HIGH-CONFIDENCE wording
+// ("credit card" / "cc bill") auto-fires; ambiguous channels (CRED) stay normal
+// debits for the user to reclassify by hand.
+// ─────────────────────────────────────────────────────────────────────────────
+const CC_BILL_OUTGOING_JUL26 = [
+  { name: 'Paid to <bank> credit card',
+    sender: 'HDFCBK', sms: 'Rs.42,300.00 debited from a/c XX4021 and paid to HDFC credit card. Ref 900112.',
+    expect: { accept: false, code: 'cc_payment_outgoing' } },
+  { name: 'Credit card bill payment debited',
+    sender: 'ICICIB', sms: 'Credit card bill payment of Rs.18,500 debited from A/c XX8899. Ref 5521.',
+    expect: { accept: false, code: 'cc_payment_outgoing' } },
+  { name: 'Towards credit card dues',
+    sender: 'SBIINB', sms: 'INR 9,999 debited towards SBI credit card dues. Avl bal INR 51,203.',
+    expect: { accept: false, code: 'cc_payment_outgoing' } },
+  { name: 'CC bill pay narration',
+    sender: 'KOTAKB', sms: 'Rs.12,000 debited from A/c XX5566 for cc bill payment. Ref 8890.',
+    expect: { accept: false, code: 'cc_payment_outgoing' } },
+  // Guard — ambiguous CRED payment stays a NORMAL debit (user reclassifies manually).
+  { name: 'Guard: UPI to CRED stays a debit',
+    sender: 'AXISBK', sms: 'Rs.25,000 debited from A/c XX1234 to CRED via UPI. Ref 774411.',
+    expect: { accept: true, type: 'debit' } },
+  // Guard — "credited" (incoming) must not be read as an outgoing CC bill.
+  { name: 'Guard: salary credited',
+    sender: 'HDFCBK', sms: 'Rs.85,000 credited to a/c XX4021 by ACME PAYROLL. Avl bal Rs.1,20,000.',
+    expect: { accept: true, type: 'credit' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1020,6 +1050,7 @@ const SUITES = [
   ['Jul-26 stress (OTP/decline/CC-bill/foreign)', JUL26_STRESS],
   ['Jul-26 merchant/verb (#51-88)', MERCHANT_JUL26],
   ['Jul-26 edge (holds/reversals/EMI/#89-118)', EDGE_JUL26],
+  ['CC bill outgoing (CRED/cc-bill, Jul-26)', CC_BILL_OUTGOING_JUL26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

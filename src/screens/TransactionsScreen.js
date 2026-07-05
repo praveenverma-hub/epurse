@@ -52,6 +52,7 @@ import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
+import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
 import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
@@ -217,6 +218,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
   const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
   const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split
+  const [ccBillTxn,       setCcBillTxn]       = useState(null); // txn being reclassified as a CC bill payment
 
   // ── Route param reactivity ─────────────────────────────────────────────────
   useEffect(() => {
@@ -531,6 +533,14 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   const handleSelectCategory = (categoryId) => {
     if (!activeTxn) return;
+    // "Credit Card Bill" opens the card-picker + reconcile sheet (which sets the
+    // category AND optionally reduces the paid card), rather than a plain re-tag.
+    if (categoryId === 'cc_bill') {
+      const t = activeTxn;
+      setActiveTxn(null);
+      setCcBillTxn(t);
+      return;
+    }
     updateTransactionCategory(activeTxn.id, categoryId);
     setActiveTxn(null);
   };
@@ -994,6 +1004,11 @@ const TransactionsScreen = ({ navigation, route }) => {
         onDelete={handleDelete}
         onIgnore={handleIgnore}
         onRestore={handleRestore}
+      />
+
+      <CCBillPaymentSheet
+        txn={ccBillTxn}
+        onClose={() => setCcBillTxn(null)}
       />
 
       <LinkContactModal

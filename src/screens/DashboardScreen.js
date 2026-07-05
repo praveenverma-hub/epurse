@@ -54,6 +54,7 @@ import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
 import SplitDetailsModal from '../components/SplitDetailsModal';
@@ -110,6 +111,7 @@ const DashboardScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
   const [lbLinkTxn, setLbLinkTxn] = useState(null);   // { txn, categoryId }
+  const [ccBillTxn, setCcBillTxn] = useState(null);   // txn being reclassified as a CC bill payment
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
@@ -399,7 +401,7 @@ const DashboardScreen = ({ navigation }) => {
 
         <AppBrandFooter />
 
-        <View style={{ height: TAB_BAR_HEIGHT + 80 }} />
+        {/* <View style={{ height: TAB_BAR_HEIGHT + 80 }} /> */}
       </ScrollView>
 
       <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
@@ -449,6 +451,13 @@ const DashboardScreen = ({ navigation }) => {
         }}
         onSelectCategory={(categoryId) => {
           if (!activeTxn) return;
+          // "Credit Card Bill" opens the card-picker + reconcile sheet.
+          if (categoryId === 'cc_bill') {
+            const t = activeTxn;
+            setActiveTxn(null);
+            setCcBillTxn(t);
+            return;
+          }
           updateTransactionCategory(activeTxn.id, categoryId);
           setActiveTxn(null);
         }}
@@ -529,6 +538,11 @@ const DashboardScreen = ({ navigation }) => {
             },
           });
         }}
+      />
+
+      <CCBillPaymentSheet
+        txn={ccBillTxn}
+        onClose={() => setCcBillTxn(null)}
       />
 
       <LinkContactModal

@@ -31,7 +31,14 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
-import { findParentByLabel } from '../constants/twoTierCategories';
+import {
+  twoTierToLegacyCatId,
+  parentCatIdForTxn,
+  buildCategoryTree,
+  buildLegacyMaps,
+  LB_ALL_CATS,
+  BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
+} from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
@@ -62,7 +69,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
 const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
 const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
-const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self'];
+const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill'];
 
 /** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
@@ -332,8 +339,6 @@ const isDuplicate = (transactions, parsed, smsId = null, suppressedSmsIds = []) 
   );
 };
 
-/** Lent/borrow category ids — excluded from normal spend/income totals. */
-const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
 
 /**
  * Categories excluded from every spend/income total and budget calculation.
@@ -342,7 +347,7 @@ const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid'
  * moved, so account balances are still adjusted via applyDelta, but it is
  * neither income nor expense and must not skew totals.
  */
-const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
+const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill']);
 
 // `isGroupExcluded` + `buildGroupLbRows` are pure helpers imported from ../utils/split
 // (co-located with the rest of the split math + `debitDisplayAmount`, and unit-tested in
@@ -367,84 +372,22 @@ const adjustGroupTotal = (groups, groupId, delta) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Budget = FIRST-LEVEL (parent) categories. Children roll up into their parent,
 // so a Groceries spend counts against the Food & Dining budget (no separate
-// "groceries" budget line). Keys are legacy parent ids that also exist in
-// DEFAULT_CATEGORIES, so name/emoji/colour resolve for free.
+// "groceries" budget line). BUDGETABLE_PARENT_IDS is imported from
+// twoTierCategories.ts (single source; derived from the tree).
 // ─────────────────────────────────────────────────────────────────────────────
-const BUDGETABLE_PARENT_IDS = new Set([
-  'food', 'travel', 'bills', 'shopping', 'entertainment', 'health', 'fuel', 'investments', 'education',
-]);
 
-// Two-tier child LABEL → legacy flat categoryId.
-// Takes priority over parent-level mapping for children with their own legacy IDs.
-const CHILD_TO_LEGACY_CAT = {
-  // Food children
-  'Groceries':      'groceries',
-  // Income children
-  'Salary':         'salary',
-  'Freelance':      'salary',
-  // Transfers children
-  'P2P Transfer':   'transfer',
-  'Self':           'self',
-  'Lent':           'lent',
-  'Borrowed':       'borrowed',
-  // Education children
-  'Online Courses': 'education',
-  'School Fees':    'education',
+// Two-tier ↔ legacy category mappings are centralised in twoTierCategories.ts.
+// CAT_MAPS is the custom-aware lookup set (built-ins + the user's custom categories);
+// it's rebuilt by refreshCatMaps() whenever custom categories change (CRUD actions +
+// on rehydrate). Module-level so the aggregation/budget helpers below stay simple.
+let CAT_MAPS = buildLegacyMaps(buildCategoryTree());
+const refreshCatMaps = (customParents, customChildren) => {
+  CAT_MAPS = buildLegacyMaps(buildCategoryTree(customParents || [], customChildren || []));
 };
-
-// Two-tier parent LABEL → legacy flat categoryId (fallback when child not in CHILD_TO_LEGACY_CAT).
-const PARENT_TO_LEGACY_CAT = {
-  'Income':    'salary',
-  'Transfers': 'transfer',
-};
-
-/** Derive the legacy flat categoryId from a two-tier parentCategory + childCategory pair. */
-const twoTierToLegacyCatId = (parentCategory, childCategory) => {
-  if (childCategory && CHILD_TO_LEGACY_CAT[childCategory]) {
-    return CHILD_TO_LEGACY_CAT[childCategory];
-  }
-  if (parentCategory && PARENT_TO_LEGACY_CAT[parentCategory]) {
-    return PARENT_TO_LEGACY_CAT[parentCategory];
-  }
-  return findParentByLabel(parentCategory)?.id || null;
-};
-
-// Two-tier parent LABEL → legacy parent id.
-const PARENT_LABEL_TO_ID = {
-  'Food & Dining':     'food',
-  'Travel & Commute':  'travel',
-  'Bills & Utilities': 'bills',
-  'Shopping':          'shopping',
-  'Entertainment':     'entertainment',
-  'Health & Fitness':  'health',
-  'Fuel':              'fuel',
-  'Investments':       'investments',
-  'Education':         'education',
-  'Transfers':         'transfers',
-  'Income':            'income',
-  'Unassigned':        'other',
-};
-
-// Legacy flat categoryId → legacy parent id (children fold into parents).
-const LEGACY_TO_PARENT = {
-  food: 'food', groceries: 'food',
-  travel: 'travel', fuel: 'fuel',
-  bills: 'bills', shopping: 'shopping',
-  entertainment: 'entertainment', health: 'health',
-  education: 'education', investments: 'investments',
-  salary: 'income', transfer: 'transfers',
-  lent: 'transfers', borrowed: 'transfers',
-  lent_settled: 'transfers', borrow_repaid: 'transfers',
-  self: 'transfers', other: 'other',
-};
-
-/** Resolve a transaction to its first-level (parent) budget category id. */
-const parentCatId = (t) => {
-  if (t.parentCategory && PARENT_LABEL_TO_ID[t.parentCategory]) {
-    return PARENT_LABEL_TO_ID[t.parentCategory];
-  }
-  return LEGACY_TO_PARENT[t.categoryId] || 'other';
-};
+// txn → first-level (parent) budget category id (custom-aware).
+const parentCatId = (t) => parentCatIdForTxn(t, CAT_MAPS);
+// two-tier labels → legacy flat categoryId (custom-aware).
+const toLegacyCat = (parentLabel, childLabel) => twoTierToLegacyCatId(parentLabel, childLabel, CAT_MAPS);
 
 /** Sum of category caps — the budget total is always derived from this. */
 const sumCaps = (perCategory) =>
@@ -497,6 +440,11 @@ export const useEPurseStore = create(
       archivedTransactions: [],
       monthlyAggregates: {}, // { 'YYYY-MM': { totalSpend, totalIncome, byCategory, byAccount } }
       categories: DEFAULT_CATEGORIES,
+      // User-created two-tier categories, merged with the built-in tree everywhere
+      // via buildCategoryTree(). customParents = new top-level parents; customChildren
+      // = sub-categories added under a parent (built-in OR custom) keyed by parentId.
+      customParents: [],
+      customChildren: [],
       lentBorrowed: [],
 
       userName: '',
@@ -863,7 +811,7 @@ export const useEPurseStore = create(
         // ── Category-level breach ─────────────────────────────────────────
         // Budgets are keyed by first-level (parent) category, but callers pass
         // the transaction's legacy categoryId — roll it up to its parent.
-        const parentId = LEGACY_TO_PARENT[categoryId] || categoryId;
+        const parentId = CAT_MAPS.legacyToParentId[categoryId] || categoryId;
         if (parentId && s.budget.perCategory[parentId] != null) {
           const cat = usage.perCategory[parentId];
           if (cat?.over && !notifiedList.includes(parentId)) {
@@ -917,7 +865,7 @@ export const useEPurseStore = create(
           const byParentPrev = {};
           Object.entries(prevAgg?.byCategory || {}).forEach(([cid, amt]) => {
             if (NON_SPEND_CATS.has(cid)) return;
-            const pid = LEGACY_TO_PARENT[cid] || cid;
+            const pid = CAT_MAPS.legacyToParentId[cid] || cid;
             if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
             byParentPrev[pid] = (byParentPrev[pid] || 0) + amt;
           });
@@ -1366,7 +1314,7 @@ export const useEPurseStore = create(
 
         // Derive the legacy flat categoryId from the two-tier labels when not given explicitly.
         const resolvedCategoryId =
-          categoryId || twoTierToLegacyCatId(parentCategory, childCategory) || 'other';
+          categoryId || toLegacyCat(parentCategory, childCategory) || 'other';
 
         const newTxn = {
           id,
@@ -1442,7 +1390,7 @@ export const useEPurseStore = create(
           ? { paidByMemberId, paidByName: paidByName || paidByMemberId, shares }
           : null;
         const resolvedCategoryId =
-          categoryId || twoTierToLegacyCatId(parentCategory, childCategory) || old.categoryId || 'other';
+          categoryId || toLegacyCat(parentCategory, childCategory) || old.categoryId || 'other';
 
         // Resolve the paying account (only when YOU paid).
         let resolvedAccountId = isGroupMemo ? null : (accountId || old.accountId || null);
@@ -1624,6 +1572,74 @@ export const useEPurseStore = create(
         });
       },
 
+      // User chose "Settle this payment" — reduce the tracked outstanding by EXACTLY
+      // the payment amount (moves the negative balance toward zero, never past it, so
+      // an overpayment lands on ₹0 rather than a credit balance). Starts tracking and
+      // files this payment's SMS so the sweep doesn't re-prompt the same one.
+      // Shifts queue so the next pending payment (if any) shows immediately.
+      settleCCPayment: () => {
+        const { pendingCCPaymentQueue, accounts, ccHandledSmsIds } = get();
+        const current = (pendingCCPaymentQueue || [])[0];
+        if (!current) return;
+        set({
+          accounts: accounts.map((a) =>
+            a.id === current.accountId
+              ? { ...a, balance: Math.min(0, (a.balance ?? 0) + current.amount), ccPaymentsTracked: true }
+              : a
+          ),
+          ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
+          pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
+        });
+      },
+
+      // Reclassify an existing (mis-booked) DEBIT as a credit-card bill payment:
+      //   • category → 'cc_bill' (non-spend, so it drops out of every spend total;
+      //     the bank balance stays reduced because the money really did leave),
+      //   • userEditedCategory so self-transfer reconciliation won't overwrite it,
+      //   • optionally reduce the paid card's outstanding:
+      //       mode 'trueup' → zero it   |  'settle' → reduce by the txn amount
+      //       mode 'none'   → leave the card alone (use when the card's own
+      //                       "payment received" SMS already reduced it → no
+      //                       double reduction).
+      markAsCCBillPayment: (txnId, cardAccountId = null, mode = 'none') =>
+        set((s) => {
+          const txn = (s.transactions || []).find((t) => t.id === txnId);
+          if (!txn || txn.lbLocked) return s;
+
+          // Reclassify the source debit (drop any split — a bill payment isn't shared).
+          const transactions = s.transactions.map((t) =>
+            t.id === txnId
+              ? {
+                  ...t,
+                  categoryId: 'cc_bill',
+                  childCategory: undefined,
+                  parentCategory: undefined,
+                  userEditedCategory: true,
+                  ccBillCardId: cardAccountId || null,
+                  isSplit: false,
+                  splitWith: [],
+                  myShareAmount: undefined,
+                }
+              : t
+          );
+          const lentBorrowed = (s.lentBorrowed || []).filter((l) => l.sourceTxnId !== txnId);
+
+          // Optionally knock down the paid card's outstanding.
+          let accounts = s.accounts;
+          if (cardAccountId && mode !== 'none') {
+            accounts = s.accounts.map((a) => {
+              if (a.id !== cardAccountId) return a;
+              if (mode === 'trueup') {
+                return { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() };
+              }
+              // 'settle' — reduce by exactly the payment, never past zero.
+              return { ...a, balance: Math.min(0, (a.balance ?? 0) + (txn.amount || 0)), ccPaymentsTracked: true };
+            });
+          }
+
+          return { transactions, lentBorrowed, accounts };
+        }),
+
       // User tapped "Skip" — leave the balance untouched, but file this payment's
       // SMS so the sweep won't re-prompt this same one. A future payment still asks.
       // Shifts queue so the next pending payment (if any) shows immediately.
@@ -1754,7 +1770,7 @@ export const useEPurseStore = create(
             if (parentCategory && !candidate.userEditedCategory) {
               candidate.parentCategory = parentCategory;
               candidate.childCategory  = childCategory;
-              const legacyId = twoTierToLegacyCatId(parentCategory, childCategory);
+              const legacyId = toLegacyCat(parentCategory, childCategory);
               if (legacyId) candidate.categoryId = legacyId;
             }
             if (isKnownSubscription) candidate.isSubscription = true;
@@ -2066,7 +2082,7 @@ export const useEPurseStore = create(
 
       updateTwoTierCategory: (id, parentCategory, childCategory) =>
         set((s) => {
-          const legacyCategoryId = twoTierToLegacyCatId(parentCategory, childCategory);
+          const legacyCategoryId = toLegacyCat(parentCategory, childCategory);
 
           return {
             transactions: s.transactions.map((t) =>
@@ -2179,17 +2195,49 @@ export const useEPurseStore = create(
           ),
         })),
 
-      // ----- categories --------------------------------------------------
-      addCategory: (cat) =>
-        set((s) => ({
-          categories: [
-            ...s.categories,
-            { id: `cat_${Date.now()}`, color: '#6B7280', emoji: '📌', ...cat },
-          ],
-        })),
+      // ----- custom two-tier categories ---------------------------------
+      // Create a new TOP-LEVEL parent. Also registers a flat `categories` entry
+      // (same id) so transactions tagged with it resolve a name/emoji for display.
+      addCustomParent: ({ label, emoji, color }) => {
+        const id = `pcat_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        set((s) => {
+          const customParents = [...(s.customParents || []), { id, label, emoji, color, legacyId: id }];
+          refreshCatMaps(customParents, s.customChildren);
+          return {
+            customParents,
+            categories: [...s.categories, { id, name: label, emoji, color }],
+          };
+        });
+        return id;
+      },
 
-      removeCategory: (id) =>
-        set((s) => ({ categories: s.categories.filter((c) => c.id !== id) })),
+      // Add a SUB-category under a parent (built-in or custom). Registers a flat entry too.
+      addCustomChild: (parentId, { label, emoji, color }) => {
+        const id = `ccat_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        set((s) => {
+          const customChildren = [...(s.customChildren || []), { id, parentId, label, emoji, legacyId: id }];
+          refreshCatMaps(s.customParents, customChildren);
+          return {
+            customChildren,
+            categories: [...s.categories, { id, name: label, emoji, color: color || '#6B7280' }],
+          };
+        });
+        return id;
+      },
+
+      // Remove a custom category (parent → also removes its custom children).
+      // The flat `categories` entries are intentionally KEPT so already-tagged
+      // transactions still display their name/emoji.
+      removeCustomCategory: (id) =>
+        set((s) => {
+          const isParent = (s.customParents || []).some((p) => p.id === id);
+          const customParents  = (s.customParents || []).filter((p) => p.id !== id);
+          const customChildren = (s.customChildren || []).filter(
+            (c) => c.id !== id && (!isParent || c.parentId !== id)
+          );
+          refreshCatMaps(customParents, customChildren);
+          return { customParents, customChildren };
+        }),
 
       // ----- lent / borrowed --------------------------------------------
       /**
@@ -2631,7 +2679,7 @@ export const useEPurseStore = create(
           let monthSum = 0;
           let has = false;
           Object.entries(agg.byCategory).forEach(([cid, amt]) => {
-            if (LEGACY_TO_PARENT[cid] === parentId) { monthSum += amt; has = true; }
+            if (CAT_MAPS.legacyToParentId[cid] === parentId) { monthSum += amt; has = true; }
           });
           if (has) { total += monthSum; count += 1; }
         }
@@ -3122,7 +3170,7 @@ export const useEPurseStore = create(
           if (nextBudget?.perCategory) {
             const remapped = {};
             Object.entries(nextBudget.perCategory).forEach(([cid, cap]) => {
-              const pid = LEGACY_TO_PARENT[cid] || cid;
+              const pid = CAT_MAPS.legacyToParentId[cid] || cid;
               if (!BUDGETABLE_PARENT_IDS.has(pid)) return; // drop transfers/income/etc
               remapped[pid] = (remapped[pid] || 0) + (Number(cap) || 0);
             });
@@ -3256,6 +3304,8 @@ export const useEPurseStore = create(
         archivedTransactions: state.archivedTransactions ?? [],
         monthlyAggregates: state.monthlyAggregates,
         categories: state.categories,
+        customParents: state.customParents ?? [],
+        customChildren: state.customChildren ?? [],
         lentBorrowed: state.lentBorrowed,
         smsAutoImport: state.smsAutoImport,
         lastSmsSync: state.lastSmsSync,
@@ -3292,7 +3342,11 @@ export const useEPurseStore = create(
         declinedAccountLinks: state.declinedAccountLinks ?? [],
       }),
       onRehydrateStorage: () => (state) => {
-        if (state) state.hydrated = true;
+        if (state) {
+          state.hydrated = true;
+          // Rebuild the custom-aware category maps from the persisted custom cats.
+          refreshCatMaps(state.customParents, state.customChildren);
+        }
       },
     }
   )
@@ -3388,9 +3442,10 @@ export const selectGapTransactionCount = (s, lastCheckedInDate) => {
 // Keeping both as derived selectors (re-computed from transactions) gives us
 // a single source of truth and prevents drift from missed delta updates.
 // =============================================================================
-const LB_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
-// Dashboard header/chip exclusions: LB ledger + self transfers between own accounts.
-const NON_SPEND_CATEGORY_IDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
+// Dashboard header/chip exclusions = the app-wide non-spend set (LB ledger, self
+// transfers, CC-bill payments). Aliased to NON_SPEND_CATS so it can never drift —
+// adding a non-spend category in one place updates the header stats too.
+const NON_SPEND_CATEGORY_IDS = NON_SPEND_CATS;
 
 const periodStartMs = (key) => {
   const now = new Date();

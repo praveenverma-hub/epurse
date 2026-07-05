@@ -27,11 +27,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
-  PARENT_CATEGORIES,
   ParentCat,
   ChildCat,
-  findParentByLabel,
 } from '../constants/twoTierCategories';
+import { useCategoryTree } from '../hooks/useCategoryTree';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.62;
@@ -59,6 +58,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
   onClose,
   onSave,
 }) => {
+  const categoryTree = useCategoryTree();   // built-ins + user's custom categories
   const [selectedParent, setSelectedParent] = useState<ParentCat | null>(null);
   const [selectedChild, setSelectedChild] = useState<ChildCat | null>(null);
 
@@ -73,7 +73,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
 
       // Pre-select current categories when editing a known transaction
       if (currentParent) {
-        const parent = findParentByLabel(currentParent);
+        const parent = categoryTree.find((p) => p.label === currentParent);
         setSelectedParent(parent ?? null);
         if (parent && currentChild) {
           setSelectedChild(parent.children.find((c) => c.label === currentChild) ?? null);
@@ -166,7 +166,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
             {/* ── Step 1: Parent categories ─────────────────────────── */}
             <Text style={styles.stepLabel}>1 — What type of spend?</Text>
             <View style={styles.parentGrid}>
-              {PARENT_CATEGORIES.map((parent) => {
+              {categoryTree.map((parent) => {
                 const active = selectedParent?.id === parent.id;
                 return (
                   <TouchableOpacity

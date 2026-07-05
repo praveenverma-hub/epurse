@@ -31,7 +31,7 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 import { INPUT_LIMITS } from '../utils/validation';
-import { PARENT_CATEGORIES } from '../constants/twoTierCategories';
+import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
@@ -78,8 +78,8 @@ const ringColor = (pct, daysElapsedPct) => {
 
 // Budget operates on FIRST-LEVEL (parent) categories only. Children (e.g.
 // Groceries) roll up into their parent (Food & Dining) in the store, so there's
-// no separate "groceries" budget line.
-const BUDGETABLE_IDS = ['food', 'travel', 'bills', 'shopping', 'entertainment', 'health', 'fuel', 'investments', 'education'];
+// no separate "groceries" budget line. BUDGETABLE_IDS is imported (aliased) from
+// twoTierCategories.ts — single source, derived from the tree.
 
 // How many sub-categories are DEFINED under each parent (from the taxonomy, not
 // from spending). A parent is drillable when it has >1 defined sub-category —

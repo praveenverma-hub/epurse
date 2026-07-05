@@ -25,6 +25,10 @@ export const DEFAULT_CATEGORIES = [
   { id: 'borrowed',      name: 'You Borrowed',   color: '#8B5CF6', emoji: '🧾' },
   { id: 'lent_settled',  name: 'Lent Settled',   color: '#14B8A6', emoji: '✅' },
   { id: 'borrow_repaid', name: 'Borrow Repaid',  color: '#6366F1', emoji: '💳' },
+  // Credit-card bill payment — money leaving a bank account to clear a card's dues.
+  // A liability settlement, NOT spend (the card purchases were already counted), so
+  // it lives in NON_SPEND_CATS and is excluded from all totals.
+  { id: 'cc_bill',       name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' },
   { id: 'other',         name: 'Other',          color: '#9CA3AF', emoji: '📌' },
 ];
 

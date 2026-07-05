@@ -20,18 +20,16 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { PARENT_CATEGORIES, ParentCat, ChildCat } from '../constants/twoTierCategories';
-
-// LB child labels that route to the contact-link flow instead of two-tier save
-const LB_CHILD_TO_ID: Record<string, string> = {
-  Lent: 'lent',
-  Borrowed: 'borrowed',
-};
-
-// Legacy categoryIds kept in a flat settlement section
-const LB_SETTLEMENT_IDS = new Set(['lent_settled', 'borrow_repaid']);
+import { useCategoryTree } from '../hooks/useCategoryTree';
+import {
+  ParentCat,
+  ChildCat,
+  LB_CHILD_LABEL_TO_ID,
+  LB_SETTLEMENT_IDS,
+} from '../constants/twoTierCategories';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -220,12 +218,13 @@ const CategoryPickerModal: React.FC<Props> = ({
   groupHasSplit,
 }) => {
   const theme = useTheme();
+  const categoryTree = useCategoryTree();   // built-ins + user's custom categories
   const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
 
   // Auto-expand the active parent when the sheet opens
   useEffect(() => {
     if (visible && selectedParent) {
-      const match = PARENT_CATEGORIES.find((p) => p.label === selectedParent);
+      const match = categoryTree.find((p) => p.label === selectedParent);
       setExpandedParentId(match?.id ?? null);
     }
     if (!visible) {
@@ -239,7 +238,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   };
 
   const handleChildPress = (parent: ParentCat, child: ChildCat) => {
-    const lbId = LB_CHILD_TO_ID[child.label];
+    const lbId = LB_CHILD_LABEL_TO_ID[child.label];
     if (lbId && onSelectLentBorrow) {
       onSelectLentBorrow(lbId);
       return;
@@ -252,6 +251,10 @@ const CategoryPickerModal: React.FC<Props> = ({
   };
 
   const settlementCats = categories.filter((c) => LB_SETTLEMENT_IDS.has(c.id));
+  // Fall back to a fixed label so the row shows even if an older persisted category
+  // list doesn't yet include cc_bill (it's injected on rehydrate, but don't depend on it).
+  const ccBillCat = categories.find((c) => c.id === 'cc_bill')
+    ?? { id: 'cc_bill', name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -284,7 +287,7 @@ const CategoryPickerModal: React.FC<Props> = ({
               style={styles.list}
               keyboardShouldPersistTaps="handled"
             >
-              {PARENT_CATEGORIES.map((parent) => (
+              {categoryTree.map((parent) => (
                 <ParentRow
                   key={parent.id}
                   parent={parent}
@@ -343,6 +346,42 @@ const CategoryPickerModal: React.FC<Props> = ({
                   })}
                 </View>
               )}
+
+              {/* Credit-card bill payment — opens the card-picker + reconcile sheet. */}
+              {ccBillCat && (
+                <View style={styles.settlementSection}>
+                  <Text style={styles.settlementSectionLabel}>CARD</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.parentRow,
+                      styles.settlementRow,
+                      selectedCategoryId === 'cc_bill' && {
+                        borderWidth: 1.5,
+                        borderColor: theme.primary + '66',
+                        backgroundColor: theme.primary + '10',
+                      },
+                    ]}
+                    onPress={() => onSelectCategory('cc_bill')}
+                    activeOpacity={0.72}
+                  >
+                    <Text style={styles.rowEmoji}>{ccBillCat.emoji}</Text>
+                    <View style={styles.rowMid}>
+                      <Text
+                        style={[
+                          styles.rowLabel,
+                          selectedCategoryId === 'cc_bill' && { color: theme.primary, fontWeight: '700' },
+                        ]}
+                      >
+                        {ccBillCat.name}
+                      </Text>
+                      <Text style={styles.lbHint}>Paid a card bill · excluded from spend</Text>
+                    </View>
+                    {selectedCategoryId === 'cc_bill' && (
+                      <Text style={{ color: theme.primary, fontWeight: '800' }}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
             </ScrollView>
           )}
 
@@ -398,35 +437,63 @@ const CategoryPickerModal: React.FC<Props> = ({
             </TouchableOpacity>
           ) : null}
 
-          {!isIgnored && (onPressAddToGroup || onPressRemoveFromGroup) ? (
-            currentGroupId ? (
-              onPressRemoveFromGroup ? (
+          {/* Group action (add / remove) + delete. When both show they share one
+              row: delete as an icon on the left (~20%), the group action on the
+              right (~80%). When only one is present it spans the full width. */}
+          {(() => {
+            const groupAction =
+              !isIgnored && !currentGroupId && onPressAddToGroup ? (
                 <TouchableOpacity
-                  style={[styles.splitBillBtn, styles.groupRemoveBtn]}
-                  activeOpacity={0.85}
-                  onPress={onPressRemoveFromGroup}
-                >
-                  <Text style={styles.groupRemoveText}>Remove from group</Text>
-                </TouchableOpacity>
-              ) : null
-            ) : (
-              onPressAddToGroup ? (
-                <TouchableOpacity
-                  style={[styles.splitBillBtn, styles.groupAddBtn]}
+                  style={[styles.groupBtnBase, styles.groupAddBtn, styles.groupActionFill]}
                   activeOpacity={0.85}
                   onPress={onPressAddToGroup}
                 >
-                  <Text style={styles.groupAddText}>🗂 Add to group</Text>
+                  <Ionicons name="people-outline" size={18} color={colors.primary} style={styles.groupIcon} />
+                  <Text style={styles.groupAddText}>Add to group</Text>
                 </TouchableOpacity>
-              ) : null
-            )
-          ) : null}
+              ) : !isIgnored && currentGroupId && onPressRemoveFromGroup ? (
+                <TouchableOpacity
+                  style={[styles.groupBtnBase, styles.groupRemoveBtn, styles.groupActionFill]}
+                  activeOpacity={0.85}
+                  onPress={onPressRemoveFromGroup}
+                >
+                  <Ionicons name="people-outline" size={18} color={colors.danger} style={styles.groupIcon} />
+                  <Text style={styles.groupRemoveText}>Remove from group</Text>
+                </TouchableOpacity>
+              ) : null;
 
-          {onDelete && (
-            <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
-              <Text style={styles.deleteText}>Delete transaction</Text>
-            </TouchableOpacity>
-          )}
+            if (groupAction && onDelete) {
+              // Paired row — delete icon (20%) · group action (80%).
+              return (
+                <View style={styles.groupDeleteRow}>
+                  <TouchableOpacity
+                    style={[styles.deleteIconBtn]}
+                    activeOpacity={0.85}
+                    onPress={onDelete}
+                    accessibilityLabel="Delete transaction"
+                  >
+                    <Ionicons name="trash-outline" size={20} color="#fff" />
+                  </TouchableOpacity>
+                  {groupAction}
+                </View>
+              );
+            }
+
+            // Otherwise render whichever is present, full width.
+            return (
+              <>
+                {groupAction ? (
+                  <View style={{ marginTop: spacing.sm }}>{groupAction}</View>
+                ) : null}
+                {onDelete ? (
+                  <TouchableOpacity style={styles.deleteBtn} onPress={onDelete} activeOpacity={0.85}>
+                    <Ionicons name="trash-outline" size={18} color="#fff" style={styles.groupIcon} />
+                    <Text style={styles.deleteText}>Delete transaction</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            );
+          })()}
         </View>
       </View>
     </Modal>
@@ -601,6 +668,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.info + '55',
   },
+  // Base for the group action button (icon + label on one row).
+  groupBtnBase: {
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  groupIcon: { marginRight: 6 },
+  // Row shared by delete (icon, ~20%) + group action (~80%).
+  groupDeleteRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  groupActionFill: { flex: 4 },
+  deleteIconBtn: {
+    flex: 1,
+    borderRadius: radius.md,
+    backgroundColor: colors.danger,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   groupAddBtn: {
     backgroundColor: colors.primary + '18',
     borderColor: colors.primary + '55',
@@ -641,9 +734,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hideHalf: {
-    backgroundColor: colors.danger + '16',
+    backgroundColor: colors.success + '16',
     borderWidth: 1,
-    borderColor: colors.danger + '55',
+    borderColor: colors.success + '55',
   },
   unhideHalf: {
     backgroundColor: colors.success + '16',
@@ -651,7 +744,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   hideIgnoreText: {
-    color: colors.danger,
+    color: colors.success,
     ...typography.small,
     fontWeight: '700',
   },
@@ -681,7 +774,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.danger,
     paddingVertical: spacing.md,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   deleteText: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
 

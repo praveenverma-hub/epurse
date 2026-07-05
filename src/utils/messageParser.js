@@ -304,8 +304,12 @@ const CC_DUE_DATE_REGEX =
 // liability settlement). Patterns: "towards [bank] credit card", "credit card
 // bill payment successful", "paid to [bank] credit card".
 // Requires a debit verb (CC_BILL_HARD_CONFIRMATION_REGEX) to fire alongside.
+// NOTE: only HIGH-CONFIDENCE wording auto-fires here — explicit "credit card" /
+// "cc bill". Ambiguous channels like CRED (also used for rent/shopping) are left as
+// normal debits so real expenses aren't hidden; the user reclassifies those by hand
+// ('cc_bill' via markAsCCBillPayment).
 const CC_PAYMENT_OUTGOING_REGEX =
-  /\btowards\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+(?:bill\s+)?(?:payment|dues?)\s+(?:successful|done|completed|processed|cleared)\b|\bpaid\s+(?:to|towards)\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+bill\s+payment\b/i;
+  /\btowards\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+(?:bill\s+)?(?:payment|dues?)\s+(?:successful|done|completed|processed|cleared)\b|\bpaid\s+(?:to|towards)\s+(?:[\w]+\s+)?credit\s+card\b|\bcredit\s+card\s+bill\s+payment\b|\bcc\s+bill(?:\s+pay(?:ment)?)?\b/i;
 
 // Promotional / upsell messages from banks (EMI offers, reward conversions).
 // These contain an amount (the "eligible spend") but no actual transaction happened.
