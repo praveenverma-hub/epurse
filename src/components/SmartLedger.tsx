@@ -35,6 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore, selectVisibleTransactions } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing } from '../constants/theme';
+import { NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import { debitDisplayAmount } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 
@@ -196,6 +197,7 @@ const SmartLedger: React.FC<SmartLedgerProps> = ({ transactions }) => {
     const now = new Date();
     return (storeTxns as LedgerTxn[]).filter((t) => {
       if (t.type !== 'debit') return false;
+      if (t.categoryId && NON_SPEND_CATEGORY_IDS.has(t.categoryId)) return false;
       const d = new Date(t.createdAt ?? 0);
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     });

@@ -15,10 +15,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
@@ -425,26 +426,19 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
     <View style={styles.root}>
       <StatusBar style="light" />
 
-      <LinearGradient
-        colors={gradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGrad}
+      <CollapsingHeaderScreen
+        collapsible={false}
+        gradientColors={gradient}
+        title="Groups"
+        headerRight={
+          <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
+            <Ionicons name="information-circle-outline" size={22} color="#FFFFFFCC" />
+          </TouchableOpacity>
+        }
+        renderHero={() => (
+          <Text style={styles.subheading}>Track shared and personal transactions</Text>
+        )}
       >
-        <SafeAreaView edges={['top']}>
-          <View style={styles.header}>
-            <View style={styles.headingRow}>
-              <Text style={styles.heading}>Groups</Text>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-                <Ionicons name="information-circle-outline" size={22} color="#FFFFFFCC" />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.subheading}>Track shared and personal transactions</Text>
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-
       {groups.length === 0 ? (
         <View style={styles.emptyContainer}>
           <EmptyState
@@ -492,6 +486,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
           {...scrollProps}
         />
       )}
+      </CollapsingHeaderScreen>
 
       {/* FAB → add a transaction to the selected group (full screen) */}
       {selectedGroup && (
@@ -664,10 +659,6 @@ const TILE = 84;
 
 const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: colors.background },
-  headerGrad: { borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.lg },
-  headingRow: { flexDirection: 'row', alignItems: 'center' },
-  heading:    { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: '#fff' },
   infoBtn:    { marginLeft: spacing.xs, padding: 2 },
   subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
   // flex:1 bounds the list to the viewport below the header so its content

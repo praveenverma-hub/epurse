@@ -13,11 +13,9 @@ import {
   ScrollView,
   Dimensions,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView } from 'react-native-tab-view';
-import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 import EmptyState from '../components/EmptyState';
 
@@ -461,46 +459,34 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   );
 
   const headerComponent = (
-    <LinearGradient
-          colors={grad}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <SafeAreaView edges={['top']}>
-            <View style={styles.headerRow}>
-              <TouchableOpacity
-                onPress={() => navigation.goBack()}
-                hitSlop={10}
-              >
-                <Ionicons name="chevron-back" size={24} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.title}>
-                {kind === 'lent' ? 'You Lent' : 'You Borrowed'}
-              </Text>
-              <View style={{ width: 40 }} />
-            </View>
+    <CollapsingHeaderScreen
+      collapsible={false}
+      gradientColors={grad}
+      onBack={() => navigation.goBack()}
+      title={kind === 'lent' ? 'You Lent' : 'You Borrowed'}
+      renderHero={() => (
+        <>
+          <Text style={styles.subLabel}>
+            {kind === 'lent' ? 'Money to receive' : 'Money to return'}
+          </Text>
+          <Text style={styles.bigAmount}>{formatCurrency(total)}</Text>
 
-            <Text style={styles.subLabel}>
-              {kind === 'lent' ? 'Money to receive' : 'Money to return'}
-            </Text>
-            <Text style={styles.bigAmount}>{formatCurrency(total)}</Text>
-
-            <View style={styles.toggleRow}>
-              <Toggle
-                label="Lent"
-                active={kind === 'lent'}
-                onPress={() => setKind('lent')}
-              />
-              <Toggle
-                label="Borrowed"
-                active={kind === 'borrowed'}
-                onPress={() => setKind('borrowed')}
-              />
-            </View>
-          </SafeAreaView>
-        </LinearGradient>
-      );
+          <View style={styles.toggleRow}>
+            <Toggle
+              label="Lent"
+              active={kind === 'lent'}
+              onPress={() => setKind('lent')}
+            />
+            <Toggle
+              label="Borrowed"
+              active={kind === 'borrowed'}
+              onPress={() => setKind('borrowed')}
+            />
+          </View>
+        </>
+      )}
+    />
+  );
 
   const renderScene = ({ route: r }) => {
     const k = r.key;
@@ -645,20 +631,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   listContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
 
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: spacing.sm,
-  },
-
-  title: { color: '#fff', ...typography.h2 },
   subLabel: {
     color: '#FFFFFFCC',
     ...typography.small,

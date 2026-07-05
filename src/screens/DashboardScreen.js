@@ -16,8 +16,8 @@ import {
   Animated, Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, RefreshControl,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats } from '../store/ePurseStore';
 import {
@@ -242,14 +242,11 @@ const DashboardScreen = ({ navigation }) => {
       <CheckInBanner />
 
       {/* ───── Gradient header ───── */}
-      <LinearGradient
-        colors={[theme.gradientStart, theme.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <SafeAreaView edges={['top']}>
-          {/* Top row */}
+      <CollapsingHeaderScreen
+        collapsible={false}
+        gradientColors={[theme.gradientStart, theme.gradientEnd]}
+        renderBar={() => (
+          /* Top row */
           <View style={styles.headerRow}>
             <View style={styles.headerGreetWrap}>
               <Text style={styles.greeting} numberOfLines={1}>{greeting}</Text>
@@ -303,7 +300,9 @@ const DashboardScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
           </View>
-
+        )}
+        renderHero={() => (
+          <>
           {/* Net expense (debits − credits) for the selected period. */}
           <View style={styles.balanceBlock}>
             <Text style={styles.balanceLabel}>ePurse net expense {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
@@ -340,8 +339,9 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.statValue}>{formatCurrency(periodStats.credits)}</Text>
             </View>
           </View>
-        </SafeAreaView>
-      </LinearGradient>
+          </>
+        )}
+      />
 
       {/* ───── Scrollable body ───── */}
       <ScrollView
@@ -735,12 +735,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
   // Header
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
-  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

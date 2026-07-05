@@ -12,12 +12,12 @@ import {
   Dimensions,
 } from 'react-native';
 import Svg, { Circle, G, Rect } from 'react-native-svg';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { selectTransactions } from '../store/ePurseStore';
+import { NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
@@ -87,7 +87,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   // linked debit card rolls into its bank); maskless txns with no account fall
   // back to a type bucket. Mirrors getMonthlySpend filters (debit, same month,
   // no NON_SPEND_CATS, no group memos) and uses the user's share for group txns.
-  const NON_SPEND = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill']);
+  const NON_SPEND = NON_SPEND_CATEGORY_IDS;
 
   // Selected-month debit spends for the What-if Ledger (same filters as the summary:
   // debit, this month, not group-excluded, not a non-spend category). Personal share
@@ -140,41 +140,34 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   return (
     <View style={styles.container}>
       {!headerless ? (
-        <LinearGradient
-          colors={[colors.gradientBlueStart, colors.gradientBlueEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <SafeAreaView edges={['top']}>
-            <View style={styles.headerRow}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                <Text style={styles.backText}>←</Text>
-              </TouchableOpacity>
-              <Text style={styles.title}>Analytics</Text>
-              <View style={{ width: 40 }} />
-            </View>
+        <CollapsingHeaderScreen
+          collapsible={false}
+          gradientColors={[colors.gradientBlueStart, colors.gradientBlueEnd]}
+          onBack={() => navigation.goBack()}
+          title="Analytics"
+          renderHero={() => (
+            <>
+              <View style={styles.monthSwitcher}>
+                <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
+                  <Text style={styles.arrow}>‹</Text>
+                </TouchableOpacity>
+                <Text style={styles.monthLabel}>{monthLabel}</Text>
+                <TouchableOpacity
+                  onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
+                  disabled={monthOffset === 0}
+                >
+                  <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.monthSwitcher}>
-              <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
-                <Text style={styles.arrow}>‹</Text>
-              </TouchableOpacity>
-              <Text style={styles.monthLabel}>{monthLabel}</Text>
-              <TouchableOpacity
-                onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
-                disabled={monthOffset === 0}
-              >
-                <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.summaryRow}>
-              <SummaryStat label="Spent" value={monthSpend} />
-              <SummaryStat label="Earned" value={monthIncome} />
-              <SummaryStat label="Net" value={monthIncome - monthSpend} />
-            </View>
-          </SafeAreaView>
-        </LinearGradient>
+              <View style={styles.summaryRow}>
+                <SummaryStat label="Spent" value={monthSpend} />
+                <SummaryStat label="Earned" value={monthIncome} />
+                <SummaryStat label="Net" value={monthIncome - monthSpend} />
+              </View>
+            </>
+          )}
+        />
       ) : (
         /* headerless — plain strip, no gradient (InsightsScreen already provides one) */
         <View style={styles.headerlessStrip}>
@@ -454,29 +447,6 @@ const ProgressRing = ({ category, size = 70, stroke = 7 }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: spacing.sm,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF22',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backText: { fontSize: 22, color: '#fff' },
-  title: { color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
 
   monthSwitcher: {
     flexDirection: 'row',

@@ -30,7 +30,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES, NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import {
   twoTierToLegacyCatId,
   parentCatIdForTxn,
@@ -347,7 +347,10 @@ const isDuplicate = (transactions, parsed, smsId = null, suppressedSmsIds = []) 
  * moved, so account balances are still adjusted via applyDelta, but it is
  * neither income nor expense and must not skew totals.
  */
-const NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill']);
+// Re-export of the canonical set (constants/categories.js) so every exclusion
+// site in the store shares one definition and can never drift from the analytics
+// selectors. Add new non-spend categories THERE, not here.
+const NON_SPEND_CATS = NON_SPEND_CATEGORY_IDS;
 
 // `isGroupExcluded` + `buildGroupLbRows` are pure helpers imported from ../utils/split
 // (co-located with the rest of the split math + `debitDisplayAmount`, and unit-tested in
@@ -3442,10 +3445,8 @@ export const selectGapTransactionCount = (s, lastCheckedInDate) => {
 // Keeping both as derived selectors (re-computed from transactions) gives us
 // a single source of truth and prevents drift from missed delta updates.
 // =============================================================================
-// Dashboard header/chip exclusions = the app-wide non-spend set (LB ledger, self
-// transfers, CC-bill payments). Aliased to NON_SPEND_CATS so it can never drift —
-// adding a non-spend category in one place updates the header stats too.
-const NON_SPEND_CATEGORY_IDS = NON_SPEND_CATS;
+// Dashboard header/chip exclusions use the same imported NON_SPEND_CATEGORY_IDS
+// (LB ledger, self transfers, CC-bill payments) — one source, no drift.
 
 const periodStartMs = (key) => {
   const now = new Date();

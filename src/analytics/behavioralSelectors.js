@@ -3,12 +3,14 @@
 // No React, no hooks. All three functions filter out isIgnored and LB cats.
 // =============================================================================
 
-import { TRANSACTION_TYPES } from '../constants/categories';
+import { TRANSACTION_TYPES, NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import { debitDisplayAmount } from '../utils/split';
 
-// Excluded from behavioral spend analytics: LB ledger + self transfers between
-// the user's own accounts (real movement, but neither income nor expense).
-const LB_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
+// Excluded from behavioral spend analytics: the app-wide non-spend set (LB
+// ledger, self transfers, CC-bill payments) — real money movement, but neither
+// income nor expense. Shared with the store so pace/bubbles/subscriptions match
+// the Spent/Earned summary exactly and can never drift.
+const LB_CATS = NON_SPEND_CATEGORY_IDS;
 
 /**
  * Computes day-by-day cumulative debit spend for targetDate's month (current)

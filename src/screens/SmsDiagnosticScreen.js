@@ -17,9 +17,8 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Platform, Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { PermissionsAndroid } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import {
@@ -29,6 +28,7 @@ import { parseMessageDetailed } from '../utils/messageParser';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import CenterModal from '../components/CenterModal';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 const STATUS = { idle: 'idle', running: 'running', done: 'done', error: 'error' };
 
@@ -188,22 +188,12 @@ export default function SmsDiagnosticScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      {/* Header */}
-      <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
-        style={styles.header}
+      <CollapsingHeaderScreen
+        collapsible={false}
+        gradientColors={[colors.gradientStart, colors.gradientEnd]}
+        onBack={() => navigation.goBack()}
+        title="SMS Diagnostic"
       >
-        <SafeAreaView edges={['top']}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Text style={styles.backText}>← Back</Text>
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>SMS Diagnostic</Text>
-            <View style={{ width: 60 }} />
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
 
         {/* Info banner */}
@@ -304,6 +294,7 @@ export default function SmsDiagnosticScreen({ navigation }) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      </CollapsingHeaderScreen>
 
       <CenterModal
         visible={!!confirm}
@@ -338,12 +329,6 @@ const HelpItem = ({ title, body }) => (
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
-
-  header: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
-  backBtn: { paddingVertical: 4, paddingRight: spacing.md },
-  backText: { color: '#fff', ...typography.body, fontWeight: '600' },
-  headerTitle: { color: '#fff', ...typography.h3, fontWeight: '700' },
 
   body: { flex: 1 },
   bodyContent: { padding: spacing.lg, gap: spacing.lg },

@@ -33,6 +33,24 @@ export const DEFAULT_CATEGORIES = [
 ];
 
 /**
+ * Category ids that move money but are NOT spend/income — excluded from every
+ * total, chart and analytic (Spent/Earned, category breakdown, spending pace,
+ * merchant bubbles, subscriptions, budgets). Balances still track these; only
+ * the "how much did I spend/earn" view ignores them.
+ *
+ *  - lent / borrowed / lent_settled / borrow_repaid → the lend-borrow ledger
+ *  - self → transfers between the user's own accounts
+ *  - cc_bill → paying off a credit-card bill (the card purchases were already counted)
+ *
+ * SINGLE SOURCE OF TRUTH. The store re-exports this as NON_SPEND_CATS and the
+ * analytics selectors import it directly — do not fork a second copy. Add a new
+ * non-spend category here and every exclusion site picks it up.
+ */
+export const NON_SPEND_CATEGORY_IDS = new Set([
+  'lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill',
+]);
+
+/**
  * Merchant-brand → category map.
  * Keys are lowercase substrings searched in the SMS body and the parsed
  * merchant string. Order doesn't matter — first hit wins.

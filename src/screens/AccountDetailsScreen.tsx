@@ -449,7 +449,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* 3. Pocket sheet — zIndex 5 / elevation 10 paints over the card's lower
               POCKET_OVERLAP px. flex: 1 fills the remaining screen. Upward shadow
               reads as the lip of a physical card sleeve. */}
-      <View style={styles.pocketSheetWrap}>
+      <View style={[styles.pocketSheetWrap, { backgroundColor: theme.background }]}>
         <FlatList
           data={ledgerData}
           keyExtractor={(item) => item.id}
@@ -599,7 +599,8 @@ const styles = StyleSheet.create({
   pocketSheetWrap: {
     flex:            1,
     zIndex:          5,
-    backgroundColor: '#FFFFFF',
+    // backgroundColor is applied inline from theme.background so the list sits on
+    // the same gray as other screens (white TransactionItem cards stand out).
     borderTopWidth:  1,
     borderColor:     '#ECEFF1',
     shadowColor:     '#000',

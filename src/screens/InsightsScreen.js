@@ -10,12 +10,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView } from 'react-native-tab-view';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, typography } from '../constants/theme';
+import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import BudgetScreen    from './BudgetScreen';
 import AnalyticsScreen from './AnalyticsScreen';
 
@@ -61,14 +60,11 @@ export default function InsightsScreen({ navigation, route }) {
   };
 
   const renderTabBar = () => (
-    <LinearGradient
-      colors={[theme.gradientStart, theme.gradientEnd]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.header}
-    >
-      <SafeAreaView edges={['top']}>
-        <Text style={styles.screenTitle}>Insights</Text>
+    <CollapsingHeaderScreen
+      collapsible={false}
+      gradientColors={[theme.gradientStart, theme.gradientEnd]}
+      title="Insights"
+      renderHero={() => (
         <View style={styles.switcher}>
           {ROUTES.map((t, i) => (
             <TouchableOpacity
@@ -86,8 +82,8 @@ export default function InsightsScreen({ navigation, route }) {
             </TouchableOpacity>
           ))}
         </View>
-      </SafeAreaView>
-    </LinearGradient>
+      )}
+    />
   );
 
   return (
@@ -103,25 +99,12 @@ export default function InsightsScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
-  },
-  screenTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
-  },
   switcher: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF22',
     borderRadius: radius.pill,
     padding: 3,
+    marginTop: spacing.md,
   },
   switcherBtn: {
     flex: 1,
