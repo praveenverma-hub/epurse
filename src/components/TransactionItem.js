@@ -59,6 +59,17 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
       disabled={!cardPressable}
       style={[styles.card, muted && styles.cardMuted, showGroupChip && styles.cardWithBadge]}
     >
+      {/* Group watermark — the group emoji, oversized and faint, bleeding ~40% off
+          the right edge (clipped to the card shape) so the card reads as "belongs
+          to this group". Sits BEHIND the content (first child), behind the amount. */}
+      {showGroupChip ? (
+        <View style={styles.groupWatermarkClip} pointerEvents="none">
+          <Text style={styles.groupWatermark} allowFontScaling={false}>
+            {group.emoji || '🗂'}
+          </Text>
+        </View>
+      ) : null}
+
       <TouchableOpacity
         activeOpacity={onPressCategory ? 0.75 : 1}
         onPress={onPressCategory}
@@ -127,17 +138,21 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         ) : null}
       </View>
 
-      {/* Group ribbon — gradient tag hanging from the card's top-right edge. */}
+      {/* Group ribbon — gradient tag hanging from the card's top-right edge: group
+          colour at the top (folded-behind look), turning to solid white where the
+          name sits, then fading out at the bottom edge so it melts into the card. */}
       {showGroupChip ? (
         <LinearGradient
-          colors={[group.color || colors.info, (group.color || colors.info) + '55', '#FFFFFF00']}
+          colors={[group.color || colors.info, '#FFFFFF00', '#FFFFFF00', '#FFFFFF00']}
+          locations={[0, 0.3, 0.85, 1]}
           start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 0.45 }}
+          end={{ x: 0, y: 1 }}
           style={styles.groupBanner}
           pointerEvents="none"
         >
           <View style={styles.groupBannerRow}>
-            <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text>
+            {/* Emoji now shown as the card watermark; hidden in the ribbon for now. */}
+            {/* <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text> */}
             <Text style={[styles.groupBannerText, { color: group.color || colors.info }]} numberOfLines={1}>
               {groupLabel}
             </Text>
@@ -243,21 +258,38 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     maxWidth: 112,
   },
+  // Group watermark — clip layer fills the card and matches its rounded shape so the
+  // oversized emoji is cut cleanly at the card's edges (only ~60% shows).
+  groupWatermarkClip: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  // The emoji itself: near card-height, faint, and shifted right so ~40% bleeds off
+  // the edge. `top` starts it ~10px above the (vertically-centred) amount.
+  groupWatermark: {
+    position: 'absolute',
+    right: -24,
+    top: 24,
+    fontSize: 62,
+    opacity: 0.12,
+  },
   // Gradient ribbon tag — dark group colour at top fading to white, hangs from card edge.
   groupBanner: {
     position: 'absolute',
     top: 0,
     right: 14,
-    width: 64,
+    width: 65,
     height: 26,
     justifyContent: 'flex-end',
     paddingHorizontal: 7,
     paddingBottom: 4,
-    borderBottomLeftRadius: radius.md,
-    borderBottomRightRadius: radius.md,
+    borderBottomLeftRadius: radius.sm,
+    borderBottomRightRadius: radius.sm,
     zIndex: 3,
-    elevation: 3,
+    elevation: 1,
     overflow: 'hidden',
+    alignItems:"center"
   },
   groupBannerRow: {
     flexDirection: 'row',
