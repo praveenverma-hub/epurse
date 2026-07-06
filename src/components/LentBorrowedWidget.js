@@ -46,7 +46,7 @@ const Card = ({ title, amount, helper, gradient, onPress }) => (
 );
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+  row: { flexDirection: 'row', gap: spacing.md },
   cardWrap: { flex: 1, ...shadows.elevated, borderRadius: radius.lg },
   card: { borderRadius: radius.lg, padding: spacing.lg },
   title: { ...typography.small, color: '#FFFFFFCC', fontWeight: '600' },

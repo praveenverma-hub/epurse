@@ -38,6 +38,8 @@ import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
+import InfoIcon from '../components/InfoIcon';
+import EditIcon from '../components/EditIcon';
 import MonthDivider from '../components/MonthDivider';
 import { useToast } from '../components/Toast';
 import type { Group, GroupExpenseData } from '../types/group';
@@ -357,7 +359,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
                   </View>
                   <View style={styles.cardActions}>
                     <TouchableOpacity onPress={handleEditGroup} hitSlop={8} style={styles.cardActionBtn}>
-                      <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
+                      <EditIcon size={16} color={colors.textSecondary} />
                     </TouchableOpacity>
                     <TouchableOpacity onPress={handleDeleteGroup} hitSlop={8} style={styles.cardActionBtn}>
                       <Ionicons name="trash-outline" size={18} color={colors.danger} />
@@ -448,7 +450,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
         title="Groups"
         headerRight={
           <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-            <Ionicons name="information-circle-outline" size={22} color="#FFFFFFCC" />
+            <InfoIcon size={22} color="#FFFFFFCC" />
           </TouchableOpacity>
         }
         renderHero={() => (
@@ -458,7 +460,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
       {groups.length === 0 ? (
         <View style={styles.emptyContainer}>
           <EmptyState
-            emoji="🗂"
+            icon="people-outline"
             title="No groups yet"
             subtitle="Create a personal group to track themed spending (house build, trip) or a shared group to split expenses with friends."
             actionLabel="Create first group"
@@ -491,7 +493,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
           ListEmptyComponent={
             <EmptyState
               compact
-              emoji="🧾"
+              icon="receipt-outline"
               title="No transactions yet"
               subtitle={'Tap + to add one, or tag existing transactions from the Activity tab.'}
               style={styles.emptyTxn}
@@ -786,7 +788,7 @@ const styles = StyleSheet.create({
 
   // Transactions list
   txnHeader: { marginTop: spacing.md, marginBottom: spacing.md },
-  sectionTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
+  sectionTitle: { ...typography.h3, color: colors.textPrimary },
   // Plain (no card) — just centred text + emoji.
   emptyTxn: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },
 

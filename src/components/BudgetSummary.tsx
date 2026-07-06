@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import InfoSheet from './InfoSheet';
+import InfoIcon from './InfoIcon';
 
 // Essential (survival) categories — keyed by the first-level BUDGET parent ids
 // the plan actually uses (groceries rolls into food, utilities→bills,
@@ -212,7 +213,7 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
         <Text style={[styles.title, { color: theme.textPrimary }]}>Budget Summary</Text>
         {isBudgetExhausted && (
           <TouchableOpacity onPress={() => setShowInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="information-circle-outline" size={18} color={theme.textMuted} />
+            <InfoIcon size={18} color={theme.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -350,7 +351,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 16,
     padding: 16,
-    marginTop: 24,
     gap: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
@@ -385,7 +385,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     paddingBottom: 12,
-    marginTop: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -399,8 +398,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '700',
+    // Matches typography.h3 (the app-wide section heading) — colour applied inline.
+    fontSize: 17,
+    fontWeight: '600',
   },
 
   mainRow: {

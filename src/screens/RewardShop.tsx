@@ -48,6 +48,7 @@ import {
 import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 import { useToast } from '../components/Toast';
 import InfoSheet from '../components/InfoSheet';
+import InfoIcon from '../components/InfoIcon';
 
 // ─── Dark-mode palette (screen-scoped) ───────────────────────────────────────
 
@@ -171,7 +172,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                   accessibilityLabel="What are Reality Points"
                 >
                   <Text style={styles.xpLabel}>NEXT LEVEL</Text>
-                  <Text style={styles.infoGlyph}>ⓘ</Text>
+                  <InfoIcon size={14} color={D.textMuted} style={{ marginLeft: 4 }} />
                 </TouchableOpacity>
                 <Text style={styles.xpPoints}>
                   {totalRP.toLocaleString('en-IN')}
@@ -204,7 +205,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                   accessibilityLabel="What are ePurse Coins"
                 >
                   <Text style={styles.coinLabel}>EPC Balance</Text>
-                  <Text style={styles.infoGlyph}>ⓘ</Text>
+                  <InfoIcon size={14} color={D.textMuted} style={{ marginLeft: 4 }} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -621,11 +622,6 @@ const styles = StyleSheet.create({
     gap:           6,
   },
   /** The (i) circle next to RP / EPC labels — tap opens InfoSheet. */
-  infoGlyph: {
-    fontSize:   13,
-    color:      D.textMuted,
-    fontWeight: '700' as const,
-  },
   xpPoints: {
     fontSize: 12,
     fontWeight: '700' as const,

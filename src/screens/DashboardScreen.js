@@ -39,6 +39,7 @@ import CrystalPiggyVault from '../components/CrystalPiggyVault';
 import BellIcon from '../components/BellIcon';
 import NotificationsSheet from '../components/NotificationsSheet';
 import AppBrandFooter from '../components/AppBrandFooter';
+import EmptyState from '../components/EmptyState';
 import {
   useNotificationStore,
   selectHasUnreadNotifications,
@@ -368,36 +369,41 @@ const DashboardScreen = ({ navigation }) => {
         {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
         <DailyQueueStack />
 
-        {/* Period transactions */}
-        <View style={styles.recentHeader}>
-          <Text style={styles.sectionTitle}>
-            Transactions · {txnSectionLabel}
-            <Text style={styles.txnCount}> ({periodStats.count})</Text>
-          </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>
-            <Text style={[styles.viewAll, { color: theme.primary }]}>View all</Text>
-          </TouchableOpacity>
-        </View>
-
-        {periodStats.recent.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyEmoji}>📭</Text>
-            <Text style={styles.emptyTitle}>Nothing this {periodTitle}</Text>
-            <Text style={styles.emptyHelp}>
-              Add a manual entry or switch to a wider period.
+        {/* Period transactions — wrapped as ONE section so the row list keeps its
+            own tight spacing while the parent `gap` spaces the sections evenly. */}
+        <View style={styles.txnSection}>
+          <View style={styles.recentHeader}>
+            <Text style={styles.sectionTitle}>
+              Transactions · {txnSectionLabel}
+              <Text style={styles.txnCount}> ({periodStats.count})</Text>
             </Text>
+            {/* Nothing to view when the period is empty (e.g. a freshly onboarded user). */}
+            {periodStats.recent.length > 0 ? (
+              <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>
+                <Text style={[styles.viewAll, { color: theme.primary }]}>View all</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
-        ) : (
-          periodStats.recent.map((t) => (
-            <TransactionItem
-              key={t.id}
-              txn={t}
-              onPressCategory={() => setActiveTxn(t)}
-              onPressSplitChip={() => setSplitDetailsTxn(t)}
-              onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(t) : undefined}
+
+          {periodStats.recent.length === 0 ? (
+            <EmptyState
+              compact
+              icon="receipt-outline"
+              title={`Nothing this ${periodTitle}`}
+              subtitle="Add a manual entry or switch to a wider period."
             />
-          ))
-        )}
+          ) : (
+            periodStats.recent.map((t) => (
+              <TransactionItem
+                key={t.id}
+                txn={t}
+                onPressCategory={() => setActiveTxn(t)}
+                onPressSplitChip={() => setSplitDetailsTxn(t)}
+                onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(t) : undefined}
+              />
+            ))
+          )}
+        </View>
 
         <AppBrandFooter />
 
@@ -858,33 +864,25 @@ const styles = StyleSheet.create({
 
   // Body
   body: { flex: 1, marginTop: -spacing.lg },
-  bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, flexGrow: 1 },
+  // `gap` gives every top-level section the SAME vertical spacing. Sections must
+  // not add their own outer marginTop/marginBottom or it compounds with this.
+  // paddingTop adds back the body's -spacing.lg overlap (tuck under the curved
+  // header) so the header→first-section gap equals the inter-section gap (spacing.xl).
+  bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl + spacing.lg, gap: spacing.xl, flexGrow: 1 },
 
   sectionTitle: { ...typography.h3, color: colors.textPrimary },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
 
   // Recent
+  txnSection: {},
   recentHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing.xl,
+    // No marginTop — the parent `gap` spaces this section from the queue above.
     marginBottom: spacing.sm,
   },
   viewAll: { ...typography.small, color: colors.primary, fontWeight: '700' },
-
-  // Plain (no card) empty state — just emoji + text, like the Groups empty list.
-  emptyCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-  },
-  emptyEmoji: { fontSize: 36 },
-  emptyTitle: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },
-  emptyHelp: {
-    ...typography.small, color: colors.textSecondary,
-    textAlign: 'center', marginTop: spacing.xs,
-  },
 
   // Settings sheet
   settingsBackdrop: {

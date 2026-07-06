@@ -29,6 +29,8 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import AccountCard    from '../components/AccountCard';
+import EmptyState     from '../components/EmptyState';
+import InfoIcon       from '../components/InfoIcon';
 import AddAccountModal from '../components/AddAccountModal';
 import CenterModal    from '../components/CenterModal';
 import InfoSheet      from '../components/InfoSheet';
@@ -386,15 +388,16 @@ export default function AccountsScreen({ navigation }) {
             accessibilityRole="button"
             accessibilityLabel="About linking cards and banks"
           >
-            <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
+            <InfoIcon size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
         {sortedAccounts.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyEmoji}>💳</Text>
-            <Text style={styles.emptyTitle}>No accounts yet</Text>
-            <Text style={styles.emptyHelp}>Tap + above to add your first account.</Text>
-          </View>
+          <EmptyState
+            compact
+            icon="card-outline"
+            title="No accounts yet"
+            subtitle="Tap + above to add your first account."
+          />
         ) : (
           sortedAccounts.map((a) => (
             <TouchableOpacity
@@ -761,16 +764,6 @@ const styles = StyleSheet.create({
   phoneAddBtnDisabled: { opacity: 0.4 },
   phoneAddText: { color: colors.card, ...typography.bodyBold, fontWeight: '700' },
 
-  // Plain (no card) empty state — just emoji + text, like the Groups empty list.
-  emptyCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.md,
-  },
-  emptyEmoji: { fontSize: 36 },
-  emptyTitle: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.sm },
-  emptyHelp:  { ...typography.small, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs },
 
   // Debit-card↔bank merge suggestion card
   linkSuggest: {

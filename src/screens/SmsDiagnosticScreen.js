@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
     ...shadows.card,
     gap: spacing.sm,
   },
-  cardTitle: { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
+  cardTitle: { ...typography.h3, color: colors.textPrimary },
   cardSub: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.xs },
 
   logRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },

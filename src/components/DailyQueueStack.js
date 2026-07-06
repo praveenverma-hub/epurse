@@ -23,6 +23,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
 import {
@@ -41,6 +42,7 @@ import GroupPickerSheet from './GroupPickerSheet';
 import GroupExpenseSheet from './GroupExpenseSheet';
 import CenterModal from './CenterModal';
 import InfoSheet from './InfoSheet';
+import InfoIcon from './InfoIcon';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -82,7 +84,7 @@ const InboxZero = () => {
   return (
     <View style={styles.inboxZero}>
       <Animated.View style={[styles.inboxZeroRing, pulseStyle]}>
-        <Text style={styles.inboxZeroCheck}>✓</Text>
+        <Ionicons name="checkmark" size={30} color={colors.success} />
       </Animated.View>
       <Text style={styles.inboxZeroTitle}>All caught up!</Text>
       <Text style={styles.inboxZeroSub}>New transactions will appear here for review.</Text>
@@ -500,7 +502,7 @@ const DailyQueueStack = () => {
       {/* ── Header ── */}
       <View style={styles.header}>
         <View style={styles.headerTitleRow}>
-          <Text style={styles.headerTitle}>REVIEW QUEUE</Text>
+          <Text style={styles.headerTitle}>Review Queue</Text>
           <TouchableOpacity
             style={styles.infoDot}
             onPress={() => setShowCapInfo(true)}
@@ -509,7 +511,7 @@ const DailyQueueStack = () => {
             accessibilityLabel="Daily earning cap info"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Text style={styles.infoDotText}>ⓘ</Text>
+            <InfoIcon size={16} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
         <View style={styles.headerRow}>
@@ -704,9 +706,7 @@ const DailyQueueStack = () => {
 // =============================================================================
 const styles = StyleSheet.create({
   container: {
-    marginBottom: spacing.md,
-    marginTop: spacing.xl,
-
+    // No outer margins — the Dashboard's bodyContent `gap` spaces this section.
   },
 
   // ── Header ──
@@ -725,24 +725,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   headerTitle: {
-    ...typography.tiny,
-    color: colors.textSecondary,
-    fontWeight: '700',
-    letterSpacing: 1.2,
+    ...typography.h3,
+    color: colors.textPrimary,
   },
   infoDot: {
     width: 18, height: 18,
     alignItems: 'center', justifyContent: 'center',
   },
-  infoDotText: {
-    fontSize: 13,
-    color:    colors.textMuted,
-    fontWeight: '700',
-  },
   headerSub: {
     ...typography.small,
-    color: colors.textPrimary,
-    fontWeight: '600',
+    color: colors.textSecondary,
   },
   xpPill: {
     flexDirection: 'row',
@@ -881,7 +873,9 @@ const styles = StyleSheet.create({
     ...typography.tiny,
     color: colors.textMuted,
     textAlign: 'center',
-    marginTop: spacing.sm + BACK_PEEK,
+    // stackContainer already reserves BACK_PEEK below the cards, so a plain small
+    // gap is enough here — adding BACK_PEEK again left too much space above the hint.
+    marginTop: spacing.sm,
   },
 
   // ── InboxZero ──
@@ -903,7 +897,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.md,
   },
-  inboxZeroCheck: { fontSize: 28, color: colors.success },
   inboxZeroTitle: {
     ...typography.h3,
     color: colors.textPrimary,

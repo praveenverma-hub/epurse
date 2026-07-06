@@ -1,12 +1,15 @@
 // =============================================================================
 // EmptyState — shared, consistent no-data / fresh-onboarding placeholder.
 //
-// Two visual modes:
-//   • card (default) — standalone rounded card with shadow. Use on screen body.
-//   • compact        — transparent, no card/shadow. Use INSIDE an existing card
-//                      (e.g. an Analytics section that is already a card).
+// Two visual modes (both flat — never a boxed card):
+//   • full (default) — fills its parent and centres vertically + horizontally.
+//                      Use for a whole-screen / whole-tab empty (put it in a
+//                      flex:1 view, or a list whose contentContainer has flexGrow:1).
+//   • compact        — smaller, no flex, centred horizontally. Use INSIDE an
+//                      existing section/card (e.g. an Analytics section).
 //
-// Optional CTA button (actionLabel + onAction) tinted with the active theme.
+// Optional CTA button (actionLabel + onAction) tinted with the active theme —
+// the single, consistent empty-state button style across the app.
 // =============================================================================
 
 import React from 'react';
@@ -18,11 +21,19 @@ import {
   StyleProp,
   ViewStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 
 interface EmptyStateProps {
+  /**
+   * Expo (Ionicons) glyph — PREFERRED. Reuse the type's canonical icon so empties
+   * match the rest of the app (e.g. groups → 'people-outline', accounts →
+   * 'card-outline', transactions → 'receipt-outline', analytics → 'bar-chart-outline').
+   */
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
+  /** Fallback pictograph when no themed icon fits. `icon` wins if both are set. */
   emoji?: string;
   title?: string;
   subtitle?: string;
@@ -34,7 +45,8 @@ interface EmptyStateProps {
 }
 
 const EmptyState: React.FC<EmptyStateProps> = ({
-  emoji = '📭',
+  icon,
+  emoji,
   title,
   subtitle,
   actionLabel,
@@ -43,11 +55,14 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   style,
 }) => {
   const theme = useTheme();
+  const glyph = icon ? null : (emoji ?? '📭');
 
   return (
-    <View style={[compact ? styles.compact : styles.card, style]}>
-      {emoji ? (
-        <Text style={[styles.emoji, compact && styles.emojiCompact]}>{emoji}</Text>
+    <View style={[compact ? styles.compact : styles.full, style]}>
+      {icon ? (
+        <Ionicons name={icon} size={compact ? 30 : 42} color={theme.textMuted} />
+      ) : glyph ? (
+        <Text style={[styles.emoji, compact && styles.emojiCompact]}>{glyph}</Text>
       ) : null}
       {title ? (
         <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text>
@@ -69,13 +84,13 @@ const EmptyState: React.FC<EmptyStateProps> = ({
 export default EmptyState;
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+  // Full-screen: flat (no card chrome), fills parent, centres both axes.
+  full: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: spacing.xl,
     paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    ...shadows.card,
   },
   compact: {
     alignItems: 'center',

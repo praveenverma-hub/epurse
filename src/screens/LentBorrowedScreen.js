@@ -446,15 +446,13 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   const renderEmpty = (k) => (
     <EmptyState
-      compact
-      emoji={k === 'lent' ? '🤝' : '🧾'}
+      icon={k === 'lent' ? 'arrow-up-circle-outline' : 'arrow-down-circle-outline'}
       title={k === 'lent' ? 'Nothing lent out' : 'Nothing borrowed'}
       subtitle={
         k === 'lent'
           ? 'Money you lend will show here so you can track what to collect.'
           : 'Money you borrow will show here so you can track what to repay.'
       }
-      style={styles.emptyWrap}
     />
   );
 
@@ -629,7 +627,7 @@ const ENTRIES_MAX_VISIBLE = 3.5; // show 3 full + partial 4th
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
+  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2, flexGrow: 1 },
 
   subLabel: {
     color: '#FFFFFFCC',
@@ -835,10 +833,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  emptyWrap: {
-    paddingVertical: spacing.xl,
-    alignItems: 'center',
-  },
   emptyText: {
     ...typography.body,
     color: colors.textSecondary,

@@ -33,6 +33,8 @@ import { formatCompact } from '../utils/format';
 import { INPUT_LIMITS } from '../utils/validation';
 import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
+import EmptyState from '../components/EmptyState';
+import InfoIcon from '../components/InfoIcon';
 import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
@@ -321,7 +323,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                   accessibilityRole="button"
                   accessibilityLabel="How this budget works"
                 >
-                  <Text style={styles.heroInfoIcon}>ⓘ</Text>
+                  <InfoIcon size={16} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.heroDays}>
@@ -480,20 +482,13 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
   // ── Empty state ──────────────────────────────────────────────────────────
   const renderEmpty = () => (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyEmoji}>📋</Text>
-      <Text style={styles.emptyTitle}>No plan yet</Text>
-      <Text style={styles.emptySub}>
-        Set a monthly budget and track your spending in real time.
-      </Text>
-      <TouchableOpacity
-        style={[styles.createBtn, { backgroundColor: theme.primary }]}
-        onPress={openCreateModal}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.createBtnText}>Create {monthName} Plan</Text>
-      </TouchableOpacity>
-    </View>
+    <EmptyState
+      icon="clipboard-outline"
+      title="No plan yet"
+      subtitle="Set a monthly budget and track your spending in real time."
+      actionLabel={`Create ${monthName} Plan`}
+      onAction={openCreateModal}
+    />
   );
 
   // ── Plan Modal ───────────────────────────────────────────────────────────
@@ -773,7 +768,7 @@ const styles = StyleSheet.create({
   },
   title:    { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: colors.textPrimary },
 
-  scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl + 24 },
+  scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl + 24, flexGrow: 1 },
 
   // ── Hero card ──
   heroCard: {
@@ -791,7 +786,6 @@ const styles = StyleSheet.create({
   },
   heroMonthRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   heroMonth: { ...typography.h2, color: colors.textPrimary },
-  heroInfoIcon: { fontSize: 15, color: colors.textMuted, marginTop: 1 },
   heroDays:  { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   streakBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -867,24 +861,6 @@ const styles = StyleSheet.create({
 
   resetLink:     { alignSelf: 'center', paddingVertical: spacing.md },
   resetLinkText: { ...typography.small, fontWeight: '700' },
-
-  // ── Empty state ──
-  emptyState: {
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
-  },
-  emptyEmoji: { fontSize: 52 },
-  emptyTitle: { ...typography.h2, color: colors.textPrimary, textAlign: 'center' },
-  emptySub:   { ...typography.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 22 },
-  createBtn: {
-    marginTop: spacing.lg,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md + 4,
-    borderRadius: radius.lg,
-  },
-  createBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800', fontSize: 16 },
 
   // ── Plan modal ──
   modalHeader: {

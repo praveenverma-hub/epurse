@@ -36,14 +36,19 @@ import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { spacing, radius } from '../constants/theme';
+import { spacing, radius, typography as typographyBase } from '../constants/theme';
+// The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
+const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { ACCOUNT_TYPES } from '../constants/categories';
 import TransactionItemRaw from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import EmptyState from '../components/EmptyState';
+import InfoSheet from '../components/InfoSheet';
+import InfoIcon from '../components/InfoIcon';
+import EditIcon from '../components/EditIcon';
 import MonthDivider from '../components/MonthDivider';
 import { monthKey } from '../utils/format';
-import { AccountAnchorBanner } from './OnboardingExperience';
+import { useAnchorToast, BalanceAnchorModal } from './OnboardingExperience';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
@@ -193,6 +198,16 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!isSensitive);
   const [debugTxn, setDebugTxn] = useState<Txn | null>(null);
   const [authFailed, setAuthFailed]           = useState(false);
+
+  // ── Balance anchoring — tap the balance to set/correct it; header ⓘ explains it.
+  // (Replaces the old first-visit anchor chip with an on-demand affordance.)
+  const [balanceInfoVisible, setBalanceInfoVisible] = useState(false);
+  const {
+    modalVisible: anchorVisible,
+    openModal: openAnchor,
+    closeModal: closeAnchor,
+    commitAnchor,
+  } = useAnchorToast(account);
   // Guards the iOS biometric overlay blip (briefly flips AppState → 'inactive')
   // so the AppState listener does not re-lock and re-prompt while a prompt is open.
   const authInFlight = useRef(false);
@@ -331,7 +346,19 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
       </TouchableOpacity>
       <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
-      <View style={styles.navBtn} />
+      {account ? (
+        <TouchableOpacity
+          onPress={() => setBalanceInfoVisible(true)}
+          style={styles.navBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="About balance & anchoring"
+        >
+          <InfoIcon size={22} color={theme.textSecondary} />
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.navBtn} />
+      )}
       </View>
     </>
   );
@@ -342,10 +369,9 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]} edges={['top']}>
         {renderHeader()}
         <EmptyState
-          emoji="💳"
+          icon="card-outline"
           title="Account not found"
           subtitle="This account may have been removed."
-          style={styles.missingState}
         />
       </SafeAreaView>
     );
@@ -392,14 +418,21 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // FlatList header: lives entirely inside the pocket sheet — no z-index tricks.
   const listHeaderComponent = (
     <View style={styles.pocketContent}>
-      {/* First-visit nudge: prompt the user to anchor their live balance.
-          Self-hides once the account is anchored or the toast is dismissed. */}
-      <AccountAnchorBanner account={account as any} position="top" />
-      <View style={styles.summaryBox}>
+      {/* Tap the balance to set/correct it (anchor). The header ⓘ explains how. */}
+      <TouchableOpacity
+        style={styles.summaryBox}
+        onPress={openAnchor}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Adjust ${summaryLabel.toLowerCase()}`}
+      >
         <Text style={styles.summaryLabel}>{summaryLabel}</Text>
-        <Text style={styles.summaryValue}>{formatMoney(summaryValue)}</Text>
-      </View>
-      <Text style={styles.sectionTitle}>Transactions</Text>
+        <View style={styles.summaryRight}>
+          <Text style={styles.summaryValue}>{formatMoney(summaryValue)}</Text>
+          <EditIcon size={20} color="#94A3B8" style={{ marginLeft: 8 }} />
+        </View>
+      </TouchableOpacity>
+      <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Transactions</Text>
     </View>
   );
 
@@ -479,11 +512,9 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           ListHeaderComponent={listHeaderComponent}
           ListEmptyComponent={
             <EmptyState
-              compact
-              emoji="🧾"
+              icon="receipt-outline"
               title="No transactions yet"
               subtitle="Spending and credits on this account will appear here."
-              style={styles.emptyLedger}
             />
           }
           contentContainerStyle={styles.listContent}
@@ -496,6 +527,28 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       {IS_PREVIEW_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
+
+      {/* Tweak / anchor the balance (opened by tapping the balance box). */}
+      <BalanceAnchorModal
+        visible={anchorVisible}
+        accountLabel={`${deriveBankName(account)}${account.mask ? `  •••• ${account.mask}` : ''}`}
+        initialValue={account.balance}
+        onCancel={closeAnchor}
+        onSave={commitAnchor}
+      />
+
+      {/* Header ⓘ → what "anchoring" means. */}
+      <InfoSheet
+        visible={balanceInfoVisible}
+        onClose={() => setBalanceInfoVisible(false)}
+        title="Balance & anchoring"
+        body={
+          'ePurse keeps this balance in sync from your bank SMS. If it ever drifts from your ' +
+          'real balance, tap the balance to set the correct amount — that "anchors" it, and new ' +
+          'transactions adjust from there. Transactions dated before the anchor stay for reference ' +
+          "and don't change it."
+        }
+      />
 
     </SafeAreaView>
   );
@@ -633,6 +686,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color:      '#64748B',
   },
+  summaryRight: { flexDirection: 'row', alignItems: 'center' },
   summaryValue: {
     fontSize:    22,
     fontWeight:  '800',
@@ -640,13 +694,11 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   sectionTitle: {
-    fontSize:    16,
-    fontWeight:  '700',
-    color:       '#1E293B',
+    ...typography.h3,   // standard section heading; colour applied inline (theme-aware)
     marginBottom: 12,
   },
 
-  listContent: { paddingBottom: spacing.xxl * 2 },
+  listContent: { paddingBottom: spacing.xxl * 2, flexGrow: 1 },
   txnRow: { paddingHorizontal: 16 },
   earlierSep: {
     paddingHorizontal: 16,
@@ -659,8 +711,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  emptyLedger: { marginTop: spacing.lg },
-  missingState: { marginTop: spacing.xxl },
 
   // Lock state
   lockWrap: {

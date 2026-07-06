@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { selectTransactions } from '../store/ePurseStore';
-import { NON_SPEND_CATEGORY_IDS } from '../constants/categories';
+import { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } from '../constants/categories';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
@@ -36,6 +36,7 @@ import SmartLedger from '../components/SmartLedger';
 import GroupInsightCarousel from '../components/GroupInsightCarousel';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
+import InfoIcon from '../components/InfoIcon';
 
 const SCREEN_W = Dimensions.get('window').width;
 
@@ -168,8 +169,23 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
         (t.accountMask && byMask.get(t.accountMask)) ||
         null;
       const key  = acct ? acct.id : (t.accountType || 'Unknown');
-      const name = acct ? (acct.name || acct.bankName || acct.type) : (t.accountType || 'Unknown');
-      if (!buckets[key]) buckets[key] = { name, total: 0, color: acct?.color };
+      const acctType = acct ? acct.type : (t.accountType || null);
+      if (!buckets[key]) {
+        // Bank label without a trailing mask (the parser bakes "··4523" into name);
+        // we re-append the number ourselves + a short type tag ("ICICI CC").
+        const base = acct ? (acct.bankName || acct.name || acct.type) : (t.accountType || 'Unknown');
+        const bankLabel = base.replace(/\s*[·•*xX]*\s*\d{3,6}\s*$/, '').trim() || base;
+        buckets[key] = {
+          name: bankLabel,
+          // Type tag only for a resolved account; a lumped type bucket's name IS the type.
+          typeTag: acct ? (ACCT_TYPE_TAG[acctType] || '') : '',
+          // Trailing mask ("account number") — resolved accounts only, so a type
+          // bucket doesn't claim one specific card's digits.
+          mask: acct ? (acct.mask || null) : null,
+          total: 0,
+          color: acct?.color,
+        };
+      }
       buckets[key].total += debitDisplayAmount(t);
     });
     return Object.values(buckets).sort((a, b) => b.total - a.total);
@@ -248,13 +264,11 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       >
         {noDataEver ? (
           <EmptyState
-            compact
-            emoji="📊"
+            icon="bar-chart-outline"
             title="No analytics yet"
             subtitle="Once your transactions start flowing in, you'll see category breakdowns, spending pace, habit leaks and subscriptions here."
             actionLabel="Add a transaction"
             onAction={navigation ? () => navigation.navigate('AddTransaction') : undefined}
-            style={{ marginTop: spacing.xl }}
           />
         ) : (
           <>
@@ -296,7 +310,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               {accountBreakdown.length === 0 ? (
                 <EmptyState
                   compact
-                  emoji="💳"
+                  icon="card-outline"
                   title="No spending this month"
                   subtitle="Switch months above, or add an expense to see the breakdown."
                 />
@@ -310,14 +324,14 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               <View style={styles.sectionHead}>
                 <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>📈 Spending Pace</Text>
                 <TouchableOpacity onPress={() => setInfoKey('pace')} hitSlop={10}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                  <InfoIcon size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.sectionSubtitle}>Your trajectory vs last month — drag to compare any day.</Text>
               {hasPace ? (
                 <GhostLineChart data={dailyData} />
               ) : (
-                <EmptyState compact emoji="📈" title="No pace to plot yet" subtitle="Spending this month and last will chart here." />
+                <EmptyState compact icon="trending-up-outline" title="No pace to plot yet" subtitle="Spending this month and last will chart here." />
               )}
             </View>
 
@@ -325,14 +339,14 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               <View style={styles.sectionHead}>
                 <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>⚡ Habit Leaks</Text>
                 <TouchableOpacity onPress={() => setInfoKey('habit')} hitSlop={10}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                  <InfoIcon size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.sectionSubtitle}>Frequency vs. spend — find the sneaky drains. Tap a bubble.</Text>
               {hasBubbles ? (
                 <HabitLeakMatrix bubbles={merchantBubbles} />
               ) : (
-                <EmptyState compact emoji="⚡" title="No habit leaks found" subtitle="Repeat merchants for this month will appear here." />
+                <EmptyState compact icon="flash-outline" title="No habit leaks found" subtitle="Repeat merchants for this month will appear here." />
               )}
             </View>
 
@@ -340,14 +354,14 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               <View style={styles.sectionHead}>
                 <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>💓 Subscription Heartbeat</Text>
                 <TouchableOpacity onPress={() => setInfoKey('heartbeat')} hitSlop={10}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                  <InfoIcon size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.sectionSubtitle}>Recurring charges visualised as an EKG. Scroll to explore.</Text>
               {hasSubs ? (
                 <SubscriptionHeartbeat subscriptions={allSubscriptions} date={date} />
               ) : (
-                <EmptyState compact emoji="💓" title="No recurring charges detected" subtitle="Subscriptions like Netflix or Spotify will show up after a couple of cycles." />
+                <EmptyState compact icon="pulse-outline" title="No recurring charges detected" subtitle="Subscriptions like Netflix or Spotify will show up after a couple of cycles." />
               )}
             </View>
 
@@ -356,7 +370,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
               <View style={styles.sectionHead}>
                 <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>🔮 What-if Ledger Playground</Text>
                 <TouchableOpacity onPress={() => setInfoKey('whatif')} hitSlop={10}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                  <InfoIcon size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.sectionSubtitle}>Toggle categories to see your month without them.</Text>
@@ -369,7 +383,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
                 <View style={styles.sectionHead}>
                   <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>👥 Spend by group</Text>
                   <TouchableOpacity onPress={() => setInfoKey('groups')} hitSlop={10}>
-                    <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
+                    <InfoIcon size={18} color={colors.textMuted} />
                   </TouchableOpacity>
                 </View>
 
@@ -397,7 +411,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
                   ) : (
                     <EmptyState
                       compact
-                      emoji="🧾"
+                      icon="receipt-outline"
                       title={focusedGroup ? 'No spend for this group' : 'No spending this month'}
                       subtitle={focusedGroup ? 'No transactions this month.' : 'Add an expense to see the breakdown.'}
                     />
@@ -454,6 +468,15 @@ const SummaryStatLight = ({ label, value }) => (
 // Palette for the 5 account bars — distinct colours so each account reads clearly.
 const HBAR_COLORS = ['#6366F1', '#0EA5E9', '#10B981', '#F59E0B', '#EC4899'];
 
+// Short type suffix appended to a resolved account's bank name ("ICICI CC").
+const ACCT_TYPE_TAG = {
+  [ACCOUNT_TYPES.CREDIT_CARD]: 'CC',
+  [ACCOUNT_TYPES.DEBIT_CARD]: 'Debit',
+  [ACCOUNT_TYPES.BANK]: 'Bank',
+  [ACCOUNT_TYPES.WALLET]: 'Wallet',
+  [ACCOUNT_TYPES.CASH]: 'Cash',
+};
+
 // ---- HorizontalBarChart ----------------------------------------------------
 // Shows top-5 accounts as horizontal bars (thinner than the vertical category chart).
 // Left: fixed-width account name. Middle: proportional fill. Right: amount.
@@ -468,9 +491,12 @@ const HorizontalBarChart = ({ data }) => {
         // Use the account's own colour when available so bars match the cards;
         // fall back to the palette for type-bucket rows without an account.
         const barColor = d.color || HBAR_COLORS[i % HBAR_COLORS.length];
+        // One line: "ICICI CC ••4523" / "ICICI Bank ••4523".
+        const label =
+          [d.name, d.typeTag].filter(Boolean).join(' ') + (d.mask ? `  ••${d.mask}` : '');
         return (
           <View key={i} style={styles.hBarRow}>
-            <Text style={styles.hBarLabel} numberOfLines={1}>{d.name}</Text>
+            <Text style={styles.hBarLabel} numberOfLines={1}>{label}</Text>
             <View style={styles.hBarTrack}>
               <View style={[styles.hBarFill, { width: `${pct * 100}%`, backgroundColor: barColor }]} />
             </View>
@@ -580,7 +606,7 @@ const styles = StyleSheet.create({
   statLabel: { color: '#FFFFFFCC', ...typography.tiny },
   statValue: { color: '#fff', ...typography.bodyBold, fontWeight: '700', marginTop: 2 },
 
-  body: { padding: spacing.lg, marginTop: -spacing.lg },
+  body: { padding: spacing.lg, marginTop: -spacing.lg, flexGrow: 1 },
 
   section: {
     backgroundColor: colors.card,
@@ -688,7 +714,7 @@ const styles = StyleSheet.create({
 
   // Horizontal bar chart — account name | bar | amount in one row
   hBarRow:    { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  hBarLabel:  { width: 104, ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
+  hBarLabel:  { width: 128, ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
   hBarTrack:  { flex: 1, height: 18, backgroundColor: colors.divider + '66', borderRadius: radius.sm, overflow: 'hidden' },
   hBarFill:   { height: '100%', borderRadius: radius.sm },
   hBarAmount: { width: 72, ...typography.tiny, color: colors.textPrimary, fontWeight: '700', textAlign: 'right' },

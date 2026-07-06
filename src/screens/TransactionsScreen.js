@@ -46,6 +46,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
+import EmptyState from '../components/EmptyState';
 import TransactionItem from '../components/TransactionItem';
 import MonthDivider from '../components/MonthDivider';
 import TxnDebugSheet from '../components/TxnDebugSheet';
@@ -793,11 +794,11 @@ const TransactionsScreen = ({ navigation, route }) => {
           </>
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="receipt-outline" size={44} color={colors.textMuted} />
-            <Text style={styles.emptyTitle}>No transactions found</Text>
-            <Text style={styles.emptyHelp}>Try adjusting your search or filters.</Text>
-          </View>
+          <EmptyState
+            icon="receipt-outline"
+            title="No transactions found"
+            subtitle="Try adjusting your search or filters."
+          />
         }
         showsVerticalScrollIndicator={false}
         initialNumToRender={24}
@@ -1252,7 +1253,8 @@ const styles = StyleSheet.create({
   activeFilterClear: { fontSize: 12, color: colors.danger, fontWeight: '700' },
 
   // ── List ───────────────────────────────────────────────────────────────────
-  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2 },
+  // flexGrow lets ListEmptyComponent stretch to fill the viewport so it can centre.
+  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2, flexGrow: 1 },
   listCount: {
     fontSize: 12,
     color: colors.textMuted,
@@ -1273,9 +1275,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontWeight: '600',
   },
-  empty: { alignItems: 'center', paddingTop: 64, gap: spacing.sm },
-  emptyTitle: { ...typography.h3, color: colors.textPrimary },
-  emptyHelp:  { ...typography.small, color: colors.textMuted, textAlign: 'center' },
 
   // ── Sheet overlay ──────────────────────────────────────────────────────────
   sheetOverlay: { flex: 1, justifyContent: 'flex-end' },

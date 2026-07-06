@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import EditIcon from './EditIcon';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
@@ -67,7 +67,7 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
                 hitSlop={10}
                 activeOpacity={0.8}
               >
-                <Ionicons name="create-outline" size={15} color={theme.primary} />
+                <EditIcon size={15} color={theme.primary} />
                 <Text style={[styles.editTxt, { color: theme.primary }]}>Edit</Text>
               </TouchableOpacity>
             ) : null}
