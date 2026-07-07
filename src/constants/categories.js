@@ -29,6 +29,10 @@ export const DEFAULT_CATEGORIES = [
   // A liability settlement, NOT spend (the card purchases were already counted), so
   // it lives in NON_SPEND_CATS and is excluded from all totals.
   { id: 'cc_bill',       name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' },
+  // Repaying money you borrowed. Unlike the borrow_repaid ledger marker, this IS a
+  // real expense (the money leaves an account now, and the original purchase was
+  // usually never logged) — so it is NOT in NON_SPEND_CATEGORY_IDS and counts as spend.
+  { id: 'repayment',     name: 'Repayment',      color: '#6B7280', emoji: '💸' },
   { id: 'other',         name: 'Other',          color: '#9CA3AF', emoji: '📌' },
 ];
 

@@ -24,6 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
+import EditIcon from './EditIcon';
 import {
   ParentCat,
   ChildCat,
@@ -55,6 +56,11 @@ interface Props {
   isSplitTxn: boolean;
   /** When true, hides the category picker and shows a locked notice instead. */
   categoryLocked?: boolean;
+  /** Name currently linked to this LB-tagged txn — shown in the locked notice. */
+  linkedPerson?: string | null;
+  /** Provided only when a linked LB entry was found for this txn — opens the
+   * same "who did you lend to / repay" picker to correct a wrong name/contact. */
+  onEditPerson?: () => void;
   onPressSplit?: () => void;
   onSelectCategory: (categoryId: string) => void;
   onSelectLentBorrow?: (categoryId: string) => void;
@@ -202,6 +208,8 @@ const CategoryPickerModal: React.FC<Props> = ({
   canSplit,
   isSplitTxn,
   categoryLocked = false,
+  linkedPerson,
+  onEditPerson,
   onPressSplit,
   onSelectCategory,
   onSelectLentBorrow,
@@ -272,15 +280,27 @@ const CategoryPickerModal: React.FC<Props> = ({
           </View>
 
           {categoryLocked ? (
-            <View style={styles.lockedNotice}>
-              <Text style={styles.lockedIcon}>🔒</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.lockedTitle}>Category locked</Text>
-                <Text style={styles.lockedBody}>
-                  This transaction is linked to a lent/borrow record. Category cannot be changed.
-                </Text>
+            <>
+              <View style={styles.lockedNotice}>
+                <Text style={styles.lockedIcon}>🔒</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.lockedTitle}>Category locked</Text>
+                  <Text style={styles.lockedBody}>
+                    {linkedPerson
+                      ? `Linked to ${linkedPerson}. Category cannot be changed, but you can fix the name below.`
+                      : 'This transaction is linked to a lent/borrow record. Category cannot be changed.'}
+                  </Text>
+                </View>
               </View>
-            </View>
+              {onEditPerson && (
+                <TouchableOpacity style={styles.editPersonBtn} onPress={onEditPerson} activeOpacity={0.75}>
+                  <EditIcon size={15} color={theme.primary} />
+                  <Text style={[styles.editPersonText, { color: theme.primary }]}>
+                    {linkedPerson ? `Edit person — ${linkedPerson}` : 'Edit person'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
           ) : (
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -805,5 +825,20 @@ const styles = StyleSheet.create({
     color:      colors.textSecondary,
     lineHeight: 17,
     marginTop:  1,
+  },
+  editPersonBtn: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'center',
+    gap:             6,
+    borderWidth:     1,
+    borderColor:     colors.divider,
+    borderRadius:    radius.md,
+    paddingVertical: spacing.sm + 2,
+    marginBottom:    spacing.sm,
+  },
+  editPersonText: {
+    ...typography.small,
+    fontWeight: '700' as const,
   },
 });

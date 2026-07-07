@@ -69,7 +69,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
 const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
 const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
-const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill'];
+const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill', 'repayment'];
 
 /** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
@@ -195,6 +195,98 @@ const applyDelta = (accounts, accountId, parsed) => {
   return accounts.map((a) =>
     a.id === accountId ? { ...a, balance: a.balance + sign * parsed.amount } : a
   );
+};
+
+/**
+ * Book the PAYING side of a CC bill payment onto the source (bank/debit) account:
+ * a `cc_bill` debit that reduces its balance and shows under it. If the bank's own
+ * debit SMS already recorded this outflow (a recent same-amount debit on that
+ * account), reclassify THAT to `cc_bill` instead of adding a second — no double-count.
+ * Returns { accounts, transactions } or null (no source / account not found).
+ */
+const CC_SOURCE_DEDUP_MS = 6 * 24 * 60 * 60 * 1000; // ~6 days — matches a bank's own SMS
+const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
+  if (!sourceAccountId || !amount) return null;
+  const acct = state.accounts.find((a) => a.id === sourceAccountId);
+  if (!acct) return null;
+  const ts = new Date(nowIso).getTime();
+  const existing = state.transactions.find(
+    (t) =>
+      !t.isIgnored &&
+      t.type === TRANSACTION_TYPES.DEBIT &&
+      t.accountId === sourceAccountId &&
+      t.categoryId !== 'cc_bill' &&
+      Math.round(t.amount) === Math.round(amount) &&
+      Math.abs(ts - new Date(t.createdAt).getTime()) <= CC_SOURCE_DEDUP_MS,
+  );
+  if (existing) {
+    // The bank already booked this outflow — just recategorise it (balance already moved).
+    return {
+      accounts: state.accounts,
+      transactions: state.transactions.map((t) =>
+        t.id === existing.id
+          ? { ...t, categoryId: 'cc_bill', userEditedCategory: true, isSplit: false, splitWith: [] }
+          : t,
+      ),
+    };
+  }
+  const txn = {
+    id: `txn_ccpay_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    amount,
+    type: TRANSACTION_TYPES.DEBIT,
+    categoryId: 'cc_bill',
+    accountId: sourceAccountId,
+    accountType: acct.type,
+    accountMask: acct.mask || null,
+    bankName: acct.bankName || null,
+    merchant: 'Credit card bill payment',
+    createdAt: nowIso,
+    source: 'manual',
+    isReviewed: true,
+    userEditedCategory: true,
+    isSplit: false,
+    splitWith: [],
+  };
+  return {
+    accounts: applyDelta(state.accounts, sourceAccountId, txn),
+    transactions: [txn, ...state.transactions],
+  };
+};
+
+/**
+ * Book a real "Repayment" EXPENSE for settling a borrow: a `repayment` debit on the
+ * chosen account (reduces its balance, counts as spend — repayment ∉ NON_SPEND).
+ * Returns { accounts, transactions, txnId } or null if no/invalid account.
+ */
+const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) => {
+  if (!accountId || !amount) return null;
+  const acct = state.accounts.find((a) => a.id === accountId);
+  if (!acct) return null;
+  const txnId = `txn_repay_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const txn = {
+    id: txnId,
+    amount,
+    type: TRANSACTION_TYPES.DEBIT,
+    categoryId: 'repayment',
+    parentCategory: 'Transfers',
+    childCategory: 'Repayment',
+    accountId,
+    accountType: acct.type,
+    accountMask: acct.mask || null,
+    bankName: acct.bankName || null,
+    merchant: personName ? `Repaid ${personName}` : 'Loan repayment',
+    createdAt: nowIso,
+    source: 'manual',
+    isReviewed: true,
+    userEditedCategory: true,
+    isSplit: false,
+    splitWith: [],
+  };
+  return {
+    accounts: applyDelta(state.accounts, accountId, txn),
+    transactions: [txn, ...state.transactions],
+    txnId,
+  };
 };
 
 /** Stable key for a debit-card↔bank pairing (order-independent on the masks). */
@@ -1232,6 +1324,13 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === txnId);
           if (!txn) return s;
+          // LB-linked transactions (lent/borrowed/lent_settled/borrow_repaid) live in
+          // their own ledger, not in groups. Without this guard, rebuilding this txn's
+          // LB rows below (buildGroupLbRows) would silently DELETE its existing
+          // lentBorrowed entry (sourceTxnId match) with nothing to replace it — the
+          // debt record just vanishes. Groups already have their own independent
+          // who-owes-whom via split legs; the two systems must not mix.
+          if (txn.lbLocked) return s;
           const group = s.groups.find((g) => g.id === groupId);
           if (!group) return s;
           const prevGroupId = txn.groupId || null;
@@ -1461,7 +1560,9 @@ export const useEPurseStore = create(
        * balances in OTHER groups / direct splits / manual IOUs untouched. The same row
        * also reduces the person's global net, so the LB screen stays consistent.
        */
-      settleGroupPersonBalance: (groupId, personKey) => {
+      // opts.accountId — for a BORROW settle (net < 0) also books a real "Repayment"
+      // expense on that account (same as settlePersonBalance).
+      settleGroupPersonBalance: (groupId, personKey, opts = {}) => {
         const person = get().getPersonBalances().find((p) => p.personKey === personKey);
         if (!person) return;
         const groupEntries = (person.entries || []).filter((e) => e.groupId === groupId);
@@ -1477,6 +1578,10 @@ export const useEPurseStore = create(
 
         const group = get().groups.find((g) => g.id === groupId);
         const now = new Date().toISOString();
+        const isBorrowSettle = net < 0;
+        const booked = isBorrowSettle
+          ? bookRepaymentExpense(get(), opts.accountId, Math.abs(net), person.person, now)
+          : null;
         const row = {
           id: `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           kind: net > 0 ? 'lent_settled' : 'borrow_repaid',
@@ -1487,8 +1592,10 @@ export const useEPurseStore = create(
           note: `Group settle · ${group?.name || 'Group'}`,
           date: now,
           groupId,
+          ...(booked ? { sourceTxnId: booked.txnId } : {}),
         };
         set((s) => ({
+          ...(booked ? { accounts: booked.accounts, transactions: booked.transactions } : {}),
           lentBorrowed: [row, ...s.lentBorrowed],
           groups: s.groups.map((g) => (g.id === groupId ? { ...g, lastActivityAt: now } : g)),
         }));
@@ -1560,16 +1667,21 @@ export const useEPurseStore = create(
       // User tapped "True-up to Zero" — zero the CC balance, start tracking, and
       // file this payment's SMS so the sweep doesn't re-prompt the same one.
       // Shifts queue so the next pending payment (if any) shows immediately.
-      confirmCCTrueUp: () => {
-        const { pendingCCPaymentQueue, accounts, ccHandledSmsIds } = get();
+      confirmCCTrueUp: (sourceAccountId = null) => {
+        const state = get();
+        const { pendingCCPaymentQueue, ccHandledSmsIds } = state;
         const current = (pendingCCPaymentQueue || [])[0];
         if (!current) return;
+        // Book the paying side onto the chosen account (if any), then zero the card.
+        const booked = bookCcPaymentSource(state, sourceAccountId, current.amount, new Date().toISOString());
+        const baseAccounts = booked?.accounts || state.accounts;
         set({
-          accounts: accounts.map((a) =>
+          accounts: baseAccounts.map((a) =>
             a.id === current.accountId
               ? { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() }
               : a
           ),
+          ...(booked ? { transactions: booked.transactions } : {}),
           ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
           pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
         });
@@ -1580,16 +1692,20 @@ export const useEPurseStore = create(
       // an overpayment lands on ₹0 rather than a credit balance). Starts tracking and
       // files this payment's SMS so the sweep doesn't re-prompt the same one.
       // Shifts queue so the next pending payment (if any) shows immediately.
-      settleCCPayment: () => {
-        const { pendingCCPaymentQueue, accounts, ccHandledSmsIds } = get();
+      settleCCPayment: (sourceAccountId = null) => {
+        const state = get();
+        const { pendingCCPaymentQueue, ccHandledSmsIds } = state;
         const current = (pendingCCPaymentQueue || [])[0];
         if (!current) return;
+        const booked = bookCcPaymentSource(state, sourceAccountId, current.amount, new Date().toISOString());
+        const baseAccounts = booked?.accounts || state.accounts;
         set({
-          accounts: accounts.map((a) =>
+          accounts: baseAccounts.map((a) =>
             a.id === current.accountId
               ? { ...a, balance: Math.min(0, (a.balance ?? 0) + current.amount), ccPaymentsTracked: true }
               : a
           ),
+          ...(booked ? { transactions: booked.transactions } : {}),
           ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
           pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
         });
@@ -2191,6 +2307,29 @@ export const useEPurseStore = create(
           };
         }),
 
+      /**
+       * Fix a wrongly-named/linked person on an LB-tagged transaction — WITHOUT
+       * touching amount, kind, date, or the transaction's category/lock. Finds the
+       * single lentBorrowed row created for this txn (via updateTransactionCategoryWithContact
+       * / addTransaction's contactInfo path — sourceTxnId === txnId) and rewrites its
+       * person/phone/contactId. No-op if that row can't be found.
+       */
+      relinkLentBorrowedEntry: (txnId, contactInfo) =>
+        set((s) => {
+          const idx = s.lentBorrowed.findIndex((l) => l.sourceTxnId === txnId);
+          if (idx === -1) return s;
+          const person = (contactInfo?.person || '').trim();
+          if (!person) return s;
+          const lentBorrowed = [...s.lentBorrowed];
+          lentBorrowed[idx] = {
+            ...lentBorrowed[idx],
+            person,
+            phone: contactInfo?.phone || null,
+            contactId: contactInfo?.contactId || null,
+          };
+          return { lentBorrowed };
+        }),
+
       setTransactionHidden: (id, hidden) =>
         set((s) => ({
           transactions: s.transactions.map((t) =>
@@ -2244,10 +2383,15 @@ export const useEPurseStore = create(
 
       // ----- lent / borrowed --------------------------------------------
       /**
-       * Add a manual lent/borrow entry.
-       * entry: { kind, person, amount, note?, contactId?, phone? }
-       * kind can be 'lent', 'borrowed', 'lent_settled', or 'borrow_repaid'.
-       * Balance is calculated additively: net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid
+       * Add a manual OUTSTANDING lent/borrow entry.
+       * entry: { kind: 'lent' | 'borrowed', person, amount, note?, contactId?, phone? }
+       *
+       * kind must be 'lent' or 'borrowed' — NOT a settlement kind. getPersonBalances()
+       * nets a settlement kind against a matching origin entry (rec.lent -= amount for
+       * lent_settled, etc.); a standalone lent_settled/borrow_repaid with no origin
+       * would wrongly skew the person's balance negative/positive. To log something
+       * already settled, use addAlreadySettledLentBorrowed instead — it creates the
+       * origin + counterpart pair atomically so they net to zero.
        */
       addLentBorrowed: (entry) =>
         set((s) => {
@@ -2261,6 +2405,61 @@ export const useEPurseStore = create(
               },
               ...s.lentBorrowed,
             ],
+          };
+        }),
+
+      /**
+       * Log a lend/borrow that has ALREADY been settled, in one step — e.g. "I lent
+       * Rohit ₹500 last month and he already paid me back." Creates BOTH the origin
+       * entry (kind 'lent'/'borrowed', settledAt = now) and its settlement counterpart
+       * (kind 'lent_settled'/'borrow_repaid', sourceSettledId → origin), exactly the
+       * shape settleLentBorrowed produces — so they net to zero (see the warning on
+       * addLentBorrowed: a standalone settlement-kind row would wrongly skew the
+       * person's balance).
+       * entry: { kind: 'lent' | 'borrowed', person, amount, note?, contactId?, phone? }
+       * opts.accountId — for a 'borrowed' entry (the counterpart is 'borrow_repaid' —
+       * a real expense, since the money left an account just now with no bank SMS
+       * backing it), also books a "Repayment" debit on that account via
+       * bookRepaymentExpense — same treatment as settlePersonBalance. Omit to stay
+       * ledger-only. 'lent' entries never book a transaction (receiving your own
+       * money back isn't income).
+       */
+      addAlreadySettledLentBorrowed: (entry, opts = {}) =>
+        set((s) => {
+          if (!entry?.amount || entry.amount <= 0 || entry.amount > MAX_ALLOWED_AMOUNT) return s;
+          if (entry.kind !== 'lent' && entry.kind !== 'borrowed') return s;
+          const now = new Date().toISOString();
+          const originId = `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const counterpartKind = entry.kind === 'lent' ? 'lent_settled' : 'borrow_repaid';
+          const booked = counterpartKind === 'borrow_repaid' && opts.accountId
+            ? bookRepaymentExpense(s, opts.accountId, entry.amount, entry.person, now)
+            : null;
+          const origin = {
+            id: originId,
+            kind: entry.kind,
+            person: entry.person,
+            phone: entry.phone || null,
+            contactId: entry.contactId || null,
+            amount: entry.amount,
+            note: entry.note || '',
+            date: now,
+            settledAt: now,
+          };
+          const counterpart = {
+            id: `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            kind: counterpartKind,
+            person: entry.person,
+            phone: entry.phone || null,
+            contactId: entry.contactId || null,
+            amount: entry.amount,
+            note: 'Manual settlement',
+            date: now,
+            sourceSettledId: originId,
+            ...(booked ? { sourceTxnId: booked.txnId } : {}),
+          };
+          return {
+            ...(booked ? { accounts: booked.accounts, transactions: booked.transactions } : {}),
+            lentBorrowed: [counterpart, origin, ...s.lentBorrowed],
           };
         }),
 
@@ -2299,13 +2498,21 @@ export const useEPurseStore = create(
       // Creates a single lent_settled / borrow_repaid entry for exactly the net
       // amount owed — avoids the per-entry settle bug where settling a full
       // original entry amount flips the balance negative.
-      settlePersonBalance: (personKey) => {
+      // opts.accountId — for a BORROW settle (net < 0), also book a real "Repayment"
+      // expense debit on that account (money leaving now to clear the debt). Lent
+      // settles, or borrow settles with no account, stay ledger-only.
+      settlePersonBalance: (personKey, opts = {}) => {
         const person = get().getPersonBalances().find((p) => p.personKey === personKey);
         if (!person || person.net === 0) return;
         const netAmt = Math.abs(person.net);
-        const kind   = person.net > 0 ? 'lent_settled' : 'borrow_repaid';
+        const isBorrowSettle = person.net < 0;
+        const kind   = isBorrowSettle ? 'borrow_repaid' : 'lent_settled';
         const now    = new Date().toISOString();
+        const booked = isBorrowSettle
+          ? bookRepaymentExpense(get(), opts.accountId, netAmt, person.person, now)
+          : null;
         set((s) => ({
+          ...(booked ? { accounts: booked.accounts, transactions: booked.transactions } : {}),
           lentBorrowed: [
             {
               id:        `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -2316,6 +2523,7 @@ export const useEPurseStore = create(
               amount:    netAmt,
               note:      'Manual settlement',
               date:      now,
+              ...(booked ? { sourceTxnId: booked.txnId } : {}),
             },
             ...s.lentBorrowed,
           ],

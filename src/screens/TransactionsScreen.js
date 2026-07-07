@@ -177,6 +177,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const updateTransactionCategory            = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTwoTierCategory                = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
+  const relinkLentBorrowedEntry              = useEPurseStore((s) => s.relinkLentBorrowedEntry);
   const setTransactionHidden                 = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction                    = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction                    = useEPurseStore((s) => s.ignoreTransaction);
@@ -260,6 +261,13 @@ const TransactionsScreen = ({ navigation, route }) => {
     });
     return map;
   }, [lentBorrowed]);
+
+  // The single LB entry this LB-tagged (locked) transaction created — powers the
+  // "Edit person" affordance in the manage-transaction sheet's locked notice.
+  const linkedLbEntry = useMemo(
+    () => (activeTxn ? (lentBorrowed || []).find((l) => l.sourceTxnId === activeTxn.id) : null),
+    [activeTxn, lentBorrowed],
+  );
 
   // ── Sticky chip bar (Swiggy-style) ────────────────────────────────────────
   // Chips live inside the FlatList (scroll away naturally). A fixed copy sits
@@ -562,6 +570,16 @@ const TransactionsScreen = ({ navigation, route }) => {
         .map((p) => ({ ...p, net: Math.abs(p.net) }));
     }
     setLbLinkTxn({ txn: t, categoryId, suggestedPersons });
+  };
+
+  // Correct a wrong name/contact on an already LB-tagged (locked) transaction —
+  // reuses the same "who did you lend to / repay" picker, but on confirm it
+  // RELINKS the existing entry instead of creating a new one (mode: 'edit').
+  const handleEditPerson = () => {
+    if (!activeTxn) return;
+    const t = activeTxn;
+    setActiveTxn(null);
+    setLbLinkTxn({ txn: t, categoryId: t.categoryId, suggestedPersons: [], mode: 'edit' });
   };
 
   const handleToggleHidden = (hidden) => {
@@ -970,8 +988,10 @@ const TransactionsScreen = ({ navigation, route }) => {
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
         isSplitTxn={!!activeTxn?.isSplit}
         categoryLocked={!!activeTxn?.lbLocked}
+        linkedPerson={linkedLbEntry?.person || null}
+        onEditPerson={linkedLbEntry ? handleEditPerson : undefined}
         currentGroupId={activeTxn?.groupId || null}
-        onPressAddToGroup={() => {
+        onPressAddToGroup={activeTxn?.lbLocked ? undefined : () => {
           const t = activeTxn;
           setActiveTxn(null);
           setGroupPickerTxn(t);
@@ -1018,12 +1038,20 @@ const TransactionsScreen = ({ navigation, route }) => {
         suggestedPersons={lbLinkTxn?.suggestedPersons || []}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
-          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          if (lbLinkTxn.mode === 'edit') {
+            relinkLentBorrowedEntry(lbLinkTxn.txn.id, contactInfo);
+          } else {
+            updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          }
           setLbLinkTxn(null);
         }}
         onSkip={() => {
           if (!lbLinkTxn) return;
-          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
+          // Editing an existing link: Skip just cancels — resetting to "Unlinked"
+          // would be a destructive default for a correction flow.
+          if (lbLinkTxn.mode !== 'edit') {
+            updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
+          }
           setLbLinkTxn(null);
         }}
         onClose={() => setLbLinkTxn(null)}

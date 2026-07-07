@@ -37,6 +37,7 @@ import CreateGroupModal, { type CreateGroupData } from '../components/CreateGrou
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CenterModal from '../components/CenterModal';
+import AccountPickerSheet from '../components/AccountPickerSheet';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
 import EditIcon from '../components/EditIcon';
@@ -92,7 +93,8 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
   const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense) as (id: string, data: GroupExpenseData) => void;
   const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => PersonBalance[];
-  const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string) => void;
+  const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
+  const accounts = useEPurseStore((s: any) => s.accounts) as any[];
   const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
   const updateTwoTierCategory = useEPurseStore((s: any) => s.updateTwoTierCategory) as (id: string, parent: string, child: string) => void;
   const setTransactionHidden = useEPurseStore((s: any) => s.setTransactionHidden) as (id: string, hidden: boolean) => void;
@@ -108,6 +110,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
   const [createVisible, setCreateVisible] = useState(false);
   const [editTarget, setEditTarget] = useState<Group | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
@@ -230,13 +233,17 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
 
   const handleSettle = (pb: GroupBalanceRow) => {
     if (!selectedGroupId) return;
-    const owesYou = pb.net > 0;
+    // You owe them (net < 0) → repaying is a real expense: pick the paying account.
+    if (pb.net < 0) {
+      setSettleTarget(pb);
+      return;
+    }
     setConfirm({
-      title: owesYou ? 'Settle up' : 'Mark repaid',
+      title: 'Settle up',
       message:
         `${pb.person} · ${formatCurrency(Math.abs(pb.net))}\n\n` +
         `Settles this group's portion only — their balance in other groups and direct splits stays untouched.`,
-      primaryText: owesYou ? 'Settle' : 'Mark repaid',
+      primaryText: 'Settle',
       secondaryText: 'Cancel',
       destructive: true,
       onPrimary: () => { settleGroupPersonBalance(selectedGroupId, pb.personKey); setConfirm(null); },
@@ -668,6 +675,25 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
         onPrimary={confirm?.onPrimary || (() => setConfirm(null))}
         onSecondary={confirm?.onSecondary || (() => setConfirm(null))}
         onClose={() => setConfirm(null)}
+      />
+
+      <AccountPickerSheet
+        visible={!!settleTarget}
+        title="Repay from which account?"
+        subtitle={settleTarget
+          ? `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
+          : undefined}
+        accounts={accounts}
+        onSelect={(accountId: string) => {
+          if (selectedGroupId && settleTarget) settleGroupPersonBalance(selectedGroupId, settleTarget.personKey, { accountId });
+          setSettleTarget(null);
+        }}
+        skipLabel="Just mark repaid (no expense)"
+        onSkip={() => {
+          if (selectedGroupId && settleTarget) settleGroupPersonBalance(selectedGroupId, settleTarget.personKey);
+          setSettleTarget(null);
+        }}
+        onClose={() => setSettleTarget(null)}
       />
     </View>
   );

@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { TabView } from 'react-native-tab-view';
 import * as Contacts from 'expo-contacts';
+import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 import EmptyState from '../components/EmptyState';
@@ -26,6 +27,7 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { formatCurrency, formatDate } from '../utils/format';
 import GradientButton from '../components/GradientButton';
 import CenterModal from '../components/CenterModal';
+import AccountPickerSheet from '../components/AccountPickerSheet';
 import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
 import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
 import Svg, { Path } from 'react-native-svg';
@@ -63,8 +65,11 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [contactId, setContactId] = useState(null);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [alreadySettled, setAlreadySettled] = useState(false); // log as already lent_settled/borrow_repaid
+  const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
   const [expandedPerson, setExpandedPerson] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [settleTarget, setSettleTarget] = useState(null); // borrow settle awaiting account pick
   const [reminderTarget, setReminderTarget] = useState(null);
   const [borrowReminderTarget, setBorrowReminderTarget] = useState(null);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
@@ -74,7 +79,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   const all = useEPurseStore((s) => s.lentBorrowed);
   const groups = useEPurseStore((s) => s.groups);
+  const accounts = useEPurseStore((s) => s.accounts);
   const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
+  const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
   const settlePersonBalance  = useEPurseStore((s) => s.settlePersonBalance);
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   const userName        = useEPurseStore((s) => s.userName);
@@ -83,6 +90,15 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     () => Object.fromEntries((groups || []).map((g) => [g.id, g.name])),
     [groups]
   );
+
+  const resetForm = useCallback(() => {
+    setPerson('');
+    setPhone('');
+    setContactId(null);
+    setAmount('');
+    setNote('');
+    setAlreadySettled(false);
+  }, []);
 
   const handleAdd = useCallback((addKind) => {
     const n = parseFloat(amount);
@@ -98,20 +114,31 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       setConfirm({ title: 'Amount too large', message: 'Maximum allowed is ₹10,00,00,000.', primaryText: 'OK' });
       return;
     }
-    addLentBorrowed({
-      kind: addKind,
+    const baseEntry = {
       person: person.trim(),
       amount: n,
       note: note.trim(),
       contactId: contactId ?? null,
       phone: phone.trim() || null,
-    });
-    setPerson('');
-    setPhone('');
-    setContactId(null);
-    setAmount('');
-    setNote('');
-  }, [person, phone, contactId, amount, note, addLentBorrowed]);
+    };
+
+    if (alreadySettled) {
+      // addAlreadySettledLentBorrowed creates BOTH the origin + settlement rows so
+      // they net to zero. A borrow's counterpart (borrow_repaid) is a real expense —
+      // pick which account it left before committing (same as the Settle flow).
+      if (addKind === 'borrowed') {
+        setPendingSettledAdd({ ...baseEntry, kind: 'borrowed' });
+        resetForm();
+        return;
+      }
+      addAlreadySettledLentBorrowed({ ...baseEntry, kind: 'lent' });
+      resetForm();
+      return;
+    }
+
+    addLentBorrowed({ ...baseEntry, kind: addKind });
+    resetForm();
+  }, [person, phone, contactId, amount, note, alreadySettled, addLentBorrowed, addAlreadySettledLentBorrowed, resetForm]);
 
   const pickContact = useCallback(async () => {
     const { status } = await Contacts.requestPermissionsAsync();
@@ -357,14 +384,20 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                     {isLast && !isFullySettled ? (
                       <TouchableOpacity
                         style={styles.settleNetBtn}
-                        onPress={() =>
+                        onPress={() => {
+                          // You owe them (net < 0) → repaying is a real expense: pick the
+                          // account it's paid from. They owe you (net > 0) → ledger-only.
+                          if (pb.net < 0) {
+                            setSettleTarget(pb);
+                            return;
+                          }
                           setConfirm({
-                            title: pb.net > 0 ? 'Mark as settled?' : 'Mark as repaid?',
+                            title: 'Mark as settled?',
                             message:
                               `${pb.person} · ${formatCurrency(netAbs)}\n\n` +
                               `Settles the FULL net outstanding of ${formatCurrency(netAbs)} ` +
                               `across all groups, splits and manual entries.`,
-                            primaryText: pb.net > 0 ? 'Settle' : 'Mark repaid',
+                            primaryText: 'Settle',
                             destructive: true,
                             secondaryText: 'Cancel',
                             onSecondary: () => setConfirm(null),
@@ -372,8 +405,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                               settlePersonBalance(pb.personKey);
                               setConfirm(null);
                             },
-                          })
-                        }
+                          });
+                        }}
                       >
                         <Text style={styles.settleNetText}>Settle</Text>
                       </TouchableOpacity>
@@ -435,6 +468,20 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         style={styles.input}
         maxLength={INPUT_LIMITS.NOTE_MAX}
       />
+      <TouchableOpacity
+        style={styles.settledRow}
+        onPress={() => setAlreadySettled((v) => !v)}
+        activeOpacity={0.75}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: alreadySettled }}
+      >
+        <View style={[styles.settledBox, alreadySettled && styles.settledBoxActive]}>
+          {alreadySettled ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
+        </View>
+        <Text style={styles.settledLabel}>
+          {k === 'lent' ? 'Already paid back' : 'Already repaid this'}
+        </Text>
+      </TouchableOpacity>
       <GradientButton
         title="Add"
         onPress={() => handleAdd(k)}
@@ -530,6 +577,50 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           onSecondary={confirm?.onSecondary}
           onClose={() => setConfirm(null)}
           onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+        />
+
+        <AccountPickerSheet
+          visible={!!settleTarget}
+          title="Repay from which account?"
+          subtitle={settleTarget
+            ? `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
+            : undefined}
+          accounts={accounts}
+          onSelect={(accountId) => {
+            settlePersonBalance(settleTarget.personKey, { accountId });
+            setSettleTarget(null);
+          }}
+          skipLabel="Just mark repaid (no expense)"
+          onSkip={() => {
+            settlePersonBalance(settleTarget.personKey);
+            setSettleTarget(null);
+          }}
+          onClose={() => setSettleTarget(null)}
+        />
+
+        <AccountPickerSheet
+          visible={!!pendingSettledAdd}
+          title="Repaid from which account?"
+          subtitle={pendingSettledAdd
+            ? `${pendingSettledAdd.person} · ${formatCurrency(pendingSettledAdd.amount)} — records a Repayment expense`
+            : undefined}
+          accounts={accounts}
+          onSelect={(accountId) => {
+            addAlreadySettledLentBorrowed(pendingSettledAdd, { accountId });
+            setPendingSettledAdd(null);
+          }}
+          skipLabel="Just log it (no expense)"
+          onSkip={() => {
+            addAlreadySettledLentBorrowed(pendingSettledAdd);
+            setPendingSettledAdd(null);
+          }}
+          // Dismissing the backdrop still logs the entry (ledger-only) — the user
+          // already committed to adding it by tapping "Add"; only the account
+          // question was left open, so declining it shouldn't discard the entry.
+          onClose={() => {
+            addAlreadySettledLentBorrowed(pendingSettledAdd);
+            setPendingSettledAdd(null);
+          }}
         />
 
         <WhatsAppReminderModal
@@ -681,6 +772,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     marginBottom: spacing.sm,
+  },
+  settledRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  settledBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: colors.textMuted,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settledBoxActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  settledLabel: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
   phoneInput: {
     flex: 1,

@@ -130,10 +130,11 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     color: '#6B7280',
     legacyId: 'transfer',
     children: [
-      { id: 'p2p',      label: 'P2P Transfer', emoji: '👤' },
-      { id: 'self',     label: 'Self',          emoji: '🔄', legacyId: 'self' },
-      { id: 'lent',     label: 'Lent',          emoji: '🤝', legacyId: 'lent' },
-      { id: 'borrowed', label: 'Borrowed',      emoji: '🧾', legacyId: 'borrowed' },
+      { id: 'p2p',       label: 'P2P Transfer', emoji: '👤' },
+      { id: 'self',      label: 'Self',         emoji: '🔄', legacyId: 'self' },
+      { id: 'lent',      label: 'Lent',         emoji: '🤝', legacyId: 'lent' },
+      { id: 'borrowed',  label: 'Borrowed',     emoji: '🧾', legacyId: 'borrowed' },
+      { id: 'repayment', label: 'Repayment',    emoji: '💸', legacyId: 'repayment' },
     ],
   },
   {

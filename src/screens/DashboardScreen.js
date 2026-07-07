@@ -85,6 +85,8 @@ const DashboardScreen = ({ navigation }) => {
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTwoTierCategory = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
+  const relinkLentBorrowedEntry = useEPurseStore((s) => s.relinkLentBorrowedEntry);
+  const lentBorrowedAll = useEPurseStore((s) => s.lentBorrowed);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
@@ -138,6 +140,13 @@ const DashboardScreen = ({ navigation }) => {
   const periodStats = useMemo(
     () => selectExpenseStats(period)({ transactions, monthlyAggregates: monthlyAggs, groups }),
     [period, transactions, monthlyAggs, groups]
+  );
+
+  // The single LB entry this LB-tagged (locked) transaction created — powers the
+  // "Edit person" affordance in the manage-transaction sheet's locked notice.
+  const linkedLbEntry = useMemo(
+    () => (activeTxn ? (lentBorrowedAll || []).find((l) => l.sourceTxnId === activeTxn.id) : null),
+    [activeTxn, lentBorrowedAll],
   );
 
   // ── Sync date-range label ────────────────────────────────────────────────
@@ -416,6 +425,12 @@ const DashboardScreen = ({ navigation }) => {
         visible={!!activeTxn}
         categories={categories}
         categoryLocked={!!activeTxn?.lbLocked}
+        linkedPerson={linkedLbEntry?.person || null}
+        onEditPerson={linkedLbEntry ? () => {
+          const t = activeTxn;
+          setActiveTxn(null);
+          setLbLinkTxn({ txn: t, categoryId: t.categoryId, suggestedPersons: [], mode: 'edit' });
+        } : undefined}
         selectedCategoryId={activeTxn?.categoryId}
         selectedParent={activeTxn?.parentCategory}
         selectedChild={activeTxn?.childCategory}
@@ -424,7 +439,7 @@ const DashboardScreen = ({ navigation }) => {
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
         isSplitTxn={!!activeTxn?.isSplit}
         currentGroupId={activeTxn?.groupId || null}
-        onPressAddToGroup={() => {
+        onPressAddToGroup={activeTxn?.lbLocked ? undefined : () => {
           const t = activeTxn;
           setActiveTxn(null);
           setGroupPickerTxn(t);
@@ -554,14 +569,23 @@ const DashboardScreen = ({ navigation }) => {
       <LinkContactModal
         visible={!!lbLinkTxn}
         categoryId={lbLinkTxn?.categoryId}
+        suggestedPersons={lbLinkTxn?.suggestedPersons || []}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
-          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          if (lbLinkTxn.mode === 'edit') {
+            relinkLentBorrowedEntry(lbLinkTxn.txn.id, contactInfo);
+          } else {
+            updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          }
           setLbLinkTxn(null);
         }}
         onSkip={() => {
           if (!lbLinkTxn) return;
-          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
+          // Editing an existing link: Skip just cancels — resetting to "Unlinked"
+          // would be a destructive default for a correction flow.
+          if (lbLinkTxn.mode !== 'edit') {
+            updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
+          }
           setLbLinkTxn(null);
         }}
         onClose={() => setLbLinkTxn(null)}

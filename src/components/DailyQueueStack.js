@@ -585,7 +585,7 @@ const DailyQueueStack = () => {
         onSelectCategory={handleSelectCategory}
         onSelectTwoTier={handleSelectTwoTier}
         onSelectLentBorrow={handleSelectLentBorrow}
-        onPressAddToGroup={handleAddToGroup}
+        onPressAddToGroup={pickerTxn?.lbLocked ? undefined : handleAddToGroup}
         onPressRemoveFromGroup={handleRemoveFromGroup}
         onPressEditGroup={
           pickerTxn?.groupId && groups.find((g) => g.id === pickerTxn.groupId)?.type === 'shared'

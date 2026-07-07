@@ -16,13 +16,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity,
-  Animated, Easing, Pressable,
+  Animated, Easing, Pressable, ScrollView,
 } from 'react-native';
 
 import { radius, spacing, shadows } from '../constants/theme';
+import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
+
+// Short label for an account chip, e.g. "HDFC ••4521".
+const acctLabel = (a) =>
+  [a.bankName || a.name || a.type, a.mask ? `••${a.mask}` : null].filter(Boolean).join(' ');
 
 const CCPaymentPromptModal = () => {
   const theme  = useTheme();
@@ -36,6 +41,14 @@ const CCPaymentPromptModal = () => {
 
   // Which reconciliation the user has picked. Defaults to the full true-up.
   const [choice, setChoice] = useState('trueup');
+  // Which account paid the bill (null = "Not sure" → don't book a paying-side txn).
+  const [sourceId, setSourceId] = useState(null);
+
+  // Accounts money could have been paid FROM — banks/debit/wallet/cash, not cards.
+  const payFromAccounts = useMemo(
+    () => accounts.filter((a) => a.type !== ACCOUNT_TYPES.CREDIT_CARD),
+    [accounts],
+  );
 
   const current = queue[0] ?? null;
 
@@ -61,7 +74,7 @@ const CCPaymentPromptModal = () => {
   }, [!!current]);
 
   // Reset the picked option each time a new payment surfaces.
-  useEffect(() => { setChoice('trueup'); }, [current?.smsId, current?.accountId]);
+  useEffect(() => { setChoice('trueup'); setSourceId(null); }, [current?.smsId, current?.accountId]);
 
   if (!current) return null;
 
@@ -87,8 +100,8 @@ const CCPaymentPromptModal = () => {
 
   const onDismiss = dismissCCPaymentPrompt;
   const onConfirm = () => {
-    if (choice === 'trueup')      confirmCCTrueUp();
-    else if (choice === 'settle') settleCCPayment();
+    if (choice === 'trueup')      confirmCCTrueUp(sourceId);
+    else if (choice === 'settle') settleCCPayment(sourceId);
     else                          dismissCCPaymentPrompt();
   };
 
@@ -183,6 +196,39 @@ const CCPaymentPromptModal = () => {
                 );
               })}
             </View>
+
+            {/* Paid from — which account the money left (books a matching debit so
+                that account's balance is corrected). "Not sure" skips that. */}
+            {choice !== 'skip' && payFromAccounts.length > 0 && (
+              <View style={styles.payFromBlock}>
+                <Text style={styles.payFromLabel}>Paid from</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chipRow}
+                >
+                  <TouchableOpacity
+                    style={[styles.chip, sourceId === null && styles.chipActive]}
+                    onPress={() => setSourceId(null)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.chipText, sourceId === null && styles.chipTextActive]}>Not sure</Text>
+                  </TouchableOpacity>
+                  {payFromAccounts.map((a) => (
+                    <TouchableOpacity
+                      key={a.id}
+                      style={[styles.chip, sourceId === a.id && styles.chipActive]}
+                      onPress={() => setSourceId(a.id)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.chipText, sourceId === a.id && styles.chipTextActive]} numberOfLines={1}>
+                        {acctLabel(a)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
 
             {/* Confirm */}
             <TouchableOpacity
@@ -419,6 +465,31 @@ const makeStyles = (t) => {
     optionResultZero: {
       color: SUCCESS,
     },
+
+    // Paid-from account chips
+    payFromBlock: { width: '100%', marginBottom: spacing.md },
+    payFromLabel: {
+      color: t.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+      marginBottom: 6,
+    },
+    chipRow: { gap: 8, paddingRight: spacing.sm },
+    chip: {
+      backgroundColor: t.cardAlt,
+      borderWidth: 1,
+      borderColor: t.divider,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      maxWidth: 180,
+    },
+    chipActive: {
+      borderColor: ACCENT,
+      backgroundColor: ACCENT + '14',
+    },
+    chipText: { color: t.textSecondary, fontSize: 12.5, fontWeight: '600' },
+    chipTextActive: { color: ACCENT },
 
     // Body (no-outstanding branch)
     body: {
