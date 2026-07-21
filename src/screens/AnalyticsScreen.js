@@ -491,9 +491,11 @@ const HorizontalBarChart = ({ data }) => {
         // Use the account's own colour when available so bars match the cards;
         // fall back to the palette for type-bucket rows without an account.
         const barColor = d.color || HBAR_COLORS[i % HBAR_COLORS.length];
-        // One line: "ICICI CC ••4523" / "ICICI Bank ••4523".
-        const label =
-          [d.name, d.typeTag].filter(Boolean).join(' ') + (d.mask ? `  ••${d.mask}` : '');
+        // Compact: FIRST word of the bank + the number → "ICICI ••4523". Drops the
+        // type tag and any extra bank words ("ICICI Bank Credit Card" → "ICICI").
+        // Type-only buckets (no mask, e.g. Cash / Digital Wallet) keep their full label.
+        const shortBank = (d.name || '').trim().split(/\s+/)[0] || d.name;
+        const label = d.mask ? `${shortBank} ••${d.mask}` : (d.name || '');
         return (
           <View key={i} style={styles.hBarRow}>
             <Text style={styles.hBarLabel} numberOfLines={1}>{label}</Text>

@@ -47,6 +47,7 @@ import {
   isSelfTransfer,
   propagateSelfByRef,
   maskMatch,
+  onlyDigits,
   SELF_TXN_FIELDS,
 } from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
@@ -115,26 +116,47 @@ const maxManualIdSuffixFromTransactions = (transactions = []) => {
 // Helpers
 // =============================================================================
 
+/** Two bank labels are compatible if either is missing or one contains the other. */
+const banksAgree = (a, b) => {
+  if (!a || !b) return true; // unknown on either side → don't block a match
+  const na = String(a).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nb = String(b).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return !na || !nb || na.includes(nb) || nb.includes(na);
+};
+
 /**
  * Best-fit account for a parsed transaction.
- * 1. exact mask match
- * 2. fall back to account-type match
+ * 1. EXACT mask (or aliasMask) match
+ * 2. SUFFIX match — the SAME account shown with different mask lengths across banks'
+ *    SMS (last-4 "XX9532" vs last-6 "XX119532"). Guarded by same account-type + a
+ *    compatible bank name so two unrelated accounts sharing trailing digits (or a card
+ *    vs a bank) are never merged by digits alone. Prefer the most-specific (longest) mask.
+ * 3. no mask → fall back to account-type match
  */
 const matchAccount = (accounts, parsed) => {
   if (!parsed) return null;
   if (parsed.accountMask) {
-    // Specific mask given — only match by mask, never fall back to type.
-    // A type-only fallback would attach the txn to a different card of the same type.
-    // `aliasMasks` lets a bank account also own its linked debit-card mask(s) — a
-    // debit card is just an access point to the bank, so a card-referenced SMS
-    // lands on the unified bank account instead of spawning a separate balance.
-    return (
-      accounts.find(
-        (a) =>
-          a.mask === parsed.accountMask ||
-          (a.aliasMasks || []).includes(parsed.accountMask),
-      ) || null
+    // 1. exact — a debit card's mask may live in a bank's aliasMasks (unified account).
+    //    Bank-guarded so two DIFFERENT named banks that happen to share a last-4 aren't
+    //    merged (only blocks when both bank names are present and disagree).
+    const exact = accounts.find(
+      (a) =>
+        (a.mask === parsed.accountMask ||
+          (a.aliasMasks || []).includes(parsed.accountMask)) &&
+        banksAgree(a.bankName, parsed.bankName),
     );
+    if (exact) return exact;
+    // 2. suffix (last-4 ↔ last-6 of one account), bank- and type-guarded.
+    const suffix = accounts
+      .filter(
+        (a) =>
+          a.type === parsed.accountType &&
+          banksAgree(a.bankName, parsed.bankName) &&
+          (maskMatch(a.mask, parsed.accountMask) ||
+            (a.aliasMasks || []).some((m) => maskMatch(m, parsed.accountMask))),
+      )
+      .sort((a, b) => onlyDigits(b.mask).length - onlyDigits(a.mask).length);
+    return suffix[0] || null;
   }
   return accounts.find((a) => a.type === parsed.accountType) || null;
 };
@@ -143,7 +165,28 @@ const matchAccount = (accounts, parsed) => {
 const ensureAccountForParsed = (accounts, parsed) => {
   if (!parsed) return { accounts, account: null };
   const existing = matchAccount(accounts, parsed);
-  if (existing) return { accounts, account: existing };
+  if (existing) {
+    // Matched the same account under a DIFFERENT mask length (last-4 vs last-6). Record
+    // the alternate form on aliasMasks so both variants resolve here and future lookups
+    // hit the exact branch. Keeps the first-seen (usually last-4) mask as the display id.
+    if (
+      parsed.accountMask &&
+      parsed.accountMask !== existing.mask &&
+      !(existing.aliasMasks || []).includes(parsed.accountMask)
+    ) {
+      const merged = {
+        ...existing,
+        aliasMasks: Array.from(
+          new Set([...(existing.aliasMasks || []), parsed.accountMask]),
+        ),
+      };
+      return {
+        accounts: accounts.map((a) => (a.id === existing.id ? merged : a)),
+        account: merged,
+      };
+    }
+    return { accounts, account: existing };
+  }
   if (!parsed.accountMask) {
     // No mask — only auto-create for Wallet / Cash. Otherwise return as-is
     // so the txn lands without an associated account.
@@ -1041,6 +1084,23 @@ export const useEPurseStore = create(
           accounts: s.accounts.map((a) =>
             a.id === accountId ? { ...a, balance: a.balance + delta } : a
           ),
+        })),
+
+      // Correct a card's type when the SMS-based inference (inferAccountType) guessed
+      // wrong — e.g. a credit-card format that omits the word "credit" was read as a
+      // Debit Card. Used by the onboarding card screen's Debit/Credit toggle. Only
+      // meaningful between Debit Card and Credit Card; when switching TO a credit card,
+      // drop any anchored-balance state (its balance is a liability, tracked separately).
+      setAccountType: (accountId, type) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) => {
+            if (a.id !== accountId || a.type === type) return a;
+            const next = { ...a, type };
+            if (type === ACCOUNT_TYPES.CREDIT_CARD) {
+              next.ccPaymentsTracked = false;
+            }
+            return next;
+          }),
         })),
 
       // Absolute "anchor" set used by the AccountCard flip flow.
@@ -2389,9 +2449,9 @@ export const useEPurseStore = create(
        * kind must be 'lent' or 'borrowed' — NOT a settlement kind. getPersonBalances()
        * nets a settlement kind against a matching origin entry (rec.lent -= amount for
        * lent_settled, etc.); a standalone lent_settled/borrow_repaid with no origin
-       * would wrongly skew the person's balance negative/positive. To log something
-       * already settled, use addAlreadySettledLentBorrowed instead — it creates the
-       * origin + counterpart pair atomically so they net to zero.
+       * would wrongly skew the person's balance negative/positive. To log a settlement
+       * against a person's existing outstanding balance, use addAlreadySettledLentBorrowed
+       * instead — it writes a single settlement-kind row (like re-tagging a transaction).
        */
       addLentBorrowed: (entry) =>
         set((s) => {
@@ -2409,57 +2469,44 @@ export const useEPurseStore = create(
         }),
 
       /**
-       * Log a lend/borrow that has ALREADY been settled, in one step — e.g. "I lent
-       * Rohit ₹500 last month and he already paid me back." Creates BOTH the origin
-       * entry (kind 'lent'/'borrowed', settledAt = now) and its settlement counterpart
-       * (kind 'lent_settled'/'borrow_repaid', sourceSettledId → origin), exactly the
-       * shape settleLentBorrowed produces — so they net to zero (see the warning on
-       * addLentBorrowed: a standalone settlement-kind row would wrongly skew the
-       * person's balance).
+       * Log a settlement against a person's EXISTING outstanding balance in one step —
+       * e.g. "Rohit already paid me back the ₹500 I lent him." Mirrors what re-tagging a
+       * normal transaction to lent_settled/borrow_repaid does (updateTransactionCategoryWithContact):
+       * creates exactly ONE ledger row of the settlement kind (kind 'lent_settled' for a
+       * 'lent' toggle, 'borrow_repaid' for a 'borrowed' toggle) — NOT an origin+counterpart
+       * pair. getPersonBalances nets it against the person's outstanding lent/borrowed
+       * (net = Σlent − Σlent_settled − Σborrowed + Σborrow_repaid), so it reduces the
+       * balance just like any real settled transaction.
        * entry: { kind: 'lent' | 'borrowed', person, amount, note?, contactId?, phone? }
-       * opts.accountId — for a 'borrowed' entry (the counterpart is 'borrow_repaid' —
-       * a real expense, since the money left an account just now with no bank SMS
-       * backing it), also books a "Repayment" debit on that account via
-       * bookRepaymentExpense — same treatment as settlePersonBalance. Omit to stay
-       * ledger-only. 'lent' entries never book a transaction (receiving your own
-       * money back isn't income).
+       * opts.accountId — for a 'borrowed' toggle (→ 'borrow_repaid', a real expense, since
+       * the money left an account just now with no bank SMS backing it), also books a
+       * "Repayment" debit on that account via bookRepaymentExpense — same treatment as
+       * settlePersonBalance. Omit to stay ledger-only. 'lent' toggles never book a
+       * transaction (receiving your own money back isn't income).
        */
       addAlreadySettledLentBorrowed: (entry, opts = {}) =>
         set((s) => {
           if (!entry?.amount || entry.amount <= 0 || entry.amount > MAX_ALLOWED_AMOUNT) return s;
           if (entry.kind !== 'lent' && entry.kind !== 'borrowed') return s;
           const now = new Date().toISOString();
-          const originId = `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          const counterpartKind = entry.kind === 'lent' ? 'lent_settled' : 'borrow_repaid';
-          const booked = counterpartKind === 'borrow_repaid' && opts.accountId
+          const settleKind = entry.kind === 'lent' ? 'lent_settled' : 'borrow_repaid';
+          const booked = settleKind === 'borrow_repaid' && opts.accountId
             ? bookRepaymentExpense(s, opts.accountId, entry.amount, entry.person, now)
             : null;
-          const origin = {
-            id: originId,
-            kind: entry.kind,
-            person: entry.person,
-            phone: entry.phone || null,
-            contactId: entry.contactId || null,
-            amount: entry.amount,
-            note: entry.note || '',
-            date: now,
-            settledAt: now,
-          };
-          const counterpart = {
+          const settleEntry = {
             id: `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            kind: counterpartKind,
+            kind: settleKind,
             person: entry.person,
             phone: entry.phone || null,
             contactId: entry.contactId || null,
             amount: entry.amount,
-            note: 'Manual settlement',
+            note: entry.note || 'Manual settlement',
             date: now,
-            sourceSettledId: originId,
             ...(booked ? { sourceTxnId: booked.txnId } : {}),
           };
           return {
             ...(booked ? { accounts: booked.accounts, transactions: booked.transactions } : {}),
-            lentBorrowed: [counterpart, origin, ...s.lentBorrowed],
+            lentBorrowed: [settleEntry, ...s.lentBorrowed],
           };
         }),
 

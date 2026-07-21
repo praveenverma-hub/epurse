@@ -63,6 +63,7 @@ import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius } from '../constants/theme';
 import { useEPurseStore, selectAccountLinkSuggestions } from '../store/ePurseStore';
+import { ACCOUNT_TYPES } from '../constants/categories';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { requestLocationPermission } from '../services/locationService';
 import { requestContactsPermission } from '../services/contactsService';
@@ -545,6 +546,7 @@ export function AccountFilterScreen({
 
   const accounts: Account[] = useEPurseStore((s: any) => s.accounts) || [];
   const deleteAccount = useEPurseStore((s: any) => s.deleteAccount);
+  const setAccountType = useEPurseStore((s: any) => s.setAccountType);
 
   // Debit-card↔bank merge suggestions surfaced from the just-completed sweep.
   const linkSuggestions = useEPurseStore(selectAccountLinkSuggestions) as Array<{
@@ -613,30 +615,63 @@ export function AccountFilterScreen({
         ) : (
           accounts.map((a) => {
             const on = isOn(a.id);
+            const isCard =
+              a.type === ACCOUNT_TYPES.DEBIT_CARD || a.type === ACCOUNT_TYPES.CREDIT_CARD;
             return (
               <View
                 key={a.id}
                 style={[styles.row, !on && styles.rowOff]}
               >
-                <View
-                  style={[
-                    styles.rowDot,
-                    { backgroundColor: on ? (a.color || theme.primary) : theme.divider },
-                  ]}
-                />
-                <View style={styles.rowText}>
-                  <Text style={[styles.rowTitle, !on && styles.rowTitleOff]} numberOfLines={1}>
-                    {maskLabel(a)}
-                  </Text>
-                  <Text style={styles.rowType}>{a.type}</Text>
+                <View style={styles.rowTop}>
+                  <View
+                    style={[
+                      styles.rowDot,
+                      { backgroundColor: on ? (a.color || theme.primary) : theme.divider },
+                    ]}
+                  />
+                  <View style={styles.rowText}>
+                    <Text style={[styles.rowTitle, !on && styles.rowTitleOff]} numberOfLines={1}>
+                      {maskLabel(a)}
+                    </Text>
+                    <Text style={styles.rowType}>{a.type}</Text>
+                  </View>
+                  <Switch
+                    value={on}
+                    onValueChange={() => toggle(a.id)}
+                    trackColor={{ false: theme.divider, true: theme.primary }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.divider}
+                  />
                 </View>
-                <Switch
-                  value={on}
-                  onValueChange={() => toggle(a.id)}
-                  trackColor={{ false: theme.divider, true: theme.primary }}
-                  thumbColor="#FFFFFF"
-                  ios_backgroundColor={theme.divider}
-                />
+
+                {/* Card type can be misread from the SMS (a credit card that omits the
+                    word "credit" reads as a debit card). Let the user correct it here. */}
+                {isCard && on ? (
+                  <View style={styles.typeToggleRow}>
+                    <Text style={styles.typeToggleLabel}>Card type</Text>
+                    <View style={styles.segment}>
+                      {[
+                        { key: ACCOUNT_TYPES.DEBIT_CARD, label: 'Debit' },
+                        { key: ACCOUNT_TYPES.CREDIT_CARD, label: 'Credit' },
+                      ].map((opt) => {
+                        const active = a.type === opt.key;
+                        return (
+                          <Pressable
+                            key={opt.key}
+                            onPress={() => { if (!active) setAccountType?.(a.id, opt.key); }}
+                            style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
+                          >
+                            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                              {opt.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
               </View>
             );
           })
@@ -1120,8 +1155,6 @@ const filterStyles = (t: Theme) =>
     emptyState: { alignItems: 'center', paddingVertical: spacing.xxl * 2 },
     emptyText: { fontSize: 14, lineHeight: 20, color: t.textSecondary, textAlign: 'center', marginTop: spacing.lg, paddingHorizontal: spacing.lg },
     row: {
-      flexDirection: 'row',
-      alignItems: 'center',
       backgroundColor: t.card,
       borderRadius: radius.md,
       borderWidth: 1,
@@ -1130,12 +1163,39 @@ const filterStyles = (t: Theme) =>
       paddingHorizontal: spacing.lg,
       marginBottom: spacing.md,
     },
+    rowTop: { flexDirection: 'row', alignItems: 'center' },
     rowOff: { opacity: 0.55 },
     rowDot: { width: 10, height: 10, borderRadius: radius.pill, marginRight: spacing.md },
     rowText: { flex: 1, marginRight: spacing.md },
     rowTitle: { fontSize: 15, fontWeight: '600', color: t.textPrimary },
     rowTitleOff: { textDecorationLine: 'line-through' },
     rowType: { fontSize: 12, color: t.textSecondary, marginTop: 2 },
+    typeToggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: spacing.md,
+      paddingTop: spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: t.divider,
+    },
+    typeToggleLabel: { fontSize: 13, color: t.textSecondary },
+    segment: {
+      flexDirection: 'row',
+      backgroundColor: t.background,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: t.divider,
+      padding: 2,
+    },
+    segmentBtn: {
+      paddingVertical: 6,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.pill,
+    },
+    segmentBtnActive: { backgroundColor: t.primary },
+    segmentText: { fontSize: 13, fontWeight: '600', color: t.textSecondary },
+    segmentTextActive: { color: '#FFFFFF' },
     footer: { paddingHorizontal: 24, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: t.divider },
     primaryBtn: { borderRadius: radius.md, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
     primaryBtnPressed: { opacity: 0.9 },

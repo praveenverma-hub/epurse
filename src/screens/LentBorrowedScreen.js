@@ -273,6 +273,31 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
       const toggle = () => setExpandedPerson(isExpanded ? null : pb.personKey);
 
+      // Settle the FULL net outstanding for this person. You owe them (net < 0) →
+      // repaying is a real expense, so pick the source account. They owe you
+      // (net > 0) → ledger-only confirmation.
+      const handleSettlePress = () => {
+        if (pb.net < 0) {
+          setSettleTarget(pb);
+          return;
+        }
+        setConfirm({
+          title: 'Mark as settled?',
+          message:
+            `${pb.person} · ${formatCurrency(netAbs)}\n\n` +
+            `Settles the FULL net outstanding of ${formatCurrency(netAbs)} ` +
+            `across all groups, splits and manual entries.`,
+          primaryText: 'Settle',
+          destructive: true,
+          secondaryText: 'Cancel',
+          onSecondary: () => setConfirm(null),
+          onConfirm: () => {
+            settlePersonBalance(pb.personKey);
+            setConfirm(null);
+          },
+        });
+      };
+
       return (
         // Plain View wrapper — the header is the only touchable, so the entries
         // ScrollView below is NOT a descendant of a touchable and can scroll freely.
@@ -347,74 +372,65 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           </TouchableOpacity>
 
           {isExpanded && (
-            <ScrollView
-              style={styles.entriesScroll}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={false}
-            >
-              {displayEntries.map((entry, idx) => {
-                const positive = isPositiveEntry(entry.kind);
-                const entryColor = positive ? colors.success : '#EF4444';
-                const entrySign = positive ? '+' : '−';
-                const isLast = idx === displayEntries.length - 1;
-                const primaryText = entry.isGroupLine
-                  ? `Group · ${entry.groupName}`
-                  : (entry.note && entry.note !== 'Manual settlement'
-                      ? entry.note
-                      : ENTRY_LABEL[entry.kind] || entry.kind);
-                const subText = entry.isGroupLine
-                  ? 'Group total'
-                  : `${ENTRY_LABEL[entry.kind]} · ${formatDate(entry.date)}`;
+            <>
+              <ScrollView
+                style={styles.entriesScroll}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                {displayEntries.map((entry) => {
+                  const positive = isPositiveEntry(entry.kind);
+                  const entryColor = positive ? colors.success : '#EF4444';
+                  const entrySign = positive ? '+' : '−';
+                  const primaryText = entry.isGroupLine
+                    ? `Group · ${entry.groupName}`
+                    : (entry.note && entry.note !== 'Manual settlement'
+                        ? entry.note
+                        : ENTRY_LABEL[entry.kind] || entry.kind);
+                  const subText = entry.isGroupLine
+                    ? 'Group total'
+                    : `${ENTRY_LABEL[entry.kind]} · ${formatDate(entry.date)}`;
 
-                return (
-                  <View
-                    key={entry.id}
-                    style={[
-                      styles.entryRow,
-                      entry.settledAt && styles.entrySettled,
-                    ]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.entryNote}>{primaryText}</Text>
-                      <Text style={styles.entryDate}>{subText}</Text>
+                  return (
+                    <View
+                      key={entry.id}
+                      style={[
+                        styles.entryRow,
+                        entry.settledAt && styles.entrySettled,
+                      ]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.entryNote}>{primaryText}</Text>
+                        <Text style={styles.entryDate}>{subText}</Text>
+                      </View>
+                      <Text style={[styles.entryAmt, { color: entryColor }]}>
+                        {entrySign} {formatCurrency(entry.amount)}
+                      </Text>
                     </View>
-                    <Text style={[styles.entryAmt, { color: entryColor }]}>
-                      {entrySign} {formatCurrency(entry.amount)}
+                  );
+                })}
+              </ScrollView>
+              {/* Settle acts on the person's NET total, so it lives on its own
+                  pinned footer row (not attached to whatever entry renders last). */}
+              {!isFullySettled ? (
+                <View style={styles.settleFooter}>
+                  <View style={{ flex: 1, marginRight: spacing.sm }}>
+                    <Text style={styles.settleFooterLabel} numberOfLines={1}>
+                      {pb.net > 0 ? 'Total owed to you' : 'Total you owe'}
                     </Text>
-                    {isLast && !isFullySettled ? (
-                      <TouchableOpacity
-                        style={styles.settleNetBtn}
-                        onPress={() => {
-                          // You owe them (net < 0) → repaying is a real expense: pick the
-                          // account it's paid from. They owe you (net > 0) → ledger-only.
-                          if (pb.net < 0) {
-                            setSettleTarget(pb);
-                            return;
-                          }
-                          setConfirm({
-                            title: 'Mark as settled?',
-                            message:
-                              `${pb.person} · ${formatCurrency(netAbs)}\n\n` +
-                              `Settles the FULL net outstanding of ${formatCurrency(netAbs)} ` +
-                              `across all groups, splits and manual entries.`,
-                            primaryText: 'Settle',
-                            destructive: true,
-                            secondaryText: 'Cancel',
-                            onSecondary: () => setConfirm(null),
-                            onConfirm: () => {
-                              settlePersonBalance(pb.personKey);
-                              setConfirm(null);
-                            },
-                          });
-                        }}
-                      >
-                        <Text style={styles.settleNetText}>Settle</Text>
-                      </TouchableOpacity>
-                    ) : null}
+                    <Text
+                      style={[styles.settleFooterAmt, { color: netColor }]}
+                      numberOfLines={1}
+                    >
+                      {formatCurrency(netAbs)}
+                    </Text>
                   </View>
-                );
-              })}
-            </ScrollView>
+                  <TouchableOpacity style={styles.settleNetBtn} onPress={handleSettlePress}>
+                    <Text style={styles.settleNetText}>Settle</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </>
           )}
         </View>
       );
@@ -424,19 +440,36 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
   // take the panel's kind `k` so the offscreen page shows the correct copy.
-  const renderForm = (k) => (
+  const renderForm = (k) => {
+    // Heading + chip reflect the resulting category when "already settled" is on:
+    // lent → Lent Settled, borrowed → Borrow Repaid.
+    const settledChipLabel = k === 'lent' ? 'as Lent settled' : 'as Borrow repaid';
+    const heading = alreadySettled
+      ? (k === 'lent' ? 'Lent settled' : 'Borrow repaid')
+      : (k === 'lent' ? 'Lend to someone' : 'Note a borrowed amount');
+
+    return (
     <View style={styles.formCard}>
-      <Text style={styles.formTitle}>
-        {k === 'lent' ? 'Lend to someone' : 'Note a borrowed amount'}
-      </Text>
-      <TextInput
-        value={person}
-        onChangeText={(t) => setPerson(sanitizeName(t))}
-        placeholder="Person name *"
-        placeholderTextColor={colors.textMuted}
-        style={styles.input}
-        maxLength={INPUT_LIMITS.NAME_MAX}
-      />
+      <View style={styles.formHeaderRow}>
+        <Text style={[styles.formTitle, styles.formTitleInline]}>{heading}</Text>
+        {/* Toggle: log straight into the existing Lent Settled / Borrow Repaid
+            categories (addAlreadySettledLentBorrowed) instead of an open
+            'lent'/'borrowed' entry you'd have to Settle separately later. */}
+        <TouchableOpacity
+          style={[styles.settledChip, alreadySettled && styles.settledChipActive]}
+          onPress={() => setAlreadySettled((v) => !v)}
+          activeOpacity={0.75}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: alreadySettled }}
+        >
+          <View style={[styles.settledBox, alreadySettled && styles.settledBoxActive]}>
+            {alreadySettled ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+          </View>
+          <Text style={[styles.settledChipText, alreadySettled && styles.settledChipTextActive]}>
+            {settledChipLabel}
+          </Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.phoneRow}>
         <TextInput
           value={phone}
@@ -451,6 +484,14 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           <ContactPickIcon />
         </TouchableOpacity>
       </View>
+      <TextInput
+        value={person}
+        onChangeText={(t) => setPerson(sanitizeName(t))}
+        placeholder="Person name *"
+        placeholderTextColor={colors.textMuted}
+        style={styles.input}
+        maxLength={INPUT_LIMITS.NAME_MAX}
+      />
       <TextInput
         value={amount}
         onChangeText={(t) => setAmount(sanitizeAmount(t))}
@@ -468,20 +509,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         style={styles.input}
         maxLength={INPUT_LIMITS.NOTE_MAX}
       />
-      <TouchableOpacity
-        style={styles.settledRow}
-        onPress={() => setAlreadySettled((v) => !v)}
-        activeOpacity={0.75}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: alreadySettled }}
-      >
-        <View style={[styles.settledBox, alreadySettled && styles.settledBoxActive]}>
-          {alreadySettled ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
-        </View>
-        <Text style={styles.settledLabel}>
-          {k === 'lent' ? 'Already paid back' : 'Already repaid this'}
-        </Text>
-      </TouchableOpacity>
       <GradientButton
         title="Add"
         onPress={() => handleAdd(k)}
@@ -489,7 +516,8 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         style={{ marginTop: spacing.sm }}
       />
     </View>
-  );
+    );
+  };
 
   const renderEmpty = (k) => (
     <EmptyState
@@ -609,7 +637,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             addAlreadySettledLentBorrowed(pendingSettledAdd, { accountId });
             setPendingSettledAdd(null);
           }}
-          skipLabel="Just log it (no expense)"
+          skipLabel="Just mark repaid (no expense)"
           onSkip={() => {
             addAlreadySettledLentBorrowed(pendingSettledAdd);
             setPendingSettledAdd(null);
@@ -756,8 +784,15 @@ const styles = StyleSheet.create({
   formTitle: {
     ...typography.h3,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
   },
+  formHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  formTitleInline: { flex: 1 },
   input: {
     backgroundColor: colors.background,
     borderRadius: radius.md,
@@ -773,16 +808,34 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     marginBottom: spacing.sm,
   },
-  settledRow: {
+  // "Already settled" chip — front-of-form toggle beside the title.
+  settledChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    flexShrink: 0,
+  },
+  settledChipActive: {
+    backgroundColor: colors.primary + '14',
+    borderColor: colors.primary + '55',
+  },
+  settledChipText: {
+    ...typography.tiny,
+    color: colors.textSecondary,
+    fontWeight: '700',
+  },
+  settledChipTextActive: {
+    color: colors.primary,
   },
   settledBox: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
+    width: 16,
+    height: 16,
+    borderRadius: 5,
     borderWidth: 2,
     borderColor: colors.textMuted,
     backgroundColor: 'transparent',
@@ -792,11 +845,6 @@ const styles = StyleSheet.create({
   settledBoxActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
-  },
-  settledLabel: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontWeight: '600',
   },
   phoneInput: {
     flex: 1,
@@ -913,13 +961,25 @@ const styles = StyleSheet.create({
   entryDate: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
   entryAmt: { ...typography.bodyBold, fontWeight: '700' },
 
+  settleFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  settleFooterLabel: { ...typography.tiny, color: colors.textSecondary },
+  settleFooterAmt: { ...typography.bodyBold, fontWeight: '700', marginTop: 1 },
+
   settleNetBtn: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 1,
     backgroundColor: colors.success + '18',
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.success + '44',
+    flexShrink: 0,
   },
   settleNetText: {
     color: colors.success,

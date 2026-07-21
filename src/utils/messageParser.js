@@ -189,6 +189,10 @@ const TRANSACTION_PHRASES = [
   'money in',             // "Money In: Rs.10,000.00 to A/c XX1102"
   // Bare-verb credit forms
   'credit to', 'credit in', 'credit of',
+  // Rail abbreviations: "NEFT Cr of Rs.X", "IMPS Dr Rs.X", "RTGS Cr Rs.X",
+  // "IMPS of Rs.X to <payee> successful" — banks often omit the -ed verb.
+  'neft cr', 'neft dr', 'neft of', 'imps cr', 'imps dr', 'imps of',
+  'rtgs cr', 'rtgs dr', 'rtgs of',
   // Reversal confirmations
   'reversed to', 'amount reversed', 'transaction reversed', 'reversal credited',
   // Bank charges / penalties (no debit verb — only "levied on" or "penalty of")
@@ -251,10 +255,16 @@ const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-
 // Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
 // Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
 const MERCHANT_REGEX =
-  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
+  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
 
 const MERCHANT_STOP =
-  /\s+(?:on|via|ref|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using)\b.*$/i;
+  /\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b.*$/i;
+
+// A period glued directly to a stop keyword or a ref/balance number-run (no space),
+// e.g. "REEMA KUMARI.RRN 853904840357.Avl Bal" → cut at ".RRN". The merchant char
+// class allows '.', so these would otherwise stay glued into the captured token.
+const MERCHANT_PERIOD_STOP =
+  /\.(?:rrn|avl|bal|ref|utr|upi|txn|info|neft|imps|rtgs|dt|not|\d)[\s\S]*$/i;
 
 // UPI VPA: someone@bank
 const VPA_REGEX = /([a-zA-Z0-9._\-]{2,30}@[a-zA-Z]{2,15})/;
@@ -270,7 +280,7 @@ const NEFT_REMITTER_REGEX =
 
 // Payment acknowledgements for credit cards (not new spend/income transactions).
 const CC_PAYMENT_NOTIFICATION_REGEX =
-  /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?[\s\S]{0,80}(?:has\s+been\s+received\s+on\s+your\b[\s\S]*\bcredit\s+card\b|was\s+credited\s+to\s+your\s+card\b|received\s+towards\s+[\w\s]{0,30}credit\s+card\b)/i;
+  /\bpayment\s+of\s+(?:inr|rs\.?|₹)\s*[0-9,]+(?:\.[0-9]{1,2})?[\s\S]{0,80}(?:(?:has\s+been\s+)?received\s+on\s+your\b[\s\S]*\bcredit\s+card\b|(?:was\s+)?credited\s+to\s+your\s+card\b|received\s+towards\s+[\w\s]{0,30}credit\s+card\b)/i;
 
 // Credit-card bill REMINDER (pre-payment alert) — NOT a spend.
 // Banks send these monthly to nudge the user to pay their CC bill.
@@ -315,7 +325,7 @@ const CC_PAYMENT_OUTGOING_REGEX =
 // These contain an amount (the "eligible spend") but no actual transaction happened.
 // Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
 const PROMOTIONAL_OFFER_REGEX =
-  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b/i;
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b|\b(?:extra|flat|bonus)\s+cashback\b|\b\d{1,3}\s*%\s*(?:extra\s+|flat\s+|bonus\s+)?cashback\b|\b(?:get|earn|enjoy|avail|win|unlock)\s+(?:up\s*to\s+)?(?:\d{1,3}\s*%\s*)?(?:extra\s+|flat\s+)?cashback\b|\bmax\.?\s*cashback\b|\bcashback\s+up\s?to\b|\bcashback\s+on\b|\b(?:flat|extra|bonus|get|earn|win|enjoy|avail|unlock|upto|up\s?to)\s+(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?\s*cashback\b/i;
 
 // EMI conversion NOTICE — an already-booked purchase being restructured into
 // instalments ("...purchase of Rs.45,000 ... has been converted to 6 Months EMI").
@@ -477,13 +487,29 @@ const NON_FINANCIAL_DLT_KEYS = [
 ];
 
 const inferAccountType = (text) => {
+  // 1. Explicit credit card wins outright.
   if (/credit\s+card|\bcc\b|c\.c\./i.test(text)) return ACCOUNT_TYPES.CREDIT_CARD;
-  // Debit card / ATM: explicit "debit card", or an ATM / cash withdrawal (always
-  // a debit/ATM card), or a "Card ending …" reference WITHOUT "credit card".
-  // Keeps debit-card spends segregated from generic bank-account ("A/c") debits.
+  // 2. Explicit debit card / ATM / cash withdrawal — always a debit/ATM card. Checked
+  //    before the CC-signal heuristic so a co-mentioned "limit" can't flip a real ATM SMS.
   if (
     /debit\s*card(?!\s+(?:maintenance|annual|issuance|fees?|charges?|renewal))/i.test(text) ||
-    /\bdr\s*card\b|\batm\b|cash\s+with(?:drawal|drawn)|\bawcw\b/i.test(text) ||
+    /\bdr\s*card\b|\batm\b|cash\s+with(?:drawal|drawn)|\bawcw\b/i.test(text)
+  ) {
+    return ACCOUNT_TYPES.DEBIT_CARD;
+  }
+  // 3. Strong credit-card-ONLY signals that a debit card / bank a/c never carry — a
+  //    credit/available/card LIMIT, outstanding, (min/total) amount due, a generated
+  //    statement, "billed to". Recovers CC formats that OMIT the word "credit"
+  //    (Amex, OneCard, "Axis Card xx1002 … Avl Limit Rs.X").
+  if (
+    /(?:credit|avl\.?|available|card)\s+limit|\boutstanding\b|(?:min(?:imum)?|total)\s+(?:amt|amount)\s+due|statement\s+(?:generated|is\s+ready)|\bbilled\s+to\b/i.test(text)
+  ) {
+    return ACCOUNT_TYPES.CREDIT_CARD;
+  }
+  // 4. Bare "Card ending/no/xxNNNN" with no debit/credit signal — default to Debit Card
+  //    (bank-issued card; keeps card spends segregated from generic "A/c" debits). The
+  //    user can flip it to Credit Card on the onboarding card screen if wrongly judged.
+  if (
     /card\s+(?:ending|no\.?|number)\b/i.test(text) ||
     /\bcard\s+[xX*•·]{1,8}\d{3,6}\b/i.test(text)
   ) {
@@ -845,7 +871,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
         ? false // "credited to beneficiary" = user sent money = DEBIT
         : debitedFromOther
           ? true // "debited from beneficiary" = user received money = CREDIT
-          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b/i.test(textSansFuture);
+          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b|\b(?:neft|imps|rtgs|ach)\b[\s:\/-]*cr\b/i.test(textSansFuture);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
@@ -861,12 +887,23 @@ export const parseMessageDetailed = (message, opts = {}) => {
   if (merchant) {
     merchant = merchant
       .replace(MERCHANT_STOP, '')
+      .replace(MERCHANT_PERIOD_STOP, '') // cut at ".RRN"/".Avl"/".<ref#>" glued without a space
+      // Trailing bank-narration verb (+ optional amount) that a rail-ref capture bled into,
+      // e.g. "MOONSHINE TECH credited Rs.30000" → "MOONSHINE TECH".
+      .replace(/\s+(?:credited|debited|deposited|transferred|withdrawn|refunded|received|sent|paid|spent|charged|billed)\b[\s\S]*$/i, '')
+      // Trailing currency+amount glued to the name, e.g. "JOHN DOE Rs.4500" → "JOHN DOE".
+      .replace(/\s+(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?[\s\S]*$/i, '')
+      // Bare trailing currency token left after the amount was cut, e.g. "JOHN DOE Rs" → "JOHN DOE"
+      // (end-anchored so a merchant like "RS TRADERS" mid-name is untouched).
+      .replace(/\s+(?:rs\.?|inr|₹)\s*$/i, '')
       .replace(/\.\s+\S.*$/g, '')   // stop at "period + space" — prevents bleeding past sentence end
       .replace(/^\d+\.\s*/g, '')    // strip NEFT/IMPS batch prefix e.g. "11." before sender name
       .replace(/^(?:upi|imps|neft|rtgs|ach|nft)[-\s]*\d+[-\s]*/i, '') // strip rail+ref prefix e.g. "UPI-755012995968-" → payee
       // Strip a leading action-noun filler so "for order at BIGBASKET" → "BIGBASKET",
       // "for auto-renewal of AMAZON PRIME" → "AMAZON PRIME", "for ride with OLA CABS" → "OLA CABS".
       .replace(/^(?:order|purchase|payment|txn|transaction|shopping|disputed\s+transaction|auto[-\s]?renewal|auto[-\s]?load|renewal|recharge|ride)\s+(?:of|at|for|on|with)\s+/i, '')
+      // Trailing reason clause on refunds/reversals, e.g. "AMAZON for order cancellation" → "AMAZON".
+      .replace(/\s+for\s+(?:the\s+|order\s+|a\s+)?(?:cancellation|cancelled|refund|reversal|failed|declined|returned|chargeback|disputed)\b[\s\S]*$/i, '')
       .replace(/[.,;:]+$/g, '')
       .replace(/\s+/g, ' ')
       .trim()

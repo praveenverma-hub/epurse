@@ -10,7 +10,7 @@ import {
   Text,
   StyleSheet,
   Dimensions,
-  TouchableWithoutFeedback,
+  Pressable,
 } from 'react-native';
 import Svg, { Line, Text as SvgText, Rect } from 'react-native-svg';
 import Animated, {
@@ -44,7 +44,10 @@ const PALETTE = [
 // ---------------------------------------------------------------------------
 // BubbleItem — individual animated bubble
 // ---------------------------------------------------------------------------
-const BubbleItem = ({ b, x, y, r, color, isExpanded, onPress }) => {
+// Pure visual — taps are handled at the plot level (nearest-bubble), so overlapping
+// bubbles stay individually reachable. Expanded bubble is raised above its neighbours
+// (zIndex) and gets a white ring so it reads clearly out of a cluster.
+const BubbleItem = ({ b, x, y, r, color, isExpanded }) => {
   const scale = useSharedValue(1);
 
   useEffect(() => {
@@ -60,32 +63,34 @@ const BubbleItem = ({ b, x, y, r, color, isExpanded, onPress }) => {
   }));
 
   return (
-    <TouchableWithoutFeedback onPress={onPress}>
-      <Animated.View
-        style={[
-          {
-            position: 'absolute',
-            width: r * 2,
-            height: r * 2,
-            borderRadius: r,
-            left: x - r,
-            top: y - r,
-            backgroundColor: color,
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-          },
-          animStyle,
-        ]}
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          width: r * 2,
+          height: r * 2,
+          borderRadius: r,
+          left: x - r,
+          top: y - r,
+          backgroundColor: color,
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          zIndex: isExpanded ? 20 : 1,
+          borderWidth: isExpanded ? 2 : 1,
+          borderColor: isExpanded ? '#FFFFFF' : 'rgba(255,255,255,0.55)',
+        },
+        animStyle,
+      ]}
+    >
+      <Text
+        numberOfLines={2}
+        style={styles.bubbleText}
       >
-        <Text
-          numberOfLines={2}
-          style={styles.bubbleText}
-        >
-          {b.name}
-        </Text>
-      </Animated.View>
-    </TouchableWithoutFeedback>
+        {b.name}
+      </Text>
+    </Animated.View>
   );
 };
 
@@ -126,8 +131,45 @@ const HabitLeakMatrix = ({ bubbles }) => {
     ? bubbles.find((b) => b.key === expandedKey)
     : null;
 
+  // Precompute every bubble's screen geometry once so the tap handler can resolve
+  // the nearest one (see handleMatrixPress).
+  const positions = bubbles.map((b) => ({
+    key: b.key,
+    x: toX(b.frequency),
+    y: toY(b.volume),
+    r: toR(b.volume),
+  }));
+
   const handleBubblePress = (key) => {
     setExpandedKey((prev) => (prev === key ? null : key));
+  };
+
+  // A single plot-level tap resolves to the NEAREST bubble instead of relying on each
+  // bubble's own hit box — so 2-3 clustered/overlapping bubbles are all reachable by
+  // aiming at (or toward) their centre. A tap inside a bubble always wins over a far
+  // one; otherwise the closest centre within a small margin is selected.
+  const handleMatrixPress = (evt) => {
+    const { locationX, locationY } = evt.nativeEvent;
+    let best = null;
+    let bestScore = Infinity;
+    positions.forEach((p) => {
+      const dx = p.x - locationX;
+      const dy = p.y - locationY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // Inside the bubble → strongly preferred (negative); else distance to centre.
+      const score = dist <= p.r ? dist - p.r * 2 : dist;
+      if (score < bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    });
+    // Ignore taps in empty space far from any bubble (collapses the detail card).
+    if (!best) return;
+    if (bestScore > 0 && bestScore > BUBBLE_MAX_R * 1.5) {
+      setExpandedKey(null);
+      return;
+    }
+    handleBubblePress(best.key);
   };
 
   return (
@@ -248,7 +290,7 @@ const HabitLeakMatrix = ({ bubbles }) => {
           </SvgText>
         </Svg>
 
-        {/* Bubbles */}
+        {/* Bubbles (pure visuals — tap handled by the overlay below) */}
         {bubbles.map((b, index) => {
           const x = toX(b.frequency);
           const y = toY(b.volume);
@@ -266,10 +308,18 @@ const HabitLeakMatrix = ({ bubbles }) => {
               r={r}
               color={color}
               isExpanded={isExpanded}
-              onPress={() => handleBubblePress(b.key)}
             />
           );
         })}
+
+        {/* Transparent tap layer on top — routes every tap to the nearest bubble so
+            clustered dots are all selectable. */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={handleMatrixPress}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Merchant bubble chart — tap a bubble for details"
+        />
       </View>
 
       {/* Detail card */}

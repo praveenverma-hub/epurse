@@ -1035,6 +1035,105 @@ const CC_BILL_OUTGOING_JUL26 = [
     expect: { accept: true, type: 'credit' } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 15 — Cashback-offer promos & "to NAME.RRN <ref>" merchant leak (Jul-26)
+//   · "Get X% Extra Cashback … Max. Cashback …" is an OFFER, not a txn (the amount
+//     is a Min. Trxn threshold) → promotional_offer.
+//   · "Sent Rs.X … to REEMA KUMARI.RRN 853904840357.Avl Bal …" — merchant must stop
+//     at ".RRN"; the char class allows '.', so RRN/balance would otherwise glue on.
+//   · Guard: a REAL "cashback credited" must still be accepted as a credit.
+// ─────────────────────────────────────────────────────────────────────────────
+const CASHBACK_RRN_JUL26 = [
+  { name: 'SBI Monte Carlo cashback offer (Min. Trxn amount, not a txn)',
+    sender: 'SBICRD',
+    sms: "Get 5% Extra Cashback at Monte Carlo with your SBI Credit Card. Min. Trxn.: Rs.6500; Max. Cashback: Rs.750 per card a/c. Valid till 17-August'26. T&C",
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'Indian Bank UPI Sent — merchant stops at .RRN',
+    sender: 'INDBNK',
+    sms: 'Sent Rs.107.00 from A/c *9532 on 17-07-26 to REEMA KUMARI.RRN 853904840357.Avl Bal Rs.3300.67.Not you?SMS BLOCK to 9289592895-Indian Bank',
+    expect: { accept: true, type: 'debit', amount: 107, accountMask: '9532', merchant: 'REEMA KUMARI' } },
+  { name: 'Guard: real cashback credited still accepted',
+    sender: 'HDFCBK',
+    sms: 'Rs.50.00 cashback credited to your A/c *1234 on 17-07-26. Avl Bal Rs.500.00',
+    expect: { accept: true, type: 'credit', amount: 50, accountMask: '1234' } },
+  // "Flat Rs.X cashback" — 'flat' separated from 'cashback' by the amount, no % present.
+  { name: 'ICICI Flat Rs.1000 cashback on flights offer',
+    sender: 'ICICIB',
+    sms: 'Flat Rs.1000 cashback on flights! Book with ICICI Credit Card, min spend Rs.10000. Offer valid till 31-Aug-26.',
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'HDFC get 10% cashback up to Rs.500 (use code) offer',
+    sender: 'HDFCBK',
+    sms: 'Get 10% cashback up to Rs.500 on your first Amazon order with HDFC Credit Card. Use code HDFC10. T&C apply.',
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'ICICI "Earn cashback on every UPI txn" festive offer (URL)',
+    sender: 'ICICIB',
+    sms: 'Win exciting rewards! Earn cashback on every UPI transaction this Diwali with ICICI Bank. Know more: http://icici.in/offer',
+    expect: { accept: false, code: 'promotional_offer' } },
+  // Guard: "received a cashback of Rs.X credited" (amount NOT adjacent to 'cashback') stays a credit.
+  { name: 'Guard: "received a cashback of Rs.X credited" still books',
+    sender: 'HDFCBK',
+    sms: 'You received a cashback of Rs.75.50 credited to your A/c XX1234 for txn at Zomato. Avl Bal Rs.900.',
+    expect: { accept: true, type: 'credit', amount: 75.5, accountMask: '1234' } },
+  // CC payment received WITHOUT "has been" — must be a CC-payment notification (true-up),
+  // NOT booked as a ₹12000 income credit. Previously the regex required "has been received".
+  { name: 'SBI CC payment received (no "has been") → cc payment, not income',
+    sender: 'SBICRD',
+    sms: 'Payment of Rs.12000 received on your SBI Credit Card XX1234. Thank you.',
+    expect: { accept: false, code: 'credit_card_payment_notification' } },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 16 — Rail abbreviations (NEFT/IMPS/RTGS Cr/Dr/of) & refund reason-clause
+//   merchant cleanup (Jul-26). Banks often omit the -ed verb on rail transfers
+//   ("NEFT Cr of Rs.X", "IMPS Dr Rs.X") — Gate-2 must still accept them, and "Cr"
+//   must read as CREDIT. Refund/reversal narration ("by AMAZON for order
+//   cancellation") must not bleed into the merchant.
+// ─────────────────────────────────────────────────────────────────────────────
+const RAIL_ABBREV_JUL26 = [
+  { name: 'NEFT Cr of Rs.X (no -ed verb) → credit',
+    sender: 'KOTAKB', sms: 'NEFT Cr of Rs.8000 in A/c XX5566 from ACME CORP LTD. Ref KKBKN00123.',
+    expect: { accept: true, type: 'credit', amount: 8000, merchant: 'ACME CORP LTD' } },
+  { name: 'IMPS Dr Rs.X (no -ed verb) → debit',
+    sender: 'AXISBK', sms: 'IMPS Dr Rs.6000 from A/c XX5960 to VENDOR PAYMENTS. Ref 300112233445.',
+    expect: { accept: true, type: 'debit', amount: 6000, merchant: 'VENDOR PAYMENTS' } },
+  { name: 'RTGS Cr Rs.X large amount → credit',
+    sender: 'ICICIB', sms: 'RTGS Cr Rs.9999999 to A/c XX302 from EXPORTS LTD. Ref R11223344.',
+    expect: { accept: true, type: 'credit', amount: 9999999, merchant: 'EXPORTS LTD' } },
+  { name: 'IMPS of Rs.X to payee successful (no verb) → debit',
+    sender: 'PAYTMB', sms: 'IMPS of Rs.1500 to RAM KIRANA STORE successful from Paytm. Bal Rs.3500.',
+    expect: { accept: true, type: 'debit', amount: 1500 } },
+  { name: 'Refund merchant stops before "for order cancellation"',
+    sender: 'HDFCBK', sms: 'Rs.750 refunded to A/c XX4021 by AMAZON for order cancellation on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 750, merchant: 'AMAZON' } },
+  { name: 'NEFT rail-ref name merchant no longer bleeds "credited Rs"',
+    sender: 'SBIINB', sms: 'Info: NEFT-SBIN0802935-MOONSHINE TECH-Rs.30000 credited to A/c XX9911.',
+    expect: { accept: true, type: 'credit', amount: 30000, merchant: 'MOONSHINE TECH' } },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 17 — Card-type inference: CC formats that omit the word "credit" (Jul-26).
+//   A credit/available/card LIMIT, outstanding, or amount due are credit-card-ONLY
+//   signals → Credit Card even without "credit card"/"cc". Bare "Card xxNNNN" with a
+//   balance (or no signal) stays Debit Card. Explicit debit/ATM always Debit.
+// ─────────────────────────────────────────────────────────────────────────────
+const CARD_TYPE_JUL26 = [
+  { name: 'Amex "Card ending" + Avl Limit → Credit Card',
+    sender: 'AMEX', sms: 'INR 2,150.00 charged on Amex Card ending 1002 at FLIPKART on 22-07-26. Avl Limit Rs.98000.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 2150 } },
+  { name: 'Axis Card xxNNNN + Outstanding → Credit Card',
+    sender: 'AXISBK', sms: 'Txn of INR 1500 on Axis Card xx1002 at SWIGGY. Outstanding Rs.12000.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 1500 } },
+  { name: 'Bare Card xxNNNN + Total amount due → Credit Card',
+    sender: 'HDFCBK', sms: 'Rs.500 spent on Card xx8077 at ZOMATO. Total amount due Rs.6000.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 500 } },
+  { name: 'Guard: "Bank Card xxNNNN" refund, no signal → Debit Card',
+    sender: 'AXISBK', sms: 'Refund of Rs.120 to your Axis Bank Card xx4412 on 22-07-26.',
+    expect: { accept: true, type: 'credit', accountType: 'Debit Card', amount: 120 } },
+  { name: 'Guard: Debit Card + Avl Bal stays Debit Card',
+    sender: 'ICICIB', sms: 'Rs.850 spent via Debit Card xx302 at BIG BAZAAR. Avl Bal Rs.9000.',
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 850 } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1051,6 +1150,9 @@ const SUITES = [
   ['Jul-26 merchant/verb (#51-88)', MERCHANT_JUL26],
   ['Jul-26 edge (holds/reversals/EMI/#89-118)', EDGE_JUL26],
   ['CC bill outgoing (CRED/cc-bill, Jul-26)', CC_BILL_OUTGOING_JUL26],
+  ['Cashback offer & .RRN merchant leak (Jul-26)', CASHBACK_RRN_JUL26],
+  ['Rail abbreviations & refund merchant (Jul-26)', RAIL_ABBREV_JUL26],
+  ['Card-type inference: CC without "credit" (Jul-26)', CARD_TYPE_JUL26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -116,77 +116,72 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
   }, [dayCharges]);
 
   // Build EKG path.
-  // We emit TWO things so the forecast part of the chart can recede:
-  //   • solidPath  — the continuous baseline + every spike that has ALREADY happened.
-  //   • dimSpikePaths — one standalone path per UPCOMING spike (a not-yet-charged day
-  //     this month = a repeat of last month's recurring charge). These render at a low
-  //     stroke opacity so this month's actual spikes read as the real signal. A single
-  //     SVG <Path> can't vary opacity per segment, hence the split. Under a dimmed
-  //     spike the solid path just runs flat along the baseline, so the two connect.
-  const { solidPath, dimSpikePaths, spikePositions } = useMemo(() => {
+  // Two continuous paths so the forecast portion can recede as ONE faded line
+  // (baseline + spikes) rather than floating spikes:
+  //   • solidPath — baseline + every spike that has ALREADY happened (day 1 → today,
+  //     or the whole month for a past month), full strength.
+  //   • dimPath   — current month only: ONE continuous line from today → month end,
+  //     baseline + the recurring spikes drawn inline, rendered at low opacity. This is
+  //     the faded "last month repeats" forecast; it starts exactly where the solid line
+  //     stops (today) so the two read as one line with a faded tail.
+  const { solidPath, dimPath, spikePositions } = useMemo(() => {
     const toX = (d) => LEAD + (d - 0.5) * DAY_W;
     const totalWidth = LEAD + daysInMonth * DAY_W + 12;
-    let solid = `M 0 ${BASELINE}`;
-    const dimPaths = [];
+    const spikeSeg = (cx, peakY) =>
+      ` L ${cx - 6} ${BASELINE}` +
+      ` L ${cx - 3} ${BASELINE + 5}` +
+      ` L ${cx} ${peakY}` +
+      ` L ${cx + 4} ${BASELINE + 8}` +
+      ` L ${cx + 8} ${BASELINE}`;
     const spikes = [];
-    // Where the solid (already-happened) line ends — extended as we add past days.
+
+    // ── Solid (already-happened) portion: day 1 → today (current month) or → end (past).
+    const lastSolidDay = isCurrentMonth ? currentDay : daysInMonth;
+    let solid = `M 0 ${BASELINE}`;
     let solidEndX = 0;
-
-    for (let d = 1; d <= daysInMonth; d++) {
+    for (let d = 1; d <= lastSolidDay; d++) {
       const cx = toX(d);
-      // In the current month, a day after today hasn't happened yet — forecast only.
-      const upcoming = isCurrentMonth && d > currentDay;
-
-      if (upcoming) {
-        // Future day: DON'T extend the solid dark line. If a charge recurs on this
-        // day, draw it as a dimmed forecast spike (it sits on the faded baseline).
-        if (dayCharges.has(d)) {
-          const charges = dayCharges.get(d);
-          const totalDayAmt = charges.reduce((s, c) => s + c.amount, 0);
-          const spikeH = MIN_SPIKE_H + (totalDayAmt / maxAmount) * (MAX_SPIKE_H - MIN_SPIKE_H);
-          const peakY = BASELINE - spikeH;
-          dimPaths.push(
-            `M ${cx - 6} ${BASELINE}` +
-              ` L ${cx - 3} ${BASELINE + 5}` +
-              ` L ${cx} ${peakY}` +
-              ` L ${cx + 4} ${BASELINE + 8}` +
-              ` L ${cx + 8} ${BASELINE}`
-          );
-          spikes.push({ day: d, cx, peakY, charges, hasHike: charges.some((c) => c.priceHike), upcoming: true });
-        }
-        continue;
-      }
-
-      // Past / today (or any day of a non-current month) → full-strength solid.
       if (!dayCharges.has(d)) {
         solid += ` L ${cx} ${BASELINE}`;
         solidEndX = cx;
         continue;
       }
-
       const charges = dayCharges.get(d);
       const totalDayAmt = charges.reduce((s, c) => s + c.amount, 0);
       const spikeH = MIN_SPIKE_H + (totalDayAmt / maxAmount) * (MAX_SPIKE_H - MIN_SPIKE_H);
       const peakY = BASELINE - spikeH;
-      solid += ` L ${cx - 6} ${BASELINE}`;
-      solid += ` L ${cx - 3} ${BASELINE + 5}`;
-      solid += ` L ${cx} ${peakY}`;
-      solid += ` L ${cx + 4} ${BASELINE + 8}`;
-      solid += ` L ${cx + 8} ${BASELINE}`;
+      solid += spikeSeg(cx, peakY);
       solidEndX = cx + 8;
       spikes.push({ day: d, cx, peakY, charges, hasHike: charges.some((c) => c.priceHike), upcoming: false });
     }
-
-    // Current month: the solid line simply STOPS at today — no future line at all
-    // (the dimmed upcoming spikes convey the forecast). Past months run full width.
     if (isCurrentMonth) {
       const todayX = toX(currentDay);
-      if (solidEndX < todayX) { solid += ` L ${todayX} ${BASELINE}`; }
+      if (solidEndX < todayX) solid += ` L ${todayX} ${BASELINE}`;
     } else {
       solid += ` L ${totalWidth} ${BASELINE}`;
     }
 
-    return { solidPath: solid, dimSpikePaths: dimPaths, spikePositions: spikes };
+    // ── Forecast (faded) portion: today → month end, continuous baseline + inline spikes.
+    let dim = '';
+    if (isCurrentMonth && currentDay < daysInMonth) {
+      dim = `M ${toX(currentDay)} ${BASELINE}`;
+      for (let d = currentDay + 1; d <= daysInMonth; d++) {
+        const cx = toX(d);
+        if (!dayCharges.has(d)) {
+          dim += ` L ${cx} ${BASELINE}`;
+          continue;
+        }
+        const charges = dayCharges.get(d);
+        const totalDayAmt = charges.reduce((s, c) => s + c.amount, 0);
+        const spikeH = MIN_SPIKE_H + (totalDayAmt / maxAmount) * (MAX_SPIKE_H - MIN_SPIKE_H);
+        const peakY = BASELINE - spikeH;
+        dim += spikeSeg(cx, peakY);
+        spikes.push({ day: d, cx, peakY, charges, hasHike: charges.some((c) => c.priceHike), upcoming: true });
+      }
+      dim += ` L ${totalWidth} ${BASELINE}`;
+    }
+
+    return { solidPath: solid, dimPath: dim, spikePositions: spikes };
   }, [dayCharges, daysInMonth, maxAmount, isCurrentMonth, currentDay]);
 
   const totalWidth = LEAD + daysInMonth * DAY_W + 12;
@@ -285,19 +280,19 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
               fill="none"
             />
 
-            {/* Upcoming (forecast) spike lines — dimmed so this month's actuals stand out.
-                Thin strokes need a lower opacity than the dots to read as "expected". */}
-            {dimSpikePaths.map((d, i) => (
+            {/* Forecast tail — ONE faded line (baseline + upcoming spikes) from today to
+                month end, so this month's actuals stand out while the expected pattern
+                stays visibly connected (not floating spikes). */}
+            {dimPath ? (
               <Path
-                key={`dim-${i}`}
-                d={d}
+                d={dimPath}
                 stroke="#3B82F6"
                 strokeWidth={2}
                 strokeLinecap="round"
-                strokeOpacity={0.3}
+                strokeOpacity={0.35}
                 fill="none"
               />
-            ))}
+            ) : null}
 
             {/* Spike top dots — upcoming (not-yet-charged this month) are dimmed */}
             {spikePositions.map((sp) => (
