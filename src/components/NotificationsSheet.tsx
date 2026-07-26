@@ -51,6 +51,7 @@ const EXIT_MS  = 240;
 
 const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   cc_due:                'card-outline',
+  subscription_hike:     'trending-up-outline',
   aware_check_in:        'sparkles-outline',
   aware_streak_reset:    'refresh-circle-outline',
   aware_savings_claimed: 'gift-outline',
@@ -59,6 +60,7 @@ const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
 
 const KIND_TINT: Record<NotificationKind, string> = {
   cc_due:                '#F59E0B',
+  subscription_hike:     '#EF4444',
   aware_check_in:        '#06B6D4',
   aware_streak_reset:    '#9CA3AF',
   aware_savings_claimed: '#10B981',

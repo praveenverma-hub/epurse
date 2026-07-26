@@ -24,7 +24,11 @@ const STUBS = {
   notifications:
     'export const fireBudgetBreachNotification=()=>{};' +
     'export const fireMidmonthNudgeNotification=()=>{};' +
-    'export const fireCCPaymentNotification=()=>{};',
+    'export const fireCCPaymentNotification=()=>{};' +
+    'export const scheduleCCBillDueReminder=async()=>null;' +
+    'export const cancelScheduledNotification=async()=>{};' +
+    'export const fireSubscriptionHikeNotification=async()=>null;' +
+    'export const parseDueDate=()=>null;',
   notifStore:
     'export const useNotificationStore={getState:()=>new Proxy({},{get:()=>()=>{}}),setState:()=>{},subscribe:()=>()=>{}};',
   buildVariant: 'export const IS_PREVIEW_BUILD=false;',

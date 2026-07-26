@@ -51,7 +51,8 @@ import {
   SELF_TXN_FIELDS,
 } from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification } from '../utils/notifications';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification } from '../utils/notifications';
+import { detectSubscriptions } from '../analytics/behavioralSelectors';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import { useNotificationStore } from './useNotificationStore';
 import {
@@ -621,6 +622,11 @@ export const useEPurseStore = create(
 
       // Notification IDs: { [personKey]: notificationId }  — used to cancel/update reminders
       notificationIds: {},
+      // CC bill-due OS reminders: `${cardLast4||bankName}:${dueDate}` → scheduled id, so a
+      // resent bill (same card+date) doesn't double-schedule and a NEW bill can cancel the stale one.
+      ccDueReminderIds: {},
+      // Subscription price-hike alerts already sent: keys `${merchantKey}:${hikeTo}`.
+      subscriptionHikesNotified: [],
 
       // ─── Budget plan ────────────────────────────────────────────────────────
       // `budget` is null until the user sets a plan. When set:
@@ -903,6 +909,43 @@ export const useEPurseStore = create(
           title: `${tone} ${monthName} check-in`,
           body,
         }).catch(() => {});
+      },
+
+      /**
+       * Detect recurring-subscription PRICE HIKES across live transactions and, for
+       * each newly-detected hike, drop an in-app feed entry + fire an OS notification.
+       * Deduped per `${merchantKey}:${hikeTo}` via `subscriptionHikesNotified` so a hike
+       * alerts exactly once (and a later further hike to a new amount alerts again).
+       * Called on launch / foreground (see App.js). Cheap: pure detection + set diff.
+       */
+      maybeFireSubscriptionAlerts: () => {
+        const s = get();
+        const subs = detectSubscriptions(s.transactions || []).filter(
+          (sub) => sub.priceHike && sub.hikeTo,
+        );
+        if (subs.length === 0) return;
+        const notified = new Set(s.subscriptionHikesNotified || []);
+        const freshKeys = [];
+        subs.forEach((sub) => {
+          const key = `${sub.merchantKey}:${Math.round(sub.hikeTo)}`;
+          if (notified.has(key)) return;
+          freshKeys.push(key);
+          useNotificationStore.getState().add({
+            kind:  'subscription_hike',
+            title: `📈 ${sub.merchant} price went up`,
+            body:  `Rose from ₹${Math.round(sub.hikeFrom).toLocaleString('en-IN')} to ₹${Math.round(sub.hikeTo).toLocaleString('en-IN')}. Still using it?`,
+            dedupeKey: `sub_hike:${sub.merchantKey}`,
+            meta:  { merchant: sub.merchant, hikeFrom: sub.hikeFrom, hikeTo: sub.hikeTo, dayOfMonth: sub.dayOfMonth },
+          });
+          fireSubscriptionHikeNotification({
+            merchant: sub.merchant, oldAmount: sub.hikeFrom, newAmount: sub.hikeTo,
+          }).catch(() => {});
+        });
+        if (freshKeys.length) {
+          // Keep the notified list bounded (last 100 keys).
+          const merged = [...(s.subscriptionHikesNotified || []), ...freshKeys].slice(-100);
+          set({ subscriptionHikesNotified: merged });
+        }
       },
 
       /**
@@ -1869,6 +1912,31 @@ export const useEPurseStore = create(
               dedupeKey: `cc_due:${cardLast4 || bankName || 'unknown'}`,
               meta:      { amount, cardLast4, dueDate, bankName },
             });
+            // Also schedule an OS reminder ahead of the due date (the feed chip alone
+            // is easy to miss). Dedupe/replace per card+date so a resent bill doesn't
+            // stack reminders, and a bill for a NEW cycle cancels the stale one.
+            if (dueDate) {
+              const key = `${cardLast4 || bankName || 'unknown'}:${dueDate}`;
+              const cardKey = `${cardLast4 || bankName || 'unknown'}`;
+              const existingMap = get().ccDueReminderIds || {};
+              if (!existingMap[key]) {
+                // Cancel any prior reminder for this card (older due date) before scheduling.
+                Object.entries(existingMap).forEach(([k, id]) => {
+                  if (k.startsWith(`${cardKey}:`)) { cancelScheduledNotification(id); }
+                });
+                scheduleCCBillDueReminder({ amount, cardLast4, bankName, dueDate })
+                  .then((id) => {
+                    if (!id) return;
+                    set((s) => {
+                      const map = { ...(s.ccDueReminderIds || {}) };
+                      Object.keys(map).forEach((k) => { if (k.startsWith(`${cardKey}:`)) delete map[k]; });
+                      map[key] = id;
+                      return { ccDueReminderIds: map };
+                    });
+                  })
+                  .catch(() => {});
+              }
+            }
           }
           // Outgoing CC bill payment from source bank account — adjust the bank
           // account balance without creating a transaction entry. Individual CC
@@ -3174,6 +3242,8 @@ export const useEPurseStore = create(
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
           notificationIds: {},
+          ccDueReminderIds: {},
+          subscriptionHikesNotified: [],
           budget: null,
           budgetHistory: {},
           budgetStreak: { current: 0, best: 0, lastResetMonth: null },
@@ -3580,6 +3650,8 @@ export const useEPurseStore = create(
         themeId: state.themeId,
         darkMode: state.darkMode,
         notificationIds: state.notificationIds,
+        ccDueReminderIds: state.ccDueReminderIds ?? {},
+        subscriptionHikesNotified: state.subscriptionHikesNotified ?? [],
         budget: state.budget,
         lastBudgetPlan: state.lastBudgetPlan,
         budgetHistory: state.budgetHistory,

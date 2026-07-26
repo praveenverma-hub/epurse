@@ -67,6 +67,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { requestLocationPermission } from '../services/locationService';
 import { requestContactsPermission } from '../services/contactsService';
+import { requestNotificationPermissions } from '../utils/notifications';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone, sanitizeAmount } from '../utils/validation';
 
@@ -368,6 +369,10 @@ export default function OnboardingDeck({
       // is non-fatal — the matching feature simply stays dormant until granted.
       try { await requestLocationPermission(); } catch { /* optional */ }
       try { await requestContactsPermission(); } catch { /* optional */ }
+      //   • Notifications — budget breaches, mid-month nudges, CC-bill-due and
+      //     subscription-hike alerts all silently no-op without this grant, so we
+      //     ask up-front rather than lazily on the first borrow reminder.
+      try { await requestNotificationPermissions(); } catch { /* optional */ }
 
       setHasOnboarded?.(true);
       navAfter(accountFilterRoute);

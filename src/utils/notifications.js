@@ -65,6 +65,81 @@ export async function scheduleBorrowReminder({ personName, amount, triggerDate }
   return id;
 }
 
+// ─── Credit-card bill-due reminder ───────────────────────────────────────────
+
+const MONTHS = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+/**
+ * Parse a CC-bill due-date string as surfaced by the parser (CC_DUE_DATE_REGEX):
+ *   "05-Aug-26" / "5 Aug 2026" / "05-08-26" / "05/08/2026".
+ * Returns a Date at 00:00 local, or null if it can't be parsed. Two-digit years
+ * map to 2000+YY. Numeric form is treated as DD-MM-YY (Indian convention).
+ */
+export function parseDueDate(dueStr) {
+  if (!dueStr) return null;
+  const s = String(dueStr).trim();
+  let m = s.match(/^(\d{1,2})[\/\-\s]([A-Za-z]{3,9})[\/\-\s](\d{2,4})$/);
+  if (m) {
+    const day = parseInt(m[1], 10);
+    const mon = MONTHS[m[2].slice(0, 3).toLowerCase()];
+    let yr = parseInt(m[3], 10);
+    if (mon == null) return null;
+    if (yr < 100) yr += 2000;
+    const d = new Date(yr, mon, day);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    const day = parseInt(m[1], 10);
+    const mon = parseInt(m[2], 10) - 1;
+    let yr = parseInt(m[3], 10);
+    if (mon < 0 || mon > 11) return null;
+    if (yr < 100) yr += 2000;
+    const d = new Date(yr, mon, day);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * Schedule a local reminder ahead of a credit-card bill due date. Fires at 10:00
+ * the day BEFORE the due date; if that moment has already passed, falls back to
+ * 10:00 on the due date itself. Returns the scheduled id, or null if the date is
+ * unparseable / already in the past / permission not granted.
+ */
+export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, dueDate }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+
+  const due = parseDueDate(dueDate);
+  if (!due) return null;
+
+  const dayBefore = new Date(due); dayBefore.setDate(due.getDate() - 1); dayBefore.setHours(10, 0, 0, 0);
+  const onDue     = new Date(due); onDue.setHours(10, 0, 0, 0);
+  const now = Date.now();
+  const when = dayBefore.getTime() > now + 60_000 ? dayBefore
+             : (onDue.getTime() > now + 60_000 ? onDue : null);
+  if (!when) return null; // due date already here/passed — the in-app chip covers it
+
+  const amtFmt  = `₹${Math.round(Number(amount) || 0).toLocaleString('en-IN')}`;
+  const cardStr = cardLast4 ? `${bankName || 'Credit Card'} XX${cardLast4}` : (bankName || 'your credit card');
+  const secondsFromNow = Math.round((when.getTime() - now) / 1000);
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: '💳 Credit card bill due soon',
+      body:  `${amtFmt} due on ${cardStr}. Pay to avoid late fees + interest.`,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.HIGH,
+      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+    },
+    trigger: { seconds: secondsFromNow },
+  });
+}
+
 export async function cancelScheduledNotification(notificationId) {
   if (!notificationId) return;
   try {
@@ -142,6 +217,27 @@ export async function fireCCPaymentNotification({ amount, accountMask, bankName 
     content: {
       title: '✅ CC Bill Payment Received',
       body:  `${amtFmt} received on ${bankStr}Credit Card ${cardStr}`,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger: null,
+  });
+}
+
+/**
+ * Fire an immediate notification when a recurring subscription's price is detected
+ * to have increased. No-ops without notification permission.
+ */
+export async function fireSubscriptionHikeNotification({ merchant, oldAmount, newAmount }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+  const oldFmt = `₹${Math.round(Number(oldAmount) || 0).toLocaleString('en-IN')}`;
+  const newFmt = `₹${Math.round(Number(newAmount) || 0).toLocaleString('en-IN')}`;
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: `📈 ${merchant} price went up`,
+      body:  `Your ${merchant} subscription rose from ${oldFmt} to ${newFmt}. Still using it?`,
       sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
