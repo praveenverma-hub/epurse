@@ -62,6 +62,9 @@ import {
   canSplitTransaction,
   debitDisplayAmount,
   isGroupExcluded,
+  isRefundCredit,
+  spendContribution,
+  countsForSpend,
   buildGroupLbRows,
 } from '../utils/split';
 
@@ -556,6 +559,14 @@ const aggregate = (transactions, groups = []) => {
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + spend;
       if (!NON_SPEND_CATS.has(t.categoryId)) a.totalSpend += spend;
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) - t.amount;
+    } else if (isRefundCredit(t)) {
+      // Refund/cashback: money back for a prior payment. Nets DOWN spend and its
+      // own category (not income). Balance-wise it's still a credit (byAccount +).
+      if (!NON_SPEND_CATS.has(t.categoryId)) {
+        a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) - t.amount;
+        a.totalSpend -= t.amount;
+      }
+      if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) + t.amount;
     } else if (t.type === TRANSACTION_TYPES.CREDIT) {
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + t.amount;
       if (!NON_SPEND_CATS.has(t.categoryId)) a.totalIncome += t.amount;
@@ -2537,6 +2548,19 @@ export const useEPurseStore = create(
           ),
         })),
 
+      /**
+       * Mark/unmark a CREDIT as a refund/return/cashback. A refund nets DOWN spend
+       * (and its own category) instead of counting as income. Balance is unchanged
+       * (the money did arrive). No-op on debits. Keep the txn's category so the
+       * refund reduces the matching expense category in breakdowns.
+       */
+      setTransactionRefund: (id, isRefund) =>
+        set((s) => ({
+          transactions: s.transactions.map((t) =>
+            t.id === id && t.type === TRANSACTION_TYPES.CREDIT ? { ...t, isRefund: !!isRefund } : t
+          ),
+        })),
+
       // ----- custom two-tier categories ---------------------------------
       // Create a new TOP-LEVEL parent. Also registers a flat `categories` entry
       // (same id) so transactions tagged with it resolve a name/emoji for display.
@@ -2898,28 +2922,32 @@ export const useEPurseStore = create(
        * month, otherwise falls back to the aggregate.
        * Lent/borrow categories are excluded from spend totals.
        */
+      // Monthly SPEND = expenses − refunds. A refund/cashback credit (isRefund)
+      // nets the spend down; income credits do NOT (see getMonthlyIncome).
       getMonthlySpend: (date = new Date()) => {
         const groups = get().groups;
         const txns = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
-            t.type === TRANSACTION_TYPES.DEBIT &&
+            countsForSpend(t) &&
             !NON_SPEND_CATS.has(t.categoryId) &&
             !isGroupExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) {
-          return txns.reduce((sum, t) => sum + debitDisplayAmount(t), 0);
+          return Math.max(0, txns.reduce((sum, t) => sum + spendContribution(t), 0));
         }
         return get().monthlyAggregates[monthKey(date)]?.totalSpend || 0;
       },
 
+      // Monthly INCOME = credits that are NOT refunds (salary, interest, P2P-in).
       getMonthlyIncome: (date = new Date()) => {
         const groups = get().groups;
         const txns = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
             t.type === TRANSACTION_TYPES.CREDIT &&
+            !isRefundCredit(t) &&
             !NON_SPEND_CATS.has(t.categoryId) &&
             !isGroupExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
@@ -2940,7 +2968,7 @@ export const useEPurseStore = create(
         const raw = get().transactions.filter(
           (t) =>
             !t.isIgnored &&
-            t.type === TRANSACTION_TYPES.DEBIT &&
+            countsForSpend(t) &&
             !NON_SPEND_CATS.has(t.categoryId) &&
             !isGroupExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
@@ -2950,9 +2978,12 @@ export const useEPurseStore = create(
         let grandTotal;
         if (raw.length > 0) {
           totals = {};
+          // Refunds keep their (purchase) category, so they net that category down.
           raw.forEach((t) => {
-            totals[t.categoryId] = (totals[t.categoryId] || 0) + debitDisplayAmount(t);
+            totals[t.categoryId] = (totals[t.categoryId] || 0) + spendContribution(t);
           });
+          // Clamp any category that went net-negative (refunds > spend that month).
+          Object.keys(totals).forEach((k) => { if (totals[k] < 0) totals[k] = 0; });
           grandTotal = Object.values(totals).reduce((s, v) => s + v, 0) || 1;
         } else {
           const agg = get().monthlyAggregates[month];
@@ -3000,14 +3031,19 @@ export const useEPurseStore = create(
         s.transactions.forEach((t) => {
           if (t.isIgnored) return;
           if (new Date(t.createdAt).getTime() < monthStart) return;
-          if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+          // Expenses add; refunds (isRefund credits) subtract from their parent —
+          // a returned purchase lowers that category's budget usage.
+          if (!countsForSpend(t)) return;
           if (NON_SPEND_CATS.has(t.categoryId)) return; // self + lent/borrow
           if (isGroupExcluded(t, s.groups)) return;
-          const amt = debitDisplayAmount(t);
+          const amt = spendContribution(t); // +expense share, −refund amount
           allExpense += amt;
           const pid = parentCatId(t);
           if (BUDGETABLE_PARENT_IDS.has(pid)) byParent[pid] = (byParent[pid] || 0) + amt;
         });
+        // A parent net-negative from refunds shouldn't read as "used" — floor at 0.
+        Object.keys(byParent).forEach((k) => { if (byParent[k] < 0) byParent[k] = 0; });
+        if (allExpense < 0) allExpense = 0;
 
         // Total cap & actual are DERIVED from the category lines — the total is
         // never edited directly (it is the sum of the per-category caps).
@@ -3095,15 +3131,16 @@ export const useEPurseStore = create(
         const rows = {};
         s.transactions.forEach((t) => {
           if (t.isIgnored) return;
-          if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+          if (!countsForSpend(t)) return;              // expense debit or refund credit
           if (NON_SPEND_CATS.has(t.categoryId)) return;
           if (!isSameMonth(t.createdAt, date)) return;
           if (parentCatId(t) !== parentId) return;
           const label = t.childCategory || catName(t.categoryId) || 'Other';
-          rows[label] = (rows[label] || 0) + debitDisplayAmount(t);
+          rows[label] = (rows[label] || 0) + spendContribution(t); // refund nets its child
         });
         return Object.entries(rows)
-          .map(([label, total]) => ({ label, total }))
+          .map(([label, total]) => ({ label, total: Math.max(0, total) }))
+          .filter((r) => r.total > 0)
           .sort((a, b) => b.total - a.total);
       },
 
@@ -3124,17 +3161,18 @@ export const useEPurseStore = create(
         const rows = {};
         s.transactions.forEach((t) => {
           if (t.isIgnored) return;
-          if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+          if (!countsForSpend(t)) return;              // expense debit or refund credit
           if (NON_SPEND_CATS.has(t.categoryId)) return;
           if (isGroupExcluded(t, s.groups)) return;
           if (!isSameMonth(t.createdAt, date)) return;
           const pid = parentCatId(t);
           if (budgeted.has(pid)) return; // already tracked by a budget line
           const label = labelFor(pid);
-          rows[label] = (rows[label] || 0) + debitDisplayAmount(t);
+          rows[label] = (rows[label] || 0) + spendContribution(t); // refund nets
         });
         return Object.entries(rows)
-          .map(([label, total]) => ({ label, total }))
+          .map(([label, total]) => ({ label, total: Math.max(0, total) }))
+          .filter((r) => r.total > 0)
           .sort((a, b) => b.total - a.total);
       },
 
@@ -3894,29 +3932,36 @@ export const selectExpenseStats = (period) => (state) => {
     (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !isGroupExcluded(t, state.groups)
   );
 
-  const rawDebits = eligible
+  // Gross expenses (debit share), refunds (isRefund credits) that net them down,
+  // and received = income + P2P-in (credits that are NOT refunds).
+  const grossExpense = eligible
     .filter((t) => t.type === TRANSACTION_TYPES.DEBIT)
     .reduce((s, t) => s + debitDisplayAmount(t), 0);
-  const rawCredits = eligible
-    .filter((t) => t.type === TRANSACTION_TYPES.CREDIT)
+  const refunds = eligible
+    .filter((t) => isRefundCredit(t))
+    .reduce((s, t) => s + (t.amount || 0), 0);
+  const receivedRaw = eligible
+    .filter((t) => t.type === TRANSACTION_TYPES.CREDIT && !isRefundCredit(t))
     .reduce((s, t) => s + t.amount, 0);
 
-  let aggDebits = 0;
-  let aggCredits = 0;
+  // Year folds in aggregates beyond the raw window. `totalSpend` is already net of
+  // refunds and `totalIncome` already excludes them (see aggregate()).
+  let aggSpent = 0;
+  let aggReceived = 0;
   if (period === 'Y') {
     const yearStr   = String(now.getFullYear());
     const cutoffDt  = new Date(now.getFullYear(), now.getMonth() - 3, 1);
     const cutoffKey = `${cutoffDt.getFullYear()}-${String(cutoffDt.getMonth() + 1).padStart(2, '0')}`;
     Object.entries(state.monthlyAggregates || {}).forEach(([k, v]) => {
       if (k.startsWith(yearStr) && k < cutoffKey) {
-        aggDebits  += v.totalSpend  || 0;
-        aggCredits += v.totalIncome || 0;
+        aggSpent    += v.totalSpend  || 0;
+        aggReceived += v.totalIncome || 0;
       }
     });
   }
 
-  const debits  = rawDebits  + aggDebits;
-  const credits = rawCredits + aggCredits;
+  const spent    = Math.max(0, grossExpense - refunds + aggSpent);
+  const received = receivedRaw + aggReceived;
 
   // The visible list (transaction cards) follows the same eligibility rules
   // as the chips — private and LB items are hidden from the default home view.
@@ -3925,9 +3970,14 @@ export const selectExpenseStats = (period) => (state) => {
     .slice(0, 20);
 
   return {
-    debits,
-    credits,
-    net: debits - credits,
+    spent,               // net expense = expenses − refunds (≥ 0)
+    received,            // income + non-refund credits (P2P-in)
+    refunds,             // total refunded/adjusted this period (raw window)
+    grossExpense,        // expenses before refunds (raw window)
+    net: spent - received,
+    // Legacy aliases so any stray consumer keeps working.
+    debits: spent,
+    credits: received,
     count: eligible.length,
     recent,
   };
@@ -3959,10 +4009,12 @@ export const selectWeeklySummary = (state) => {
   const weekEndMs   = weekStartMs + 7 * DAY_MS;   // exclusive upper bound
   const prevStartMs = weekStartMs - 7 * DAY_MS;
 
+  // Spend = expenses − refunds (refund credits net down via spendContribution),
+  // consistent with getMonthlySpend / selectMonthlyReport.
   const isSpend = (t) =>
     !t.isIgnored &&
     !t.isHidden &&
-    t.type === TRANSACTION_TYPES.DEBIT &&
+    countsForSpend(t) &&
     !NON_SPEND_CATEGORY_IDS.has(t.categoryId) &&
     !isGroupExcluded(t, state.groups);
 
@@ -3981,17 +4033,23 @@ export const selectWeeklySummary = (state) => {
   state.transactions.forEach((t) => {
     if (!isSpend(t)) return;
     const ts = new Date(t.createdAt).getTime();
+    const amt = spendContribution(t); // +expense share, −refund
     if (ts >= weekStartMs && ts < weekEndMs) {
-      const amt = debitDisplayAmount(t);
       total += amt;
       txnCount += 1;
       const dayIdx = Math.floor((ts - weekStartMs) / DAY_MS);
       if (dayIdx >= 0 && dayIdx < 7) perDay[dayIdx].amount += amt;
       catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + amt;
     } else if (ts >= prevStartMs && ts < weekStartMs) {
-      prevTotal += debitDisplayAmount(t);
+      prevTotal += amt;
     }
   });
+
+  // Refunds can push a day / category / total net-negative — clamp for display.
+  perDay.forEach((d) => { if (d.amount < 0) d.amount = 0; });
+  Object.keys(catTotals).forEach((k) => { if (catTotals[k] < 0) catTotals[k] = 0; });
+  total = Math.max(0, total);
+  prevTotal = Math.max(0, prevTotal);
 
   const maxDay      = perDay.reduce((m, d) => Math.max(m, d.amount), 0);
   const daysElapsed = dow + 1;
@@ -4000,7 +4058,7 @@ export const selectWeeklySummary = (state) => {
 
   let topCategory = null;
   const topId = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
-  if (topId) {
+  if (topId && catTotals[topId] > 0) {
     const c = (state.categories || []).find((x) => x.id === topId);
     topCategory = {
       id:    topId,
@@ -4070,19 +4128,23 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
   const rawMonth = state.transactions.filter((t) => !t.isIgnored && monthKey(t.createdAt) === mk);
   const rawKept  = rawMonth.filter(keepHidden);
   const hasRaw   = rawKept.length > 0;
-  const isSpendTxn = (t) =>
-    t.type === TRANSACTION_TYPES.DEBIT &&
+  // Counts toward SPEND math this month (expense debit or refund credit), after the
+  // standard exclusions. Refunds net down via spendContribution (−amount).
+  const countsHere = (t) =>
+    countsForSpend(t) &&
     !NON_SPEND_CATEGORY_IDS.has(t.categoryId) &&
     !isGroupExcluded(t, state.groups);
 
-  // ── Cashflow ──
-  let spent = 0, income = 0;
+  // ── Cashflow (spend nets refunds; income excludes refunds) ──
+  let spent = 0, income = 0, refunds = 0;
   if (hasRaw) {
     rawKept.forEach((t) => {
       if (NON_SPEND_CATEGORY_IDS.has(t.categoryId) || isGroupExcluded(t, state.groups)) return;
       if (t.type === TRANSACTION_TYPES.DEBIT) spent += debitDisplayAmount(t);
+      else if (isRefundCredit(t)) { spent -= t.amount; refunds += t.amount; }
       else if (t.type === TRANSACTION_TYPES.CREDIT) income += t.amount;
     });
+    spent = Math.max(0, spent);
   } else {
     spent = state.getMonthlySpend(monthDate);
     income = state.getMonthlyIncome(monthDate);
@@ -4130,10 +4192,11 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
   if (hasRaw) {
     curByParent = {};
     rawKept.forEach((t) => {
-      if (!isSpendTxn(t)) return;
+      if (!countsHere(t)) return;
       const pid = parentCatId(t);
-      curByParent[pid] = (curByParent[pid] || 0) + debitDisplayAmount(t);
+      curByParent[pid] = (curByParent[pid] || 0) + spendContribution(t); // refund nets its parent
     });
+    Object.keys(curByParent).forEach((k) => { if (curByParent[k] < 0) curByParent[k] = 0; });
   } else {
     curByParent = rollup(state.getCategoryBreakdown(monthDate));
   }
@@ -4162,9 +4225,9 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
     const payMap = {};
     const grpMap = {};
     rawKept.forEach((t) => {
-      // Only spend that counts toward the month (skips memos + private groups).
-      if (!isSpendTxn(t)) return;
-      const amt = debitDisplayAmount(t);
+      // Spend that counts this month (expense debit or refund credit); refunds net down.
+      if (!countsHere(t)) return;
+      const amt = spendContribution(t); // +expense share, −refund
       const d = new Date(t.createdAt);
       const di = d.getDate() - 1;
       if (di >= 0 && di < daysInMonth) perDay[di] += amt;
@@ -4174,8 +4237,12 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
         const gm = grpMap[t.groupId] || (grpMap[t.groupId] = { total: 0, count: 0 });
         gm.total += amt; gm.count += 1;
       }
-      if (!biggest || amt > biggest.amount) biggest = { amount: amt, merchant: t.merchant || 'Expense', day: d.getDate() };
+      // "Biggest expense" is a real outflow — refunds (amt<0) never qualify.
+      if (amt > 0 && (!biggest || amt > biggest.amount)) biggest = { amount: amt, merchant: t.merchant || 'Expense', day: d.getDate() };
     });
+
+    // A day/account net-negative from refunds reads as 0 spend (not a negative bar).
+    for (let i = 0; i < perDay.length; i++) if (perDay[i] < 0) perDay[i] = 0;
 
     // Per-group spend (your counted share this month) — non-private groups only.
     groupSpend = includeGroups ? Object.entries(grpMap)
@@ -4205,8 +4272,9 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
         const label = a
           ? (a.bankName ? `${a.bankName}${a.mask ? ' ··' + a.mask : ''}` : (a.name || a.type))
           : 'Cash';
-        return { id, label, total, color: a?.color || '#9CA3AF' };
+        return { id, label, total: Math.max(0, total), color: a?.color || '#9CA3AF' };
       })
+      .filter((p) => p.total > 0)
       .sort((x, z) => z.total - x.total);
 
     // Merchants/subscriptions scan the whole history; respect the private toggle
@@ -4220,11 +4288,11 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
       .map((su) => ({ merchant: su.merchant, amount: su.amount, priceHike: !!su.priceHike, hikeFrom: su.hikeFrom, hikeTo: su.hikeTo }));
     subscriptionTotal = subscriptions.reduce((s, x) => s + (x.amount || 0), 0);
 
-    // Optional full transaction list (appended to the PDF) — every kept spend
-    // txn this month, newest first.
+    // Optional expense ledger (appended to the PDF) — every kept expense + refund
+    // this month, newest first. Refund rows carry a negative amount + a flag.
     if (includeTxnList) {
       txnList = rawKept
-        .filter(isSpendTxn)
+        .filter(countsHere)
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .map((t) => {
           const p = findParentById(parentCatId(t));
@@ -4234,9 +4302,10 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
             dateLabel: new Date(t.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
             merchant: t.merchant || '—',
             category: p?.label || 'Other',
-            amount: debitDisplayAmount(t),
+            amount: spendContribution(t), // +expense, −refund
             account: acc ? (acc.mask ? `··${acc.mask}` : (acc.name || acc.type || '')) : (t.accountId ? '' : 'Cash'),
             isPrivate: !!t.isHidden,
+            isRefund: isRefundCredit(t),
           };
         });
     }
@@ -4255,6 +4324,7 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
     highlights.push({ kind: down ? 'pos' : 'neg', icon: down ? '📉' : '📈', text: `Spending ${down ? 'down' : 'up'} ${Math.abs(Math.round(spendDeltaPct))}% vs last month` });
   }
   if (biggest) highlights.push({ kind: '', icon: '🧾', text: `Biggest: ${money(biggest.amount)} · ${biggest.merchant}` });
+  if (refunds > 0) highlights.push({ kind: 'pos', icon: '↩️', text: `${money(refunds)} refunded / adjusted` });
   if (groupSpend[0]) highlights.push({ kind: '', icon: groupSpend[0].emoji || '👥', text: `${groupSpend[0].name}: ${money(groupSpend[0].total)}` });
 
   // ── Next-month suggestion (avg of up to 3 recent months' spend) ──
@@ -4269,7 +4339,7 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
 
   return {
     monthKey: mk, monthLabel, shortLabel, daysInMonth, isCurrent,
-    cashflow: { spent, income, net, savingsRate, prevSpent, spendDeltaPct },
+    cashflow: { spent, income, net, savingsRate, prevSpent, spendDeltaPct, refunds },
     budget,
     categories,
     daily, peakDay, noSpendDays, weekdayAvg, weekendAvg, biggest,

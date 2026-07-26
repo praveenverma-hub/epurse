@@ -18,7 +18,7 @@ interface Merchant { name: string; amount: number; count: number; }
 interface Sub { merchant: string; amount: number; priceHike: boolean; hikeFrom: number | null; hikeTo: number | null; }
 interface Pay { label: string; total: number; color: string; }
 interface GroupSpend { name: string; emoji: string; color: string; total: number; count: number; type: string | null; }
-interface TxnRow { dateLabel: string; merchant: string; category: string; amount: number; account: string; isPrivate: boolean; }
+interface TxnRow { dateLabel: string; merchant: string; category: string; amount: number; account: string; isPrivate: boolean; isRefund: boolean; }
 interface Highlight { kind: string; icon: string; text: string; }
 
 export interface MonthlyReport {
@@ -227,17 +227,20 @@ function planSection(r: MonthlyReport): string {
 function txnListSection(r: MonthlyReport): string {
   const rows = r.txnList;
   if (!rows || !rows.length) return '';
-  const body = rows.map((t) => `
+  const body = rows.map((t) => {
+    const amt = t.amount < 0 ? `−${money(-t.amount)}` : money(t.amount);
+    return `
     <tr>
       <td class="tl-d">${esc(t.dateLabel)}</td>
-      <td class="tl-m">${esc(t.merchant)}${t.isPrivate ? '<span class="tl-priv">private</span>' : ''}</td>
+      <td class="tl-m">${esc(t.merchant)}${t.isRefund ? '<span class="tl-refund">refund</span>' : ''}${t.isPrivate ? '<span class="tl-priv">private</span>' : ''}</td>
       <td class="tl-c">${esc(t.category)}</td>
       <td class="tl-a">${esc(t.account)}</td>
-      <td class="tl-amt">${money(t.amount)}</td>
-    </tr>`).join('');
+      <td class="tl-amt"${t.isRefund ? ' style="color:' + POS + '"' : ''}>${amt}</td>
+    </tr>`;
+  }).join('');
   return `
   <div class="sec">
-    <div class="sec-h"><h2>All transactions</h2><span class="sub">${rows.length} this month</span></div>
+    <div class="sec-h"><h2>Expenses &amp; refunds</h2><span class="sub">${rows.length} this month</span></div>
     <table class="tl">
       <thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th>Account</th><th class="tl-amt">Amount</th></tr></thead>
       <tbody>${body}</tbody>
@@ -319,6 +322,7 @@ export function buildMonthlyReportHtml(r: MonthlyReport, opts: { userName?: stri
   .tl-d { color:${MUTED}; white-space:nowrap; } .tl-m { font-weight:600; } .tl-c, .tl-a { color:#4A5160; }
   .tl-amt { text-align:right; font-weight:700; white-space:nowrap; }
   .tl-priv { font-size:8.5px; font-weight:800; color:${MUTED}; background:${alpha(MUTED, 0.14)}; padding:1px 5px; border-radius:5px; margin-left:6px; text-transform:uppercase; letter-spacing:.04em; }
+  .tl-refund { font-size:8.5px; font-weight:800; color:${POS}; background:${alpha(POS, 0.14)}; padding:1px 5px; border-radius:5px; margin-left:6px; text-transform:uppercase; letter-spacing:.04em; }
 
   .pay-bar { height:14px; border-radius:7px; overflow:hidden; display:flex; margin-bottom:10px; } .pay-bar > span { display:block; height:100%; }
   .pleg { display:flex; align-items:center; gap:8px; font-size:12px; padding:2px 0; } .pl-sw { width:10px; height:10px; border-radius:3px; } .pl-name { flex:1; color:#4A5160; } .pl-amt { font-weight:700; }

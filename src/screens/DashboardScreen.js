@@ -90,6 +90,7 @@ const DashboardScreen = ({ navigation }) => {
   const relinkLentBorrowedEntry = useEPurseStore((s) => s.relinkLentBorrowedEntry);
   const lentBorrowedAll = useEPurseStore((s) => s.lentBorrowed);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
+  const setTransactionRefund = useEPurseStore((s) => s.setTransactionRefund);
   const deleteTransaction = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const level              = useRewardStore(selectLevel);
@@ -347,15 +348,19 @@ const DashboardScreen = ({ navigation }) => {
             <Text style={styles.dataInfo}>{dataInfo}</Text>
           </View>
 
-          {/* ── Period debit / credit pills ── */}
+          {/* ── Period spent / received pills ──
+              Spent = expenses − refunds (net); Received = income + P2P-in. */}
           <View style={styles.statsRow}>
             <View style={styles.statPill}>
-              <Text style={styles.statLabel}>Debits {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
-              <Text style={styles.statValue}>{formatCurrency(periodStats.debits)}</Text>
+              <Text style={styles.statLabel}>Spent {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.spent)}</Text>
+              {periodStats.refunds > 0 && (
+                <Text style={styles.statSub}>incl. {formatCurrency(periodStats.refunds)} refunded</Text>
+              )}
             </View>
             <View style={styles.statPill}>
-              <Text style={styles.statLabel}>Credits {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
-              <Text style={styles.statValue}>{formatCurrency(periodStats.credits)}</Text>
+              <Text style={styles.statLabel}>Received {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.received)}</Text>
             </View>
           </View>
           </>
@@ -458,6 +463,13 @@ const DashboardScreen = ({ navigation }) => {
         selectedChild={activeTxn?.childCategory}
         isHidden={!!activeTxn?.isHidden}
         isIgnored={!!activeTxn?.isIgnored}
+        canRefund={activeTxn?.type === 'credit'}
+        isRefund={!!activeTxn?.isRefund}
+        onToggleRefund={(v) => {
+          if (!activeTxn) return;
+          setTransactionRefund(activeTxn.id, v);
+          setActiveTxn(null);
+        }}
         canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
         isSplitTxn={!!activeTxn?.isSplit}
         currentGroupId={activeTxn?.groupId || null}
@@ -952,6 +964,7 @@ const styles = StyleSheet.create({
   },
   statLabel: { color: '#FFFFFFCC', ...typography.tiny },
   statValue: { color: '#fff', ...typography.bodyBold, fontWeight: '700', marginTop: 2 },
+  statSub: { color: '#FFFFFFAA', fontSize: 10, fontWeight: '600', marginTop: 1 },
 
   // Body
   body: { flex: 1, marginTop: -spacing.lg },

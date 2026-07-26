@@ -113,6 +113,35 @@ export function debitDisplayAmount(t) {
   return t.amount;
 }
 
+/**
+ * A CREDIT the user (or parser) marked as a refund / return / cashback — money
+ * back for a prior payment. It nets AGAINST spend (and against its own category),
+ * and is NOT counted as income. See spendContribution.
+ */
+export function isRefundCredit(txn) {
+  return !!txn && txn.type === TRANSACTION_TYPES.CREDIT && !!txn.isRefund;
+}
+
+/**
+ * A transaction's signed contribution to SPEND:
+ *   • real expense debit → +your share (debitDisplayAmount)
+ *   • refund credit      → −amount (reduces spend, nets its category)
+ *   • anything else      → 0
+ * Callers still apply their own ignored / private / NON_SPEND / group filters;
+ * this only decides the sign+magnitude once a txn is known to count for spend.
+ */
+export function spendContribution(txn) {
+  if (!txn) return 0;
+  if (txn.type === TRANSACTION_TYPES.DEBIT) return debitDisplayAmount(txn);
+  if (isRefundCredit(txn)) return -(txn.amount || 0);
+  return 0;
+}
+
+/** True when a txn participates in spend math (an expense debit or a refund credit). */
+export function countsForSpend(txn) {
+  return !!txn && (txn.type === TRANSACTION_TYPES.DEBIT || isRefundCredit(txn));
+}
+
 // Categories where split/group expenses never count toward spend or income totals.
 const GROUP_NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 

@@ -27,7 +27,7 @@ import { colors, radius, spacing, typography as typographyBase, shadows } from '
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency, monthKey } from '../utils/format';
-import { debitDisplayAmount } from '../utils/split';
+import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import FAB from '../components/FAB';
@@ -160,9 +160,10 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
   const myShareByGroup = useMemo(() => {
     const m: Record<string, number> = {};
     for (const t of transactions) {
-      if (!t.groupId || t.isIgnored) continue;
-      m[t.groupId] = (m[t.groupId] || 0) + debitDisplayAmount(t);
+      if (!t.groupId || t.isIgnored || !countsForSpend(t)) continue;
+      m[t.groupId] = (m[t.groupId] || 0) + spendContribution(t); // refund nets the group
     }
+    for (const k of Object.keys(m)) if (m[k] < 0) m[k] = 0;
     return m;
   }, [transactions]);
 
@@ -178,7 +179,11 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
   // month and each older month gets its own total on a divider.
   const groupMonthTotals = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const t of groupTxns) m[monthKey(t.createdAt)] = (m[monthKey(t.createdAt)] || 0) + debitDisplayAmount(t);
+    for (const t of groupTxns) {
+      if (!countsForSpend(t)) continue;
+      m[monthKey(t.createdAt)] = (m[monthKey(t.createdAt)] || 0) + spendContribution(t);
+    }
+    for (const k of Object.keys(m)) if (m[k] < 0) m[k] = 0;
     return m;
   }, [groupTxns]);
   const currentMonthTotal = groupMonthTotals[monthKey(new Date())] || 0;

@@ -67,6 +67,10 @@ interface Props {
   /** Called when a child chip is selected outside the LB flow. */
   onSelectTwoTier?: (parentCategory: string, childCategory: string) => void;
   onToggleHidden?: (hidden: boolean) => void;
+  /** Credit-only: mark this as a refund/return/cashback (nets against spend, not income). */
+  canRefund?: boolean;
+  isRefund?: boolean;
+  onToggleRefund?: (isRefund: boolean) => void;
   onIgnore?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
@@ -215,6 +219,9 @@ const CategoryPickerModal: React.FC<Props> = ({
   onSelectLentBorrow,
   onSelectTwoTier,
   onToggleHidden,
+  canRefund,
+  isRefund,
+  onToggleRefund,
   onIgnore,
   onRestore,
   onDelete,
@@ -442,6 +449,19 @@ const CategoryPickerModal: React.FC<Props> = ({
                 </TouchableOpacity>
               ) : null}
             </View>
+          ) : null}
+
+          {/* Credit-only: mark as refund/return/cashback → nets against spend, not income. */}
+          {canRefund && onToggleRefund && !isIgnored ? (
+            <TouchableOpacity
+              style={[styles.refundBtn, isRefund && styles.refundBtnOn]}
+              activeOpacity={0.85}
+              onPress={() => onToggleRefund(!isRefund)}
+            >
+              <Text style={[styles.refundText, isRefund && styles.refundTextOn]}>
+                {isRefund ? '✓ Refund — reduces your spend' : 'Mark as refund / cashback'}
+              </Text>
+            </TouchableOpacity>
           ) : null}
 
           {/* Shared-group txn → set who owes / edit the split (drives the LB legs). */}
@@ -688,6 +708,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.info + '55',
   },
+  refundBtn: {
+    marginTop: spacing.sm,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.textSecondary + '12',
+    borderWidth: 1,
+    borderColor: colors.textSecondary + '33',
+  },
+  refundBtnOn: {
+    backgroundColor: colors.success + '1A',
+    borderColor: colors.success + '66',
+  },
+  refundText: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
+  refundTextOn: { color: colors.success },
   // Base for the group action button (icon + label on one row).
   groupBtnBase: {
     borderRadius: radius.md,

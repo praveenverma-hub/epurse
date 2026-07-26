@@ -42,7 +42,7 @@ import { useEPurseStore, selectTransactions } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, typography as typographyBase } from '../constants/theme';
 import { formatCurrency, isSameMonth } from '../utils/format';
-import { debitDisplayAmount } from '../utils/split';
+import { countsForSpend, spendContribution } from '../utils/split';
 
 // The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
@@ -252,9 +252,10 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
       if (!t.groupId || t.isIgnored) continue;
       const s = acc[t.groupId];
       if (!s || !isSameMonth(t.createdAt as any, date)) continue;
-      if (t.type === 'debit') {
-        s.personalShare += debitDisplayAmount(t as any);
-        s.groupTotal += Number(t.amount) || 0;
+      if (countsForSpend(t as any)) {
+        // Expense adds, refund credit nets both your share and the group total down.
+        s.personalShare += spendContribution(t as any);
+        s.groupTotal += (t.type === 'debit' ? (Number(t.amount) || 0) : -(Number(t.amount) || 0));
         s.txnCount += 1;
       }
     }

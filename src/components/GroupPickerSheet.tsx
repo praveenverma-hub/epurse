@@ -14,7 +14,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, monthKey } from '../utils/format';
-import { debitDisplayAmount } from '../utils/split';
+import { countsForSpend, spendContribution } from '../utils/split';
 import type { Group } from '../types/group';
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
@@ -48,10 +48,11 @@ export default function GroupPickerSheet({
     const mk = monthKey(new Date());
     const m: Record<string, number> = {};
     for (const t of transactions) {
-      if (!t.groupId || t.isIgnored) continue;
+      if (!t.groupId || t.isIgnored || !countsForSpend(t)) continue;
       if (monthKey(t.createdAt) !== mk) continue;
-      m[t.groupId] = (m[t.groupId] || 0) + debitDisplayAmount(t);
+      m[t.groupId] = (m[t.groupId] || 0) + spendContribution(t); // refund nets the group
     }
+    for (const k of Object.keys(m)) if (m[k] < 0) m[k] = 0;
     return m;
   }, [transactions]);
 

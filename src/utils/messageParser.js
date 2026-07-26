@@ -204,8 +204,10 @@ const TRANSACTION_PHRASES = [
   // "IMPS of Rs.X to <payee> successful" — banks often omit the -ed verb.
   'neft cr', 'neft dr', 'neft of', 'imps cr', 'imps dr', 'imps of',
   'rtgs cr', 'rtgs dr', 'rtgs of',
-  // Reversal confirmations
+  // Reversal / refund confirmations. "returned to your a/c" and "credited back" are
+  // scoped to "…your account/card" so they can't fire on "I returned the item".
   'reversed to', 'amount reversed', 'transaction reversed', 'reversal credited',
+  'returned to your', 'credited back',
   // Bank charges / penalties (no debit verb — only "levied on" or "penalty of")
   'levied on', 'levied', 'penalty of', 'charge levied',
 ];
@@ -433,6 +435,12 @@ const EVENT_PATTERNS = [
 ];
 
 const NON_TXN_AMOUNT_HINTS = /\b(?:due|min(?:imum)?\s+due|outstanding|avl(?:\.|\s+bal(?:ance)?)?|available\s+balance|closing\s+balance|total\s+due|statement|bal(?:ance)?)\b/i;
+
+// A CREDIT that is money back for a prior payment — refund / return / reversal /
+// cashback. Flagged as `isRefund` so the store nets it against spend (not income).
+// (Promotional cashback OFFERS are already intercepted earlier as promos.)
+const REFUND_CREDIT_REGEX =
+  /\b(?:refund(?:ed)?|refund\s+of|reversed\s+to|reversal|credited\s+back|returned\s+to\s+your|cashback(?:\s+credited)?)\b/i;
 
 const STRONG_TRANSACTION_WORDS = [
   'debit',
@@ -964,7 +972,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
         ? false // "credited to beneficiary" = user sent money = DEBIT
         : debitedFromOther
           ? true // "debited from beneficiary" = user received money = CREDIT
-          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b|\b(?:neft|imps|rtgs|ach|upi)\b[\s:\/-]*cr\b/i.test(textSansFuture);
+          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b|\breturned\s+to\s+your\b|\bcredited\s+back\b|\b(?:neft|imps|rtgs|ach|upi)\b[\s:\/-]*cr\b/i.test(textSansFuture);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
@@ -1091,16 +1099,21 @@ export const parseMessageDetailed = (message, opts = {}) => {
       ? (coMaskPool.find((m) => m && m !== accountMask) || null)
       : null;
 
+  // Refund/cashback credit → flagged so the store nets it against spend, not income.
+  const isRefund =
+    inferredTypeFromFirstVerb === TRANSACTION_TYPES.CREDIT && REFUND_CREDIT_REGEX.test(text);
+
   const single = buildTransaction({
     amount,
     type: inferredTypeFromFirstVerb,
     accountType,
     accountMask,
     bankName: getBankName(opts.sender),
-    merchant: merchant || (inferredTypeFromFirstVerb === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'),
+    merchant: merchant || (isRefund ? 'Refund' : inferredTypeFromFirstVerb === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'),
     categoryId,
     note,
     createdAt: opts.receivedAt,
+    isRefund,
     counterpartyMask,
     counterpartyPhone,
     counterpartyName,
@@ -1133,6 +1146,7 @@ function buildTransaction({
   categoryId,
   note,
   createdAt,
+  isRefund = false,
   counterpartyMask = null,
   counterpartyPhone = null,
   counterpartyName = null,
@@ -1151,6 +1165,7 @@ function buildTransaction({
     categoryId,
     note,
     source:      'sms',
+    isRefund:    !!isRefund,
     isSplit:     false,
     splitWith:   [],
     createdAt:   createdAt || new Date().toISOString(),

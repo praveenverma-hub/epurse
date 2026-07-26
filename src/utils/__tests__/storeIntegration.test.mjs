@@ -15,6 +15,7 @@ register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook
 
 const mod = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
 const useStore = mod.useEPurseStore || mod.default;
+const beh = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/analytics/behavioralSelectors.js');
 
 const reset = () =>
   useStore.setState({
@@ -330,6 +331,75 @@ check('No-mask bank debit: transaction still recorded', txns().length === 1, `go
   useStore.getState().maybeQueueMonthlyRecap();
   check('Recap: disabled toggle → not queued', useStore.getState().pendingMonthlyRecap === null,
     `got ${useStore.getState().pendingMonthlyRecap}`);
+}
+
+// ── Refunds: net against spend + own category, excluded from income ───────────
+reset();
+ingest('HDFCBK', 'Rs.1000 debited from A/c XX4021 at AMAZON on 22-07-26.', { smsId: 're1' });
+ingest('HDFCBK', 'Rs.300 refunded to A/c XX4021 by AMAZON on 22-07-26.',   { smsId: 'rr1' });
+{
+  const refundTxn = txns().find((t) => t.isRefund);
+  check('Refund parsed: isRefund flag on the credit', !!refundTxn && refundTxn.type === 'credit', JSON.stringify(refundTxn && { type: refundTxn.type, isRefund: refundTxn.isRefund }));
+  check('Refund nets spend: getMonthlySpend = 700 (1000 − 300)', Math.round(useStore.getState().getMonthlySpend()) === 700, `got ${useStore.getState().getMonthlySpend()}`);
+  check('Refund not income: getMonthlyIncome = 0', Math.round(useStore.getState().getMonthlyIncome()) === 0, `got ${useStore.getState().getMonthlyIncome()}`);
+  const cats = useStore.getState().getCategoryBreakdown();
+  const shopping = cats.find((c) => c.id === 'shopping');
+  check('Refund nets its own category: shopping = 700', shopping && Math.round(shopping.total) === 700, JSON.stringify(shopping && { id: shopping.id, total: shopping.total }));
+  const stats = mod.selectExpenseStats('M')(useStore.getState());
+  check('ExpenseStats: spent 700 / refunds 300 / received 0',
+    Math.round(stats.spent) === 700 && Math.round(stats.refunds) === 300 && Math.round(stats.received) === 0,
+    JSON.stringify({ spent: stats.spent, refunds: stats.refunds, received: stats.received }));
+}
+
+// ── Manual mark-as-refund moves a credit from Received → Refund ───────────────
+reset();
+ingest('HDFCBK', 'Rs.500 credited to A/c XX4021 by JOHN on 22-07-26.', { smsId: 'mc1' });
+{
+  const s1 = mod.selectExpenseStats('M')(useStore.getState());
+  check('P2P credit counts as Received (500)', Math.round(s1.received) === 500, `got ${s1.received}`);
+  const cid = txns()[0].id;
+  useStore.getState().setTransactionRefund(cid, true);
+  const s2 = mod.selectExpenseStats('M')(useStore.getState());
+  check('After mark-refund: received 0, refunds 500', Math.round(s2.received) === 0 && Math.round(s2.refunds) === 500, JSON.stringify({ received: s2.received, refunds: s2.refunds }));
+  useStore.getState().setTransactionRefund(cid, false);
+  const s3 = mod.selectExpenseStats('M')(useStore.getState());
+  check('Un-mark refund: back to received 500', Math.round(s3.received) === 500, `got ${s3.received}`);
+}
+
+// ── Refund consistency across ALL spend surfaces (single source of truth) ─────
+{
+  const nowIso = new Date().toISOString();
+  const refundSet = [
+    { id: 'd1', amount: 1000, type: 'debit',  categoryId: 'shopping', merchant: 'Croma', accountId: 'acc1', createdAt: nowIso },
+    { id: 'd2', amount: 300,  type: 'credit', isRefund: true, categoryId: 'shopping', merchant: 'Croma', accountId: 'acc1', createdAt: nowIso },
+  ];
+
+  // Weekly summary card
+  reset();
+  useStore.setState({ transactions: refundSet });
+  check('Weekly card nets refunds: total 700', Math.round(mod.selectWeeklySummary(useStore.getState()).total) === 700, `got ${mod.selectWeeklySummary(useStore.getState()).total}`);
+
+  // Analytics: daily cumulative (Pace/Ghost) + group category breakdown
+  const dc = beh.getDailyCumulative(refundSet, new Date());
+  check('DailyCumulative (Pace) nets refunds: 700', Math.round(dc.current[dc.current.length - 1]) === 700, `got ${dc.current[dc.current.length - 1]}`);
+  const bc = beh.buildCategoryBreakdown(refundSet, [{ id: 'shopping', name: 'Shopping', color: '#000', emoji: '🛍️' }]);
+  check('buildCategoryBreakdown nets refunds: shopping 700', bc[0] && Math.round(bc[0].total) === 700, JSON.stringify(bc));
+
+  // Budget drill-down + unbudgeted breakdown (with an active plan)
+  reset();
+  useStore.setState({
+    budget: { totalCap: 5000, perCategory: { food: 5000 } },
+    transactions: [
+      { id: 'b1', amount: 1000, type: 'debit',  categoryId: 'food',      childCategory: 'Dining', accountId: 'acc1', createdAt: nowIso },
+      { id: 'b2', amount: 400,  type: 'credit', isRefund: true, categoryId: 'food', childCategory: 'Dining', accountId: 'acc1', createdAt: nowIso },
+      { id: 'b3', amount: 700,  type: 'debit',  categoryId: 'shopping',  accountId: 'acc1', createdAt: nowIso },
+    ],
+  });
+  const child = useStore.getState().getBudgetChildBreakdown('food');
+  check('Budget child breakdown nets refunds: Dining 600', child[0] && Math.round(child[0].total) === 600, JSON.stringify(child));
+  const unbud = useStore.getState().getUnbudgetedBreakdown();
+  const shoppingUn = unbud.find((r) => r.label && r.label.toLowerCase().includes('shop'));
+  check('Unbudgeted breakdown present (shopping 700)', shoppingUn && Math.round(shoppingUn.total) === 700, JSON.stringify(unbud));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

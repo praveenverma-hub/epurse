@@ -36,7 +36,7 @@ import { useEPurseStore, selectVisibleTransactions } from '../store/ePurseStore'
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing } from '../constants/theme';
 import { NON_SPEND_CATEGORY_IDS } from '../constants/categories';
-import { debitDisplayAmount } from '../utils/split';
+import { debitDisplayAmount, spendContribution } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ const SmartLedger: React.FC<SmartLedgerProps> = ({ transactions }) => {
     for (const t of txns) {
       const cid = t.categoryId || 'other';
       const meta = catById.get(cid) || { name: 'Uncategorized', emoji: '📌', color: '#6B7280' };
-      const personal = debitDisplayAmount(t);
+      const personal = spendContribution(t); // +expense share, −refund (nets category)
       const cur = map.get(cid);
       if (cur) {
         cur.total += personal;
@@ -234,7 +234,11 @@ const SmartLedger: React.FC<SmartLedgerProps> = ({ transactions }) => {
         });
       }
     }
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+    // A category fully offset by refunds drops out; never show a negative row.
+    return Array.from(map.values())
+      .map((r) => ({ ...r, total: Math.max(0, r.total) }))
+      .filter((r) => r.total > 0)
+      .sort((a, b) => b.total - a.total);
   }, [txns, catById]);
 
   // ── State: category ids currently INCLUDED in the total (all on by default) ─
@@ -377,7 +381,7 @@ const makeStyles = (t: any) =>
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: t.background,
+      backgroundColor: 'transparent',
       borderWidth: 1,
       borderColor: t.divider,
       borderRadius: radius.md,

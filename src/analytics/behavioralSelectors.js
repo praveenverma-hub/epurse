@@ -4,7 +4,7 @@
 // =============================================================================
 
 import { TRANSACTION_TYPES, NON_SPEND_CATEGORY_IDS } from '../constants/categories';
-import { debitDisplayAmount } from '../utils/split';
+import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
 
 // Excluded from behavioral spend analytics: the app-wide non-spend set (LB
 // ledger, self transfers, CC-bill payments) — real money movement, but neither
@@ -34,13 +34,15 @@ export function getDailyCumulative(transactions, targetDate = new Date()) {
   const curDaily = new Array(daysInMonth + 1).fill(0);
   const ghostDaily = new Array(daysInPrevMonth + 1).fill(0);
 
+  // Net spend = expenses − refunds (refund credits subtract via spendContribution),
+  // matching getMonthlySpend so the pace/ghost chart never drifts from the total.
   transactions.forEach((t) => {
-    if (t.isIgnored || t.type !== TRANSACTION_TYPES.DEBIT || LB_CATS.has(t.categoryId)) return;
+    if (t.isIgnored || !countsForSpend(t) || LB_CATS.has(t.categoryId)) return;
     const d = new Date(t.createdAt);
     const ty = d.getFullYear();
     const tm = d.getMonth();
     const td = d.getDate();
-    const amt = debitDisplayAmount(t);
+    const amt = spendContribution(t);
     if (ty === y && tm === m && td >= 1 && td <= daysInMonth) {
       curDaily[td] += amt;
     } else if (ty === py && tm === pm && td >= 1 && td <= daysInPrevMonth) {
@@ -66,13 +68,16 @@ export function getDailyCumulative(transactions, targetDate = new Date()) {
  */
 export function buildCategoryBreakdown(transactions, categories) {
   const totals = {};
-  let grand = 0;
   for (const t of transactions) {
-    if (t.isIgnored || t.type !== TRANSACTION_TYPES.DEBIT || LB_CATS.has(t.categoryId)) continue;
-    const share = debitDisplayAmount(t);
-    if (share <= 0) continue;
-    totals[t.categoryId] = (totals[t.categoryId] || 0) + share;
-    grand += share;
+    if (t.isIgnored || !countsForSpend(t) || LB_CATS.has(t.categoryId)) continue;
+    // Expense adds, refund credit subtracts (nets its category).
+    totals[t.categoryId] = (totals[t.categoryId] || 0) + spendContribution(t);
+  }
+  // Clamp any category left net-negative by refunds, then total up.
+  let grand = 0;
+  for (const k of Object.keys(totals)) {
+    if (totals[k] < 0) totals[k] = 0;
+    grand += totals[k];
   }
   if (grand <= 0) return [];
   return categories

@@ -1234,6 +1234,43 @@ const ADVERSARIAL_FP_JUL26 = [
     expect: { accept: true, type: 'debit', amount: 500 } },
 ];
 
+// SUITE 20 — Refund / reversal / cashback detection (Jul-26). Genuine money-back
+//   credits must set isRefund; income & P2P credits and expense debits must NOT;
+//   promo cashback OFFERS and "will be reversed" failures must not book at all.
+// ─────────────────────────────────────────────────────────────────────────────
+const REFUND_DETECTION_JUL26 = [
+  { name: 'Refund credit → isRefund',
+    sender: 'HDFCBK', sms: 'Rs.499 refunded to your A/c XX4021 by AMAZON for order #402 on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 499, isRefund: true } },
+  { name: 'Reversal credit (failed txn reversed) → isRefund',
+    sender: 'ICICIB', sms: 'Rs.2,320 reversed to your A/c XX302 for a failed txn on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 2320, isRefund: true } },
+  { name: 'Cashback credited → isRefund (cashback = refund)',
+    sender: 'AXISBK', sms: 'Rs.50 cashback credited to your A/c XX5960 on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 50, isRefund: true } },
+  { name: '"returned to your account" → CREDIT + isRefund',
+    sender: 'HDFCBK', sms: 'Rs.899 has been returned to your account XX4021 for a cancelled order.',
+    expect: { accept: true, type: 'credit', amount: 899, isRefund: true } },
+  { name: '"credited back" to card → isRefund',
+    sender: 'SBICRD', sms: 'Rs.200 credited back to your SBI Credit Card XX7890 on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 200, isRefund: true } },
+  { name: 'Salary credit is NOT a refund',
+    sender: 'HDFCBK', sms: 'Rs.85,000 credited to A/c XX4021 - SALARY JUL 2026.',
+    expect: { accept: true, type: 'credit', amount: 85000, isRefund: false } },
+  { name: 'P2P credit is NOT a refund',
+    sender: 'ICICIB', sms: 'Rs.1,500 credited to A/c XX302 by RAHUL via UPI on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 1500, isRefund: false } },
+  { name: 'Expense debit is NOT a refund',
+    sender: 'HDFCBK', sms: 'Rs.1,299 debited from A/c XX4021 at AMAZON on 22-07-26.',
+    expect: { accept: true, type: 'debit', amount: 1299, isRefund: false } },
+  { name: 'Promo cashback OFFER not booked at all',
+    sender: 'HDFCBK', sms: 'Get flat Rs.100 cashback on your next UPI payment! Use code SAVE100.',
+    expect: { accept: false } },
+  { name: '"will be reversed" failure not booked',
+    sender: 'ICICIB', sms: 'Your payment of Rs.500 to raj@ybl has failed. Amount will be reversed in 3 days.',
+    expect: { accept: false } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1255,6 +1292,7 @@ const SUITES = [
   ['Card-type inference: CC without "credit" (Jul-26)', CARD_TYPE_JUL26],
   ['100-msg stress findings (Jul-26)', STRESS_FINDINGS_JUL26],
   ['Adversarial false-positive traps (Jul-26)', ADVERSARIAL_FP_JUL26],
+  ['Refund / reversal / cashback detection (Jul-26)', REFUND_DETECTION_JUL26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1271,6 +1309,7 @@ function checkCase({ sender, sms, expect }) {
     const t = r.transaction;
     const cmp = (key, actual, want) => { if (want !== undefined && actual !== want) fails.push(`${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(actual)}`); };
     cmp('type', t.type, expect.type);
+    cmp('isRefund', !!t.isRefund, expect.isRefund);
     cmp('accountType', t.accountType, expect.accountType);
     cmp('amount', t.amount, expect.amount);
     cmp('categoryId', t.categoryId, expect.categoryId);

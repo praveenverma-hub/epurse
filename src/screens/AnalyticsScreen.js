@@ -22,7 +22,7 @@ import { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } from '../constants/categories';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
-import { debitDisplayAmount, isGroupExcluded } from '../utils/split';
+import { debitDisplayAmount, isGroupExcluded, countsForSpend, spendContribution } from '../utils/split';
 import {
   getDailyCumulative,
   getMerchantBubbles,
@@ -147,7 +147,8 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const whatIfTxns = useMemo(
     () =>
       visibleTxns.filter(
-        (t) => t.type === 'debit' && isSameMonth(t.createdAt, date) && !NON_SPEND.has(t.categoryId),
+        // Expenses + refunds (refunds net their category in the ledger below).
+        (t) => countsForSpend(t) && isSameMonth(t.createdAt, date) && !NON_SPEND.has(t.categoryId),
       ),
     [visibleTxns, date], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -160,7 +161,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
     });
     const buckets = {};
     transactions.forEach((t) => {
-      if (t.type !== 'debit') return;
+      if (!countsForSpend(t)) return;               // expense debit or refund credit
       if (!isSameMonth(t.createdAt, date)) return;
       if (NON_SPEND.has(t.categoryId)) return;
       if (isGroupExcluded(t, groups)) return;
@@ -186,9 +187,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           color: acct?.color,
         };
       }
-      buckets[key].total += debitDisplayAmount(t);
+      buckets[key].total += spendContribution(t);   // refund nets the account down
     });
-    return Object.values(buckets).sort((a, b) => b.total - a.total);
+    return Object.values(buckets)
+      .map((b) => ({ ...b, total: Math.max(0, b.total) }))
+      .filter((b) => b.total > 0)
+      .sort((a, b) => b.total - a.total);
   }, [transactions, date, groups, accounts]);
 
   const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
