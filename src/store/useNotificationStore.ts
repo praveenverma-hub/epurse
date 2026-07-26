@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type NotificationKind =
   | 'cc_due'
   | 'subscription_hike'
+  | 'monthly_recap'
   | 'aware_check_in'
   | 'aware_streak_reset'
   | 'aware_savings_claimed'

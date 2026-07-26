@@ -247,6 +247,25 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
 }
 
 /**
+ * Fires a "monthly recap is ready" notification on the first open of a new
+ * month. No-ops without notification permission.
+ */
+export async function fireMonthlyRecapNotification({ monthLabel }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: `📊 Your ${monthLabel} recap is ready`,
+      body:  'See where your money went last month — open ePurse to view and download.',
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger: null,
+  });
+}
+
+/**
  * Fires a soft mid-cycle nudge notification. Same channel as budget breaches
  * but with a friendlier tone (passed in as title/body from the store action).
  * No-ops without notification permission.

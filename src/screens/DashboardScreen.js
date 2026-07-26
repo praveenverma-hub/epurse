@@ -19,7 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
-import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats } from '../store/ePurseStore';
+import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats, selectLatestRecapMonth } from '../store/ePurseStore';
 import {
   useRewardStore,
   selectLevel,
@@ -49,7 +49,8 @@ import { vaultTierForStreak } from '../config/rewardConfig';
 import { selectAwareStreak } from '../store/useRewardStore';
 import WelcomeStreakModal from '../components/WelcomeStreakModal';
 import CheckInBanner from '../components/CheckInBanner';
-import CelebrationModal from '../components/CelebrationModal';
+import MonthlyRecapModal from '../components/MonthlyRecapModal';
+import MonthlyRecapCard from '../components/MonthlyRecapCard';
 import CCPaymentPromptModal from '../components/CCPaymentPromptModal';
 import TransactionItem from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
@@ -105,10 +106,15 @@ const DashboardScreen = ({ navigation }) => {
   const updateGroupExpense      = useEPurseStore((s) => s.updateGroupExpense);
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
   const addGroupExpense = useEPurseStore((s) => s.addGroupExpense);
-  const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
-  const clearPendingCelebration = useEPurseStore((s) => s.clearPendingCelebration);
   const showWeeklySummary    = useEPurseStore((s) => s.showWeeklySummary);
   const setShowWeeklySummary = useEPurseStore((s) => s.setShowWeeklySummary);
+  const showMonthlyRecap     = useEPurseStore((s) => s.showMonthlyRecap);
+  const setShowMonthlyRecap  = useEPurseStore((s) => s.setShowMonthlyRecap);
+  const recapOptions         = useEPurseStore((s) => s.recapOptions);
+  const setRecapOption       = useEPurseStore((s) => s.setRecapOption);
+  const latestRecapMonth     = useEPurseStore(selectLatestRecapMonth);
+  const recapCardDismissed   = useEPurseStore((s) => s.monthlyRecapCardDismissed);
+  const dismissMonthlyRecapCard = useEPurseStore((s) => s.dismissMonthlyRecapCard);
 
   const { onScroll, scrollEventThrottle } = useTabBarScroll();
   const insets = useSafeAreaInsets();
@@ -367,6 +373,14 @@ const DashboardScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
       >
+        {/* Monthly recap — persistent month-end card, dismissible per month */}
+        {showMonthlyRecap && latestRecapMonth && recapCardDismissed !== latestRecapMonth && (
+          <MonthlyRecapCard
+            monthKey={latestRecapMonth}
+            onDismiss={() => dismissMonthlyRecapCard(latestRecapMonth)}
+          />
+        )}
+
         {/* Lent / Borrowed */}
         <LentBorrowedWidget
           lent={lent}
@@ -633,15 +647,10 @@ const DashboardScreen = ({ navigation }) => {
         onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
 
-      {/* Monthly wrap-up celebration — shown after rollover snapshots a month */}
-      <CelebrationModal
-        visible={!!pendingCelebration}
-        onClose={clearPendingCelebration}
-        onPlanNext={() => {
-          clearPendingCelebration();
-          navigation.navigate('Insights');
-        }}
-      />
+      {/* Monthly recap — one-time month-end moment (replaces the old celebration
+          modal; folds in the budget streak/saved wrap-up). Then persists as a
+          dashboard card below. */}
+      <MonthlyRecapModal />
 
       {/* Day-1 Aware Run welcome — auto-dismisses after 4.5s */}
       <WelcomeStreakModal />
@@ -754,6 +763,42 @@ const DashboardScreen = ({ navigation }) => {
                 ios_backgroundColor="#D1D5DB"
               />
             </View>
+
+            {/* Preference: monthly recap (modal + card + PDF) */}
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsRowEmoji}>📊</Text>
+              <Text style={styles.settingsRowLabel}>Monthly recap</Text>
+              <Switch
+                value={showMonthlyRecap}
+                onValueChange={setShowMonthlyRecap}
+                trackColor={{ true: theme.primary, false: '#D1D5DB' }}
+                thumbColor="#fff"
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
+
+            {/* Sub-preferences: what the recap report / PDF includes */}
+            {showMonthlyRecap && (
+              <>
+                <Text style={styles.settingsSubHeader}>Report includes</Text>
+                {[
+                  { key: 'includePrivate', label: 'Private transactions' },
+                  { key: 'includeGroups',  label: 'Group & trip spend' },
+                  { key: 'includeTxnList', label: 'Full transaction list (PDF)' },
+                ].map(({ key, label }) => (
+                  <View key={key} style={[styles.settingsRow, styles.settingsSubRow]}>
+                    <Text style={styles.settingsSubLabel}>{label}</Text>
+                    <Switch
+                      value={!!recapOptions?.[key]}
+                      onValueChange={(v) => setRecapOption(key, v)}
+                      trackColor={{ true: theme.primary, false: '#D1D5DB' }}
+                      thumbColor="#fff"
+                      ios_backgroundColor="#D1D5DB"
+                    />
+                  </View>
+                ))}
+              </>
+            )}
 
             {[
               { emoji: '📂', label: 'Categories', route: 'Categories' },
@@ -961,6 +1006,9 @@ const styles = StyleSheet.create({
   },
   settingsRowEmoji: { fontSize: 20 },
   settingsRowLabel: { flex: 1, ...typography.body, color: colors.textPrimary, fontWeight: '600' },
+  settingsSubHeader: { ...typography.tiny, color: colors.textMuted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: spacing.md, marginBottom: spacing.xxs, marginLeft: spacing.xs },
+  settingsSubRow: { paddingVertical: 12, paddingLeft: spacing.md },
+  settingsSubLabel: { flex: 1, ...typography.small, color: colors.textSecondary, fontWeight: '600' },
   settingsRowChevron: { fontSize: 22, color: colors.textSecondary, fontWeight: '300' },
 });
 

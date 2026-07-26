@@ -22,6 +22,8 @@ const reset = () =>
     suppressedSmsIds: [], monthlyAggregates: {}, groups: [], lastSmsDate: null,
     userOnboardedAt: 0, activeGroupZoneId: null,
     pendingCCPaymentQueue: [], ccHandledSmsIds: [], userPhones: [],
+    budgetHistory: {}, showMonthlyRecap: true, pendingMonthlyRecap: null,
+    recapMonthHandled: null, monthlyRecapCardDismissed: null,
   });
 
 const ingest = (sender, body, opts = {}) =>
@@ -215,6 +217,120 @@ reset();
 ingest('HDFCBK', 'Rs.250 debited for UPI to cafe@ybl on 22-07-26.', { receivedAt: T0, smsId: 'nomask1' });
 check('No-mask bank debit: no phantom account created', accts().length === 0, `got ${accts().length} accounts`);
 check('No-mask bank debit: transaction still recorded', txns().length === 1, `got ${txns().length}`);
+
+// ── Monthly report / recap ────────────────────────────────────────────────────
+// Use the previous calendar month (relative to now) so the assertions are
+// time-robust: it's always < current month and the latest month with data.
+{
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth(), 0);       // last day, prev month
+  const prevMk = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+  const iso = (d) => new Date(prev.getFullYear(), prev.getMonth(), d, 10, 0, 0).toISOString();
+
+  reset();
+  useStore.setState({
+    accounts: [{ id: 'acc1', name: 'HDFC ··4021', bankName: 'HDFC', mask: '4021', type: 'Bank Account', balance: 0 }],
+    transactions: [
+      { id: 'r1', amount: 1000, type: 'debit',  categoryId: 'food',      merchant: 'Swiggy',    accountId: 'acc1', createdAt: iso(10) },
+      { id: 'r2', amount: 500,  type: 'debit',  categoryId: 'groceries', merchant: 'BigBasket', accountId: 'acc1', createdAt: iso(12) },
+      { id: 'r3', amount: 5000, type: 'credit', categoryId: 'salary',    merchant: 'ACME',      accountId: 'acc1', createdAt: iso(1)  },
+    ],
+  });
+
+  const rep = mod.selectMonthlyReport(prevMk)(useStore.getState());
+  check('Report: spent excludes credits (₹1500)', Math.round(rep.cashflow.spent) === 1500, `got ${rep.cashflow.spent}`);
+  check('Report: income from credit (₹5000)', Math.round(rep.cashflow.income) === 5000, `got ${rep.cashflow.income}`);
+  check('Report: net saved (₹3500)', Math.round(rep.cashflow.net) === 3500, `got ${rep.cashflow.net}`);
+  check('Report: groceries rolls up into Food parent (top cat ₹1500)',
+    rep.categories[0] && rep.categories[0].id === 'food' && Math.round(rep.categories[0].total) === 1500,
+    rep.categories.map((c) => `${c.id}:${c.total}`).join(','));
+  check('Report: hasRaw true for recent month', rep.hasRaw === true);
+  check('Report: payment method resolves account label',
+    rep.paymentMethods && rep.paymentMethods[0] && Math.round(rep.paymentMethods[0].total) === 1500,
+    JSON.stringify(rep.paymentMethods));
+
+  check('selectLatestRecapMonth → previous month', mod.selectLatestRecapMonth(useStore.getState()) === prevMk,
+    `got ${mod.selectLatestRecapMonth(useStore.getState())}`);
+
+  // maybeQueueMonthlyRecap: queues once, then is idempotent (guarded).
+  useStore.getState().maybeQueueMonthlyRecap();
+  check('Recap: queued for previous month', useStore.getState().pendingMonthlyRecap === prevMk,
+    `got ${useStore.getState().pendingMonthlyRecap}`);
+  check('Recap: month marked handled', useStore.getState().recapMonthHandled === prevMk);
+  useStore.getState().clearPendingMonthlyRecap();
+  useStore.getState().maybeQueueMonthlyRecap();
+  check('Recap: does not re-queue after handled (fires once)', useStore.getState().pendingMonthlyRecap === null,
+    `got ${useStore.getState().pendingMonthlyRecap}`);
+
+  // Group block: non-private groups broken out; private (excludeFromTotals) excluded.
+  reset();
+  useStore.setState({
+    accounts: [{ id: 'acc1', name: 'HDFC', bankName: 'HDFC', mask: '4021', type: 'Bank Account', balance: 0 }],
+    groups: [
+      { id: 'gTrip', name: 'Goa Trip', type: 'trip',     emoji: '🏖️', color: '#3B82F6', excludeFromTotals: false, members: [] },
+      { id: 'gPriv', name: 'Secret',   type: 'personal', emoji: '🔒', color: '#999999', excludeFromTotals: true,  members: [] },
+    ],
+    transactions: [
+      { id: 'g1', amount: 2000, type: 'debit', categoryId: 'food',     merchant: 'Beach Shack', accountId: 'acc1', createdAt: iso(5), groupId: 'gTrip' },
+      { id: 'g2', amount: 1500, type: 'debit', categoryId: 'travel',   merchant: 'Cab',         accountId: 'acc1', createdAt: iso(6), groupId: 'gTrip' },
+      { id: 'g3', amount: 9999, type: 'debit', categoryId: 'shopping', merchant: 'Hidden',      accountId: 'acc1', createdAt: iso(7), groupId: 'gPriv' },
+    ],
+  });
+  {
+    const g = mod.selectMonthlyReport(prevMk)(useStore.getState());
+    check('Group block: only the non-private group appears',
+      g.groupSpend.length === 1 && g.groupSpend[0].id === 'gTrip', g.groupSpend.map((x) => x.id).join(','));
+    check('Group block: sums your share (₹3500, 2 expenses)',
+      g.groupSpend[0] && Math.round(g.groupSpend[0].total) === 3500 && g.groupSpend[0].count === 2,
+      JSON.stringify(g.groupSpend[0]));
+    check('Group block: private group excluded from block AND month total',
+      !g.groupSpend.some((x) => x.id === 'gPriv') && Math.round(g.cashflow.spent) === 3500, `spent ${g.cashflow.spent}`);
+  }
+
+  // Report options: private / groups / transaction list.
+  reset();
+  useStore.setState({
+    accounts: [{ id: 'acc1', bankName: 'HDFC', mask: '4021', type: 'Bank Account', balance: 0 }],
+    transactions: [
+      { id: 'p1', amount: 1000, type: 'debit', categoryId: 'food',     merchant: 'Cafe',       accountId: 'acc1', createdAt: iso(3) },
+      { id: 'p2', amount: 4000, type: 'debit', categoryId: 'shopping', merchant: 'SecretShop', accountId: 'acc1', createdAt: iso(4), isHidden: true },
+    ],
+  });
+  {
+    const inc = mod.selectMonthlyReport(prevMk, { includePrivate: true })(useStore.getState());
+    check('includePrivate on: spent counts private (₹5000)', Math.round(inc.cashflow.spent) === 5000, `got ${inc.cashflow.spent}`);
+    check('includePrivate on: private category present', inc.categories.some((c) => c.id === 'shopping'));
+    const exc = mod.selectMonthlyReport(prevMk, { includePrivate: false })(useStore.getState());
+    check('includePrivate off: spent drops private (₹1000)', Math.round(exc.cashflow.spent) === 1000, `got ${exc.cashflow.spent}`);
+    check('includePrivate off: private category removed', !exc.categories.some((c) => c.id === 'shopping'), exc.categories.map((c) => c.id).join(','));
+
+    const tlOn = mod.selectMonthlyReport(prevMk, { includeTxnList: true })(useStore.getState());
+    check('includeTxnList on: list built', Array.isArray(tlOn.txnList) && tlOn.txnList.length === 2);
+    const tlOff = mod.selectMonthlyReport(prevMk, { includeTxnList: false })(useStore.getState());
+    check('includeTxnList off: null', tlOff.txnList === null);
+  }
+  reset();
+  useStore.setState({
+    accounts: [{ id: 'acc1', bankName: 'HDFC', mask: '4021', type: 'Bank Account', balance: 0 }],
+    groups: [{ id: 'gA', name: 'Trip', type: 'trip', emoji: '🏖️', color: '#3B82F6', excludeFromTotals: false, members: [] }],
+    transactions: [{ id: 'x', amount: 1200, type: 'debit', categoryId: 'food', merchant: 'Y', accountId: 'acc1', createdAt: iso(2), groupId: 'gA' }],
+  });
+  {
+    const goff = mod.selectMonthlyReport(prevMk, { includeGroups: false })(useStore.getState());
+    check('includeGroups off: no group block', goff.groupSpend.length === 0, `got ${goff.groupSpend.length}`);
+    const gon = mod.selectMonthlyReport(prevMk, { includeGroups: true })(useStore.getState());
+    check('includeGroups on: group block present', gon.groupSpend.length === 1);
+  }
+
+  // Toggle off → never queues.
+  reset();
+  useStore.setState({ showMonthlyRecap: false, transactions: [
+    { id: 'r1', amount: 1000, type: 'debit', categoryId: 'food', merchant: 'X', accountId: 'acc1', createdAt: iso(10) },
+  ] });
+  useStore.getState().maybeQueueMonthlyRecap();
+  check('Recap: disabled toggle → not queued', useStore.getState().pendingMonthlyRecap === null,
+    `got ${useStore.getState().pendingMonthlyRecap}`);
+}
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

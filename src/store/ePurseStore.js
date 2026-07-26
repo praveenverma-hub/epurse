@@ -36,6 +36,7 @@ import {
   parentCatIdForTxn,
   buildCategoryTree,
   buildLegacyMaps,
+  findParentById,
   LB_ALL_CATS,
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
 } from '../constants/twoTierCategories';
@@ -51,8 +52,8 @@ import {
   SELF_TXN_FIELDS,
 } from '../utils/selfTransfer';
 import { isSameMonth, monthKey } from '../utils/format';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification } from '../utils/notifications';
-import { detectSubscriptions } from '../analytics/behavioralSelectors';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification } from '../utils/notifications';
+import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import { useNotificationStore } from './useNotificationStore';
 import {
@@ -624,6 +625,21 @@ export const useEPurseStore = create(
       // default; toggled from the Settings sheet. Persisted (see partialize).
       showWeeklySummary: true,
 
+      // ── Monthly recap ────────────────────────────────────────────────────
+      // Month-end wrap-up: a one-time modal on first open of a new month, then
+      // a persistent dashboard card, plus a downloadable PDF. On by default.
+      showMonthlyRecap: true,
+      // monthKey we've already queued the modal + notification for (so neither
+      // re-fires on every launch). null = none handled yet.
+      recapMonthHandled: null,
+      // monthKey whose dashboard CARD the user dismissed (card hidden for it).
+      monthlyRecapCardDismissed: null,
+      // monthKey to show the recap MODAL for right now (ephemeral, not persisted).
+      pendingMonthlyRecap: null,
+      // What the recap/PDF includes (profile toggles). Private included by default;
+      // in-app spend logic elsewhere is unaffected. Transaction list off by default.
+      recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
+
       // Notification IDs: { [personKey]: notificationId }  — used to cancel/update reminders
       notificationIds: {},
       // CC bill-due OS reminders: `${cardLast4||bankName}:${dueDate}` → scheduled id, so a
@@ -736,6 +752,56 @@ export const useEPurseStore = create(
       setDarkMode: (v) => set({ darkMode: !!v }),
       /** Dashboard: show/hide the weekly spend summary card. */
       setShowWeeklySummary: (v) => set({ showWeeklySummary: !!v }),
+
+      // ── Monthly recap actions ─────────────────────────────────────────────
+      /** Settings: show/hide the monthly recap (modal + card). */
+      setShowMonthlyRecap: (v) => set({ showMonthlyRecap: !!v }),
+
+      /** Settings: toggle what the recap/PDF includes (includePrivate | includeGroups | includeTxnList). */
+      setRecapOption: (key, value) =>
+        set((s) => ({ recapOptions: { ...s.recapOptions, [key]: !!value } })),
+
+      /**
+       * Called on launch / foreground (App.js). If a new calendar month has begun
+       * and the just-ended month has data we haven't surfaced yet, queue the
+       * one-time recap modal and fire a single "recap ready" notification.
+       * Guarded by `recapMonthHandled` so it fires at most once per month.
+       */
+      maybeQueueMonthlyRecap: () => {
+        const s = get();
+        if (!s.showMonthlyRecap) return;
+        const now = new Date();
+        const prev = new Date(now.getFullYear(), now.getMonth(), 0); // last day of prev month
+        const prevMk = monthKey(prev);
+        if (s.recapMonthHandled === prevMk) return; // already queued + notified
+
+        const hasData =
+          !!s.monthlyAggregates?.[prevMk] ||
+          s.transactions.some((t) => !t.isIgnored && monthKey(t.createdAt) === prevMk);
+        if (!hasData) return;
+
+        // The recap IS the month-end moment now — fold in / supersede the old
+        // budget celebration so the user gets one popup, not two.
+        set({ pendingMonthlyRecap: prevMk, recapMonthHandled: prevMk, pendingCelebration: null });
+
+        // In-app feed + OS notification (both no-op silently without permission).
+        const label = prev.toLocaleDateString('en-IN', { month: 'long' });
+        try {
+          useNotificationStore.getState().add({
+            kind: 'monthly_recap',
+            title: `Your ${label} recap is ready`,
+            body: 'See where your money went last month — tap to view and download.',
+            dedupeKey: `recap:${prevMk}`,
+          });
+        } catch {}
+        fireMonthlyRecapNotification({ monthLabel: label });
+      },
+
+      /** Recap modal closed — stop showing it (kept marked handled). */
+      clearPendingMonthlyRecap: () => set({ pendingMonthlyRecap: null }),
+
+      /** User dismissed the persistent recap card for `mk`. */
+      dismissMonthlyRecapCard: (mk) => set({ monthlyRecapCardDismissed: mk || null }),
 
       setNotificationId: (personKey, id) =>
         set((s) => ({ notificationIds: { ...s.notificationIds, [personKey]: id } })),
@@ -3248,6 +3314,11 @@ export const useEPurseStore = create(
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
           showWeeklySummary: true,
+          showMonthlyRecap: true,
+          recapMonthHandled: null,
+          monthlyRecapCardDismissed: null,
+          pendingMonthlyRecap: null,
+          recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
           notificationIds: {},
           ccDueReminderIds: {},
           subscriptionHikesNotified: [],
@@ -3657,6 +3728,10 @@ export const useEPurseStore = create(
         themeId: state.themeId,
         darkMode: state.darkMode,
         showWeeklySummary: state.showWeeklySummary ?? true,
+        showMonthlyRecap: state.showMonthlyRecap ?? true,
+        recapMonthHandled: state.recapMonthHandled ?? null,
+        monthlyRecapCardDismissed: state.monthlyRecapCardDismissed ?? null,
+        recapOptions: state.recapOptions ?? { includePrivate: true, includeGroups: true, includeTxnList: false },
         notificationIds: state.notificationIds,
         ccDueReminderIds: state.ccDueReminderIds ?? {},
         subscriptionHikesNotified: state.subscriptionHikesNotified ?? [],
@@ -3941,6 +4016,268 @@ export const selectWeeklySummary = (state) => {
     dailyAvg, daysElapsed, txnCount, maxDay,
     perDay, topCategory,
     weekStartMs, weekEndMs,
+  };
+};
+
+/**
+ * The most recent completed month (YYYY-MM, strictly before the current month)
+ * that has any data — from monthlyAggregates or raw transactions. Drives the
+ * persistent dashboard recap card. Returns null when there's no prior month.
+ */
+export const selectLatestRecapMonth = (state) => {
+  const curMk = monthKey(new Date());
+  const set = new Set(Object.keys(state.monthlyAggregates || {}));
+  (state.transactions || []).forEach((t) => { if (!t.isIgnored) set.add(monthKey(t.createdAt)); });
+  const past = [...set].filter((k) => k < curMk).sort();
+  return past.length ? past[past.length - 1] : null;
+};
+
+/**
+ * Monthly report — the SINGLE SOURCE for the recap card, modal, and PDF.
+ * Assembles cashflow, budget-vs-plan, parent-level category breakdown with
+ * month-over-month movers, daily spend series, top merchants, subscriptions,
+ * payment methods, highlights, and a next-month budget suggestion for `mk`.
+ *
+ * Degrades gracefully: cashflow / category / budget work from aggregates for
+ * months whose raw transactions have been compacted; the raw-only sections
+ * (daily, merchants, subscriptions, payment methods) are null when no raw rows
+ * survive for `mk`, so consumers can omit them.
+ *
+ * @param {string} mk  month key "YYYY-MM"
+ * @returns selector: (state) => report object
+ */
+export const selectMonthlyReport = (mk, opts = {}) => (state) => {
+  const includePrivate = opts.includePrivate !== false;   // default: include private
+  const includeGroups  = opts.includeGroups  !== false;   // default: include groups
+  const includeTxnList = opts.includeTxnList === true;     // default: no txn list
+
+  const [y, m] = String(mk).split('-').map(Number);
+  const monthDate = new Date(y, m - 1, 15);
+  const prevDate  = new Date(y, m - 2, 15);
+  const now = new Date();
+  const isCurrent = mk === monthKey(now);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const lastDay = isCurrent ? now.getDate() : daysInMonth;
+  const money = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
+  const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const shortLabel = new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'long' });
+
+  // Ignored txns are always dropped; private (isHidden) follow the toggle. When
+  // raw rows survive for the month we compute EVERY section from them so figures
+  // reconcile and honor the private toggle uniformly; older months (raw pruned)
+  // fall back to the store getters/aggregates, which always include private.
+  const keepHidden = (t) => includePrivate || !t.isHidden;
+  const rawMonth = state.transactions.filter((t) => !t.isIgnored && monthKey(t.createdAt) === mk);
+  const rawKept  = rawMonth.filter(keepHidden);
+  const hasRaw   = rawKept.length > 0;
+  const isSpendTxn = (t) =>
+    t.type === TRANSACTION_TYPES.DEBIT &&
+    !NON_SPEND_CATEGORY_IDS.has(t.categoryId) &&
+    !isGroupExcluded(t, state.groups);
+
+  // ── Cashflow ──
+  let spent = 0, income = 0;
+  if (hasRaw) {
+    rawKept.forEach((t) => {
+      if (NON_SPEND_CATEGORY_IDS.has(t.categoryId) || isGroupExcluded(t, state.groups)) return;
+      if (t.type === TRANSACTION_TYPES.DEBIT) spent += debitDisplayAmount(t);
+      else if (t.type === TRANSACTION_TYPES.CREDIT) income += t.amount;
+    });
+  } else {
+    spent = state.getMonthlySpend(monthDate);
+    income = state.getMonthlyIncome(monthDate);
+  }
+  const net    = income - spent;
+  const savingsRate = income > 0 ? Math.max(0, net / income) : 0;
+  const prevSpent = state.getMonthlySpend(prevDate);
+  const spendDeltaPct = prevSpent > 0 ? ((spent - prevSpent) / prevSpent) * 100 : null;
+
+  // ── Budget: planned vs actual (rollover snapshot) ──
+  let budget = null;
+  const bh = state.budgetHistory?.[mk];
+  if (bh && bh.perCategory) {
+    const rows = Object.entries(bh.perCategory)
+      .map(([pid, v]) => {
+        const p = findParentById(pid);
+        return {
+          id: pid, name: p?.label || pid, color: p?.color || '#9CA3AF', emoji: p?.emoji || '📌',
+          cap: v.cap || 0, actual: v.actual || 0, over: (v.actual || 0) > (v.cap || 0),
+        };
+      })
+      .filter((r) => r.cap > 0 || r.actual > 0)
+      .sort((a, b) => (b.cap ? b.actual / b.cap : 0) - (a.cap ? a.actual / a.cap : 0));
+    budget = {
+      totalCap: bh.totalCap ?? null,
+      totalActual: bh.totalActual || 0,
+      status: bh.status || null,
+      overshoot: bh.overshoot || 0,
+      saved: (bh.totalCap != null && bh.totalActual <= bh.totalCap) ? bh.totalCap - bh.totalActual : 0,
+      streak: state.budgetStreak?.current || 0,
+      rows,
+    };
+  }
+
+  // ── Category breakdown (parent level) + month-over-month movers ──
+  const rollup = (rows) => {
+    const out = {};
+    (rows || []).forEach((r) => {
+      const pid = CAT_MAPS.legacyToParentId[r.id] || r.id;
+      out[pid] = (out[pid] || 0) + (r.total || 0);
+    });
+    return out;
+  };
+  let curByParent;
+  if (hasRaw) {
+    curByParent = {};
+    rawKept.forEach((t) => {
+      if (!isSpendTxn(t)) return;
+      const pid = parentCatId(t);
+      curByParent[pid] = (curByParent[pid] || 0) + debitDisplayAmount(t);
+    });
+  } else {
+    curByParent = rollup(state.getCategoryBreakdown(monthDate));
+  }
+  const prevByParent = rollup(state.getCategoryBreakdown(prevDate));
+  const catTotalAll  = Object.values(curByParent).reduce((s, v) => s + v, 0) || 1;
+  const categories = Object.entries(curByParent)
+    .map(([pid, total]) => {
+      const p = findParentById(pid);
+      const prev = prevByParent[pid] || 0;
+      return {
+        id: pid, name: p?.label || pid, color: p?.color || '#9CA3AF', emoji: p?.emoji || '📌',
+        total, percent: (total / catTotalAll) * 100,
+        moverPct: prev > 0 ? ((total - prev) / prev) * 100 : null,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  // ── Raw-only sections (daily / payment methods / groups / biggest / txn list) ──
+  let daily = null, peakDay = null, noSpendDays = null, weekdayAvg = null, weekendAvg = null;
+  let biggest = null, paymentMethods = null, merchants = null, subscriptions = [], subscriptionTotal = 0;
+  let groupSpend = [];
+  let txnList = null;
+
+  if (hasRaw) {
+    const perDay = Array.from({ length: daysInMonth }, () => 0);
+    const payMap = {};
+    const grpMap = {};
+    rawKept.forEach((t) => {
+      // Only spend that counts toward the month (skips memos + private groups).
+      if (!isSpendTxn(t)) return;
+      const amt = debitDisplayAmount(t);
+      const d = new Date(t.createdAt);
+      const di = d.getDate() - 1;
+      if (di >= 0 && di < daysInMonth) perDay[di] += amt;
+      const acc = t.accountId || 'cash';
+      payMap[acc] = (payMap[acc] || 0) + amt;
+      if (includeGroups && t.groupId) {
+        const gm = grpMap[t.groupId] || (grpMap[t.groupId] = { total: 0, count: 0 });
+        gm.total += amt; gm.count += 1;
+      }
+      if (!biggest || amt > biggest.amount) biggest = { amount: amt, merchant: t.merchant || 'Expense', day: d.getDate() };
+    });
+
+    // Per-group spend (your counted share this month) — non-private groups only.
+    groupSpend = includeGroups ? Object.entries(grpMap)
+      .map(([gid, v]) => {
+        const g = (state.groups || []).find((x) => x.id === gid);
+        return { id: gid, name: g?.name || 'Group', emoji: g?.emoji || '👥', color: g?.color || '#6366F1', type: g?.type || null, total: v.total, count: v.count };
+      })
+      .filter((x) => x.total > 0)
+      .sort((a, b) => b.total - a.total) : [];
+    daily = perDay.slice(0, lastDay).map((amount, i) => ({ day: i + 1, amount }));
+    const peak = daily.reduce((mx, d) => (d.amount > (mx ? mx.amount : 0) ? d : mx), null);
+    peakDay = (peak && peak.amount > 0)
+      ? { day: peak.day, amount: peak.amount, weekday: new Date(y, m - 1, peak.day).toLocaleDateString('en-IN', { weekday: 'short' }) }
+      : null;
+    noSpendDays = daily.filter((d) => d.amount === 0).length;
+    let wkTot = 0, wkN = 0, weTot = 0, weN = 0;
+    for (let i = 0; i < lastDay; i++) {
+      const dow = new Date(y, m - 1, i + 1).getDay();
+      if (dow === 0 || dow === 6) { weTot += perDay[i]; weN++; } else { wkTot += perDay[i]; wkN++; }
+    }
+    weekdayAvg = wkN ? wkTot / wkN : 0;
+    weekendAvg = weN ? weTot / weN : 0;
+
+    paymentMethods = Object.entries(payMap)
+      .map(([id, total]) => {
+        const a = (state.accounts || []).find((x) => x.id === id);
+        const label = a
+          ? (a.bankName ? `${a.bankName}${a.mask ? ' ··' + a.mask : ''}` : (a.name || a.type))
+          : 'Cash';
+        return { id, label, total, color: a?.color || '#9CA3AF' };
+      })
+      .sort((x, z) => z.total - x.total);
+
+    // Merchants/subscriptions scan the whole history; respect the private toggle
+    // by pre-filtering (both helpers already skip isIgnored internally).
+    const scanList = state.transactions.filter(keepHidden);
+    merchants = getMerchantBubbles(scanList, monthDate)
+      .slice(0, 6)
+      .map((mb) => ({ name: mb.name, amount: mb.volume, count: mb.frequency }));
+
+    subscriptions = detectSubscriptions(scanList.filter((t) => !isGroupExcluded(t, state.groups)))
+      .map((su) => ({ merchant: su.merchant, amount: su.amount, priceHike: !!su.priceHike, hikeFrom: su.hikeFrom, hikeTo: su.hikeTo }));
+    subscriptionTotal = subscriptions.reduce((s, x) => s + (x.amount || 0), 0);
+
+    // Optional full transaction list (appended to the PDF) — every kept spend
+    // txn this month, newest first.
+    if (includeTxnList) {
+      txnList = rawKept
+        .filter(isSpendTxn)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .map((t) => {
+          const p = findParentById(parentCatId(t));
+          const acc = (state.accounts || []).find((x) => x.id === t.accountId);
+          return {
+            day: new Date(t.createdAt).getDate(),
+            dateLabel: new Date(t.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+            merchant: t.merchant || '—',
+            category: p?.label || 'Other',
+            amount: debitDisplayAmount(t),
+            account: acc ? (acc.mask ? `··${acc.mask}` : (acc.name || acc.type || '')) : (t.accountId ? '' : 'Cash'),
+            isPrivate: !!t.isHidden,
+          };
+        });
+    }
+  }
+
+  // ── Highlights ──
+  const highlights = [];
+  if (budget && budget.saved > 0) highlights.push({ kind: 'pos', icon: '💰', text: `Saved ${money(budget.saved)} under budget` });
+  else if (budget && budget.overshoot > 0) highlights.push({ kind: 'neg', icon: '⚠️', text: `Over budget by ${money(budget.overshoot)}` });
+  if (noSpendDays != null && noSpendDays > 0) highlights.push({ kind: '', icon: '🧊', text: `${noSpendDays} no-spend day${noSpendDays > 1 ? 's' : ''}` });
+  const hiked = subscriptions.find((s) => s.priceHike);
+  if (hiked) highlights.push({ kind: 'neg', icon: '🔺', text: `${hiked.merchant} hiked to ${money(hiked.hikeTo)}` });
+  if (categories[0]) highlights.push({ kind: '', icon: categories[0].emoji, text: `${categories[0].name} was your top category` });
+  if (spendDeltaPct != null) {
+    const down = spendDeltaPct < 0;
+    highlights.push({ kind: down ? 'pos' : 'neg', icon: down ? '📉' : '📈', text: `Spending ${down ? 'down' : 'up'} ${Math.abs(Math.round(spendDeltaPct))}% vs last month` });
+  }
+  if (biggest) highlights.push({ kind: '', icon: '🧾', text: `Biggest: ${money(biggest.amount)} · ${biggest.merchant}` });
+  if (groupSpend[0]) highlights.push({ kind: '', icon: groupSpend[0].emoji || '👥', text: `${groupSpend[0].name}: ${money(groupSpend[0].total)}` });
+
+  // ── Next-month suggestion (avg of up to 3 recent months' spend) ──
+  const spends = [];
+  for (let k = 0; k < 3; k++) {
+    const sp = state.getMonthlySpend(new Date(y, m - 1 - k, 15));
+    if (sp > 0) spends.push(sp);
+  }
+  const avgSpend = spends.length ? spends.reduce((s, v) => s + v, 0) / spends.length : spent;
+  const suggestedBudget = Math.round(avgSpend / 500) * 500;
+  const watchCategories = budget ? budget.rows.filter((r) => r.over).map((r) => r.name) : [];
+
+  return {
+    monthKey: mk, monthLabel, shortLabel, daysInMonth, isCurrent,
+    cashflow: { spent, income, net, savingsRate, prevSpent, spendDeltaPct },
+    budget,
+    categories,
+    daily, peakDay, noSpendDays, weekdayAvg, weekendAvg, biggest,
+    merchants, subscriptions, subscriptionTotal, paymentMethods, groupSpend,
+    txnList,
+    highlights,
+    plan: { suggestedBudget, avgSpend, watchCategories },
+    hasRaw,
   };
 };
 
