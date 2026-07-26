@@ -1080,6 +1080,16 @@ const CASHBACK_RRN_JUL26 = [
     sender: 'SBICRD',
     sms: 'Payment of Rs.12000 received on your SBI Credit Card XX1234. Thank you.',
     expect: { accept: false, code: 'credit_card_payment_notification' } },
+  // "Instant Discount" offer — must reject (was booked as a ₹9000 debit).
+  { name: 'SBI "Get up to Rs.9000 Instant Discount" offer → rejected',
+    sender: 'SBICRD',
+    sms: "Get up to Rs. 9000 Instant Discount at Electronics Paradise with SBI Credit Card. Min. Trxn.: Rs. 20000; Max. Discount: Rs. 9000 per card. Validity: Till 21-August'26. T&C",
+    expect: { accept: false, code: 'promotional_offer' } },
+  // BillPay/BBPS: biller is the subject before "Bill", NOT the "from <card>" source.
+  { name: 'BillPay bill paid via CC → merchant is the biller, debit on the card',
+    sender: 'HDFCBK',
+    sms: 'Bill Paid!\nSBI Life Bill 2x430759904 of Rs. 100000.00 paid on 22-Jul-2026 from HDFC Bank Credit Card 2170.\n\nBillPay Ref: HGALP147CC1079489174',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 100000, accountMask: '2170', merchant: 'SBI Life' } },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1134,6 +1144,96 @@ const CARD_TYPE_JUL26 = [
     expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 850 } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 18 — 100-message stress-test findings (Jul-26): rail/format coverage,
+//   reversal-vs-failed, the 10-crore cap, and unknown-sender card spends.
+// ─────────────────────────────────────────────────────────────────────────────
+const STRESS_FINDINGS_JUL26 = [
+  { name: 'Reversal for a FAILED txn is a genuine credit (not swallowed)',
+    sender: 'HDFCBK', sms: 'Rs.320 reversed to A/c XX4021 for failed ATM txn on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 320 } },
+  { name: 'Future "will be reversed if debited" stays a decline',
+    sender: 'HDFCBK', sms: 'TRANSACTION FAILED: Rs.5000 to A/c XX4321 failed at 14:22. Amount will be reversed if debited.',
+    expect: { accept: false, code: 'transaction_failed' } },
+  { name: 'Amount over ₹10 crore rejected (cap)',
+    sender: 'HDFCBK', sms: 'Rs.10,00,00,001 debited from A/c XX4021 to VENDOR. Ref X.',
+    expect: { accept: false, code: 'amount_exceeds_limit' } },
+  { name: 'Exactly ₹10 crore still books',
+    sender: 'HDFCBK', sms: 'Rs.10,00,00,000 debited from A/c XX4021 to VENDOR PAYMENT. Ref Y.',
+    expect: { accept: true, type: 'debit', amount: 100000000 } },
+  { name: 'Compact "UPI/DR/<ref>/PAYEE/Rs.X" (no verb) books',
+    sender: 'HDFCBK', sms: 'UPI/DR/307600331251/AMAZON/Rs.1299 from A/c XX4021.',
+    expect: { accept: true, type: 'debit', amount: 1299 } },
+  { name: '"UPI payment to X … successful" (no -ed verb) books',
+    sender: 'IDBIBK', sms: 'Rs.99 UPI payment to SPOTIFY from IDBI A/c XX3344 successful.',
+    expect: { accept: true, type: 'debit', amount: 99 } },
+  { name: '"Avl Cr Limit" → Credit Card (word "credit" absent)',
+    sender: 'RBLBNK', sms: 'INR 640.00 spent on RBL Card xx5511 at MCDONALDS. Avl Cr Limit Rs.40000.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 640, merchant: 'MCDONALDS' } },
+  { name: 'UPI "to MERCHANT from A/c" — merchant is the payee, not the source',
+    sender: 'SBIINB', sms: 'Rs.1500 paid via UPI to RAM STORE from A/c XX9911. UPI Ref 219000112233.',
+    expect: { accept: true, type: 'debit', amount: 1500, merchant: 'RAM STORE' } },
+  { name: 'Card spend from an UNKNOWN sender still clears Gate-1 (card ref + spent)',
+    sender: 'ONECRD', sms: 'Rs.780 spent on your Card xx3421 at ZARA. Total amount due Rs.9000.',
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 780 } },
+  // Pre-auth / hold (fuel, hotel) — money only blocked, real charge posts later. Must NOT book.
+  { name: 'Fuel pre-auth hold ("final amount may vary") not booked',
+    sender: 'SBIINB', sms: 'Rs.500 hold placed on A/c XX302 for fuel txn at HP PETROL. Final amount may vary.',
+    expect: { accept: false, code: 'preauth_hold' } },
+  // Wallet SMS with NO a/c mask + unrecognised sender — a wallet-brand phrase in the body
+  // (+ debit term) clears Gate-1.
+  { name: 'Amazon Pay balance spend (no a/c mask) books via wallet body signal',
+    sender: 'AMZNIN', sms: 'Rs.299 paid using Amazon Pay balance at SWIGGY. Bal Rs.51.',
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 299 } },
+  { name: 'Mobikwik wallet debit books via wallet body signal',
+    sender: 'MBKWIK', sms: 'Rs.120 debited from Mobikwik wallet for METRO recharge.',
+    expect: { accept: true, type: 'debit', amount: 120 } },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 19 — Adversarial false-positive traps (Jul-26). Informational messages that
+//   CARRY an amount but must NOT book a phantom transaction (the #1 trust-killer),
+//   plus direction/amount correctness on genuine txns.
+// ─────────────────────────────────────────────────────────────────────────────
+const ADVERSARIAL_FP_JUL26 = [
+  { name: 'Low-balance alert not booked',
+    sender: 'HDFCBK', sms: 'Your A/c XX4021 balance is low: Rs.320.50. Add funds to avoid failed autopay.',
+    expect: { accept: false, code: 'balance_alert' } },
+  { name: 'Monthly spend summary not booked',
+    sender: 'ICICIB', sms: 'You have spent Rs.45,000 this month on your ICICI Card. View insights on iMobile.',
+    expect: { accept: false, code: 'non_transaction_notice' } },
+  { name: 'Available-limit statement not booked',
+    sender: 'SBICRD', sms: 'Your SBI Card XX7890 available limit is Rs.1,50,000. Shop more, earn more!',
+    expect: { accept: false, code: 'non_transaction_notice' } },
+  { name: '"Scheduled to be debited" future notice not booked',
+    sender: 'HDFCBK', sms: 'Your SIP of Rs.5000 is scheduled to be debited on 25-Jul from A/c XX4021.',
+    expect: { accept: false } },
+  { name: 'FD "will mature and be credited" not booked',
+    sender: 'SBIINB', sms: 'Your FD of Rs.100000 will mature on 30-Jul and be credited to A/c XX9911.',
+    expect: { accept: false, code: 'non_transaction_notice' } },
+  { name: 'Conditional "may be charged" not booked',
+    sender: 'AXISBK', sms: 'You may be charged Rs.590 if minimum balance is not maintained in A/c XX5960.',
+    expect: { accept: false, code: 'non_transaction_notice' } },
+  { name: '"Salary expected to be credited" not booked',
+    sender: 'HDFCBK', sms: 'Your salary of Rs.85000 is expected to be credited by 01-Aug.',
+    expect: { accept: false } },
+  { name: 'UPI "has FAILED. Amount not debited" not booked',
+    sender: 'ICICIB', sms: 'Your UPI transaction of Rs.2000 to raj@ybl has FAILED. Amount not debited.',
+    expect: { accept: false, code: 'transaction_failed' } },
+  { name: 'creditedToOther → DEBIT direction',
+    sender: 'HDFCBK', sms: 'Rs.5000 debited from A/c XX4021 and credited to the beneficiary RAHUL on 22-07.',
+    expect: { accept: true, type: 'debit', amount: 5000 } },
+  { name: 'debitedFromOther → CREDIT direction',
+    sender: 'ICICIB', sms: 'Rs.3000 debited from beneficiary a/c; your A/c XX302 credited on 22-07-26.',
+    expect: { accept: true, type: 'credit', amount: 3000 } },
+  { name: 'Salary credit with TDS line → picks salary, not the TDS',
+    sender: 'ICICIB', sms: 'Salary Rs.95000 credited to A/c XX302. TDS of Rs.5000 deducted.',
+    expect: { accept: true, type: 'credit', amount: 95000 } },
+  { name: 'Guard: real debit + trailing "low balance" advisory still books',
+    sender: 'HDFCBK', sms: 'Rs.500 debited from A/c XX4021 at STORE. Low balance, please add funds.',
+    expect: { accept: true, type: 'debit', amount: 500 } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1153,6 +1253,8 @@ const SUITES = [
   ['Cashback offer & .RRN merchant leak (Jul-26)', CASHBACK_RRN_JUL26],
   ['Rail abbreviations & refund merchant (Jul-26)', RAIL_ABBREV_JUL26],
   ['Card-type inference: CC without "credit" (Jul-26)', CARD_TYPE_JUL26],
+  ['100-msg stress findings (Jul-26)', STRESS_FINDINGS_JUL26],
+  ['Adversarial false-positive traps (Jul-26)', ADVERSARIAL_FP_JUL26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

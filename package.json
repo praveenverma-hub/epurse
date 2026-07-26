@@ -3,10 +3,11 @@
   "version": "1.4.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "test": "npm run test:parser && npm run test:self && npm run test:group",
+    "test": "npm run test:parser && npm run test:self && npm run test:group && npm run test:store",
     "test:parser": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/messageParser.test.mjs",
     "test:self": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/selfTransfer.test.mjs",
     "test:group": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/groupExpense.test.mjs",
+    "test:store": "node --no-warnings src/utils/__tests__/storeIntegration.test.mjs",
     "start": "expo start",
     "start:tunnel": "expo start --tunnel",
     "android": "expo run:android",

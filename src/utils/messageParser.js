@@ -23,6 +23,7 @@
 // =============================================================================
 
 import { CATEGORY_KEYWORDS, ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 
 // =============================================================================
 // Gate 1a — Sender keywords
@@ -146,12 +147,20 @@ const getBankName = (sender) => {
 // This covers small banks, new wallets, or unusual sender ID formats.
 // =============================================================================
 const ACCOUNT_REF_REGEX =
-  /(?:a\/c|acct\.?|account|card\s+ending|card\s+no\.?)\s*[xX*•·]{0,8}\d{3,}/i;
+  /(?:a\/c|acct\.?|account|card\s+ending|card\s+no\.?|card)\s*[xX*•·]{0,8}\d{3,}/i;
 
 const BODY_DEBIT_CREDIT_TERMS = [
   'debit', 'credit', 'paid', 'payment', 'transfer', 'withdraw',
   'deposit', 'debited', 'credited', 'withdrawn', 'transferred',
+  'spent', 'sent', 'charged',
 ];
+
+// Wallet SMS carry NO a/c mask, so when the DLT sender header isn't recognised they'd
+// fail Gate-1. An explicit wallet-brand phrase in the BODY (+ a debit/credit term) is a
+// reliable financial signal for them. e.g. "paid using Amazon Pay balance", "debited from
+// Mobikwik wallet", "via Ola Money", "via CRED".
+const WALLET_BODY_REGEX =
+  /\b(?:wallet|amazon\s*pay|paytm(?:\s+balance)?|phonepe|mobikwik|freecharge|ola\s*money|cred|payzapp|jupiter\s+edge|slice|lazypay|simpl)\b/i;
 
 // =============================================================================
 // Gate 2 — Mandatory transaction phrase
@@ -163,7 +172,9 @@ const TRANSACTION_PHRASES = [
   'debit',
   'debited', 'withdrawn', 'deducted', 'auto-debit', 'autopay',
   'emi debited', 'emi deducted', 'emi paid',
-  'paid to', 'paid via', 'paid at', 'paid from', 'amount paid',
+  'paid to', 'paid via', 'paid at', 'paid from', 'amount paid', 'payment to',
+  // Compact UPI rail forms with no verb: "UPI/DR/<ref>/PAYEE/Rs.X", "UPI Cr Rs.X".
+  'upi/dr', 'upi/cr', 'upi-dr', 'upi-cr', 'upi dr', 'upi cr',
   'sent to', 'sent via', 'sent from',  // "Transfer: Rs.X sent from your A/c to <payee>"
   'sent rs', 'sent inr', 'sent ₹',  // "Sent Rs.3082.00\nFrom HDFC Bank A/C *5960\nTo MERCHANT" (HDFC UPI)
   'money sent',           // "Money Sent: Rs.60.00 to MERCHANT"
@@ -255,10 +266,10 @@ const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-
 // Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
 // Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
 const MERCHANT_REGEX =
-  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
+  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
 
 const MERCHANT_STOP =
-  /\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b.*$/i;
+  /\s+(?:(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|from\s+(?:a\/c|acct\.?|account|your)\b).*$/i;
 
 // A period glued directly to a stop keyword or a ref/balance number-run (no space),
 // e.g. "REEMA KUMARI.RRN 853904840357.Avl Bal" → cut at ".RRN". The merchant char
@@ -277,6 +288,14 @@ const VPA_REGEX = /([a-zA-Z0-9._\-]{2,30}@[a-zA-Z]{2,15})/;
 // real "to MERCHANT" capture; keeps NEFT credits from leaking the bank sender as merchant.
 const NEFT_REMITTER_REGEX =
   /\b(?:neft|imps|rtgs|ach)\b[\s:\/-]*(?:cr|dr|p2a|p2p|inward|outward)?[\s:\/-]*[a-z]*\d[a-z0-9]*[\s:\/-]+([a-z][a-z .&]{1,29}?)(?=\s*(?:[-\/.,;:]|available|avl|info|ref|utr|$))/i;
+
+// BillPay / BBPS biller: "<Biller> Bill <ref> of Rs.X paid … from <account>". The biller
+// is the sentence SUBJECT before "Bill", not the "from <account>" payment source that the
+// generic MERCHANT_REGEX would otherwise grab. Skips a leading "Bill Paid!" header, then
+// captures the biller up to " Bill ", requiring a nearby "paid" so it only fires on this
+// bill-payment shape. e.g. "Bill Paid! SBI Life Bill 2x430… paid … from HDFC…" → "SBI Life".
+const BILLPAY_MERCHANT_REGEX =
+  /(?:bill\s+paid[!:.]?\s*)?([A-Za-z][A-Za-z0-9&.\- ]{1,39}?)\s+bill\b[\s\S]{0,45}\bpaid\b/i;
 
 // Payment acknowledgements for credit cards (not new spend/income transactions).
 const CC_PAYMENT_NOTIFICATION_REGEX =
@@ -325,7 +344,7 @@ const CC_PAYMENT_OUTGOING_REGEX =
 // These contain an amount (the "eligible spend") but no actual transaction happened.
 // Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
 const PROMOTIONAL_OFFER_REGEX =
-  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b|\b(?:extra|flat|bonus)\s+cashback\b|\b\d{1,3}\s*%\s*(?:extra\s+|flat\s+|bonus\s+)?cashback\b|\b(?:get|earn|enjoy|avail|win|unlock)\s+(?:up\s*to\s+)?(?:\d{1,3}\s*%\s*)?(?:extra\s+|flat\s+)?cashback\b|\bmax\.?\s*cashback\b|\bcashback\s+up\s?to\b|\bcashback\s+on\b|\b(?:flat|extra|bonus|get|earn|win|enjoy|avail|unlock|upto|up\s?to)\s+(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?\s*cashback\b/i;
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b|\b(?:extra|flat|bonus)\s+cashback\b|\b\d{1,3}\s*%\s*(?:extra\s+|flat\s+|bonus\s+)?cashback\b|\b(?:get|earn|enjoy|avail|win|unlock)\s+(?:up\s*to\s+)?(?:\d{1,3}\s*%\s*)?(?:extra\s+|flat\s+)?cashback\b|\bmax\.?\s*cashback\b|\bcashback\s+up\s?to\b|\bcashback\s+on\b|\b(?:flat|extra|bonus|get|earn|win|enjoy|avail|unlock|upto|up\s?to)\s+(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?\s*cashback\b|\b(?:instant|flat|extra|bonus|festive)\s+discount\b|\b\d{1,3}\s*%\s*(?:instant\s+|flat\s+)?discount\b|\b(?:get|earn|enjoy|avail|save|unlock|grab)\s+(?:up\s*to\s+)?(?:(?:\d{1,3}\s*%|(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?)\s*)?(?:instant\s+|flat\s+)?discount\b|\bmax\.?\s*discount\b|\bdiscount\s+(?:on|at|up\s?to|of\s+up\s?to)\b/i;
 
 // EMI conversion NOTICE — an already-booked purchase being restructured into
 // instalments ("...purchase of Rs.45,000 ... has been converted to 6 Months EMI").
@@ -358,7 +377,21 @@ const OTP_MESSAGE_REGEX =
 // to …", "DECLINED: … Insufficient Funds"). NOTE: "reversed" is deliberately NOT
 // listed — a genuine reversal is a real CREDIT back and must still book.
 const FAILED_TRANSACTION_REGEX =
-  /\b(?:transaction|txn|payment|request|purchase|attempt|withdrawal)\s+(?:was\s+|has\s+been\s+|is\s+)?(?:declined|failed|blocked|rejected|unsuccessful|not\s+successful)\b|\b(?:declined|failed|blocked|rejected|unsuccessful)\s+(?:due\s+to|at|because|as|:)|\bwas\s+(?:declined|blocked|rejected|unsuccessful)\b/i;
+  /\b(?:transaction|txn|payment|request|purchase|attempt|withdrawal)\s+(?:was\s+|has\s+been\s+|is\s+)?(?:declined|failed|blocked|rejected|unsuccessful|not\s+successful)\b|\b(?:declined|failed|blocked|rejected|unsuccessful)\s+(?:due\s+to|at|because|as|:)|\bwas\s+(?:declined|blocked|rejected|unsuccessful)\b|\b(?:transaction|txn|payment|upi)\b[\s\S]{0,45}?\bhas\s+failed\b|\b(?:amount\s+not\s+debited|not\s+debited|no\s+amount\s+(?:was\s+)?debited)\b/i;
+
+// Informational notices that CARRY an amount but book NO transaction — the #1 source of
+// "phantom transaction" false positives. These phrases are notice-EXCLUSIVE (never appear
+// in a real completed single-txn SMS): a spend SUMMARY, a limit STATEMENT, a conditional
+// "may be charged", or a FUTURE credit/debit notice ("scheduled/expected to be debited",
+// "will mature"). Rejected unconditionally. (Real spends say "Avl limit Rs.X", not
+// "limit is Rs.X"; a real spend line is "Rs.X spent at MERCHANT", never "spent … this month".)
+const NON_TXN_NOTICE_REGEX =
+  /\byou\s+have\s+spent\b|\bspent\s+(?:rs\.?|inr|₹)?\s*[\d,]+(?:\.\d+)?\s+(?:so\s+far\s+)?this\s+month\b|\btotal\s+spends?\b|\b(?:available|avl\.?)\s+limit\s+is\b|\b(?:you\s+)?(?:may|might)\s+be\s+charged\b|\bwill\s+mature\b|\b(?:scheduled|expected|due|set|going)\s+to\s+be\s+(?:auto[\s-]?)?(?:debited|credited|deducted|charged)\b/i;
+
+// Balance / funds ALERTS — reject ONLY when no real transaction is also present, since an
+// advisory ("… low balance, add funds") can tail a genuine debit ("Rs.500 debited. Low balance.").
+const BALANCE_ALERT_REGEX =
+  /\bbalance\s+is\s+low\b|\blow\s+balance\b|\binsufficient\s+(?:balance|funds)\b|\badd\s+funds\b|\bmaintain\s+(?:a\s+)?(?:minimum|min\.?)\s+balance\b/i;
 
 // Pre-authorisation / hold / refundable security deposit — money is only BLOCKED,
 // not spent (released later), so it must not book. e.g. "Pre-Auth Alert: INR 5000
@@ -366,7 +399,7 @@ const FAILED_TRANSACTION_REGEX =
 // be released post trip". The "released"/"not a charge" signals are the safe anchors
 // (bare "security deposit" alone is too broad — a real deposit payment can be a spend).
 const HOLD_PREAUTH_REGEX =
-  /\bpre[\s-]?auth(?:oriz|oris)?(?:ation|ed)?\b|\bauthorization\s+hold\b|\bamount\s+held\b|\bheld\s+on\s+your\b|\bthis\s+is\s+not\s+an?\s+(?:actual\s+)?charge\b|\bwill\s+be\s+released\b|\breleased\s+(?:post|after|on)\b/i;
+  /\bpre[\s-]?auth(?:oriz|oris)?(?:ation|ed)?\b|\bauthorization\s+hold\b|\bamount\s+held\b|\bheld\s+on\s+your\b|\bthis\s+is\s+not\s+an?\s+(?:actual\s+)?charge\b|\bwill\s+be\s+released\b|\breleased\s+(?:post|after|on)\b|\bhold\s+placed\b|\bplaced\s+a\s+hold\b|\bon\s+hold\b|\b(?:final\s+)?amount\s+(?:may|might)\s+vary\b|\btemporarily\s+blocked\b/i;
 
 // AutoPay / NACH mandate SETUP confirmations — the mandate was registered, no money moved yet.
 // Distinct from an actual mandate EXECUTION ("AutoPay of Rs 500 debited"), which has a debit verb.
@@ -408,6 +441,7 @@ const STRONG_TRANSACTION_WORDS = [
   'credited',
   'paid',
   'spent',
+  'sent',
   'withdrawn',
   'deducted',
   'transferred',
@@ -418,17 +452,28 @@ const STRONG_TRANSACTION_WORDS = [
   'levied',
 ];
 
+// A withheld TAX amount shown alongside the primary credit ("Salary Rs.95000 credited.
+// TDS of Rs.5000 deducted.") — never THE transaction amount when a primary exists. Scoped
+// to TDS/TCS only: a "surcharge"/"fee" can legitimately BE the transaction (e.g. a fuel
+// surcharge SMS), so those must stay eligible.
+const SECONDARY_AMOUNT_CONTEXT = /\b(?:tds|tcs)\b\s*(?:of\s+)?(?:rs\.?|inr|₹)?\s*$/i;
+
 const extractAmountNearTransactionKeyword = (text) => {
   const amountMatches = [];
   let m;
   while ((m = AMOUNT_REGEX_GLOBAL.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, m.index - 20), m.index);
     amountMatches.push({
       amount: toNumber(m[1] || m[2]),
       index: m.index,
+      secondary: SECONDARY_AMOUNT_CONTEXT.test(before),
     });
   }
   AMOUNT_REGEX_GLOBAL.lastIndex = 0;
   if (amountMatches.length === 0) return { amount: 0, reason: 'no_amount_match', keyword: null };
+  // Prefer primary amounts; only fall back to fee/tax amounts if that's all there is.
+  const primaryMatches = amountMatches.filter((a) => !a.secondary);
+  const candidates = primaryMatches.length > 0 ? primaryMatches : amountMatches;
 
   const eventHits = [];
   EVENT_PATTERNS.forEach(({ regex }) => {
@@ -442,7 +487,7 @@ const extractAmountNearTransactionKeyword = (text) => {
   if (eventHits.length > 0) {
     let best = null;
     eventHits.forEach((ev) => {
-      amountMatches.forEach((a) => {
+      candidates.forEach((a) => {
         const distance = Math.abs(a.index - ev.index);
         if (distance > 45) return;
         if (!best || distance < best.distance) {
@@ -459,7 +504,7 @@ const extractAmountNearTransactionKeyword = (text) => {
     }
   }
 
-  for (const a of amountMatches) {
+  for (const a of candidates) {
     const around = text.slice(Math.max(0, a.index - 24), Math.min(text.length, a.index + 24));
     if (!NON_TXN_AMOUNT_HINTS.test(around)) {
       return {
@@ -470,7 +515,7 @@ const extractAmountNearTransactionKeyword = (text) => {
     }
   }
   return {
-    amount: amountMatches[0].amount || 0,
+    amount: candidates[0].amount || 0,
     reason: 'fallback_first_amount',
     keyword: null,
   };
@@ -502,7 +547,7 @@ const inferAccountType = (text) => {
   //    statement, "billed to". Recovers CC formats that OMIT the word "credit"
   //    (Amex, OneCard, "Axis Card xx1002 … Avl Limit Rs.X").
   if (
-    /(?:credit|avl\.?|available|card)\s+limit|\boutstanding\b|(?:min(?:imum)?|total)\s+(?:amt|amount)\s+due|statement\s+(?:generated|is\s+ready)|\bbilled\s+to\b/i.test(text)
+    /(?:credit|avl\.?|available|card)\s+limit|\bcr\.?\s+limit\b|\boutstanding\b|(?:min(?:imum)?|total)\s+(?:amt|amount)\s+due|statement\s+(?:generated|is\s+ready)|\bbilled\s+to\b/i.test(text)
   ) {
     return ACCOUNT_TYPES.CREDIT_CARD;
   }
@@ -593,10 +638,13 @@ export const parseMessageDetailed = (message, opts = {}) => {
   const bodyHasAccountRef =
     ACCOUNT_REF_REGEX.test(text) &&
     hasAnyWord(normalized, BODY_DEBIT_CREDIT_TERMS);
+  // A wallet-brand phrase + a debit/credit term stands in for the missing a/c mask.
+  const bodyHasWalletSignal =
+    WALLET_BODY_REGEX.test(text) && hasAnyWord(normalized, BODY_DEBIT_CREDIT_TERMS);
   const strongKeywordSignal = hasAnyWord(normalized, STRONG_TRANSACTION_WORDS);
   const nonFinancialDlt = isLikelyNonFinancialDltSender(opts.sender);
 
-  if (!senderOk && (!bodyHasAccountRef || !strongKeywordSignal || nonFinancialDlt)) {
+  if (!senderOk && ((!bodyHasAccountRef && !bodyHasWalletSignal) || !strongKeywordSignal || nonFinancialDlt)) {
     return {
       ok: false,
       error: {
@@ -638,7 +686,13 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // Declined / failed / blocked transaction — no money moved. Runs AFTER the promo
   // filter so a phishing "A/c blocked due to KYC … claim reward at <url>" decoy is
   // classified as promotional, not as a genuine transaction decline.
-  if (FAILED_TRANSACTION_REGEX.test(text)) {
+  // Guard: a COMPLETED reversal / refund credit-back ("Rs.320 reversed to A/c … for
+  // failed ATM txn", "Rs.1499 credited back to your card") is a genuine credit — the
+  // word "failed" only explains WHY money returned, so it must NOT be swallowed by the
+  // failed-txn filter. Requires a completed credit-back phrase — a FUTURE/conditional
+  // "amount WILL BE reversed if debited" is still a genuine decline and stays rejected.
+  const isReversalCredit = /\b(?:reversed\s+to|credited\s+back|refunded\s+to|refund\s+of|returned\s+to\s+your)\b/i.test(text);
+  if (FAILED_TRANSACTION_REGEX.test(text) && !isReversalCredit) {
     return {
       ok: false,
       error: {
@@ -647,6 +701,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
       },
     };
   }
+
 
   // Pre-auth / hold / refundable security deposit — money is only held, not spent.
   if (HOLD_PREAUTH_REGEX.test(text)) {
@@ -818,6 +873,33 @@ export const parseMessageDetailed = (message, opts = {}) => {
     };
   }
 
+  // Informational notice carrying an amount (spend summary, limit statement, conditional
+  // "may be charged", future "scheduled/expected to be debited", "will mature"). Runs
+  // AFTER the CC-payment/bill/outgoing + future interceptors so those keep their specific
+  // codes/side-effects; these phrases are notice-EXCLUSIVE, so reject outright.
+  if (NON_TXN_NOTICE_REGEX.test(text)) {
+    return {
+      ok: false,
+      error: {
+        code: 'non_transaction_notice',
+        message: 'Informational notice (spend summary, limit statement, or future/conditional debit) — not a completed transaction.',
+      },
+    };
+  }
+  // Balance / funds alert — reject only if no genuine completed debit/credit/levy is present
+  // (an advisory can tail a real debit; "penalty … levied … due to insufficient funds" IS real).
+  const hasCompletedTxnVerb =
+    /\b(?:debited|credited|deposited|withdrawn|deducted|refunded|levied|charged|spent|paid)\b/i.test(text);
+  if (BALANCE_ALERT_REGEX.test(text) && !hasCompletedTxnVerb) {
+    return {
+      ok: false,
+      error: {
+        code: 'balance_alert',
+        message: 'Low-balance / minimum-balance alert — no money moved, so it was not added.',
+      },
+    };
+  }
+
   // ── Gate 2: Mandatory transaction phrase ──────────────────────────────────
   // Must contain a concrete past-tense financial phrase.
   const phraseHit = includesAny(lower, TRANSACTION_PHRASES) || hasAnyWord(normalized, TRANSACTION_PHRASES);
@@ -850,6 +932,17 @@ export const parseMessageDetailed = (message, opts = {}) => {
       },
     };
   }
+  // Sanity cap — a single txn over ₹10 crore (MAX_ALLOWED_AMOUNT) is almost certainly a
+  // misparse (e.g. a limit/reference number read as the amount), so reject it.
+  if (amount > MAX_ALLOWED_AMOUNT) {
+    return {
+      ok: false,
+      error: {
+        code: 'amount_exceeds_limit',
+        message: `Amount exceeds the ₹${MAX_ALLOWED_AMOUNT.toLocaleString('en-IN')} limit — likely a misparse.`,
+      },
+    };
+  }
 
   // ── Extract: debit vs credit ──────────────────────────────────────────────
   // Check for "credited to beneficiary" or "debited from beneficiary" patterns.
@@ -871,13 +964,16 @@ export const parseMessageDetailed = (message, opts = {}) => {
         ? false // "credited to beneficiary" = user sent money = DEBIT
         : debitedFromOther
           ? true // "debited from beneficiary" = user received money = CREDIT
-          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b|\b(?:neft|imps|rtgs|ach)\b[\s:\/-]*cr\b/i.test(textSansFuture);
+          : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b|\b(?:neft|imps|rtgs|ach|upi)\b[\s:\/-]*cr\b/i.test(textSansFuture);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
   const note = text.length > 120 ? text.slice(0, 117) + '…' : text;
 
   // ── Extract: merchant ─────────────────────────────────────────────────────
+  // BillPay biller wins first — its "from <account>" source would otherwise be captured
+  // by MERCHANT_REGEX's "from" anchor.
   let merchant =
+    text.match(BILLPAY_MERCHANT_REGEX)?.[1]?.trim() ||
     text.match(BENEFICIARY_CREDITED_REGEX)?.[1]?.trim() ||
     text.match(VPA_REGEX)?.[1] ||
     text.match(MERCHANT_REGEX)?.[1]?.trim() ||
