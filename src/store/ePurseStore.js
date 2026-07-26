@@ -620,6 +620,10 @@ export const useEPurseStore = create(
       themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
       darkMode: false,             // reserved for future dark-theme rollout
 
+      // Dashboard preference: show the "This Week" spend summary card. On by
+      // default; toggled from the Settings sheet. Persisted (see partialize).
+      showWeeklySummary: true,
+
       // Notification IDs: { [personKey]: notificationId }  — used to cancel/update reminders
       notificationIds: {},
       // CC bill-due OS reminders: `${cardLast4||bankName}:${dueDate}` → scheduled id, so a
@@ -730,6 +734,8 @@ export const useEPurseStore = create(
       // ----- theme setters ----------------------------------------------
       setThemeId: (id) => set({ themeId: id || DEFAULT_THEME_ID }),
       setDarkMode: (v) => set({ darkMode: !!v }),
+      /** Dashboard: show/hide the weekly spend summary card. */
+      setShowWeeklySummary: (v) => set({ showWeeklySummary: !!v }),
 
       setNotificationId: (personKey, id) =>
         set((s) => ({ notificationIds: { ...s.notificationIds, [personKey]: id } })),
@@ -3241,6 +3247,7 @@ export const useEPurseStore = create(
           contactsPermissionGranted: false,
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
+          showWeeklySummary: true,
           notificationIds: {},
           ccDueReminderIds: {},
           subscriptionHikesNotified: [],
@@ -3649,6 +3656,7 @@ export const useEPurseStore = create(
         contactsPermissionGranted: state.contactsPermissionGranted,
         themeId: state.themeId,
         darkMode: state.darkMode,
+        showWeeklySummary: state.showWeeklySummary ?? true,
         notificationIds: state.notificationIds,
         ccDueReminderIds: state.ccDueReminderIds ?? {},
         subscriptionHikesNotified: state.subscriptionHikesNotified ?? [],
@@ -3847,6 +3855,92 @@ export const selectExpenseStats = (period) => (state) => {
     net: debits - credits,
     count: eligible.length,
     recent,
+  };
+};
+
+// Weekday letters, Monday-first — matches the perDay order in selectWeeklySummary.
+const WEEK_DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+/**
+ * Weekly spend summary for the Dashboard "This Week" card.
+ * SINGLE SOURCE for all weekly-card math. Monday-anchored week
+ * (Mon 00:00 → next Mon 00:00, local time). Uses the SAME spend eligibility as
+ * getMonthlySpend: excludes ignored / private / NON_SPEND / group-excluded, and
+ * uses debitDisplayAmount so split shares count as your share only.
+ *
+ * @returns {{
+ *   total: number, prevTotal: number, deltaPct: number|null,
+ *   dailyAvg: number, daysElapsed: number, txnCount: number, maxDay: number,
+ *   perDay: Array<{ label:string, amount:number, isToday:boolean, isFuture:boolean }>,
+ *   topCategory: { id:string, name:string, emoji:string, color:string, total:number }|null,
+ *   weekStartMs: number, weekEndMs: number,
+ * }}
+ */
+export const selectWeeklySummary = (state) => {
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7;   // 0 = Mon … 6 = Sun
+  const weekStart   = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow, 0, 0, 0, 0);
+  const weekStartMs = weekStart.getTime();
+  const weekEndMs   = weekStartMs + 7 * DAY_MS;   // exclusive upper bound
+  const prevStartMs = weekStartMs - 7 * DAY_MS;
+
+  const isSpend = (t) =>
+    !t.isIgnored &&
+    !t.isHidden &&
+    t.type === TRANSACTION_TYPES.DEBIT &&
+    !NON_SPEND_CATEGORY_IDS.has(t.categoryId) &&
+    !isGroupExcluded(t, state.groups);
+
+  const perDay = WEEK_DAY_LABELS.map((label, i) => ({
+    label,
+    amount:   0,
+    isToday:  i === dow,
+    isFuture: i > dow,
+  }));
+
+  const catTotals = {};
+  let total = 0;
+  let prevTotal = 0;
+  let txnCount = 0;
+
+  state.transactions.forEach((t) => {
+    if (!isSpend(t)) return;
+    const ts = new Date(t.createdAt).getTime();
+    if (ts >= weekStartMs && ts < weekEndMs) {
+      const amt = debitDisplayAmount(t);
+      total += amt;
+      txnCount += 1;
+      const dayIdx = Math.floor((ts - weekStartMs) / DAY_MS);
+      if (dayIdx >= 0 && dayIdx < 7) perDay[dayIdx].amount += amt;
+      catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + amt;
+    } else if (ts >= prevStartMs && ts < weekStartMs) {
+      prevTotal += debitDisplayAmount(t);
+    }
+  });
+
+  const maxDay      = perDay.reduce((m, d) => Math.max(m, d.amount), 0);
+  const daysElapsed = dow + 1;
+  const dailyAvg    = total / daysElapsed;
+  const deltaPct    = prevTotal > 0 ? ((total - prevTotal) / prevTotal) * 100 : null;
+
+  let topCategory = null;
+  const topId = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
+  if (topId) {
+    const c = (state.categories || []).find((x) => x.id === topId);
+    topCategory = {
+      id:    topId,
+      name:  c?.name  || 'Other',
+      emoji: c?.emoji || '📌',
+      color: c?.color || '#9CA3AF',
+      total: catTotals[topId],
+    };
+  }
+
+  return {
+    total, prevTotal, deltaPct,
+    dailyAvg, daysElapsed, txnCount, maxDay,
+    perDay, topCategory,
+    weekStartMs, weekEndMs,
   };
 };
 

@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Animated, Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, RefreshControl,
+  StatusBar, RefreshControl, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
@@ -34,6 +34,7 @@ import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import { BudgetSummary } from '../components/BudgetSummary';
+import WeeklySummaryCard from '../components/WeeklySummaryCard';
 import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
 import BellIcon from '../components/BellIcon';
@@ -106,6 +107,8 @@ const DashboardScreen = ({ navigation }) => {
   const addGroupExpense = useEPurseStore((s) => s.addGroupExpense);
   const pendingCelebration  = useEPurseStore((s) => s.pendingCelebration);
   const clearPendingCelebration = useEPurseStore((s) => s.clearPendingCelebration);
+  const showWeeklySummary    = useEPurseStore((s) => s.showWeeklySummary);
+  const setShowWeeklySummary = useEPurseStore((s) => s.setShowWeeklySummary);
 
   const { onScroll, scrollEventThrottle } = useTabBarScroll();
   const insets = useSafeAreaInsets();
@@ -374,6 +377,11 @@ const DashboardScreen = ({ navigation }) => {
 
         {/* Monthly budget — empty CTA or active progress */}
         <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
+
+        {/* Weekly spend summary — opt-in via Settings sheet */}
+        {showWeeklySummary && (
+          <WeeklySummaryCard onPress={() => navigation.navigate('Insights', { defaultTab: 'analytics' })} />
+        )}
 
         {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
         <DailyQueueStack />
@@ -733,6 +741,20 @@ const DashboardScreen = ({ navigation }) => {
             ]}
           >
             <View style={styles.settingsHandle} />
+
+            {/* Preference: weekly summary card on the dashboard */}
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsRowEmoji}>📅</Text>
+              <Text style={styles.settingsRowLabel}>Weekly summary card</Text>
+              <Switch
+                value={showWeeklySummary}
+                onValueChange={setShowWeeklySummary}
+                trackColor={{ true: theme.primary, false: '#D1D5DB' }}
+                thumbColor="#fff"
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
+
             {[
               { emoji: '📂', label: 'Categories', route: 'Categories' },
               { emoji: '🔬', label: 'SMS Diagnostic', route: 'SmsDiagnostic' },
