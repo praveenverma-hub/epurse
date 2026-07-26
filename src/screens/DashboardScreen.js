@@ -34,7 +34,7 @@ import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import { BudgetSummary } from '../components/BudgetSummary';
-import WeeklySummaryCard from '../components/WeeklySummaryCard';
+import WeeklyRecapModal from '../components/WeeklyRecapModal';
 import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
 import BellIcon from '../components/BellIcon';
@@ -243,8 +243,6 @@ const DashboardScreen = ({ navigation }) => {
   }, []);
 
   const periodTitle = PERIODS.find((p) => p.key === period)?.title ?? 'period';
-  // periodStats.net = debits − credits (positive = net expense outflow).
-  const periodNet = periodStats.net;
 
   // Exact label for the transactions section header
   const txnSectionLabel = period === 'M'
@@ -323,10 +321,10 @@ const DashboardScreen = ({ navigation }) => {
         )}
         renderHero={() => (
           <>
-          {/* Net expense (debits − credits) for the selected period. */}
+          {/* Spend (expenses − refunds) for the selected period. */}
           <View style={styles.balanceBlock}>
-            <Text style={styles.balanceLabel}>ePurse net expense {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
-            <Text style={styles.balanceValue}>{formatCurrency(periodNet)}</Text>
+            <Text style={styles.balanceLabel}>Spent {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+            <Text style={styles.balanceValue}>{formatCurrency(periodStats.spent)}</Text>
           </View>
 
           {/* ── W / M / Y toggle ── */}
@@ -348,19 +346,15 @@ const DashboardScreen = ({ navigation }) => {
             <Text style={styles.dataInfo}>{dataInfo}</Text>
           </View>
 
-          {/* ── Period spent / received pills ──
-              Spent = expenses − refunds (net); Received = income + P2P-in. */}
+          {/* ── Period income / refund pills (spend is the big number above) ── */}
           <View style={styles.statsRow}>
             <View style={styles.statPill}>
-              <Text style={styles.statLabel}>Spent {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
-              <Text style={styles.statValue}>{formatCurrency(periodStats.spent)}</Text>
-              {periodStats.refunds > 0 && (
-                <Text style={styles.statSub}>incl. {formatCurrency(periodStats.refunds)} refunded</Text>
-              )}
+              <Text style={styles.statLabel}>Income {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.received)}</Text>
             </View>
             <View style={styles.statPill}>
-              <Text style={styles.statLabel}>Received {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
-              <Text style={styles.statValue}>{formatCurrency(periodStats.received)}</Text>
+              <Text style={styles.statLabel}>Refunds {period === 'D' ? 'today' : `this ${periodTitle}`}</Text>
+              <Text style={styles.statValue}>{formatCurrency(periodStats.refunds)}</Text>
             </View>
           </View>
           </>
@@ -397,10 +391,8 @@ const DashboardScreen = ({ navigation }) => {
         {/* Monthly budget — empty CTA or active progress */}
         <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
 
-        {/* Weekly spend summary — opt-in via Settings sheet */}
-        {showWeeklySummary && (
-          <WeeklySummaryCard onPress={() => navigation.navigate('Insights', { defaultTab: 'analytics' })} />
-        )}
+        {/* Weekly spend recap is no longer an inline card — it appears once, after
+            a week ends, as a centered modal (WeeklyRecapModal below). */}
 
         {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
         <DailyQueueStack />
@@ -663,6 +655,9 @@ const DashboardScreen = ({ navigation }) => {
           modal; folds in the budget streak/saved wrap-up). Then persists as a
           dashboard card below. */}
       <MonthlyRecapModal />
+
+      {/* Weekly recap — one-time centered modal after a week ends */}
+      <WeeklyRecapModal />
 
       {/* Day-1 Aware Run welcome — auto-dismisses after 4.5s */}
       <WelcomeStreakModal />

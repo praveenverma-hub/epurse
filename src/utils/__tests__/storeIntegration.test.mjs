@@ -25,6 +25,7 @@ const reset = () =>
     pendingCCPaymentQueue: [], ccHandledSmsIds: [], userPhones: [],
     budgetHistory: {}, showMonthlyRecap: true, pendingMonthlyRecap: null,
     recapMonthHandled: null, monthlyRecapCardDismissed: null,
+    showWeeklySummary: true, pendingWeeklyRecap: null, weeklyRecapHandled: null,
   });
 
 const ingest = (sender, body, opts = {}) =>
@@ -401,6 +402,57 @@ ingest('HDFCBK', 'Rs.500 credited to A/c XX4021 by JOHN on 22-07-26.', { smsId: 
   const shoppingUn = unbud.find((r) => r.label && r.label.toLowerCase().includes('shop'));
   check('Unbudgeted breakdown present (shopping 700)', shoppingUn && Math.round(shoppingUn.total) === 700, JSON.stringify(unbud));
 }
+
+// ── Weekly recap: fires once for a completed week, only when it had activity ──
+{
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7;
+  const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow, 0, 0, 0, 0).getTime();
+  const lastWeekStart = thisWeekStart - 7 * 24 * 60 * 60 * 1000;
+  const midLastWeek = new Date(lastWeekStart + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  // No activity last week → not queued.
+  reset();
+  useStore.getState().maybeQueueWeeklyRecap();
+  check('Weekly recap: no data last week → not queued', useStore.getState().pendingWeeklyRecap === null);
+
+  // Activity last week → queued once, anchored inside that week.
+  reset();
+  useStore.setState({ transactions: [
+    { id: 'w1', amount: 500, type: 'debit', categoryId: 'food', merchant: 'X', accountId: 'acc1', createdAt: midLastWeek },
+  ] });
+  useStore.getState().maybeQueueWeeklyRecap();
+  const anchor = useStore.getState().pendingWeeklyRecap;
+  check('Weekly recap: queued with an anchor inside last week',
+    anchor !== null && anchor >= lastWeekStart && anchor < thisWeekStart, `got ${anchor}`);
+
+  // selectWeeklySummary(state, anchor) reports the ANCHORED (last) week's total,
+  // with no "today"/"future" markers since that week has already ended.
+  const summary = mod.selectWeeklySummary(useStore.getState(), anchor);
+  check('Anchored weekly summary: totals the completed week (500)', Math.round(summary.total) === 500, `got ${summary.total}`);
+  check('Anchored weekly summary: no day marked as today', !summary.perDay.some((d) => d.isToday));
+  check('Anchored weekly summary: no day marked as future', !summary.perDay.some((d) => d.isFuture));
+
+  // Idempotent: clearing + re-running the same week doesn't re-queue.
+  useStore.getState().clearPendingWeeklyRecap();
+  useStore.getState().maybeQueueWeeklyRecap();
+  check('Weekly recap: does not re-queue the same week', useStore.getState().pendingWeeklyRecap === null,
+    `got ${useStore.getState().pendingWeeklyRecap}`);
+
+  // Toggle off → never queues.
+  reset();
+  useStore.setState({ showWeeklySummary: false, transactions: [
+    { id: 'w2', amount: 500, type: 'debit', categoryId: 'food', merchant: 'X', accountId: 'acc1', createdAt: midLastWeek },
+  ] });
+  useStore.getState().maybeQueueWeeklyRecap();
+  check('Weekly recap: disabled toggle → not queued', useStore.getState().pendingWeeklyRecap === null);
+}
+
+// ── getMonthlyRefunds ───────────────────────────────────────────────────────
+reset();
+ingest('HDFCBK', 'Rs.1000 debited from A/c XX4021 at AMAZON on 22-07-26.', { smsId: 'gr1' });
+ingest('HDFCBK', 'Rs.300 refunded to A/c XX4021 by AMAZON on 22-07-26.',   { smsId: 'gr2' });
+check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds()) === 300, `got ${useStore.getState().getMonthlyRefunds()}`);
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

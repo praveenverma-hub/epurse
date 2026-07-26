@@ -86,7 +86,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   // and subscription detection match the Spent/Earned summary, which already
   // excludes them via getMonthlySpend / getCategoryBreakdown.
   const visibleTxns = useMemo(
-    () => transactions.filter((t) => !isGroupExcluded(t, groups)),
+    () => transactions.filter((t) => !t.isIgnored && !isGroupExcluded(t, groups)),
     [transactions, groups],
   );
   const dailyData = useMemo(() => getDailyCumulative(visibleTxns, date), [visibleTxns, date]);
@@ -96,6 +96,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const breakdown = useEPurseStore((s) => s.getCategoryBreakdown(date));
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
+  const monthRefund = useEPurseStore((s) => s.getMonthlyRefunds(date));
 
   // ── Group focus (from the carousel in the "Spend by group" card) ─────────────
   // Focusing a group re-draws ONLY the category chart in that same card from that
@@ -233,8 +234,8 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
               <View style={styles.summaryRow}>
                 <SummaryStat label="Spent" value={monthSpend} />
-                <SummaryStat label="Earned" value={monthIncome} />
-                <SummaryStat label="Net" value={monthIncome - monthSpend} />
+                <SummaryStat label="Income" value={monthIncome} />
+                <SummaryStat label="Refunds" value={monthRefund} />
               </View>
             </>
           )}
@@ -255,9 +256,9 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             </TouchableOpacity>
           </View>
           <View style={styles.summaryRowLight}>
-            <SummaryStatLight label="Spent"  value={monthSpend} />
-            <SummaryStatLight label="Earned" value={monthIncome} />
-            <SummaryStatLight label="Net"    value={monthIncome - monthSpend} />
+            <SummaryStatLight label="Spent"   value={monthSpend} />
+            <SummaryStatLight label="Income"  value={monthIncome} />
+            <SummaryStatLight label="Refunds" value={monthRefund} />
           </View>
         </View>
       )}

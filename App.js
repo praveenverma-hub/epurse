@@ -60,21 +60,24 @@ function BudgetRolloverBoot() {
   const nudge      = useEPurseStore((s) => s.maybeFireMidmonthNudge);
   const subAlerts  = useEPurseStore((s) => s.maybeFireSubscriptionAlerts);
   const recap      = useEPurseStore((s) => s.maybeQueueMonthlyRecap);
+  const weeklyRecap = useEPurseStore((s) => s.maybeQueueWeeklyRecap);
   useEffect(() => {
     rollover();
     nudge();
     subAlerts();
     recap();
+    weeklyRecap();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         rollover();
         nudge();
         subAlerts();
         recap();
+        weeklyRecap();
       }
     });
     return () => sub.remove();
-  }, [rollover, nudge, subAlerts, recap]);
+  }, [rollover, nudge, subAlerts, recap, weeklyRecap]);
   return null;
 }
 

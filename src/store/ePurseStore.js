@@ -632,9 +632,14 @@ export const useEPurseStore = create(
       themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
       darkMode: false,             // reserved for future dark-theme rollout
 
-      // Dashboard preference: show the "This Week" spend summary card. On by
-      // default; toggled from the Settings sheet. Persisted (see partialize).
+      // Dashboard preference: show the weekly spend recap. On by default; toggled
+      // from the Settings sheet. The recap now appears ONLY after a week ends, as a
+      // one-time centered modal (no persistent card). Persisted (see partialize).
       showWeeklySummary: true,
+      // week-start key (YYYY-M-D of Monday) we've already shown the recap for.
+      weeklyRecapHandled: null,
+      // Anchor ms (a day in the just-ended week) to render the modal for now (ephemeral).
+      pendingWeeklyRecap: null,
 
       // ── Monthly recap ────────────────────────────────────────────────────
       // Month-end wrap-up: a one-time modal on first open of a new month, then
@@ -761,8 +766,35 @@ export const useEPurseStore = create(
       // ----- theme setters ----------------------------------------------
       setThemeId: (id) => set({ themeId: id || DEFAULT_THEME_ID }),
       setDarkMode: (v) => set({ darkMode: !!v }),
-      /** Dashboard: show/hide the weekly spend summary card. */
+      /** Dashboard: show/hide the weekly spend recap (week-end modal). */
       setShowWeeklySummary: (v) => set({ showWeeklySummary: !!v }),
+
+      /**
+       * Called on launch/foreground. Once a new week has begun, surface a one-time
+       * centered recap modal for the JUST-ENDED week (if it had activity). Guarded
+       * by `weeklyRecapHandled` so it shows at most once per week.
+       */
+      maybeQueueWeeklyRecap: () => {
+        const s = get();
+        if (!s.showWeeklySummary) return;
+        const now = new Date();
+        const dow = (now.getDay() + 6) % 7;
+        const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow, 0, 0, 0, 0).getTime();
+        const lastWeekStart = thisWeekStart - 7 * DAY_MS;
+        const lw = new Date(lastWeekStart);
+        const key = `${lw.getFullYear()}-${lw.getMonth() + 1}-${lw.getDate()}`;
+        if (s.weeklyRecapHandled === key) return;
+        const hasData = s.transactions.some((t) => {
+          if (t.isIgnored) return false;
+          const ts = new Date(t.createdAt).getTime();
+          return ts >= lastWeekStart && ts < thisWeekStart;
+        });
+        if (!hasData) return;
+        set({ pendingWeeklyRecap: lastWeekStart, weeklyRecapHandled: key });
+      },
+
+      /** Weekly recap modal closed. */
+      clearPendingWeeklyRecap: () => set({ pendingWeeklyRecap: null }),
 
       // ── Monthly recap actions ─────────────────────────────────────────────
       /** Settings: show/hide the monthly recap (modal + card). */
@@ -2956,6 +2988,23 @@ export const useEPurseStore = create(
         return get().monthlyAggregates[monthKey(date)]?.totalIncome || 0;
       },
 
+      // Monthly REFUNDS = sum of refund/cashback credits (isRefund) — the amount
+      // that nets down Spent. Raw-only (aggregates fold it into totalSpend, not
+      // stored separately), so older months return 0.
+      getMonthlyRefunds: (date = new Date()) => {
+        const groups = get().groups;
+        return get().transactions
+          .filter(
+            (t) =>
+              !t.isIgnored &&
+              isRefundCredit(t) &&
+              !NON_SPEND_CATS.has(t.categoryId) &&
+              !isGroupExcluded(t, groups) &&
+              isSameMonth(t.createdAt, date)
+          )
+          .reduce((s, t) => s + (t.amount || 0), 0);
+      },
+
       /**
        * Category breakdown for a month.
        * If raw transactions exist for that month, use them. Otherwise build
@@ -3352,6 +3401,8 @@ export const useEPurseStore = create(
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
           showWeeklySummary: true,
+          weeklyRecapHandled: null,
+          pendingWeeklyRecap: null,
           showMonthlyRecap: true,
           recapMonthHandled: null,
           monthlyRecapCardDismissed: null,
@@ -3766,6 +3817,7 @@ export const useEPurseStore = create(
         themeId: state.themeId,
         darkMode: state.darkMode,
         showWeeklySummary: state.showWeeklySummary ?? true,
+        weeklyRecapHandled: state.weeklyRecapHandled ?? null,
         showMonthlyRecap: state.showMonthlyRecap ?? true,
         recapMonthHandled: state.recapMonthHandled ?? null,
         monthlyRecapCardDismissed: state.monthlyRecapCardDismissed ?? null,
@@ -4001,13 +4053,21 @@ const WEEK_DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
  *   weekStartMs: number, weekEndMs: number,
  * }}
  */
-export const selectWeeklySummary = (state) => {
+export const selectWeeklySummary = (state, anchor) => {
   const now = new Date();
-  const dow = (now.getDay() + 6) % 7;   // 0 = Mon … 6 = Sun
-  const weekStart   = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow, 0, 0, 0, 0);
+  // Week CONTAINING `anchor` (default = now). Lets the week-end recap render the
+  // just-completed week by passing a day from last week.
+  const ref = anchor != null ? new Date(anchor) : now;
+  const dow = (ref.getDay() + 6) % 7;   // 0 = Mon … 6 = Sun
+  const weekStart   = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() - dow, 0, 0, 0, 0);
   const weekStartMs = weekStart.getTime();
   const weekEndMs   = weekStartMs + 7 * DAY_MS;   // exclusive upper bound
   const prevStartMs = weekStartMs - 7 * DAY_MS;
+
+  // "today" only applies when now actually falls inside this week (current week);
+  // for a past week it's -1 so nothing is marked today/future.
+  const nowMs = now.getTime();
+  const todayIdx = (nowMs >= weekStartMs && nowMs < weekEndMs) ? Math.floor((nowMs - weekStartMs) / DAY_MS) : -1;
 
   // Spend = expenses − refunds (refund credits net down via spendContribution),
   // consistent with getMonthlySpend / selectMonthlyReport.
@@ -4021,8 +4081,8 @@ export const selectWeeklySummary = (state) => {
   const perDay = WEEK_DAY_LABELS.map((label, i) => ({
     label,
     amount:   0,
-    isToday:  i === dow,
-    isFuture: i > dow,
+    isToday:  i === todayIdx,
+    isFuture: todayIdx >= 0 ? i > todayIdx : false,
   }));
 
   const catTotals = {};
@@ -4052,7 +4112,8 @@ export const selectWeeklySummary = (state) => {
   prevTotal = Math.max(0, prevTotal);
 
   const maxDay      = perDay.reduce((m, d) => Math.max(m, d.amount), 0);
-  const daysElapsed = dow + 1;
+  // Current week → days so far (today+1); a completed/past week → all 7.
+  const daysElapsed = todayIdx >= 0 ? todayIdx + 1 : 7;
   const dailyAvg    = total / daysElapsed;
   const deltaPct    = prevTotal > 0 ? ((total - prevTotal) / prevTotal) * 100 : null;
 

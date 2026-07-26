@@ -60,7 +60,8 @@ const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({ monthKey, isNew, on
     if (busy) return;
     setBusy(true);
     try {
-      await exportMonthlyRecap(report, userName);
+      const res = await exportMonthlyRecap(report, userName);
+      if (res.outcome === 'saved') toast.success('Report saved', `PDF saved to ${res.location || 'your device'}.`);
       onDownloaded?.();
     } catch (e) {
       toast.error('Could not create the report', 'Please try again in a moment.');

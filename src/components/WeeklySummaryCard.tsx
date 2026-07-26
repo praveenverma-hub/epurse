@@ -13,7 +13,7 @@
 // Tapping the card calls `onPress` (Dashboard routes it to weekly analytics).
 // =============================================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -69,6 +69,9 @@ interface Palette {
 
 export interface WeeklySummaryCardProps {
   onPress?: () => void;
+  /** Render the week CONTAINING this date (default = current week). The week-end
+   *  recap passes a day from the just-ended week. */
+  anchorDate?: Date;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -93,19 +96,29 @@ const formatWeekRange = (startMs: number): string => {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const WeeklySummaryCard: React.FC<WeeklySummaryCardProps> = ({ onPress }) => {
+const WeeklySummaryCard: React.FC<WeeklySummaryCardProps> = ({ onPress, anchorDate }) => {
   const theme = useTheme() as Palette;
-  const summary = useEPurseStore(selectWeeklySummary) as WeeklySummary;
+  // Recompute only when inputs change (avoids the fresh-object-every-render warning).
+  const anchorMs = anchorDate ? anchorDate.getTime() : undefined;
+  const transactions = useEPurseStore((s) => s.transactions);
+  const groups       = useEPurseStore((s) => s.groups);
+  const categories   = useEPurseStore((s) => s.categories);
+  const summary = useMemo(
+    () => selectWeeklySummary(useEPurseStore.getState(), anchorMs) as WeeklySummary,
+    [anchorMs, transactions, groups, categories],
+  );
   const {
     total, deltaPct, dailyAvg, txnCount, maxDay,
     perDay, topCategory, weekStartMs,
   } = summary;
 
-  // Tapped bar (null → default to today). Reset when the week rolls over.
+  // Tapped bar. Default = today; for a completed week (no today) → the peak day.
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   useEffect(() => { setSelectedIdx(null); }, [weekStartMs]);
   const todayIdx  = perDay.findIndex((d) => d.isToday);
-  const activeIdx = selectedIdx ?? todayIdx;
+  const peakIdx   = perDay.reduce((mi: number, d: WeekDay, i: number, a: WeekDay[]) => (d.amount > a[mi].amount ? i : mi), 0);
+  const defaultIdx = todayIdx >= 0 ? todayIdx : peakIdx;
+  const activeIdx = selectedIdx ?? defaultIdx;
 
   // Grow bars from the baseline whenever the week or its total changes.
   const grow = useRef(new Animated.Value(0)).current;
