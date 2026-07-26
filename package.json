@@ -1,6 +1,6 @@
 {
   "name": "epurse",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "test": "npm run test:parser && npm run test:self && npm run test:group && npm run test:store",
