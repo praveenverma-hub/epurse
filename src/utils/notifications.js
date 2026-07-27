@@ -248,17 +248,19 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
 
 /**
  * Fires a "monthly recap is ready" notification on the first open of a new
- * month. No-ops without notification permission.
+ * month. No-ops without notification permission. Carries `data.monthKey` so
+ * tapping it (handled by the listener in App.js) re-opens that month's recap.
  */
-export async function fireMonthlyRecapNotification({ monthLabel }) {
+export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
   return Notifications.scheduleNotificationAsync({
     content: {
       title: `📊 Your ${monthLabel} recap is ready`,
-      body:  'See where your money went last month — open ePurse to view and download.',
+      body:  'Tap to view and download.',
       sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      data: { type: 'monthly_recap', monthKey },
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
     trigger: null,

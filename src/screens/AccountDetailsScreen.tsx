@@ -42,6 +42,7 @@ const typography = typographyBase as unknown as Record<string, import('react-nat
 import { ACCOUNT_TYPES } from '../constants/categories';
 import TransactionItemRaw from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
+import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
@@ -53,7 +54,7 @@ import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
-  txn: Txn; onLongPress?: () => void; muted?: boolean;
+  txn: Txn; onPress?: () => void; onLongPress?: () => void; muted?: boolean;
 }>;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -197,6 +198,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // ── Biometric gate ─────────────────────────────────────────────────────────
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!isSensitive);
   const [debugTxn, setDebugTxn] = useState<Txn | null>(null);
+  // Tap a shared-group row → view-only split detail (no onEdit passed — these
+  // rows are archived/onboarding-swept reference data, not meant to be edited).
+  const [groupDetailTxn, setGroupDetailTxn] = useState<Txn | null>(null);
+  const groups = useEPurseStore((s: any) => s.groups) as { id: string; type: string }[];
   const [authFailed, setAuthFailed]           = useState(false);
 
   // ── Balance anchoring — tap the balance to set/correct it; header ⓘ explains it.
@@ -499,11 +504,13 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               );
             }
+            const itemGroup = (item as any).groupId ? groups.find((g) => g.id === (item as any).groupId) : null;
             return (
               <View style={styles.txnRow}>
                 <TransactionItem
                   txn={item}
                   muted={!!(item as any).preOnboarding}
+                  onPress={itemGroup && itemGroup.type === 'shared' ? () => setGroupDetailTxn(item) : undefined}
                   onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
                 />
               </View>
@@ -527,6 +534,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       {IS_PREVIEW_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
+
+      {/* View-only — no onEdit, so the sheet's Edit pill doesn't render. These
+          rows are archived/onboarding-swept reference data, not editable here. */}
+      <GroupTxnDetailSheet txn={groupDetailTxn as any} onClose={() => setGroupDetailTxn(null)} />
 
       {/* Tweak / anchor the balance (opened by tapping the balance box). */}
       <BalanceAnchorModal

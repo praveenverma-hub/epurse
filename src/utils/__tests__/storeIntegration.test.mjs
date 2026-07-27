@@ -40,7 +40,10 @@ const check = (name, cond, detail = '') => {
   else { fail++; console.log(`  ${C.red}✗ ${name}${C.reset}  ${detail}`); }
 };
 
-const T0 = new Date('2026-07-22T10:00:00Z').getTime();
+// Anchored to real "now" (not a fixed calendar date) so this suite never goes
+// stale — CC true-up tests are dropped by applyCCPayment's 5-day age guard
+// (CC_PROMPT_MAX_AGE_MS) once a hardcoded past date falls outside that window.
+const T0 = Date.now() - 2 * 24 * 60 * 60 * 1000;
 
 // ── Dedup ────────────────────────────────────────────────────────────────────
 reset();
@@ -324,6 +327,15 @@ check('No-mask bank debit: transaction still recorded', txns().length === 1, `go
     check('includeGroups on: group block present', gon.groupSpend.length === 1);
   }
 
+  // openMonthlyRecap: tapping the notification/bell re-opens the SAME month's
+  // recap, independent of recapMonthHandled's dedup (which only guards re-firing
+  // the notification, not the user's ability to revisit it).
+  useStore.getState().clearPendingMonthlyRecap();
+  useStore.getState().openMonthlyRecap(prevMk);
+  check('openMonthlyRecap: re-opens the recap for that month', useStore.getState().pendingMonthlyRecap === prevMk,
+    `got ${useStore.getState().pendingMonthlyRecap}`);
+  useStore.getState().clearPendingMonthlyRecap();
+
   // Toggle off → never queues.
   reset();
   useStore.setState({ showMonthlyRecap: false, transactions: [
@@ -446,6 +458,23 @@ ingest('HDFCBK', 'Rs.500 credited to A/c XX4021 by JOHN on 22-07-26.', { smsId: 
   ] });
   useStore.getState().maybeQueueWeeklyRecap();
   check('Weekly recap: disabled toggle → not queued', useStore.getState().pendingWeeklyRecap === null);
+}
+
+// ── Coincidental shared transferRef between UNRELATED txns must not self-link ──
+// Real user-reported pair: different amounts, same IMPS ref. Neither leg's
+// counterparty (mobile "13245" / Acct XX232) is a registered user account/phone,
+// so propagateSelfByRef (ref-only, no amount check) must NOT tag either as self.
+reset();
+ingest('INDBNK', 'Your a/c. XXXX9452 is credited by Rs. 1500.00 on 27-07-26 by a/c linked to mobile 9XXXXXX13245 (IMPS Ref no. 620812989787). -IndianBank', { smsId: 'sr1' });
+ingest('ICICIB', 'ICICI Bank Acct XX341 debited with Rs 15,000.00 on 27-Jul-26 & Acct XX232 credited.IMPS:620812989787. Call 18002662 for dispute or SMS BLOCK 171 to 9215676766', { smsId: 'sr2' });
+{
+  const both = txns();
+  check('Shared-ref pair: both txns booked (not deduped against each other)', both.length === 2, `got ${both.length}`);
+  check('Shared-ref pair: neither wrongly tagged self', both.every((t) => t.categoryId !== 'self'), both.map((t) => `${t.amount}:${t.categoryId}`).join(','));
+  const credit = both.find((t) => t.type === 'credit');
+  const debit  = both.find((t) => t.type === 'debit');
+  check('Shared-ref pair: credit leg amount 1500', credit && Math.round(credit.amount) === 1500, `got ${credit && credit.amount}`);
+  check('Shared-ref pair: debit leg amount 15000', debit && Math.round(debit.amount) === 15000, `got ${debit && debit.amount}`);
 }
 
 // ── getMonthlyRefunds ───────────────────────────────────────────────────────

@@ -276,10 +276,13 @@ const REAL_WORLD = [
     expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 142997, accountMask: '171' },
   },
   {
+    // Jul-27 fix: "linked to mobile 9XXXXXX33221" used to leak "mobile 9XXXXXX33221"
+    // as the merchant (MERCHANT_REGEX's "to" anchor matched "linked TO mobile…").
+    // Now blocked → falls back to the sender, same as any other no-merchant credit.
     name: 'IMPS P2P credit linked to mobile',
     sender: 'INDBNK',
     sms: 'Your a/c. XXXX9532 is credited by Rs. 60000.00 on 03-06-26 by a/c linked to mobile 9XXXXXX33221 (IMPS Ref no. 615423432006). -IndianBank',
-    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 60000, accountMask: '9532', counterpartyPhone: '33221' },
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 60000, accountMask: '9532', counterpartyPhone: '33221', merchant: 'INDBNK' },
   },
   {
     name: 'Self-transfer dual-leg (debit + credit, dispute phone in footer)',
@@ -291,7 +294,22 @@ const REAL_WORLD = [
     name: 'IMPS P2P credit (older date)',
     sender: 'INDBNK',
     sms: 'Your a/c. XXXX9532 is credited by Rs. 5000.00 on 23-12-25 by a/c linked to mobile 9XXXXXX33221 (IMPS Ref no. 535718946347). -IndianBank',
-    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 5000, accountMask: '9532', counterpartyPhone: '33221' },
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 5000, accountMask: '9532', counterpartyPhone: '33221', merchant: 'INDBNK' },
+  },
+  {
+    // Real user-reported pair (Jul-27): an unrelated IndianBank P2P credit and an
+    // ICICI dual-leg debit that happen to share an IMPS ref — different amounts
+    // (1500 vs 15000), so each must parse independently and correctly on its own.
+    name: 'IMPS P2P credit (real, coincidental shared ref with unrelated ICICI txn)',
+    sender: 'INDBNK',
+    sms: 'Your a/c. XXXX9452 is credited by Rs. 1500.00 on 27-07-26 by a/c linked to mobile 9XXXXXX13245 (IMPS Ref no. 620812989787). -IndianBank',
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 1500, accountMask: '9452', counterpartyPhone: '13245', transferRef: '620812989787', merchant: 'INDBNK' },
+  },
+  {
+    name: 'ICICI dual-leg debit (real, coincidental shared ref with unrelated txn above)',
+    sender: 'ICICIB',
+    sms: 'ICICI Bank Acct XX341 debited with Rs 15,000.00 on 27-Jul-26 & Acct XX232 credited.IMPS:620812989787. Call 18002662 for dispute or SMS BLOCK 171 to 9215676766',
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 15000, accountMask: '341', selfDualLeg: true, counterpartyMask: '232', transferRef: '620812989787' },
   },
   {
     name: 'UPI debit to CRED Club',

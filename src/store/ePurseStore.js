@@ -828,6 +828,8 @@ export const useEPurseStore = create(
         set({ pendingMonthlyRecap: prevMk, recapMonthHandled: prevMk, pendingCelebration: null });
 
         // In-app feed + OS notification (both no-op silently without permission).
+        // Both carry monthKey so tapping either re-opens THIS month's recap —
+        // see openMonthlyRecap() + the notification-tap listener in App.js.
         const label = prev.toLocaleDateString('en-IN', { month: 'long' });
         try {
           useNotificationStore.getState().add({
@@ -835,13 +837,17 @@ export const useEPurseStore = create(
             title: `Your ${label} recap is ready`,
             body: 'See where your money went last month — tap to view and download.',
             dedupeKey: `recap:${prevMk}`,
+            meta: { monthKey: prevMk },
           });
         } catch {}
-        fireMonthlyRecapNotification({ monthLabel: label });
+        fireMonthlyRecapNotification({ monthLabel: label, monthKey: prevMk });
       },
 
       /** Recap modal closed — stop showing it (kept marked handled). */
       clearPendingMonthlyRecap: () => set({ pendingMonthlyRecap: null }),
+
+      /** Re-open the recap modal for `mk` — used by notification/bell taps. */
+      openMonthlyRecap: (mk) => set({ pendingMonthlyRecap: mk || null }),
 
       /** User dismissed the persistent recap card for `mk`. */
       dismissMonthlyRecapCard: (mk) => set({ monthlyRecapCardDismissed: mk || null }),

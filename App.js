@@ -4,6 +4,8 @@ import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import * as Notifications from 'expo-notifications';
+
 import AppNavigator from './src/navigation/AppNavigator';
 import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
@@ -21,6 +23,31 @@ function NotificationBoot() {
     setupAndroidChannel();
     setupBudgetAlertChannel();
   }, []);
+  return null;
+}
+
+/**
+ * Routes taps on OS notifications to the right in-app view. Currently only
+ * `monthly_recap` carries a payload (`data.monthKey`); other kinds just open
+ * the app with no extra action, same as before. Handles both a tap while the
+ * app is running/backgrounded (the listener) and a tap that COLD-STARTS the
+ * app (getLastNotificationResponseAsync, checked once on mount).
+ */
+function NotificationTapBoot() {
+  const openMonthlyRecap = useEPurseStore((s) => s.openMonthlyRecap);
+  useEffect(() => {
+    const handle = (response) => {
+      const data = response?.notification?.request?.content?.data;
+      if (data?.type === 'monthly_recap' && data.monthKey) {
+        openMonthlyRecap(data.monthKey);
+      }
+    };
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) handle(response);
+    });
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
+    return () => sub.remove();
+  }, [openMonthlyRecap]);
   return null;
 }
 
@@ -88,6 +115,7 @@ export default function App() {
         <ToastProvider>
           <StatusBar style="light" />
           <NotificationBoot />
+          <NotificationTapBoot />
           <SmsSyncBoot />
           <CompactionBoot />
           <BudgetRolloverBoot />

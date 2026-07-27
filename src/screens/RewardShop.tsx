@@ -1,13 +1,20 @@
 // =============================================================================
-// RewardShop.tsx — Unified Profile + Widget Customization Hub (dark premium)
+// RewardShop.tsx — Unified Profile + Widget Customization Hub
 //
-// Region A: top bar (back + "Profile & Perks")
+// Region A: top bar (back + "Profile & Perks" + settings gear)
 // Region B: profile block (avatar + name + level), animated XP bar, coin balance
 // Region C: 3 widget cards with locked / purchasable / owned-toggle states
+// Region D: settings bottom sheet (gear icon) — recap prefs, Categories, SMS Diagnostic
+//
+// Theme-adaptive: palette D is derived from useTheme() each render, so this
+// screen follows the app's accent theme and light/dark mode instead of being
+// hardcoded to one dark-navy look.
 // =============================================================================
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Animated as RNAnimated,
+  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -49,28 +56,14 @@ import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 import { useToast } from '../components/Toast';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
-
-// ─── Dark-mode palette (screen-scoped) ───────────────────────────────────────
-
-const D = {
-  bg:           '#0A0E1A',
-  card:         '#161B2E',
-  cardElevated: '#1F2640',
-  border:       '#283047',
-  borderActive: '#FF5A1F',
-  white:        '#F5F7FA',
-  textSec:      '#A5ACBE',
-  textMuted:    '#6B7388',
-  gold:         '#F59E0B',
-  goldGlow:     '#FCD34D',
-  primary:      '#FF5A1F',
-  success:      '#10B981',
-};
+import { useTheme } from '../hooks/useTheme';
+import { radius, spacing, typography, shadows } from '../constants/theme';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 interface NavigationProp {
   goBack: () => void;
+  navigate: (route: string) => void;
 }
 
 interface Props {
@@ -80,6 +73,41 @@ interface Props {
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 const RewardShop: React.FC<Props> = ({ navigation }) => {
+  const theme = useTheme();
+  const dark  = theme.darkMode;
+
+  // Screen-scoped palette, re-derived from the app theme so this screen
+  // adapts to accent + light/dark instead of a fixed dark-navy look.
+  const D = useMemo(() => ({
+    bg:            theme.background,
+    card:          theme.card,
+    cardElevated:  theme.cardAlt,
+    border:        theme.divider,
+    borderActive:  theme.primary,
+    white:         theme.textPrimary,
+    textSec:       theme.textSecondary,
+    textMuted:     theme.textMuted,
+    gold:          '#F59E0B',
+    goldGlow:      '#FCD34D',
+    primary:       theme.primary,
+    success:       theme.success,
+    heroGradient:  dark ? ['#1B2342', '#0F1428'] : ['#FFFFFF', '#F1F3F7'],
+    cardGradient:  dark ? ['#1A2138', '#10162A'] : ['#FFFFFF', '#F7F8FA'],
+    hairline:      dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+    overlayTint:   dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+    overlayBorder: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+    lockTint:      dark ? 'rgba(10,14,26,0.78)'    : 'rgba(244,245,247,0.85)',
+    lockBadgeBg:   dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+    lockBadgeBorder: dark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.12)',
+    goldTint:      dark ? 'rgba(245,158,11,0.14)' : 'rgba(245,158,11,0.12)',
+    goldBorder:    dark ? 'rgba(245,158,11,0.32)' : 'rgba(245,158,11,0.28)',
+    successTint:   dark ? 'rgba(16,185,129,0.14)' : 'rgba(16,185,129,0.12)',
+    successBorder: dark ? 'rgba(16,185,129,0.32)' : 'rgba(16,185,129,0.28)',
+    switchTrackOff: dark ? '#283047' : '#D1D5DB',
+  }), [theme, dark]);
+
+  const styles = useMemo(() => makeStyles(D), [D]);
+
   const userName  = useEPurseStore((s: any) => s.userName ?? '');
   const totalRP   = useRewardStore(selectTotalRP);
   const coins     = useRewardStore(selectEpcBalance);
@@ -94,6 +122,25 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
   // them mutually exclusive — tapping RP closes EPC and vice-versa.
   const [infoOpen, setInfoOpen] = useState<'rp' | 'epc' | null>(null);
 
+  // Settings bottom sheet (gear icon) — moved here from the Dashboard's
+  // long-press avatar trigger so it lives inside the Profile section.
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsSlide = useState(() => new RNAnimated.Value(0))[0];
+
+  const showMonthlyRecap     = useEPurseStore((s: any) => s.showMonthlyRecap);
+  const setShowMonthlyRecap  = useEPurseStore((s: any) => s.setShowMonthlyRecap);
+  const recapOptions         = useEPurseStore((s: any) => s.recapOptions);
+  const setRecapOption       = useEPurseStore((s: any) => s.setRecapOption);
+
+  const openSettings = () => {
+    hapticLight();
+    setShowSettings(true);
+    RNAnimated.spring(settingsSlide, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
+  };
+  const closeSettings = () => {
+    RNAnimated.timing(settingsSlide, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowSettings(false));
+  };
+
   const initial = userName?.trim()?.charAt(0)?.toUpperCase() || '🙂';
   const display = userName?.trim() || 'Guest';
 
@@ -104,7 +151,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={D.bg} />
+      <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} backgroundColor={D.bg} />
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* ── Region A: Header ──────────────────────────────────────── */}
         <View style={styles.topBar}>
@@ -112,7 +159,15 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
             <Ionicons name="chevron-back" size={24} color={D.white} />
           </TouchableOpacity>
           <Text style={styles.screenTitle}>Profile & Perks</Text>
-          <View style={{ width: 40 }} />
+          <TouchableOpacity
+            onPress={openSettings}
+            hitSlop={10}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Ionicons name="settings-outline" size={22} color={D.white} />
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -125,7 +180,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
             style={styles.heroCard}
           >
             <LinearGradient
-              colors={['#1B2342', '#0F1428']}
+              colors={D.heroGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFillObject}
@@ -145,7 +200,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                 >
                   <Text style={styles.avatarText}>{initial}</Text>
                 </LinearGradient>
-                <LevelChip level={level} />
+                <LevelChip level={level} styles={styles} D={D} />
               </Animated.View>
 
               <View style={styles.profileMeta}>
@@ -181,7 +236,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                   </Text>
                 </Text>
               </View>
-              <XpBar progress={pct} />
+              <XpBar progress={pct} D={D} styles={styles} />
             </View>
 
             {/* Coin balance */}
@@ -229,7 +284,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
                 .damping(22)
                 .stiffness(180)}
             >
-              <ShopCard item={item} currentLevel={level} currentCoins={coins} />
+              <ShopCard item={item} currentLevel={level} currentCoins={coins} D={D} styles={styles} />
             </Animated.View>
           ))}
 
@@ -260,6 +315,81 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
           { label: REWARD_COPY.EPC_BULLET_SAVE_LABEL, value: REWARD_COPY.EPC_BULLET_SAVE_VALUE },
         ]}
       />
+
+      {/* ── Region D: Settings bottom sheet (gear icon) ─────────────────── */}
+      <Modal
+        visible={showSettings}
+        transparent
+        animationType="none"
+        onRequestClose={closeSettings}
+      >
+        <Pressable style={styles.settingsBackdrop} onPress={closeSettings}>
+          <RNAnimated.View
+            style={[
+              styles.settingsSheet,
+              { transform: [{ translateY: settingsSlide.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] },
+            ]}
+          >
+            <View style={styles.settingsHandle} />
+
+            {/* Preference: monthly recap (modal + card + PDF) */}
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsRowEmoji}>📊</Text>
+              <Text style={styles.settingsRowLabel}>Monthly recap</Text>
+              <Switch
+                value={showMonthlyRecap}
+                onValueChange={setShowMonthlyRecap}
+                trackColor={{ true: D.primary, false: D.switchTrackOff }}
+                thumbColor="#fff"
+                ios_backgroundColor={D.switchTrackOff}
+              />
+            </View>
+
+            {/* Sub-preferences: what the recap report / PDF includes */}
+            {showMonthlyRecap && (
+              <>
+                <Text style={styles.settingsSubHeader}>Report includes</Text>
+                {[
+                  { key: 'includePrivate', label: 'Private transactions' },
+                  { key: 'includeGroups',  label: 'Group & trip spend' },
+                  { key: 'includeTxnList', label: 'Full transaction list (PDF)' },
+                ].map(({ key, label }) => (
+                  <View key={key} style={[styles.settingsRow, styles.settingsSubRow]}>
+                    <Text style={styles.settingsSubLabel}>{label}</Text>
+                    <Switch
+                      value={!!recapOptions?.[key]}
+                      onValueChange={(v) => setRecapOption(key, v)}
+                      trackColor={{ true: D.primary, false: D.switchTrackOff }}
+                      thumbColor="#fff"
+                      ios_backgroundColor={D.switchTrackOff}
+                    />
+                  </View>
+                ))}
+              </>
+            )}
+
+            {[
+              { emoji: '📂', label: 'Categories', route: 'Categories' },
+              { emoji: '🔬', label: 'SMS Diagnostic', route: 'SmsDiagnostic' },
+            ].map(({ emoji, label, route }) => (
+              <TouchableOpacity
+                key={route}
+                style={styles.settingsRow}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setShowSettings(false);
+                  settingsSlide.setValue(0);
+                  navigation.navigate(route);
+                }}
+              >
+                <Text style={styles.settingsRowEmoji}>{emoji}</Text>
+                <Text style={styles.settingsRowLabel}>{label}</Text>
+                <Text style={styles.settingsRowChevron}>›</Text>
+              </TouchableOpacity>
+            ))}
+          </RNAnimated.View>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -268,7 +398,7 @@ export default RewardShop;
 
 // ─── LevelChip ───────────────────────────────────────────────────────────────
 
-const LevelChip: React.FC<{ level: number }> = ({ level }) => (
+const LevelChip: React.FC<{ level: number; styles: any; D: any }> = ({ level, styles, D }) => (
   <View style={styles.levelChipWrap}>
     <LinearGradient
       colors={[D.goldGlow, D.gold]}
@@ -283,7 +413,7 @@ const LevelChip: React.FC<{ level: number }> = ({ level }) => (
 
 // ─── XpBar ───────────────────────────────────────────────────────────────────
 
-const XpBar: React.FC<{ progress: number }> = ({ progress }) => {
+const XpBar: React.FC<{ progress: number; D: any; styles: any }> = ({ progress, D, styles }) => {
   const w = useSharedValue(0);
 
   useEffect(() => {
@@ -315,9 +445,11 @@ interface ShopCardProps {
   item:         InventoryItem;
   currentLevel: number;
   currentCoins: number;
+  D:            any;
+  styles:       any;
 }
 
-const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins }) => {
+const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins, D, styles }) => {
   const purchaseItem     = useRewardStore((s) => s.purchaseItem);
   const toggleItemActive = useRewardStore((s) => s.toggleItemActive);
   const toast            = useToast();
@@ -368,7 +500,7 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins })
       ]}
     >
       <LinearGradient
-        colors={['#1A2138', '#10162A']}
+        colors={D.cardGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFillObject}
@@ -408,11 +540,13 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins })
               cost={item.cost}
               canAfford={currentCoins >= item.cost}
               onPress={handleBuy}
+              D={D}
+              styles={styles}
             />
           ) : null}
 
           {item.isUnlocked ? (
-            <OwnedToggle active={item.isActive} onToggle={handleToggle} />
+            <OwnedToggle active={item.isActive} onToggle={handleToggle} D={D} styles={styles} />
           ) : null}
         </View>
       </View>
@@ -439,7 +573,9 @@ const BuyButton: React.FC<{
   cost: number;
   canAfford: boolean;
   onPress: () => void;
-}> = ({ cost, canAfford, onPress }) => (
+  D: any;
+  styles: any;
+}> = ({ cost, canAfford, onPress, D, styles }) => (
   <Pressable
     onPress={onPress}
     style={({ pressed }) => [
@@ -449,7 +585,7 @@ const BuyButton: React.FC<{
     ]}
   >
     <LinearGradient
-      colors={canAfford ? [D.primary, '#E64A0F'] : ['#22293F', '#1A2034']}
+      colors={canAfford ? [D.primary, '#E64A0F'] : [D.cardElevated, D.card]}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
       style={StyleSheet.absoluteFillObject}
@@ -465,17 +601,19 @@ const BuyButton: React.FC<{
 
 // ─── OwnedToggle ─────────────────────────────────────────────────────────────
 
-const OwnedToggle: React.FC<{ active: boolean; onToggle: () => void }> = ({
+const OwnedToggle: React.FC<{ active: boolean; onToggle: () => void; D: any; styles: any }> = ({
   active,
   onToggle,
+  D,
+  styles,
 }) => (
   <View style={styles.toggleWrap}>
     <Switch
       value={active}
       onValueChange={onToggle}
-      trackColor={{ false: '#283047', true: D.primary + 'AA' }}
+      trackColor={{ false: D.switchTrackOff, true: D.primary + 'AA' }}
       thumbColor={active ? D.primary : '#4B5366'}
-      ios_backgroundColor="#283047"
+      ios_backgroundColor={D.switchTrackOff}
     />
     <Text
       style={[
@@ -489,377 +627,417 @@ const OwnedToggle: React.FC<{ active: boolean; onToggle: () => void }> = ({
 );
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
+// A function of the theme-derived palette (D) so colors stay reactive to
+// theme/dark-mode changes — StyleSheet.create alone can't react to a hook.
 
-const styles = StyleSheet.create({
-  root:      { flex: 1, backgroundColor: D.bg },
-  container: { flex: 1 },
+function makeStyles(D: any) {
+  return StyleSheet.create({
+    root:      { flex: 1, backgroundColor: D.bg },
+    container: { flex: 1 },
 
-  // ── Region A: top bar ──────────────────────────────────────────────────
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 12,
-  },
-  screenTitle: {
-    fontSize: 18,
-    fontWeight: '800' as const,
-    color: D.white,
-    letterSpacing: -0.3,
-  },
+    // ── Region A: top bar ──────────────────────────────────────────────────
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingTop: 6,
+      paddingBottom: 12,
+    },
+    screenTitle: {
+      fontSize: 18,
+      fontWeight: '800' as const,
+      color: D.white,
+      letterSpacing: -0.3,
+    },
 
-  scroll: { paddingHorizontal: 16, paddingBottom: 32 },
+    scroll: { paddingHorizontal: 16, paddingBottom: 32 },
 
-  // ── Region B: hero card ────────────────────────────────────────────────
-  heroCard: {
-    borderRadius: 24,
-    padding: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: D.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.4,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
-    marginBottom: 24,
-  },
+    // ── Region B: hero card ────────────────────────────────────────────────
+    heroCard: {
+      borderRadius: 24,
+      padding: 20,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: D.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.4,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 8,
+      marginBottom: 24,
+    },
 
-  // Profile row
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 22,
-  },
-  avatarWrap: {
-    width: 64,
-    height: 64,
-    position: 'relative',
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: D.primary,
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  avatarText: {
-    fontSize: 28,
-    fontWeight: '800' as const,
-    color: '#FFFFFF',
-  },
-  levelChipWrap: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
-  },
-  levelChip: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: D.bg,
-  },
-  levelChipText: {
-    fontSize: 12,
-    fontWeight: '900' as const,
-    color: '#7C2D12',
-  },
+    // Profile row
+    profileRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      marginBottom: 22,
+    },
+    avatarWrap: {
+      width: 64,
+      height: 64,
+      position: 'relative',
+    },
+    avatar: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: D.primary,
+      shadowOpacity: 0.45,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    avatarText: {
+      fontSize: 28,
+      fontWeight: '800' as const,
+      color: '#FFFFFF',
+    },
+    levelChipWrap: {
+      position: 'absolute',
+      bottom: -4,
+      right: -4,
+    },
+    levelChip: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: D.bg,
+    },
+    levelChipText: {
+      fontSize: 12,
+      fontWeight: '900' as const,
+      color: '#7C2D12',
+    },
 
-  profileMeta: { flex: 1 },
-  profileGreet: {
-    fontSize: 12,
-    fontWeight: '600' as const,
-    color: D.textSec,
-    letterSpacing: 0.4,
-  },
-  profileName: {
-    fontSize: 22,
-    fontWeight: '800' as const,
-    color: D.white,
-    letterSpacing: -0.4,
-    marginTop: 2,
-  },
-  profileTitle: {
-    fontSize: 11,
-    fontWeight: '700' as const,
-    color: D.gold,
-    textTransform: 'uppercase',
-    letterSpacing: 1.0,
-    marginTop: 4,
-  },
+    profileMeta: { flex: 1 },
+    profileGreet: {
+      fontSize: 12,
+      fontWeight: '600' as const,
+      color: D.textSec,
+      letterSpacing: 0.4,
+    },
+    profileName: {
+      fontSize: 22,
+      fontWeight: '800' as const,
+      color: D.white,
+      letterSpacing: -0.4,
+      marginTop: 2,
+    },
+    profileTitle: {
+      fontSize: 11,
+      fontWeight: '700' as const,
+      color: D.gold,
+      textTransform: 'uppercase',
+      letterSpacing: 1.0,
+      marginTop: 4,
+    },
 
-  // XP block
-  xpBlock: {
-    marginBottom: 16,
-  },
-  xpRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 8,
-  },
-  xpLabel: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    color: D.textSec,
-    letterSpacing: 1.2,
-  },
-  /** Wraps a section label + the (i) glyph so they tap together. */
-  labelWithInfo: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           6,
-  },
-  /** The (i) circle next to RP / EPC labels — tap opens InfoSheet. */
-  xpPoints: {
-    fontSize: 12,
-    fontWeight: '700' as const,
-    color: D.white,
-  },
-  xpPointsMuted: {
-    fontSize: 12,
-    fontWeight: '500' as const,
-    color: D.textMuted,
-  },
-  xpBarTrack: {
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  xpBarFill: {
-    height: '100%',
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
+    // XP block
+    xpBlock: {
+      marginBottom: 16,
+    },
+    xpRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'baseline',
+      marginBottom: 8,
+    },
+    xpLabel: {
+      fontSize: 10,
+      fontWeight: '800' as const,
+      color: D.textSec,
+      letterSpacing: 1.2,
+    },
+    /** Wraps a section label + the (i) glyph so they tap together. */
+    labelWithInfo: {
+      flexDirection: 'row',
+      alignItems:    'center',
+      gap:           6,
+    },
+    /** The (i) circle next to RP / EPC labels — tap opens InfoSheet. */
+    xpPoints: {
+      fontSize: 12,
+      fontWeight: '700' as const,
+      color: D.white,
+    },
+    xpPointsMuted: {
+      fontSize: 12,
+      fontWeight: '500' as const,
+      color: D.textMuted,
+    },
+    xpBarTrack: {
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: D.overlayTint,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: D.overlayBorder,
+    },
+    xpBarFill: {
+      height: '100%',
+      borderRadius: 6,
+      overflow: 'hidden',
+    },
 
-  // Coin block
-  coinBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
-  },
-  coinIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(245, 158, 11, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.32)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  coinIcon: { fontSize: 24 },
-  coinAmount: {
-    fontSize: 26,
-    fontWeight: '900' as const,
-    color: D.white,
-    letterSpacing: -0.5,
-    lineHeight: 30,
-  },
-  coinLabel: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    color: D.gold,
-    textTransform: 'uppercase',
-    letterSpacing: 1.0,
-    marginTop: 2,
-  },
+    // Coin block
+    coinBlock: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: D.hairline,
+    },
+    coinIconWrap: {
+      width: 48,
+      height: 48,
+      borderRadius: 14,
+      backgroundColor: D.goldTint,
+      borderWidth: 1,
+      borderColor: D.goldBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    coinIcon: { fontSize: 24 },
+    coinAmount: {
+      fontSize: 26,
+      fontWeight: '900' as const,
+      color: D.white,
+      letterSpacing: -0.5,
+      lineHeight: 30,
+    },
+    coinLabel: {
+      fontSize: 10,
+      fontWeight: '800' as const,
+      color: D.gold,
+      textTransform: 'uppercase',
+      letterSpacing: 1.0,
+      marginTop: 2,
+    },
 
-  // ── Region C: shop header ──────────────────────────────────────────────
-  shopHeader: { marginBottom: 14, paddingHorizontal: 2 },
-  shopEyebrow: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    color: D.gold,
-    letterSpacing: 1.4,
-  },
-  shopHeading: {
-    fontSize: 20,
-    fontWeight: '800' as const,
-    color: D.white,
-    letterSpacing: -0.4,
-    marginTop: 4,
-  },
-  shopSubtitle: {
-    fontSize: 13,
-    color: D.textSec,
-    fontWeight: '500' as const,
-    marginTop: 4,
-    lineHeight: 18,
-  },
+    // ── Region C: shop header ──────────────────────────────────────────────
+    shopHeader: { marginBottom: 14, paddingHorizontal: 2 },
+    shopEyebrow: {
+      fontSize: 10,
+      fontWeight: '800' as const,
+      color: D.gold,
+      letterSpacing: 1.4,
+    },
+    shopHeading: {
+      fontSize: 20,
+      fontWeight: '800' as const,
+      color: D.white,
+      letterSpacing: -0.4,
+      marginTop: 4,
+    },
+    shopSubtitle: {
+      fontSize: 13,
+      color: D.textSec,
+      fontWeight: '500' as const,
+      marginTop: 4,
+      lineHeight: 18,
+    },
 
-  // ── Shop card ──────────────────────────────────────────────────────────
-  card: {
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: D.border,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  cardActive: {
-    borderColor: D.borderActive,
-    shadowColor: D.primary,
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    gap: 12,
-  },
-  cardEmojiBox: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardEmoji: { fontSize: 28 },
-  cardMiddle: { flex: 1 },
-  cardName: {
-    fontSize: 15,
-    fontWeight: '800' as const,
-    color: D.white,
-    letterSpacing: -0.2,
-  },
-  cardDesc: {
-    fontSize: 12,
-    color: D.textSec,
-    marginTop: 3,
-    marginBottom: 8,
-    lineHeight: 16,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  metaPill: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  metaPillText: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    color: D.textSec,
-    letterSpacing: 0.6,
-  },
-  metaPillCost: {
-    backgroundColor: 'rgba(245, 158, 11, 0.14)',
-    borderColor: 'rgba(245, 158, 11, 0.32)',
-  },
-  metaPillCostText: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    color: D.goldGlow,
-    letterSpacing: 0.4,
-  },
-  metaPillOwned: {
-    backgroundColor: 'rgba(16, 185, 129, 0.14)',
-    borderColor: 'rgba(16, 185, 129, 0.32)',
-  },
-  metaPillOwnedText: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    color: D.success,
-    letterSpacing: 0.4,
-  },
+    // ── Shop card ──────────────────────────────────────────────────────────
+    card: {
+      borderRadius: 18,
+      overflow: 'hidden',
+      borderWidth: 1.5,
+      borderColor: D.border,
+      marginBottom: 12,
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    cardActive: {
+      borderColor: D.borderActive,
+      shadowColor: D.primary,
+      shadowOpacity: 0.35,
+      shadowRadius: 14,
+    },
+    cardContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 14,
+      gap: 12,
+    },
+    cardEmojiBox: {
+      width: 56,
+      height: 56,
+      borderRadius: 16,
+      backgroundColor: D.overlayTint,
+      borderWidth: 1,
+      borderColor: D.overlayBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cardEmoji: { fontSize: 28 },
+    cardMiddle: { flex: 1 },
+    cardName: {
+      fontSize: 15,
+      fontWeight: '800' as const,
+      color: D.white,
+      letterSpacing: -0.2,
+    },
+    cardDesc: {
+      fontSize: 12,
+      color: D.textSec,
+      marginTop: 3,
+      marginBottom: 8,
+      lineHeight: 16,
+    },
+    metaRow: {
+      flexDirection: 'row',
+      gap: 6,
+      flexWrap: 'wrap',
+    },
+    metaPill: {
+      backgroundColor: D.overlayTint,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderWidth: 1,
+      borderColor: D.overlayBorder,
+    },
+    metaPillText: {
+      fontSize: 10,
+      fontWeight: '800' as const,
+      color: D.textSec,
+      letterSpacing: 0.6,
+    },
+    metaPillCost: {
+      backgroundColor: D.goldTint,
+      borderColor: D.goldBorder,
+    },
+    metaPillCostText: {
+      fontSize: 10,
+      fontWeight: '800' as const,
+      color: D.goldGlow,
+      letterSpacing: 0.4,
+    },
+    metaPillOwned: {
+      backgroundColor: D.successTint,
+      borderColor: D.successBorder,
+    },
+    metaPillOwnedText: {
+      fontSize: 10,
+      fontWeight: '800' as const,
+      color: D.success,
+      letterSpacing: 0.4,
+    },
 
-  cardRight: {
-    minWidth: 92,
-    alignItems: 'flex-end',
-  },
+    cardRight: {
+      minWidth: 92,
+      alignItems: 'flex-end',
+    },
 
-  // ── Buy button ──────────────────────────────────────────────────────────
-  buyBtn: {
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-    minWidth: 92,
-    overflow: 'hidden',
-  },
-  buyBtnDisabled: {},
-  buyBtnText: {
-    fontSize: 12,
-    fontWeight: '900' as const,
-    color: '#FFFFFF',
-    letterSpacing: 0.4,
-  },
-  buyBtnPrice: {
-    fontSize: 11,
-    fontWeight: '800' as const,
-    color: '#FFFFFF',
-    marginTop: 2,
-  },
-  buyBtnTextDisabled: { color: D.textMuted },
+    // ── Buy button ──────────────────────────────────────────────────────────
+    buyBtn: {
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      alignItems: 'center',
+      minWidth: 92,
+      overflow: 'hidden',
+    },
+    buyBtnDisabled: {},
+    buyBtnText: {
+      fontSize: 12,
+      fontWeight: '900' as const,
+      color: '#FFFFFF',
+      letterSpacing: 0.4,
+    },
+    buyBtnPrice: {
+      fontSize: 11,
+      fontWeight: '800' as const,
+      color: '#FFFFFF',
+      marginTop: 2,
+    },
+    buyBtnTextDisabled: { color: D.textMuted },
 
-  // ── Owned toggle ────────────────────────────────────────────────────────
-  toggleWrap: { alignItems: 'center', gap: 2 },
-  toggleLabel: {
-    fontSize: 9,
-    fontWeight: '900' as const,
-    letterSpacing: 1.0,
-    marginTop: 2,
-  },
+    // ── Owned toggle ────────────────────────────────────────────────────────
+    toggleWrap: { alignItems: 'center', gap: 2 },
+    toggleLabel: {
+      fontSize: 9,
+      fontWeight: '900' as const,
+      letterSpacing: 1.0,
+      marginTop: 2,
+    },
 
-  // ── Locked overlay (frosted-glass fallback) ─────────────────────────────
-  lockOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lockOverlayTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(10, 14, 26, 0.78)',
-  },
-  lockBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  lockIcon: { fontSize: 14 },
-  lockText: {
-    fontSize: 11,
-    fontWeight: '800' as const,
-    color: D.white,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-});
+    // ── Locked overlay (frosted-glass fallback) ─────────────────────────────
+    lockOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    lockOverlayTint: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: D.lockTint,
+    },
+    lockBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: D.lockBadgeBg,
+      borderWidth: 1,
+      borderColor: D.lockBadgeBorder,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 999,
+    },
+    lockIcon: { fontSize: 14 },
+    lockText: {
+      fontSize: 11,
+      fontWeight: '800' as const,
+      color: D.white,
+      letterSpacing: 0.6,
+      textTransform: 'uppercase',
+    },
+
+    // ── Region D: settings sheet ────────────────────────────────────────────
+    settingsBackdrop: {
+      flex: 1,
+      backgroundColor: '#00000066',
+      justifyContent: 'flex-end',
+    },
+    settingsSheet: {
+      backgroundColor: D.card,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: 36,
+      paddingTop: spacing.sm,
+      ...shadows.elevated,
+    },
+    settingsHandle: {
+      width: 36, height: 4, borderRadius: 2,
+      backgroundColor: D.border,
+      alignSelf: 'center',
+      marginBottom: spacing.md,
+    },
+    settingsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: D.border,
+      gap: spacing.md,
+    },
+    settingsRowEmoji: { fontSize: 20 },
+    settingsRowLabel: { flex: 1, ...typography.body, color: D.white, fontWeight: '600' },
+    settingsSubHeader: { ...typography.tiny, color: D.textMuted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: spacing.md, marginBottom: spacing.xxs, marginLeft: spacing.xs },
+    settingsSubRow: { paddingVertical: 12, paddingLeft: spacing.md },
+    settingsSubLabel: { flex: 1, ...typography.small, color: D.textSec, fontWeight: '600' },
+    settingsRowChevron: { fontSize: 22, color: D.textSec, fontWeight: '300' },
+  });
+}

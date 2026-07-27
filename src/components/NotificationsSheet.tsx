@@ -33,6 +33,7 @@ import {
   type NotificationEntry,
   type NotificationKind,
 } from '../store/useNotificationStore';
+import { useEPurseStore } from '../store/ePurseStore';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
   const markRead    = useNotificationStore((s) => s.markRead);
   const markAllRead = useNotificationStore((s) => s.markAllRead);
   const dismiss     = useNotificationStore((s) => s.dismiss);
+  const openMonthlyRecap = useEPurseStore((s) => s.openMonthlyRecap);
 
   const opacity   = useSharedValue<number>(0);
   const translate = useSharedValue<number>(-SHEET_MAX_H);
@@ -179,7 +181,16 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
                 <NotificationRow
                   key={entry.id}
                   entry={entry}
-                  onPress={() => markRead(entry.id)}
+                  onPress={() => {
+                    markRead(entry.id);
+                    // monthly_recap rows promise "tap to view and download" — honor it
+                    // by re-opening that month's recap modal once this sheet is closed.
+                    const monthKey = entry.kind === 'monthly_recap' ? (entry.meta?.monthKey as string | undefined) : null;
+                    if (monthKey) {
+                      handleDismiss();
+                      openMonthlyRecap(monthKey);
+                    }
+                  }}
                   onLongPress={() => dismiss(entry.id)}
                 />
               ))}

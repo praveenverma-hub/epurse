@@ -13,8 +13,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Animated, Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, RefreshControl, Switch,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  StatusBar, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
@@ -66,6 +66,8 @@ import { canSplitTransaction } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
+import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
+import TxnDetailSheet from '../components/TxnDetailSheet';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -107,12 +109,7 @@ const DashboardScreen = ({ navigation }) => {
   const updateGroupExpense      = useEPurseStore((s) => s.updateGroupExpense);
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
   const addGroupExpense = useEPurseStore((s) => s.addGroupExpense);
-  const showWeeklySummary    = useEPurseStore((s) => s.showWeeklySummary);
-  const setShowWeeklySummary = useEPurseStore((s) => s.setShowWeeklySummary);
   const showMonthlyRecap     = useEPurseStore((s) => s.showMonthlyRecap);
-  const setShowMonthlyRecap  = useEPurseStore((s) => s.setShowMonthlyRecap);
-  const recapOptions         = useEPurseStore((s) => s.recapOptions);
-  const setRecapOption       = useEPurseStore((s) => s.setRecapOption);
   const latestRecapMonth     = useEPurseStore(selectLatestRecapMonth);
   const recapCardDismissed   = useEPurseStore((s) => s.monthlyRecapCardDismissed);
   const dismissMonthlyRecapCard = useEPurseStore((s) => s.dismissMonthlyRecapCard);
@@ -128,13 +125,13 @@ const DashboardScreen = ({ navigation }) => {
   const [splitTxn, setSplitTxn] = useState(null);
   const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
-  const [showSettings, setShowSettings] = useState(false);
   const [debugTxn, setDebugTxn] = useState(null);
   const [groupPickerTxn, setGroupPickerTxn] = useState(null);
   const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
   const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split
+  const [groupDetailTxn,  setGroupDetailTxn]  = useState(null); // { txn, group } — tap a shared-group row → view detail
+  const [detailTxn,       setDetailTxn]       = useState(null); // plain txn — tap a row → view detail before edit
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
-  const settingsSlide = useState(() => new Animated.Value(0))[0];
   // Dev-only: long-press vault to cycle tiers for visual preview.
   // null means "use real tier from streak".
   const [devVaultTier, setDevVaultTier] = useState(null);
@@ -303,10 +300,6 @@ const DashboardScreen = ({ navigation }) => {
               <TouchableOpacity
                 style={styles.avatarBtn}
                 onPress={() => navigation.navigate('RewardShop')}
-                onLongPress={IS_PREVIEW_BUILD ? () => {
-                  setShowSettings(true);
-                  Animated.spring(settingsSlide, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
-                } : undefined}
                 activeOpacity={0.8}
               >
                 <Text style={styles.avatarInitial}>
@@ -425,6 +418,19 @@ const DashboardScreen = ({ navigation }) => {
               <TransactionItem
                 key={t.id}
                 txn={t}
+                onPress={() => {
+                  // Tapping the card opens the most relevant DETAIL view for
+                  // what this transaction actually is — always view-first, then
+                  // edit: a shared-group expense shows its split detail (who
+                  // paid, per-member shares); a direct split shows its share
+                  // breakdown; a plain transaction shows its own detail sheet.
+                  // The category-icon tap still skips straight to the manage
+                  // sheet as a fast path.
+                  const group = t.groupId ? groups.find((g) => g.id === t.groupId) : null;
+                  if (group && group.type === 'shared') { setGroupDetailTxn({ txn: t, group }); return; }
+                  if (t.isSplit) { setSplitDetailsTxn(t); return; }
+                  setDetailTxn(t);
+                }}
                 onPressCategory={() => setActiveTxn(t)}
                 onPressSplitChip={() => setSplitDetailsTxn(t)}
                 onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(t) : undefined}
@@ -718,6 +724,30 @@ const DashboardScreen = ({ navigation }) => {
         />
       )}
 
+      {/* Tapping a shared-group transaction card opens this first — who paid,
+          per-member shares, your position — with an Edit pill into the same
+          split editor (editGroupTxn) used everywhere else. */}
+      <GroupTxnDetailSheet
+        txn={groupDetailTxn?.txn || null}
+        onClose={() => setGroupDetailTxn(null)}
+        onEdit={() => {
+          const { txn, group } = groupDetailTxn;
+          setGroupDetailTxn(null);
+          setEditGroupTxn({ txn, group });
+        }}
+      />
+
+      {/* Plain-transaction detail — view first, Edit hands off to the manage sheet. */}
+      <TxnDetailSheet
+        txn={detailTxn}
+        onClose={() => setDetailTxn(null)}
+        onEdit={() => {
+          const t = detailTxn;
+          setDetailTxn(null);
+          setActiveTxn(t);
+        }}
+      />
+
       {/* EPC claim sheet — surfaces automatically when a Zero-Transaction Day
           bonus is detected. User must consciously claim; crediting is deferred
           to claimSavingsBonus() so the balance only changes on explicit tap. */}
@@ -734,101 +764,6 @@ const DashboardScreen = ({ navigation }) => {
         onClose={() => setNotificationsVisible(false)}
       />
 
-      {/* ── Settings bottom sheet ── */}
-      <Modal
-        visible={showSettings}
-        transparent
-        animationType="none"
-        onRequestClose={() => {
-          Animated.timing(settingsSlide, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowSettings(false));
-        }}
-      >
-        <TouchableOpacity
-          style={styles.settingsBackdrop}
-          activeOpacity={1}
-          onPress={() => {
-            Animated.timing(settingsSlide, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowSettings(false));
-          }}
-        >
-          <Animated.View
-            style={[
-              styles.settingsSheet,
-              { transform: [{ translateY: settingsSlide.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] },
-            ]}
-          >
-            <View style={styles.settingsHandle} />
-
-            {/* Preference: weekly summary card on the dashboard */}
-            <View style={styles.settingsRow}>
-              <Text style={styles.settingsRowEmoji}>📅</Text>
-              <Text style={styles.settingsRowLabel}>Weekly summary card</Text>
-              <Switch
-                value={showWeeklySummary}
-                onValueChange={setShowWeeklySummary}
-                trackColor={{ true: theme.primary, false: '#D1D5DB' }}
-                thumbColor="#fff"
-                ios_backgroundColor="#D1D5DB"
-              />
-            </View>
-
-            {/* Preference: monthly recap (modal + card + PDF) */}
-            <View style={styles.settingsRow}>
-              <Text style={styles.settingsRowEmoji}>📊</Text>
-              <Text style={styles.settingsRowLabel}>Monthly recap</Text>
-              <Switch
-                value={showMonthlyRecap}
-                onValueChange={setShowMonthlyRecap}
-                trackColor={{ true: theme.primary, false: '#D1D5DB' }}
-                thumbColor="#fff"
-                ios_backgroundColor="#D1D5DB"
-              />
-            </View>
-
-            {/* Sub-preferences: what the recap report / PDF includes */}
-            {showMonthlyRecap && (
-              <>
-                <Text style={styles.settingsSubHeader}>Report includes</Text>
-                {[
-                  { key: 'includePrivate', label: 'Private transactions' },
-                  { key: 'includeGroups',  label: 'Group & trip spend' },
-                  { key: 'includeTxnList', label: 'Full transaction list (PDF)' },
-                ].map(({ key, label }) => (
-                  <View key={key} style={[styles.settingsRow, styles.settingsSubRow]}>
-                    <Text style={styles.settingsSubLabel}>{label}</Text>
-                    <Switch
-                      value={!!recapOptions?.[key]}
-                      onValueChange={(v) => setRecapOption(key, v)}
-                      trackColor={{ true: theme.primary, false: '#D1D5DB' }}
-                      thumbColor="#fff"
-                      ios_backgroundColor="#D1D5DB"
-                    />
-                  </View>
-                ))}
-              </>
-            )}
-
-            {[
-              { emoji: '📂', label: 'Categories', route: 'Categories' },
-              { emoji: '🔬', label: 'SMS Diagnostic', route: 'SmsDiagnostic' },
-            ].map(({ emoji, label, route }) => (
-              <TouchableOpacity
-                key={route}
-                style={styles.settingsRow}
-                activeOpacity={0.7}
-                onPress={() => {
-                  setShowSettings(false);
-                  settingsSlide.setValue(0);
-                  navigation.navigate(route);
-                }}
-              >
-                <Text style={styles.settingsRowEmoji}>{emoji}</Text>
-                <Text style={styles.settingsRowLabel}>{label}</Text>
-                <Text style={styles.settingsRowChevron}>›</Text>
-              </TouchableOpacity>
-            ))}
-          </Animated.View>
-        </TouchableOpacity>
-      </Modal>
     </View>
   );
 };
@@ -982,42 +917,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   viewAll: { ...typography.small, color: colors.primary, fontWeight: '700' },
-
-  // Settings sheet
-  settingsBackdrop: {
-    flex: 1,
-    backgroundColor: '#00000066',
-    justifyContent: 'flex-end',
-  },
-  settingsSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: 36,
-    paddingTop: spacing.sm,
-    ...shadows.elevated,
-  },
-  settingsHandle: {
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: colors.divider,
-    alignSelf: 'center',
-    marginBottom: spacing.md,
-  },
-  settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-    gap: spacing.md,
-  },
-  settingsRowEmoji: { fontSize: 20 },
-  settingsRowLabel: { flex: 1, ...typography.body, color: colors.textPrimary, fontWeight: '600' },
-  settingsSubHeader: { ...typography.tiny, color: colors.textMuted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: spacing.md, marginBottom: spacing.xxs, marginLeft: spacing.xs },
-  settingsSubRow: { paddingVertical: 12, paddingLeft: spacing.md },
-  settingsSubLabel: { flex: 1, ...typography.small, color: colors.textSecondary, fontWeight: '600' },
-  settingsRowChevron: { fontSize: 22, color: colors.textSecondary, fontWeight: '300' },
 });
 
 export default DashboardScreen;

@@ -16,7 +16,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import MonthlyRecapCard from './MonthlyRecapCard';
 
-interface Palette { card: string; primary: string; textPrimary: string; textSecondary: string; textMuted: string; }
+interface Palette { textSecondary: string; textMuted: string; }
 
 const MonthlyRecapModal: React.FC = () => {
   const theme = useTheme() as Palette;
@@ -33,15 +33,19 @@ const MonthlyRecapModal: React.FC = () => {
       <View style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
-          <Text style={[styles.heading, { color: theme.textPrimary }]}>Your month is wrapped 🎉</Text>
-          <Text style={[styles.sub, { color: theme.textSecondary }]}>Here's how last month went — download the full report anytime.</Text>
-
+          {/* No separate heading here — the card's own header ("{month} recap")
+              already says what this is; a second title outside its background
+              just floated oddly over the backdrop. */}
           {pendingMonthlyRecap && (
             <MonthlyRecapCard monthKey={pendingMonthlyRecap} isNew onDownloaded={close} />
           )}
 
-          <Pressable onPress={close} style={styles.later} hitSlop={8}>
-            <Text style={[styles.laterText, { color: theme.textMuted }]}>Maybe later</Text>
+          <Pressable
+            onPress={close}
+            style={[styles.later, { backgroundColor: `${theme.textMuted}1F` }]}
+            hitSlop={8}
+          >
+            <Text style={[styles.laterText, { color: theme.textSecondary }]}>Maybe later</Text>
           </Pressable>
         </View>
       </View>
@@ -54,8 +58,12 @@ export default MonthlyRecapModal;
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(5, 8, 16, 0.6)', justifyContent: 'flex-end' },
   sheet: { paddingHorizontal: 16, paddingTop: 20 },
-  heading: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3, textAlign: 'center' },
-  sub: { fontSize: 13, textAlign: 'center', marginTop: 4, marginBottom: 16, paddingHorizontal: 12 },
-  later: { alignSelf: 'center', paddingVertical: 14, paddingHorizontal: 20 },
+  later: {
+    alignSelf: 'center',
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 999,
+  },
   laterText: { fontSize: 14, fontWeight: '700' },
 });

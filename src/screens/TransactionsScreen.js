@@ -60,6 +60,8 @@ import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
+import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
+import TxnDetailSheet from '../components/TxnDetailSheet';
 import { canSplitTransaction, debitDisplayAmount, isGroupExcluded } from '../utils/split';
 import { formatCurrency, monthKey } from '../utils/format';
 
@@ -220,6 +222,8 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
   const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
   const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split
+  const [groupDetailTxn,  setGroupDetailTxn]  = useState(null); // { txn, group } — tap a shared-group row → view detail
+  const [detailTxn,       setDetailTxn]       = useState(null); // plain txn — tap a row → view detail before edit
   const [ccBillTxn,       setCcBillTxn]       = useState(null); // txn being reclassified as a CC bill payment
 
   // ── Route param reactivity ─────────────────────────────────────────────────
@@ -745,6 +749,15 @@ const TransactionsScreen = ({ navigation, route }) => {
           ) : (
             <TransactionItem
               txn={item}
+              onPress={() => {
+                // Same routing as Dashboard: view-first for every kind — shared
+                // group → split detail, direct split → share breakdown, plain
+                // txn → its own detail sheet. Icon tap still skips to manage.
+                const group = item.groupId ? groups.find((g) => g.id === item.groupId) : null;
+                if (group && group.type === 'shared') { setGroupDetailTxn({ txn: item, group }); return; }
+                if (item.isSplit) { setSplitDetailsTxn(item); return; }
+                setDetailTxn(item);
+              }}
               onPressCategory={() => setActiveTxn(item)}
               onPressSplitChip={() => setSplitDetailsTxn(item)}
               onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
@@ -1150,6 +1163,30 @@ const TransactionsScreen = ({ navigation, route }) => {
           }}
         />
       )}
+
+      {/* Tapping a shared-group transaction card opens this first — who paid,
+          per-member shares, your position — with an Edit pill into the same
+          split editor (editGroupTxn) used everywhere else. */}
+      <GroupTxnDetailSheet
+        txn={groupDetailTxn?.txn || null}
+        onClose={() => setGroupDetailTxn(null)}
+        onEdit={() => {
+          const { txn, group } = groupDetailTxn;
+          setGroupDetailTxn(null);
+          setEditGroupTxn({ txn, group });
+        }}
+      />
+
+      {/* Plain-transaction detail — view first, Edit hands off to the manage sheet. */}
+      <TxnDetailSheet
+        txn={detailTxn}
+        onClose={() => setDetailTxn(null)}
+        onEdit={() => {
+          const t = detailTxn;
+          setDetailTxn(null);
+          setActiveTxn(t);
+        }}
+      />
 
     </SafeAreaView>
   );

@@ -266,9 +266,11 @@ const TRANSFER_REF_REGEX =
 const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-Za-z\s]{1,29}?)\s+credited\b/i;
 
 // Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
-// Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor.
+// Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor,
+// and "to/by mobile <digits>" — "a/c linked to mobile 9XXXXXX13245" is a P2P/self-transfer
+// routing description (the counterparty's masked phone), never a real merchant name.
 const MERCHANT_REGEX =
-  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d)([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
+  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d|mobile\s+[0-9x]{2,})([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
 
 const MERCHANT_STOP =
   /\s+(?:(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|from\s+(?:a\/c|acct\.?|account|your)\b).*$/i;

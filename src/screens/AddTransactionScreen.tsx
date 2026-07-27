@@ -760,7 +760,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
         {/* Pinned bottom bar — single primary action. */}
         <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
           <GradientButton
-            title="Save transaction"
+            title="Add transaction"
             onPress={handleSave}
             style={{ width: '100%' }}
           />

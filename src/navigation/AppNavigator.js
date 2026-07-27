@@ -57,7 +57,7 @@ export default function AppNavigator() {
         <Stack.Screen
           name="RewardShop"
           component={RewardShop}
-          options={{ animation: 'slide_from_right', contentStyle: { backgroundColor: '#0A0E1A' } }}
+          options={{ animation: 'slide_from_right' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
