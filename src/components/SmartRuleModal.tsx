@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
+import SheetCloseButton from './SheetCloseButton';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ export const SmartRuleModal: React.FC<Props> = ({ rule, onAutomate, onDismiss })
         exiting={FadeOutDown.duration(200)}
         style={styles.card}
       >
+        <SheetCloseButton onPress={onDismiss} variant="absolute" />
         {/* Drag pill */}
         <View style={styles.pillRow}>
           <View style={styles.pill} />
@@ -118,8 +120,8 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingHorizontal: 20,
     paddingBottom: 36,
     shadowColor: '#000',

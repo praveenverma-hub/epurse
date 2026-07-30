@@ -23,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from './Toast';
+import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import {
@@ -212,6 +213,8 @@ const ExportSheet: React.FC<Props> = ({
     >
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={handleClose} />
+        {/* handleClose (not onClose) — it no-ops while an export is running. */}
+        <SheetCloseButton onPress={handleClose} />
 
         <View style={styles.sheet}>
           <View style={styles.handle} />
@@ -222,13 +225,6 @@ const ExportSheet: React.FC<Props> = ({
               <Text style={styles.title}>Export Transactions</Text>
               <Text style={styles.subtitle}>Compile & share your current statement</Text>
             </View>
-            <TouchableOpacity
-              onPress={handleClose}
-              style={styles.closeBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="close" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
           </View>
 
           {/* ── Context summary card ── */}
@@ -395,8 +391,8 @@ const styles = StyleSheet.create({
 
   sheet: {
     backgroundColor: colors.card,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     padding: spacing.lg,
     paddingBottom: spacing.xxl + 8,
     gap: spacing.md,

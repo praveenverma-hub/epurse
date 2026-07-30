@@ -34,6 +34,7 @@ import {
   type NotificationKind,
 } from '../store/useNotificationStore';
 import { useEPurseStore } from '../store/ePurseStore';
+import SheetCloseButton from './SheetCloseButton';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
 
         <Animated.View style={[styles.sheet, sheetStyle]}>
+          <SheetCloseButton onPress={handleDismiss} variant="absolute" />
           <View style={styles.headerRow}>
             <Text style={styles.title}>Notifications</Text>
             {unreadCount > 0 && (

@@ -33,6 +33,7 @@ import { formatCompact } from '../utils/format';
 import { INPUT_LIMITS } from '../utils/validation';
 import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
+import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
 import { useToast } from '../components/Toast';
@@ -620,6 +621,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
             onPress={() => setLocalPickerOpen(false)}
           >
             <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
+              <SheetCloseButton onPress={() => setLocalPickerOpen(false)} variant="absolute" />
               <View style={styles.pickerHandle} />
               <Text style={styles.pickerTitle}>Add category</Text>
               <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
@@ -699,6 +701,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
           onPress={() => setDrillCatId(null)}
         >
           <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
+            <SheetCloseButton onPress={() => setDrillCatId(null)} variant="absolute" />
             <View style={styles.pickerHandle} />
             <View style={styles.drillHeader}>
               {isUnbudgetedDrill ? (

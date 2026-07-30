@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 
 import { radius, spacing, shadows } from '../constants/theme';
+import SheetCloseButton from './SheetCloseButton';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
@@ -129,6 +130,7 @@ const CCPaymentPromptModal = () => {
         style={[styles.sheet, { transform: [{ translateY: slideY }] }]}
         pointerEvents="box-none"
       >
+        <SheetCloseButton onPress={onDismiss} variant="absolute" />
         {/* Handle + optional queue badge */}
         <View style={styles.handleRow}>
           <View style={styles.handle} />
@@ -506,7 +508,7 @@ const makeStyles = (t) => {
     primaryBtn: {
       width: '100%',
       backgroundColor: ACCENT,
-      borderRadius: radius.md,
+      borderRadius: radius.lg,
       paddingVertical: 15,
       alignItems: 'center',
     },

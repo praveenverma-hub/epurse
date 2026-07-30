@@ -20,6 +20,7 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
+import SheetCloseButton from '../components/SheetCloseButton';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
@@ -373,6 +374,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
                     <TouchableOpacity onPress={handleEditGroup} hitSlop={8} style={styles.cardActionBtn}>
                       <EditIcon size={16} color={colors.textSecondary} />
                     </TouchableOpacity>
+                    <View style={styles.cardActionDivider} />
                     <TouchableOpacity onPress={handleDeleteGroup} hitSlop={8} style={styles.cardActionBtn}>
                       <Ionicons name="trash-outline" size={18} color={colors.danger} />
                     </TouchableOpacity>
@@ -553,6 +555,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
       >
         <View style={styles.sheetBackdrop}>
           <TouchableOpacity style={styles.sheetDismiss} activeOpacity={1} onPress={() => setBalancesVisible(false)} />
+          <SheetCloseButton onPress={() => setBalancesVisible(false)} />
           <View style={styles.balancesSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle} numberOfLines={1}>
@@ -768,6 +771,15 @@ const styles = StyleSheet.create({
   cardMeta:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   cardActions:{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   cardActionBtn: { padding: 4 },
+  // 1px (not hairline) and a mid-gray: the icons sit on the near-white END of the
+  // header gradient, where a 0.5px `divider` tone is effectively invisible.
+  cardActionDivider: {
+    width: 1,
+    height: 20,
+    marginHorizontal: spacing.xs,
+    backgroundColor: colors.textMuted,
+    opacity: 0.5,
+  },
   amountRow:  { marginTop: spacing.sm },
   amountBig:  { ...typography.display, color: colors.textPrimary },
   amountSub:  { ...typography.tiny, color: colors.textMuted, marginTop: 2 },

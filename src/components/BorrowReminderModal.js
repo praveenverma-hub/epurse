@@ -23,6 +23,7 @@ import {
 } from '../utils/notifications';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useToast } from './Toast';
+import SheetCloseButton from './SheetCloseButton';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -212,6 +213,7 @@ const BorrowReminderModal = ({ visible, person, onClose }) => {
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.overlay}>
         <View style={styles.sheet}>
+          <SheetCloseButton onPress={onClose} variant="absolute" />
           <View style={styles.handle} />
 
           <View style={styles.headerRow}>

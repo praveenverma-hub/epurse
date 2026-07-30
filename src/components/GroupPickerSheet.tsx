@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
+import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, monthKey } from '../utils/format';
@@ -65,6 +66,7 @@ export default function GroupPickerSheet({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <Text style={styles.title}>Add to Group</Text>
@@ -111,9 +113,6 @@ export default function GroupPickerSheet({
             </TouchableOpacity>
           </ScrollView>
 
-          <TouchableOpacity style={styles.cancel} onPress={onClose}>
-            <Text style={styles.cancelTxt}>Cancel</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -166,6 +165,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   newLabel:  { ...typography.body, color: colors.textSecondary, fontWeight: '600' },
-  cancel:    { marginTop: spacing.sm, alignItems: 'center' },
-  cancelTxt: { ...typography.body, color: colors.textSecondary },
 });

@@ -71,10 +71,18 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
           <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
-          <View style={{ flex: 1 }}>
+          <View style={styles.headerCentre}>
             <Text style={styles.title}>{isEdit ? 'Edit transaction' : 'Add transaction'}</Text>
-            {group && <Text style={styles.subtitle} numberOfLines={1}>{group.name}</Text>}
+            {/* Name the group explicitly — a bare name reads as an unlabelled
+                subheading, leaving it unclear what it refers to. */}
+            {group && (
+              <Text style={styles.subtitle} numberOfLines={1}>
+                Group · {group.emoji ? `${group.emoji} ` : ''}{group.name}
+              </Text>
+            )}
           </View>
+          {/* Balances the back button so the title block lands on true centre. */}
+          <View style={styles.backBtn} />
         </View>
       </SafeAreaView>
 
@@ -133,9 +141,12 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.xs,
   },
-  backBtn: { padding: 4 },
-  title:    { ...typography.h2, color: colors.textPrimary },
-  subtitle: { ...typography.small, color: colors.textSecondary, marginTop: 1 },
+  // Fixed 40×40 box (same convention as AddTransaction / Categories) so an empty
+  // spacer of the same style balances it and the title block is truly centred.
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerCentre: { flex: 1, alignItems: 'center' },
+  title:    { ...typography.h2, color: colors.textPrimary, textAlign: 'center' },
+  subtitle: { ...typography.small, color: colors.textSecondary, marginTop: 1, textAlign: 'center' },
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
   footer: {
     paddingHorizontal: spacing.lg,

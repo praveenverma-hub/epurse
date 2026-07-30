@@ -11,7 +11,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,7 +18,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -35,6 +33,16 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree, useCategoryMaps } from '../hooks/useCategoryTree';
 import GradientButtonBase from '../components/GradientButton';
+import SheetCloseButton from '../components/SheetCloseButton';
+import DateField from '../components/DateField';
+import {
+  FormField,
+  FormTextInput,
+  FormAmountInput,
+  FormSelectRow,
+  FormChipRow,
+  FormChip,
+} from '../components/FormField';
 
 // Cast to typed interface — GradientButton.js has no TS declarations
 const GradientButton: React.FC<{
@@ -180,22 +188,37 @@ interface NavigationProp {
   navigate: (screen: string) => void;
 }
 
-const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) => {
+interface RouteProp {
+  params?: { editTxnId?: string };
+}
+
+const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationProp; route?: RouteProp }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const categoryTree = useCategoryTree();   // built-ins + user's custom categories
   const categoryMaps = useCategoryMaps();   // custom-aware legacy lookup maps
   const categories  = useEPurseStore((s: any) => s.categories);
   const accounts    = useEPurseStore((s: any) => s.accounts);
-  const addTransaction = useEPurseStore((s: any) => s.addTransaction);
+  const addTransaction  = useEPurseStore((s: any) => s.addTransaction);
+  const updateTransaction = useEPurseStore((s: any) => s.updateTransaction);
   const ingestMessage  = useEPurseStore((s: any) => s.ingestMessage);
   const budget         = useEPurseStore((s: any) => s.budget);
   const transactions   = useEPurseStore((s: any) => s.transactions);
   const getBudgetUsage = useEPurseStore((s: any) => s.getBudgetUsage);
   const toast          = useToast();
 
+  // ── Edit mode ────────────────────────────────────────────────────────────────
+  const editTxnId = route?.params?.editTxnId;
+  const isEdit = !!editTxnId;
+  const editTxn = useEPurseStore((s: any) =>
+    (editTxnId ? s.transactions.find((t: any) => t.id === editTxnId) : null) || null,
+  );
+  // A tagged SMS amount is bank-verified — lock it, same rule the group edit form uses.
+  const amountLocked = isEdit && editTxn?.source !== 'manual';
+
   // ── Form state ──────────────────────────────────────────────────────────────
   const [amount,         setAmount]         = useState('');
+  const [date,           setDate]           = useState(() => new Date());
   const [merchant,       setMerchant]       = useState('');
   const [type,           setType]           = useState(TRANSACTION_TYPES.DEBIT);
   const [accountId,      setAccountId]      = useState<string | null>(null);
@@ -213,6 +236,19 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   const [smsBody,        setSmsBody]        = useState('');
   // LB contact-picker state — opened mid-save when an LB category is chosen.
   const [lbPickerOpen,   setLbPickerOpen]   = useState(false);
+
+  // ── Edit-mode prefill (once the txn loads) ──────────────────────────────────
+  useEffect(() => {
+    if (!editTxn) return;
+    setAmount(String(editTxn.amount ?? ''));
+    setDate(editTxn.createdAt ? new Date(editTxn.createdAt) : new Date());
+    setMerchant(editTxn.merchant || '');
+    setType(editTxn.type || TRANSACTION_TYPES.DEBIT);
+    setAccountId(editTxn.accountId || null);
+    setParentCategory(editTxn.parentCategory || '');
+    setChildCategory(editTxn.childCategory || '');
+    setNote(editTxn.note || '');
+  }, [editTxn?.id]);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
   const defaultAccountId = useMemo(() => {
@@ -311,6 +347,12 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   };
 
   const handleChildPress = (parent: ParentCat, child: ChildCat) => {
+    // Lend/Borrow categories need a linked contact — that flow lives in the
+    // category-manage sheet on the transaction card, not this full edit form.
+    if (isEdit && LB_ALL_CATS.has(twoTierToLegacyCatId(parent.label, child.label, categoryMaps) ?? '')) {
+      toast.info('Use the category menu', 'Link this to a Lent/Borrowed contact from the transaction card instead.');
+      return;
+    }
     setParentCategory(parent.label);
     setChildCategory(child.label);
     // Clear split if moving to an LB/blocked child
@@ -345,6 +387,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
       amount: num,
       type,
       accountId: resolvedAccountId,
+      createdAt: date.toISOString(),
       ...(location ? { location } : {}),
       categoryId:      legacyCategoryId,
       parentCategory,
@@ -378,6 +421,23 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
     navigation.goBack();
   };
 
+  /** Save changes to an existing transaction — no location/split/LB re-capture. */
+  const commitEdit = () => {
+    if (!editTxnId) return;
+    updateTransaction(editTxnId, {
+      amount:  amountLocked ? editTxn.amount : parseFloat(amount),
+      type,
+      accountId: resolvedAccountId,
+      merchant: merchant.trim(),
+      categoryId: legacyCategoryId,
+      parentCategory,
+      childCategory,
+      note: note.trim(),
+      createdAt: amountLocked ? editTxn.createdAt : date.toISOString(),
+    });
+    navigation.goBack();
+  };
+
   const handleSave = () => {
     const num = parseFloat(amount);
     if (!num || num <= 0) {
@@ -403,6 +463,12 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
       );
       return;
     }
+
+    if (isEdit) {
+      commitEdit();
+      return;
+    }
+
     const wantSplit = isSplit && canSplitHere;
     if (wantSplit && splitPicks.length === 0) {
       toast.warning('Choose people', 'Pick at least one person to split this expense with.');
@@ -466,7 +532,9 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
           <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.title}>Add transaction</Text>
+          <Text style={styles.title}>{isEdit ? 'Edit transaction' : 'Add transaction'}</Text>
+          {/* Balances the back button so the title lands on true centre. */}
+          <View style={styles.backBtn} />
         </View>
       </SafeAreaView>
 
@@ -481,103 +549,66 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
           keyboardShouldPersistTaps="handled"
         >
           <>
-            <Field label="Amount (₹) · Max 10 crore">
-              <TextInput
+            <FormField
+              label="Amount (₹)"
+              hint={amountLocked ? 'From your bank SMS — not editable' : 'Up to 10 crore'}
+            >
+              <FormAmountInput
                 value={amount}
-                onChangeText={(t) => setAmount(sanitizeAmount(t))}
-                keyboardType="decimal-pad"
+                onChangeText={(t: string) => setAmount(sanitizeAmount(t))}
                 placeholder="0"
-                placeholderTextColor={colors.textMuted}
-                style={styles.amountInput}
+                locked={amountLocked}
                 maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
               />
-            </Field>
+            </FormField>
 
-            <Field label="Type">
-              <View style={styles.segRow}>
+            <FormField label="Date" hint={amountLocked ? 'From your bank SMS' : undefined}>
+              <DateField
+                value={date}
+                onChange={setDate}
+                maximumDate={new Date()}
+                disabled={amountLocked}
+                accentColor={theme.primary}
+              />
+            </FormField>
+
+            <FormField label="Type">
+              <FormChipRow>
                 {[
                   { key: TRANSACTION_TYPES.DEBIT,  label: 'Expense' },
                   { key: TRANSACTION_TYPES.CREDIT, label: 'Income'  },
                 ].map((opt) => (
-                  <Seg
+                  <FormChip
                     key={opt.key}
                     label={opt.label}
                     active={type === opt.key}
                     onPress={() => handleTypeChange(opt.key)}
+                    accentColor={theme.primary}
                   />
                 ))}
-              </View>
-            </Field>
+              </FormChipRow>
+            </FormField>
 
-            <Field label="Account">
-              <View style={styles.segRow}>
-                {accounts.map((a: any) => {
-                  const emoji = ({ bank: '🏦', credit_card: '💳', wallet: '👛', cash: '💵' } as any)[a.type] ?? '💳';
-                  const shortName = a.bankName
-                    ? a.bankName
-                    : a.mask
-                    ? `${a.name.split('··')[0].trim()} ··${a.mask.slice(-4)}`
-                    : a.name;
-                  const isActive = (accountId ?? defaultAccountId) === a.id;
-                  return (
-                    <Seg
-                      key={a.id}
-                      label={`${emoji} ${shortName}`}
-                      active={isActive}
-                      onPress={() => setAccountId(a.id)}
-                    />
-                  );
-                })}
-              </View>
-            </Field>
-
-            <Field label="Merchant / Person">
-              <TextInput
+            <FormField label="Merchant / Person">
+              <FormTextInput
                 value={merchant}
-                onChangeText={(t) => setMerchant(sanitizeName(t, INPUT_LIMITS.MERCHANT_MAX))}
+                onChangeText={(t: string) => setMerchant(sanitizeName(t, INPUT_LIMITS.MERCHANT_MAX))}
                 placeholder="e.g. Zomato / Rohit"
-                placeholderTextColor={colors.textMuted}
-                style={styles.input}
                 maxLength={INPUT_LIMITS.MERCHANT_MAX}
               />
-            </Field>
+            </FormField>
 
             {/* ── Category selector ───────────────────────────────── */}
-            <Field label="Category">
+            <FormField label="Category">
               <>
-                <TouchableOpacity
-                  style={[
-                    styles.catSelector,
-                    selectedParentDef && {
-                      borderColor: selectedParentDef.color + '99',
-                      borderWidth: 1.5,
-                    },
-                  ]}
+                <FormSelectRow
+                  leading={selectedParentDef?.emoji ?? '📌'}
+                  value={catDisplayLabel}
+                  isPlaceholder={!selectedParentDef}
+                  resolved={!!childCategory}
+                  accentColor={selectedParentDef?.color ?? theme.primary}
                   onPress={() => setCatPickerOpen(true)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.catSelectorEmoji}>
-                    {selectedParentDef?.emoji ?? '📌'}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.catSelectorName,
-                      selectedParentDef
-                        ? { color: selectedParentDef.color, fontWeight: '700' }
-                        : { color: colors.textMuted },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {catDisplayLabel}
-                  </Text>
-                  {childCategory ? (
-                    <Text style={[styles.catSelectorCheck, { color: selectedParentDef?.color }]}>
-                      ✓
-                    </Text>
-                  ) : (
-                    <Text style={styles.catSelectorArrow}>›</Text>
-                  )}
-                </TouchableOpacity>
+                />
 
                 {/* Budget breach preview */}
                 {breachPreview ? (
@@ -601,18 +632,30 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
                   </View>
                 ) : null}
               </>
-            </Field>
+            </FormField>
 
-            <Field label="Note (optional)">
-              <TextInput
-                value={note}
-                onChangeText={setNote}
-                placeholder="What was this for?"
-                placeholderTextColor={colors.textMuted}
-                multiline
-                style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]}
-              />
-            </Field>
+            <FormField label="Account">
+              <FormChipRow>
+                {accounts.map((a: any) => {
+                  const emoji = ({ bank: '🏦', credit_card: '💳', wallet: '👛', cash: '💵' } as any)[a.type] ?? '💳';
+                  const shortName = a.bankName
+                    ? a.bankName
+                    : a.mask
+                    ? `${a.name.split('··')[0].trim()} ··${a.mask.slice(-4)}`
+                    : a.name;
+                  const isActive = (accountId ?? defaultAccountId) === a.id;
+                  return (
+                    <FormChip
+                      key={a.id}
+                      label={`${emoji} ${shortName}`}
+                      active={isActive}
+                      onPress={() => setAccountId(a.id)}
+                      accentColor={theme.primary}
+                    />
+                  );
+                })}
+              </FormChipRow>
+            </FormField>
 
             {/* ── Split ───────────────────────────────────────────────────
                 Behaviour:
@@ -621,7 +664,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
                 • Tapping the enabled row immediately opens the picker modal
                   — no second tap. Re-tapping while open is a no-op.
                 • Unchecking clears picks and resets share state.            */}
-            {canSplitHere ? (
+            {!isEdit && (canSplitHere ? (
               isSplit && splitPicks.length > 0 ? (
                 /* ── Confirmed split: show who's in + edit/clear actions ── */
                 <View style={[styles.splitToggle, { borderColor: theme.primary, borderWidth: 1 }]}>
@@ -694,9 +737,20 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
               <Text style={styles.splitUnavailable}>
                 Split is available for expenses only (not income or lend / borrow categories).
               </Text>
-            )}
+            ))}
 
-            <SplitConfigModal
+            {/* Note — last field, same position as on the group form. */}
+            <FormField label="Note (optional)" style={styles.noteField}>
+              <FormTextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder="What else should we know?"
+                multiline
+                maxLength={INPUT_LIMITS.NOTE_MAX}
+              />
+            </FormField>
+
+            {!isEdit && <SplitConfigModal
               visible={splitModalOpen}
               transaction={splitDraftTxn}
               onClose={() => {
@@ -731,9 +785,9 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
                 }
                 setSplitModalOpen(false);
               }}
-            />
+            />}
 
-            <LinkContactModal
+            {!isEdit && <LinkContactModal
               visible={lbPickerOpen}
               categoryId={legacyCategoryId}
               suggestedPersons={[]}
@@ -753,14 +807,14 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
                 commitTransaction();
               }}
               onClose={() => setLbPickerOpen(false)}
-            />
+            />}
           </>
         </ScrollView>
 
         {/* Pinned bottom bar — single primary action. */}
         <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
           <GradientButton
-            title="Add transaction"
+            title={isEdit ? 'Save changes' : 'Add transaction'}
             onPress={handleSave}
             style={{ width: '100%' }}
           />
@@ -781,6 +835,7 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
             onPress={() => setCatPickerOpen(false)}
           />
           <View style={styles.catModalSheet}>
+            <SheetCloseButton onPress={() => setCatPickerOpen(false)} variant="absolute" />
             <View style={styles.catModalHandle} />
             <Text style={styles.catModalTitle}>Choose category</Text>
             <ScrollView
@@ -806,59 +861,9 @@ const AddTransactionScreen = ({ navigation }: { navigation: NavigationProp }) =>
   );
 };
 
-// ─── Small shared sub-components ─────────────────────────────────────────────
-
-const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-  <View style={styles.field}>
-    <Text style={styles.fieldLabel}>{label}</Text>
-    {children}
-  </View>
-);
-
-const Tab = ({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) => {
-  const theme = useTheme();
-  return (
-    <TouchableOpacity onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
-      {active ? (
-        <LinearGradient
-          colors={[theme.gradientStart, theme.gradientEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: radius.pill }]}
-        />
-      ) : null}
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-};
-
-const Seg = ({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) => {
-  const { primary } = useTheme();
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[styles.seg, active && { backgroundColor: primary + '15', borderColor: primary }]}
-    >
-      <Text
-        style={[styles.segText, active && { color: primary, fontWeight: '700' }]}
-        numberOfLines={1}
-        ellipsizeMode="tail"
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-};
-
 // ─── Styles ──────────────────────────────────────────────────────────────────
+// Field-level styles (labels, inputs, select rows, chips) live in
+// components/FormField.tsx so this screen and GroupExpenseForm stay identical.
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
@@ -875,29 +880,20 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.xs,
   },
-  backBtn: { padding: 4 },
-  title: { ...typography.h2, fontWeight: '700' as const, color: colors.textPrimary },
-
-  tabs: {
-    flexDirection: 'row',
-    marginHorizontal: spacing.lg,
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    padding: 4,
-    ...shadows.card,
-  },
-  tab: {
+  // Fixed 40×40 box (same convention as Categories / AccountDetails) so an empty
+  // spacer of the same style balances it and the centred title is truly centred.
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  title: {
+    ...typography.h2,
+    fontWeight: '700' as const,
+    color: colors.textPrimary,
     flex: 1,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    overflow: 'hidden',
+    textAlign: 'center',
   },
-  tabActive: {},
-  tabText: { ...typography.bodyBold, fontWeight: '600' as const, color: colors.textSecondary },
-  tabTextActive: { color: '#fff' },
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
+  // Sits after the split block, which has its own bottom margin.
+  noteField: { marginTop: spacing.lg },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
@@ -905,69 +901,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.divider,
   },
-
-  field: { marginBottom: spacing.lg },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '600' as const,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-
-  input: {
-    ...(shadows.card as object),
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '400' as const,
-  },
-  amountInput: {
-    ...(shadows.card as object),
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    color: colors.textPrimary,
-    fontSize: 28,
-    fontWeight: '800' as const,
-  },
-
-  segRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  seg: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    maxWidth: '100%',
-  },
-  segText: {
-    fontSize: 13,
-    fontWeight: '400' as const,
-    color: colors.textSecondary,
-  },
-
-  // ── Category selector button ───────────────────────────────────────────────
-  catSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    gap: spacing.sm,
-    ...shadows.card,
-  },
-  catSelectorEmoji: { fontSize: 20 },
-  catSelectorName: { flex: 1, fontSize: 15, fontWeight: '400' as const },
-  catSelectorArrow: { fontSize: 20, color: colors.textMuted },
-  catSelectorCheck: { fontSize: 16, fontWeight: '700' as const },
 
   // ── Category bottom-sheet modal ────────────────────────────────────────────
   catModalBackdrop: {
@@ -1031,7 +964,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginLeft: spacing.sm,
   },
-  catModalCheck: { fontWeight: '800' as const, fontSize: 16 },
 
   // Child chip grid
   childGrid: {
@@ -1128,34 +1060,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800' as const,
     color: colors.danger,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: colors.divider,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkmark: { color: '#fff', fontWeight: '700' as const },
-  splitPickBtn: {
-    marginTop: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    ...shadows.card,
-  },
-  splitPickBtnTitle: {
-    fontSize: 15,
-    fontWeight: '700' as const,
-  },
-  splitPickBtnHint: {
-    fontSize: 11,
-    fontWeight: '500' as const,
-    color: colors.textSecondary,
-    marginTop: 4,
   },
   splitUnavailable: {
     fontSize: 13,

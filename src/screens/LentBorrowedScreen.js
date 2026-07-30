@@ -17,6 +17,7 @@ import { TabView } from 'react-native-tab-view';
 import * as Contacts from 'expo-contacts';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
+import SheetCloseButton from '../components/SheetCloseButton';
 
 import EmptyState from '../components/EmptyState';
 
@@ -24,12 +25,14 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizePhone, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate } from '../utils/format';
 import GradientButton from '../components/GradientButton';
 import CenterModal from '../components/CenterModal';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
 import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
+import DateField from '../components/DateField';
 import Svg, { Path } from 'react-native-svg';
 
 const ENTRY_LABEL = {
@@ -53,6 +56,7 @@ const initialLayout = { width: Dimensions.get('window').width };
 const isPositiveEntry = (kind) => kind === 'lent' || kind === 'borrow_repaid';
 
 const LentBorrowedScreen = ({ route, navigation }) => {
+  const theme = useTheme();
   const initialKind = route?.params?.kind || 'lent';
   // Tab index is the source of truth; `kind` is the active route's key. This
   // keeps the existing kind-based logic intact while the native pager drives
@@ -64,6 +68,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [phone, setPhone] = useState('');
   const [contactId, setContactId] = useState(null);
   const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(() => new Date()); // when it was lent/borrowed
   const [note, setNote] = useState('');
   const [alreadySettled, setAlreadySettled] = useState(false); // log as already lent_settled/borrow_repaid
   const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
@@ -96,6 +101,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     setPhone('');
     setContactId(null);
     setAmount('');
+    setDate(new Date());
     setNote('');
     setAlreadySettled(false);
   }, []);
@@ -117,6 +123,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     const baseEntry = {
       person: person.trim(),
       amount: n,
+      date: date.toISOString(),
       note: note.trim(),
       contactId: contactId ?? null,
       phone: phone.trim() || null,
@@ -138,7 +145,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
     addLentBorrowed({ ...baseEntry, kind: addKind });
     resetForm();
-  }, [person, phone, contactId, amount, note, alreadySettled, addLentBorrowed, addAlreadySettledLentBorrowed, resetForm]);
+  }, [person, phone, contactId, amount, date, note, alreadySettled, addLentBorrowed, addAlreadySettledLentBorrowed, resetForm]);
 
   const pickContact = useCallback(async () => {
     const { status } = await Contacts.requestPermissionsAsync();
@@ -307,8 +314,20 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             onPress={toggle}
             activeOpacity={0.85}
           >
-            <View style={[styles.avatar, isFullySettled && styles.avatarSettled]}>
-              <Text style={[styles.avatarText, isFullySettled && styles.avatarTextSettled]}>
+            <View
+              style={[
+                styles.avatar,
+                { backgroundColor: theme.primary + '22' },
+                isFullySettled && styles.avatarSettled,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.avatarText,
+                  { color: theme.primary },
+                  isFullySettled && styles.avatarTextSettled,
+                ]}
+              >
                 {(pb.person || '?').charAt(0).toUpperCase()}
               </Text>
             </View>
@@ -444,9 +463,12 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     // Heading + chip reflect the resulting category when "already settled" is on:
     // lent → Lent Settled, borrowed → Borrow Repaid.
     const settledChipLabel = k === 'lent' ? 'as Lent settled' : 'as Borrow repaid';
+    // Both headings are verb-first and parallel ("Lend to someone" /
+    // "Borrow from someone"), matching LinkContactModal's "Who did you lend
+    // to?" / "Who did you borrow from?".
     const heading = alreadySettled
       ? (k === 'lent' ? 'Lent settled' : 'Borrow repaid')
-      : (k === 'lent' ? 'Lend to someone' : 'Note a borrowed amount');
+      : (k === 'lent' ? 'Lend to someone' : 'Borrow from someone');
 
     return (
     <View style={styles.formCard}>
@@ -456,16 +478,24 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             categories (addAlreadySettledLentBorrowed) instead of an open
             'lent'/'borrowed' entry you'd have to Settle separately later. */}
         <TouchableOpacity
-          style={[styles.settledChip, alreadySettled && styles.settledChipActive]}
+          style={[
+            styles.settledChip,
+            alreadySettled && { backgroundColor: theme.primary + '14', borderColor: theme.primary + '55' },
+          ]}
           onPress={() => setAlreadySettled((v) => !v)}
           activeOpacity={0.75}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: alreadySettled }}
         >
-          <View style={[styles.settledBox, alreadySettled && styles.settledBoxActive]}>
+          <View
+            style={[
+              styles.settledBox,
+              alreadySettled && { backgroundColor: theme.primary, borderColor: theme.primary },
+            ]}
+          >
             {alreadySettled ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
           </View>
-          <Text style={[styles.settledChipText, alreadySettled && styles.settledChipTextActive]}>
+          <Text style={[styles.settledChipText, alreadySettled && { color: theme.primary }]}>
             {settledChipLabel}
           </Text>
         </TouchableOpacity>
@@ -480,8 +510,14 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           style={[styles.input, styles.phoneInput]}
           maxLength={INPUT_LIMITS.PHONE_LEN}
         />
-        <TouchableOpacity style={styles.contactPickBtn} onPress={pickContact}>
-          <ContactPickIcon />
+        <TouchableOpacity
+          style={[
+            styles.contactPickBtn,
+            { backgroundColor: theme.primary + '18', borderColor: theme.primary + '33' },
+          ]}
+          onPress={pickContact}
+        >
+          <ContactPickIcon color={theme.primary} />
         </TouchableOpacity>
       </View>
       <TextInput
@@ -492,15 +528,27 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         style={styles.input}
         maxLength={INPUT_LIMITS.NAME_MAX}
       />
-      <TextInput
-        value={amount}
-        onChangeText={(t) => setAmount(sanitizeAmount(t))}
-        keyboardType="decimal-pad"
-        placeholder="Amount *"
-        placeholderTextColor={colors.textMuted}
-        style={styles.input}
-        maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
-      />
+      {/* Amount + date. The calendar sits beside the amount (not on its own
+          row) to keep this card compact; it stays icon-only until the entry is
+          backdated, then shows the date so it's never mistaken for today's. */}
+      <View style={styles.amountRow}>
+        <TextInput
+          value={amount}
+          onChangeText={(t) => setAmount(sanitizeAmount(t))}
+          keyboardType="decimal-pad"
+          placeholder="Amount *"
+          placeholderTextColor={colors.textMuted}
+          style={[styles.input, styles.amountInput]}
+          maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
+        />
+        <DateField
+          value={date}
+          onChange={setDate}
+          maximumDate={new Date()}
+          variant="icon"
+          accentColor={theme.primary}
+        />
+      </View>
       <TextInput
         value={note}
         onChangeText={(t) => setNote(t.slice(0, INPUT_LIMITS.NOTE_MAX))}
@@ -680,6 +728,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
               onPress={() => setContactSheetVisible(false)}
             />
             <View style={styles.contactSheet}>
+              <SheetCloseButton onPress={() => setContactSheetVisible(false)} variant="absolute" />
               <View style={styles.contactHandle} />
               <Text style={styles.contactTitle}>Pick a contact</Text>
               <TextInput
@@ -693,7 +742,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
               {contactsLoading ? (
                 <ActivityIndicator
                   style={{ marginVertical: 32 }}
-                  color={colors.primary}
+                  color={theme.primary}
                 />
               ) : (
                 <FlatList
@@ -748,19 +797,24 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   listContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2, flexGrow: 1 },
 
+  // Hero text is centred to match the centred screen title above it (pushed
+  // screens centre their header — see ui-consistency §2).
   subLabel: {
     color: '#FFFFFFCC',
     ...typography.small,
     marginTop: spacing.lg,
+    textAlign: 'center',
   },
   bigAmount: {
     color: '#fff',
     fontSize: 36,
     fontWeight: '800',
     marginTop: 4,
+    textAlign: 'center',
   },
   toggleRow: {
     flexDirection: 'row',
+    alignSelf: 'center',
     backgroundColor: '#FFFFFF1F',
     borderRadius: radius.pill,
     padding: 4,
@@ -820,17 +874,10 @@ const styles = StyleSheet.create({
     borderColor: colors.divider,
     flexShrink: 0,
   },
-  settledChipActive: {
-    backgroundColor: colors.primary + '14',
-    borderColor: colors.primary + '55',
-  },
   settledChipText: {
     ...typography.tiny,
     color: colors.textSecondary,
     fontWeight: '700',
-  },
-  settledChipTextActive: {
-    color: colors.primary,
   },
   settledBox: {
     width: 16,
@@ -842,11 +889,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  settledBoxActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
   phoneInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  // Amount + date-picker button share a row (see the render comment).
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  amountInput: {
     flex: 1,
     marginBottom: 0,
   },
@@ -986,17 +1040,6 @@ const styles = StyleSheet.create({
     ...typography.tiny,
     fontWeight: '700',
   },
-  settle: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.primary + '15',
-    borderRadius: radius.pill,
-  },
-  settleText: {
-    color: colors.primary,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
   settledPill: {
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: spacing.xs,
@@ -1081,11 +1124,11 @@ const styles = StyleSheet.create({
   },
 });
 
-const ContactPickIcon = ({ size = 18 }) => (
+const ContactPickIcon = ({ size = 18, color = colors.primary }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path
       d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"
-      fill={colors.primary}
+      fill={color}
     />
   </Svg>
 );

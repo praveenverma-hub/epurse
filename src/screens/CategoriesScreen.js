@@ -323,7 +323,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { ...typography.h2, color: colors.textPrimary },
+  // Pushed screen → centred title. The 40px spacer opposite the back button
+  // makes the side slots equal, so flex + textAlign centres it truly.
+  title: { ...typography.h2, color: colors.textPrimary, flex: 1, textAlign: 'center' },
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {

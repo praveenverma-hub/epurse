@@ -89,4 +89,7 @@ export interface GroupExpenseData {
   accountId?: string | null;
   /** Captured at save time for manual adds (point of purchase). Optional. */
   location?: TxnLocation;
+  note?: string;
+  /** ISO date string — when the expense actually happened. Defaults to now. */
+  date?: string;
 }

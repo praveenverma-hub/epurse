@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { radius, spacing, shadows } from '../constants/theme';
+import SheetCloseButton from './SheetCloseButton';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
@@ -39,6 +40,7 @@ const AccountPickerSheet = ({
     <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} />
       <View style={styles.sheet}>
+        <SheetCloseButton onPress={onClose} variant="absolute" />
         <View style={styles.handle} />
         <Text style={styles.title}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}

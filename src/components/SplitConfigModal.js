@@ -14,6 +14,7 @@ import {
 
 import { colors, radius, spacing, typography } from '../constants/theme';
 import GradientButton from './GradientButton';
+import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
 import { useToast } from './Toast';
@@ -315,6 +316,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <ScrollView

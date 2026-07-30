@@ -34,6 +34,7 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useGradient, useTheme } from '../hooks/useTheme';
+import SheetCloseButton from './SheetCloseButton';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
         <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
 
         <Animated.View style={[styles.sheet, isCenter && styles.centerCard, cardStyle]}>
+          <SheetCloseButton onPress={handleDismiss} variant="absolute" />
           {isCenter ? null : <View style={styles.handle} />}
 
           <View style={styles.titleRow}>
@@ -205,8 +207,8 @@ const styles = StyleSheet.create({
     paddingHorizontal:    22,
     paddingTop:           12,
     paddingBottom:        34,
-    borderTopLeftRadius:  28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius:  24,
+    borderTopRightRadius: 24,
   },
   // Centered card: all four corners rounded, no drag handle, symmetric padding.
   centerCard: {

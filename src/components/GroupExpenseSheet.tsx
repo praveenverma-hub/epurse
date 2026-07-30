@@ -19,6 +19,7 @@ import { colors, radius, spacing, typography as typographyBase } from '../consta
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import GroupExpenseForm from './GroupExpenseForm';
+import SheetCloseButton from './SheetCloseButton';
 import GradientButtonBase from './GradientButton';
 import type { Group, GroupExpenseData } from '../types/group';
 
@@ -57,6 +58,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
       >
         <View style={styles.backdrop}>
           <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
+          <SheetCloseButton onPress={onClose} />
           <View style={styles.sheet}>
             <View style={styles.handle} />
             <ScrollView
@@ -65,8 +67,10 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.bodyContent}
             >
-              <Text style={[styles.title, !isEdit && { marginBottom: spacing.md }]}>
-                {isEdit ? `Who owes? · ${group.name}` : `Add Expense · ${group.name}`}
+              <Text style={styles.title}>{isEdit ? 'Who owes?' : 'Add Expense'}</Text>
+              {/* Name the group explicitly — matches AddGroupExpenseScreen's header. */}
+              <Text style={[styles.subtitle, !isEdit && { marginBottom: spacing.md }]} numberOfLines={1}>
+                Group · {group.emoji ? `${group.emoji} ` : ''}{group.name}
               </Text>
               {isEdit ? (
                 <Text style={styles.subtitle}>Paid by you by default — set how it splits and the category.</Text>

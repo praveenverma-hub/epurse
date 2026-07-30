@@ -27,6 +27,15 @@ import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useToast } from './Toast';
 import { TwoTierCategorySheet } from './TwoTierCategorySheet';
+import DateField from './DateField';
+import {
+  FormField,
+  FormTextInput,
+  FormAmountInput,
+  FormSelectRow,
+  FormChipRow,
+  FormChip,
+} from './FormField';
 import type { Group, GroupShare, GroupExpenseData } from '../types/group';
 
 const GradientButton = GradientButtonBase as React.FC<{
@@ -89,7 +98,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const accounts = useEPurseStore((s: any) => s.accounts) as AccountLike[];
 
   const [amountRaw, setAmountRaw] = useState('');
+  const [date, setDate] = useState(() => new Date());
   const [merchant, setMerchant] = useState('');
+  const [note, setNote] = useState('');
   const [payerIdx, setPayerIdx] = useState(0); // index into allMembers
   const [splitMode, setSplitMode] = useState<SplitMode>('equal');
   const [shares, setShares] = useState<GroupShare[]>([]);
@@ -131,8 +142,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     if (editTxn) {
       const eg = editTxn.groupSplit;
       setAmountRaw(String(editTxn.amount ?? ''));
+      setDate(editTxn.createdAt ? new Date(editTxn.createdAt) : new Date());
       // 'Group Expense' is the placeholder default — show it as empty so the hint shows.
       setMerchant(editTxn.merchant && editTxn.merchant !== 'Group Expense' ? editTxn.merchant : '');
+      setNote(editTxn.note || '');
       setParentCat(editTxn.parentCategory ?? null);
       setChildCat(editTxn.childCategory ?? null);
       setAccountId(editTxn.accountId ?? accounts[0]?.id ?? null);
@@ -181,7 +194,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     }
 
     setAmountRaw(amountLocked ? String(presetAmount) : '');
+    setDate(new Date());
     setMerchant('');
+    setNote('');
     setPayerIdx(0);
     setSplitMode('equal');
     setAccountId(accounts[0]?.id || null);
@@ -378,6 +393,8 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     const expenseData: GroupExpenseData = {
       amount,
       merchant: merchant.trim() || 'Group Expense',
+      note: note.trim(),
+      date: amountLocked ? undefined : date.toISOString(),
       // categoryId is derived from the two-tier labels by addGroupExpense; pass labels through.
       ...(parentCat ? { parentCategory: parentCat } : {}),
       ...(childCat ? { childCategory: childCat } : {}),
@@ -395,63 +412,75 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   return (
     <>
       {/* Amount — prefilled & locked when tagging an existing transaction */}
-      <TextInput
-        style={[styles.amountInput, amountLocked && styles.amountInputLocked]}
-        placeholder="₹ 0"
-        placeholderTextColor={colors.textMuted}
-        value={amountRaw}
-        onChangeText={(t) => setAmountRaw(sanitizeAmount(t))}
-        keyboardType="decimal-pad"
-        maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
-        editable={!amountLocked}
-        autoFocus={!amountLocked}
-      />
-      {amountLocked && <Text style={styles.amountHint}>From the transaction</Text>}
+      <FormField
+        label="Amount (₹)"
+        hint={amountLocked ? 'From the transaction — not editable' : 'Up to 10 crore'}
+      >
+        <FormAmountInput
+          placeholder="0"
+          value={amountRaw}
+          onChangeText={(t: string) => setAmountRaw(sanitizeAmount(t))}
+          maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
+          locked={amountLocked}
+          autoFocus={!amountLocked}
+        />
+      </FormField>
+
+      {/* Date — hidden when tagging an existing transaction with no `editTxn`
+          loaded (we don't know its real date here, so there's nothing
+          meaningful to show); locked (but shown) when editing one we DO
+          have loaded, same reasoning as the locked amount. */}
+      {(!amountLocked || editTxn) && (
+        <FormField label="Date" hint={amountLocked ? 'From the transaction' : undefined}>
+          <DateField
+            value={date}
+            onChange={setDate}
+            maximumDate={new Date()}
+            disabled={amountLocked}
+            accentColor={theme.primary}
+          />
+        </FormField>
+      )}
 
       {/* Merchant */}
-      <TextInput
-        style={styles.nameInput}
-        placeholder="What was this for?"
-        placeholderTextColor={colors.textMuted}
-        value={merchant}
-        onChangeText={setMerchant}
-        maxLength={60}
-      />
+      <FormField label="Merchant / Person">
+        <FormTextInput
+          placeholder="e.g. Dinner / Groceries / Rohit"
+          value={merchant}
+          onChangeText={setMerchant}
+          maxLength={INPUT_LIMITS.MERCHANT_MAX}
+        />
+      </FormField>
 
       {/* Category — hidden when reached from the manage modal (already set there) */}
       {!hideCategory && (
-        <TouchableOpacity style={styles.catRow} onPress={() => setCatSheet(true)} activeOpacity={0.75}>
-          <Text style={styles.catLabel}>Category</Text>
-          <View style={styles.catValueWrap}>
-            <Text style={[styles.catValue, !childCat && styles.catValueMuted]} numberOfLines={1}>
-              {childCat ? `${parentCat} › ${childCat}` : 'Other (tap to choose)'}
-            </Text>
-            <Text style={styles.catChevron}>›</Text>
-          </View>
-        </TouchableOpacity>
+        <FormField label="Category">
+          <FormSelectRow
+            leading={childCat ? '🏷️' : '📌'}
+            value={childCat ? `${parentCat}  ›  ${childCat}` : 'Select category'}
+            isPlaceholder={!childCat}
+            resolved={!!childCat}
+            accentColor={theme.primary}
+            onPress={() => setCatSheet(true)}
+          />
+        </FormField>
       )}
 
       {/* Account — personal groups (no payer concept) */}
       {!isShared && accounts.length > 1 && (
-        <>
-          <Text style={styles.sectionLabel}>Account</Text>
-          <View style={styles.accountRow}>
+        <FormField label="Account">
+          <FormChipRow>
             {accounts.map((a) => (
-              <TouchableOpacity
+              <FormChip
                 key={a.id}
-                style={[styles.accountChip, accountId === a.id && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
+                label={a.name}
+                active={accountId === a.id}
                 onPress={() => setAccountId(a.id)}
-              >
-                <Text
-                  style={[styles.accountChipTxt, accountId === a.id && { color: theme.primary }]}
-                  numberOfLines={1}
-                >
-                  {a.name}
-                </Text>
-              </TouchableOpacity>
+                accentColor={theme.primary}
+              />
             ))}
-          </View>
-        </>
+          </FormChipRow>
+        </FormField>
       )}
 
       {/* Payer → account → split (shared only) */}
@@ -459,88 +488,76 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         <>
           {lockPayerToMe ? (
             // Real account debit → you paid; flipping to a memo would reverse the balance.
-            <View style={[styles.paidByMeNote, { borderColor: theme.primary + '44', backgroundColor: theme.primary + '0F' }]}>
-              <Text style={[styles.paidByMeTxt, { color: theme.primary }]}>👤 Paid by you</Text>
-            </View>
+            <FormField label="Who paid?" hint="The money already left your account, so this can't change.">
+              <View style={[styles.paidByMeNote, { borderColor: theme.primary + '44', backgroundColor: theme.primary + '0F' }]}>
+                <Text style={[styles.paidByMeTxt, { color: theme.primary }]}>👤 Paid by you</Text>
+              </View>
+            </FormField>
           ) : (
-            <>
-              <Text style={styles.sectionLabel}>Who paid?</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.payerRow}
-                contentContainerStyle={styles.payerRowContent}
-              >
+            <FormField label="Who paid?">
+              <FormChipRow>
                 {allMembers.map((m, i) => (
-                  <TouchableOpacity
+                  <FormChip
                     key={m.memberId}
-                    style={[styles.payerChip, payerIdx === i && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
+                    label={m.isMe ? '👤 You' : m.name}
+                    active={payerIdx === i}
                     onPress={() => setPayerIdx(i)}
-                  >
-                    <Text style={[styles.payerChipTxt, payerIdx === i && { color: theme.primary }]}>
-                      {m.isMe ? '👤 You' : m.name}
-                    </Text>
-                  </TouchableOpacity>
+                    accentColor={theme.primary}
+                  />
                 ))}
-              </ScrollView>
-            </>
+              </FormChipRow>
+            </FormField>
           )}
 
           {/* Account — only when YOU paid; sits below "Who paid" */}
           {allMembers[payerIdx]?.isMe && accounts.length > 1 && (
-            <>
-              <Text style={styles.sectionLabel}>Account</Text>
-              <View style={styles.accountRow}>
+            <FormField label="Account">
+              <FormChipRow>
                 {accounts.map((a) => (
-                  <TouchableOpacity
+                  <FormChip
                     key={a.id}
-                    style={[styles.accountChip, accountId === a.id && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
+                    label={a.name}
+                    active={accountId === a.id}
                     onPress={() => setAccountId(a.id)}
-                  >
-                    <Text
-                      style={[styles.accountChipTxt, accountId === a.id && { color: theme.primary }]}
-                      numberOfLines={1}
-                    >
-                      {a.name}
-                    </Text>
-                  </TouchableOpacity>
+                    accentColor={theme.primary}
+                  />
                 ))}
-              </View>
-            </>
+              </FormChipRow>
+            </FormField>
           )}
 
-          <Text style={styles.sectionLabel}>Split</Text>
-          <View style={styles.modeRow}>
-            {(['equal', 'percent', 'amount', 'fullOwed'] as SplitMode[]).map((m) => (
-              <TouchableOpacity
-                key={m}
-                style={[styles.modeChip, splitMode === m && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
-                onPress={() => handleSetMode(m)}
-              >
-                <View style={styles.modeChipInner}>
-                  {m === 'fullOwed' && (
+          <FormField
+            label="Split"
+            hint={splitMode === 'fullOwed' ? 'You pay the whole bill — everyone else owes an equal share.' : undefined}
+          >
+            <FormChipRow>
+              {(['equal', 'percent', 'amount', 'fullOwed'] as SplitMode[]).map((m) => (
+                <FormChip
+                  key={m}
+                  label={m === 'equal' ? '⚖️ Equal' : m === 'percent' ? '% Percent' : m === 'amount' ? '₹ Amount' : 'Full owed'}
+                  active={splitMode === m}
+                  onPress={() => handleSetMode(m)}
+                  accentColor={theme.primary}
+                  icon={m === 'fullOwed' ? (
                     <Ionicons
                       name="hand-left-outline"
                       size={14}
                       color={splitMode === m ? theme.primary : colors.textSecondary}
-                      style={styles.modeChipIcon}
                     />
-                  )}
-                  <Text style={[styles.modeChipTxt, splitMode === m && { color: theme.primary }]} numberOfLines={1}>
-                    {m === 'equal' ? '⚖️ Equal' : m === 'percent' ? '% Percent' : m === 'amount' ? '₹ Amount' : 'Full owed'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {splitMode === 'fullOwed' && (
-            <Text style={styles.modeHint}>You pay the whole bill — everyone else owes an equal share.</Text>
-          )}
+                  ) : undefined}
+                />
+              ))}
+            </FormChipRow>
+          </FormField>
 
           {/* Per-member breakdown — scrollable bordered box. Equal shows checkboxes
               for member selection; percent/amount are editable; Full-owed locks ONLY
               the payer (others edit their owed ₹). Each row is annotated with who
               paid vs. who owes. */}
+          <FormField
+            label="Who owes what"
+            hint={splitMode === 'equal' ? 'Untick anyone who isn’t part of this expense.' : undefined}
+          >
           <ScrollView
             style={styles.sharesList}
             contentContainerStyle={styles.sharesListContent}
@@ -622,8 +639,20 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
               );
             })}
           </ScrollView>
+          </FormField>
         </>
       )}
+
+      {/* Note — last field, same position as on the plain-transaction form. */}
+      <FormField label="Note (optional)">
+        <FormTextInput
+          placeholder="What else should we know?"
+          value={note}
+          onChangeText={setNote}
+          multiline
+          maxLength={INPUT_LIMITS.NOTE_MAX}
+        />
+      </FormField>
 
       {!hideSubmit && (
         <GradientButton
@@ -651,51 +680,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
 }
 
 const styles = StyleSheet.create({
-  amountInput: {
-    fontSize: 34, fontWeight: '700',
-    color: colors.textPrimary,
-    textAlign: 'center',
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1.5, borderBottomColor: colors.divider,
-    marginBottom: spacing.sm,
-  },
-  amountInputLocked: { color: colors.textSecondary, borderBottomColor: 'transparent' },
-  amountHint: { ...typography.tiny, color: colors.textMuted, textAlign: 'center', marginTop: -spacing.xs, marginBottom: spacing.sm },
-  nameInput: {
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    color: colors.textPrimary,
-    ...typography.body,
-    marginBottom: spacing.sm,
-    borderWidth: 1, borderColor: colors.divider,
-  },
-  catRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
-    marginBottom: spacing.sm,
-    borderWidth: 1, borderColor: colors.divider,
-  },
-  catLabel:     { ...typography.body, color: colors.textSecondary },
-  catValueWrap: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, marginLeft: spacing.sm },
-  catValue:     { ...typography.body, color: colors.textPrimary, fontWeight: '600', flexShrink: 1 },
-  catValueMuted:{ color: colors.textMuted, fontWeight: '400' },
-  catChevron:   { ...typography.h3, color: colors.textMuted, marginLeft: 6 },
-  sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.sm, marginBottom: spacing.xs },
-  // Wrapping grid (no horizontal scroll) — full-screen form has the room.
-  accountRow:   { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm },
-  accountChip: {
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderRadius: radius.pill, marginRight: 8, marginBottom: 8,
-    borderWidth: 1.5, borderColor: colors.divider,
-    backgroundColor: colors.background, maxWidth: 160,
-  },
-  // Constant weight so selecting a chip recolours it without changing its width
-  // (a fontWeight change would resize the text and make the row jump horizontally).
-  accountChipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   paidByMeNote: {
     alignSelf: 'flex-start',
     marginTop: spacing.sm, marginBottom: spacing.xs,
@@ -703,35 +687,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill, borderWidth: 1,
   },
   paidByMeTxt: { ...typography.small, fontWeight: '700' },
-  payerRow:   { marginBottom: spacing.sm },
-  // flexGrow:1 makes the content fill the viewport when there are few chips, so a
-  // narrow row isn't scrollable (fixes the "jump right on scroll" with few items).
-  payerRowContent: { flexGrow: 1 },
-  payerChip: {
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderRadius: radius.pill, marginRight: 8,
-    borderWidth: 1.5, borderColor: colors.divider,
-    backgroundColor: colors.background,
-  },
-  // Constant weight — see accountChipTxt note (prevents the "Who paid" row jumping on tap).
-  payerChipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
-  // 4 modes → 2×2 grid so the longer "Full owed" label fits without truncation.
-  modeRow:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
-  modeChip: {
-    flexGrow: 1, flexBasis: '46%', paddingVertical: spacing.sm,
-    borderRadius: radius.pill, alignItems: 'center',
-    borderWidth: 1, borderColor: colors.divider,
-    backgroundColor: colors.background,
-  },
-  modeChipInner: { flexDirection: 'row', alignItems: 'center' },
-  modeChipIcon: { marginRight: 4 },
-  modeChipTxt: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
-  modeHint:   { ...typography.tiny, color: colors.textMuted, marginTop: -spacing.xs, marginBottom: spacing.sm },
   // Bordered, scrollable box so a long member list doesn't push the form around.
+  // Card surface + hairline border to match the shared FormField controls.
   sharesList: {
-    maxHeight: 200, marginBottom: spacing.sm,
+    maxHeight: 200,
     borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md,
-    backgroundColor: colors.background,
+    backgroundColor: colors.card,
   },
   sharesListContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   shareRow: {
@@ -769,5 +730,4 @@ const styles = StyleSheet.create({
   // every row's amount block is the same width and the name/owe-label column stays aligned.
   shareAmountCol: { width: 116, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   shareEqualAmt: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', textAlign: 'right' },
-  equalHint:   { ...typography.small, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs },
 });

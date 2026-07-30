@@ -14,6 +14,7 @@ import {
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButtonBase from './GradientButton';
+import SheetCloseButton from './SheetCloseButton';
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { fetchContactsForPicker, getContactsPermissionStatus } from '../services/contactsService';
@@ -138,6 +139,7 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
       >
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <ScrollView

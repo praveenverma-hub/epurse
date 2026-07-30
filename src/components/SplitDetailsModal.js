@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
 
 const pct = (amount, share) => {
@@ -42,6 +43,7 @@ export default function SplitDetailsModal({ visible, txn, myName, onClose, onEdi
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <Text style={styles.title}>Split details</Text>
@@ -66,9 +68,6 @@ export default function SplitDetailsModal({ visible, txn, myName, onClose, onEdi
           </ScrollView>
 
           <View style={styles.btnRow}>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={onClose} activeOpacity={0.85}>
-              <Text style={styles.secondaryText}>Close</Text>
-            </TouchableOpacity>
             <TouchableOpacity
               style={styles.primaryBtn}
               onPress={onEdit}
@@ -123,16 +122,6 @@ const styles = StyleSheet.create({
   meta: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   amt: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '800' },
   btnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  secondaryBtn: {
-    flex: 1,
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
-  secondaryText: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
   primaryBtn: {
     flex: 1,
     backgroundColor: colors.primary,

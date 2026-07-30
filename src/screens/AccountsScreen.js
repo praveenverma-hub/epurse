@@ -29,6 +29,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
 import AccountCard    from '../components/AccountCard';
+import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState     from '../components/EmptyState';
 import InfoIcon       from '../components/InfoIcon';
 import AddAccountModal from '../components/AddAccountModal';
@@ -531,6 +532,7 @@ export default function AccountsScreen({ navigation }) {
         <View style={styles.pickBackdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setLinkTarget(null)} />
           <View style={styles.pickSheet}>
+            <SheetCloseButton onPress={() => setLinkTarget(null)} variant="absolute" />
             <View style={styles.pickHandle} />
             <Text style={styles.pickTitle}>Link {linkTarget?.name} to…</Text>
             <Text style={styles.pickHelp}>

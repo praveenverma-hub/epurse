@@ -45,6 +45,7 @@ import { radius, spacing, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { hapticSuccess } from '../utils/haptics';
 import ThreeDEngravedCoin from './ThreeDEngravedCoin';
+import SheetCloseButton from './SheetCloseButton';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,12 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
         <View style={styles.confettiOverlay} pointerEvents="none">
           <LottieView
             source={require('../assets/confetti.json')}
-            style={StyleSheet.absoluteFill}
+            style={styles.confetti}
+            // The composition is 1827×2436 (≈3:4) — far wider than a phone, so the
+            // default 'contain' letterboxes it into a band in the middle of the
+            // screen (reads as "cut off at the top"). 'cover' fills the height and
+            // crops the sides instead, which is what a full-screen burst needs.
+            resizeMode="cover"
             autoPlay
             loop={false}
             onAnimationFinish={handleAnimationFinish}
@@ -166,6 +172,7 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
 
       {/* Sheet body */}
       <Animated.View style={[styles.sheetWrap, sheetStyle]} pointerEvents="box-none">
+        <SheetCloseButton onPress={dismissSheet} variant="absolute" />
         <SafeAreaView edges={['bottom']} style={styles.safe}>
           <View style={[styles.sheet, { backgroundColor: theme.card }]}>
             {/* Handle (decorative — not interactive) */}
@@ -248,6 +255,7 @@ const styles = StyleSheet.create<{
   claimBtn: ViewStyle;
   claimBtnText: TextStyle;
   confettiOverlay: ViewStyle;
+  confetti: ViewStyle;
 }>({
   scrim: {
     ...StyleSheet.absoluteFillObject,
@@ -334,6 +342,11 @@ const styles = StyleSheet.create<{
   confettiOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 999,
+    overflow: 'hidden',
+  },
+  confetti: {
+    width: '100%',
+    height: '100%',
   },
 
   // Reward pills row

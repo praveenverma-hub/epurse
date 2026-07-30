@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 
 import { radius, spacing, shadows } from '../constants/theme';
+import SheetCloseButton from './SheetCloseButton';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
@@ -97,6 +98,7 @@ const CCBillPaymentSheet = ({ txn, onClose }) => {
       </Animated.View>
 
       <Animated.View style={[styles.sheet, { transform: [{ translateY: slideY }] }]} pointerEvents="box-none">
+        <SheetCloseButton onPress={onClose} variant="absolute" />
         <View style={styles.handle} />
 
         <Text style={styles.title}>Credit card bill payment</Text>
@@ -273,7 +275,7 @@ const makeStyles = (t) => {
     rowResultZero: { color: SUCCESS },
     primaryBtn: {
       backgroundColor: ACCENT,
-      borderRadius: radius.md,
+      borderRadius: radius.lg,
       paddingVertical: 15,
       alignItems: 'center',
       marginTop: spacing.sm,

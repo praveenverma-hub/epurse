@@ -19,6 +19,7 @@ import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 import { useToast } from './Toast';
+import SheetCloseButton from './SheetCloseButton';
 import CenterModal from './CenterModal';
 
 // ── Screen dimensions ─────────────────────────────────────────────────────────
@@ -486,6 +487,7 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
 
         <View style={[styles.sheet, { height: SHEET_H }]}>
+          <SheetCloseButton onPress={onClose} variant="absolute" />
           <View style={styles.handle} />
 
           {/* ── Top info row ── */}
@@ -751,7 +753,7 @@ const styles = StyleSheet.create({
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: spacing.sm, backgroundColor: '#25D366',
-    borderRadius: radius.md, paddingVertical: spacing.md, marginTop: spacing.sm,
+    borderRadius: radius.lg, paddingVertical: spacing.md, marginTop: spacing.sm,
   },
   sendBtnText: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
   cancelBtn:  { alignItems: 'center', marginTop: spacing.sm },

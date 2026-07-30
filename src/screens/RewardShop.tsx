@@ -56,6 +56,7 @@ import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 import { useToast } from '../components/Toast';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
+import SheetCloseButton from '../components/SheetCloseButton';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography, shadows } from '../constants/theme';
 
@@ -155,14 +156,15 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* ── Region A: Header ──────────────────────────────────────── */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={handleBack} hitSlop={10} activeOpacity={0.7}>
+          <TouchableOpacity onPress={handleBack} hitSlop={10} activeOpacity={0.7} style={styles.topBarSide}>
             <Ionicons name="chevron-back" size={24} color={D.white} />
           </TouchableOpacity>
-          <Text style={styles.screenTitle}>Profile & Perks</Text>
+          <Text style={styles.screenTitle} numberOfLines={1}>Profile &amp; Perks</Text>
           <TouchableOpacity
             onPress={openSettings}
             hitSlop={10}
             activeOpacity={0.7}
+            style={styles.topBarSide}
             accessibilityRole="button"
             accessibilityLabel="Settings"
           >
@@ -330,6 +332,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
               { transform: [{ translateY: settingsSlide.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] },
             ]}
           >
+            <SheetCloseButton onPress={closeSettings} variant="absolute" />
             <View style={styles.settingsHandle} />
 
             {/* Preference: monthly recap (modal + card + PDF) */}
@@ -639,12 +642,16 @@ function makeStyles(D: any) {
     topBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       paddingHorizontal: 16,
       paddingTop: 6,
       paddingBottom: 12,
     },
+    // Equal-width side slots (back chevron / gear) so the flexed title centres
+    // truly rather than being distributed by space-between.
+    topBarSide: { width: 32, alignItems: 'center', justifyContent: 'center' },
     screenTitle: {
+      flex: 1,
+      textAlign: 'center',
       fontSize: 18,
       fontWeight: '800' as const,
       color: D.white,
@@ -848,7 +855,7 @@ function makeStyles(D: any) {
 
     // ── Shop card ──────────────────────────────────────────────────────────
     card: {
-      borderRadius: 18,
+      borderRadius: radius.lg,
       overflow: 'hidden',
       borderWidth: 1.5,
       borderColor: D.border,

@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import InfoSheet from './InfoSheet';
+import SheetCloseButton from './SheetCloseButton';
 import InfoIcon from './InfoIcon';
 
 // Essential (survival) categories — keyed by the first-level BUDGET parent ids
@@ -303,6 +304,7 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
       <Modal visible={showRebalance} transparent animationType="slide" onRequestClose={() => setShowRebalance(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowRebalance(false)}>
           <View style={[styles.bottomSheet, { backgroundColor: theme.card }]}>
+            <SheetCloseButton onPress={() => setShowRebalance(false)} variant="absolute" />
             <View style={[styles.sheetHandle, { backgroundColor: theme.divider }]} />
             <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>Rebalance Budget</Text>
             <ScrollView style={styles.sheetScroll}>

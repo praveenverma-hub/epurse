@@ -46,6 +46,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
+import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState from '../components/EmptyState';
 import TransactionItem from '../components/TransactionItem';
 import MonthDivider from '../components/MonthDivider';
@@ -856,6 +857,7 @@ const TransactionsScreen = ({ navigation, route }) => {
 
           <GestureDetector gesture={panGesture}>
             <Animated.View style={[styles.sheet, sheetStyle]}>
+              <SheetCloseButton onPress={closeSheet} variant="absolute" />
 
               <View style={styles.handleArea}>
                 <View style={styles.handle} />
@@ -1177,14 +1179,22 @@ const TransactionsScreen = ({ navigation, route }) => {
         }}
       />
 
-      {/* Plain-transaction detail — view first, Edit hands off to the manage sheet. */}
+      {/* Plain-transaction detail — view first, Edit opens the full edit form
+          (amount/merchant/account/category/note), mirroring the group edit
+          flow. LB-linked transactions keep their own dedicated edit path
+          (the manage sheet's "Edit person"), since a lend/borrow link isn't
+          editable from this form. */}
       <TxnDetailSheet
         txn={detailTxn}
         onClose={() => setDetailTxn(null)}
         onEdit={() => {
           const t = detailTxn;
           setDetailTxn(null);
-          setActiveTxn(t);
+          if (t.lbLocked) {
+            setActiveTxn(t);
+          } else {
+            navigation.navigate('AddTransaction', { editTxnId: t.id });
+          }
         }}
       />
 

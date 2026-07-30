@@ -13,6 +13,7 @@ import { useTheme } from '../hooks/useTheme';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { INPUT_LIMITS, sanitizeName } from '../utils/validation';
 import { useToast } from './Toast';
+import SheetCloseButton from './SheetCloseButton';
 
 const TYPE_OPTIONS = [
   { key: ACCOUNT_TYPES.CASH,        label: 'Cash',         emoji: '💵' },
@@ -92,15 +93,13 @@ const AddAccountModal = ({ visible, onClose, onAdd }) => {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.overlay}>
+        <SheetCloseButton onPress={handleClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
           {/* Header */}
           <View style={styles.headerRow}>
             <Text style={styles.title}>Add Account</Text>
-            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.closeBtn}>✕</Text>
-            </TouchableOpacity>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>

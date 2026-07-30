@@ -37,6 +37,7 @@ import {
 } from '../store/useRewardStore';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
 import LiveFlame from './LiveFlame';
+import SheetCloseButton from './SheetCloseButton';
 import { hapticSuccess } from '../utils/haptics';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -135,6 +136,7 @@ const WelcomeStreakModal: React.FC = () => {
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissEarly} />
 
         <Animated.View style={[styles.sheet, sheetStyle]}>
+          <SheetCloseButton onPress={dismissEarly} variant="absolute" />
           <LinearGradient
             colors={['#1B2342', '#0F1428']}
             start={{ x: 0, y: 0 }}
@@ -173,8 +175,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop:        28,
     paddingBottom:     38,
-    borderTopLeftRadius:  28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius:  24,
+    borderTopRightRadius: 24,
     overflow:          'hidden',
     borderWidth:       1,
     borderColor:       'rgba(255, 255, 255, 0.08)',

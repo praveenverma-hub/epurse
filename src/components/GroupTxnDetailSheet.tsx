@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import EditIcon from './EditIcon';
+import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
@@ -28,6 +29,7 @@ interface GroupTxn {
   categoryId?: string;
   isGroupMemo?: boolean;
   groupSplit?: GroupSplit;
+  note?: string;
 }
 
 interface GroupTxnDetailSheetProps {
@@ -54,6 +56,7 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
     <Modal visible={!!txn} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
@@ -74,6 +77,7 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
           </View>
           {txn.createdAt ? <Text style={styles.date}>{formatDateTime(txn.createdAt)}</Text> : null}
           <Text style={styles.total}>{formatCurrency(amount)}</Text>
+          {txn.note ? <Text style={styles.note} numberOfLines={3}>{txn.note}</Text> : null}
 
           {gs ? (
             <>
@@ -141,9 +145,6 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
             </View>
           )}
 
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeTxt}>Close</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -176,6 +177,7 @@ const styles = StyleSheet.create({
   editTxt:  { ...typography.small, fontWeight: '700' },
   date:     { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   total:    { ...typography.display, color: colors.textPrimary, marginTop: spacing.sm },
+  note:     { ...typography.small, color: colors.textSecondary, marginTop: spacing.xs },
   sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.lg, marginBottom: spacing.xs },
   splitList: { maxHeight: 220 },
   splitRow: {
@@ -210,6 +212,4 @@ const styles = StyleSheet.create({
   oweLine:     { ...typography.body, fontWeight: '700', marginTop: 2 },
   settledLine: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   personalNote:{ ...typography.body, color: colors.textSecondary },
-  closeBtn:    { marginTop: spacing.lg, alignItems: 'center' },
-  closeTxt:    { ...typography.body, color: colors.textSecondary },
 });

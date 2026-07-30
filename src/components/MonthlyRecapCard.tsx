@@ -178,7 +178,7 @@ export default MonthlyRecapCard;
 const makeStyles = (theme: Palette) => StyleSheet.create({
   card: {
     backgroundColor: theme.card,
-    borderRadius: 18,
+    borderRadius: radius.lg,
     padding: 16,
     borderWidth: 1,
     borderColor: `${theme.primary}2E`,
@@ -213,7 +213,7 @@ const makeStyles = (theme: Palette) => StyleSheet.create({
 
   ribbon: { flexDirection: 'row', height: 8, borderRadius: 5, overflow: 'hidden', marginTop: 12, backgroundColor: theme.divider },
 
-  dlBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 12, paddingVertical: 12, marginTop: 14 },
+  dlBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.lg, paddingVertical: 12, marginTop: 14 },
   dlText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   foot: { fontSize: 10.5, color: theme.textMuted, textAlign: 'center', marginTop: 9 },
 });

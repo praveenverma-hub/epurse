@@ -1625,7 +1625,7 @@ export const useEPurseStore = create(
        * paidByMemberId: 'me' | group member's memberId
        * If paidBy !== 'me': isGroupMemo=true, no account balance change.
        */
-      addGroupExpense: (groupId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, date, location } = {}) => {
+      addGroupExpense: (groupId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, date, location, note } = {}) => {
         const s = get();
         const group = s.groups.find((g) => g.id === groupId);
         if (!group || !amount || amount <= 0 || amount > MAX_ALLOWED_AMOUNT) return null;
@@ -1659,6 +1659,7 @@ export const useEPurseStore = create(
           ...(groupSplit   ? { groupSplit }        : {}),
           ...(isGroupMemo ? { isGroupMemo: true }  : {}),
           ...(location ? { location } : {}),
+          ...(note ? { note: note.trim() } : {}),
         };
 
         let resolvedAccountId = accountId || null;
@@ -1700,7 +1701,7 @@ export const useEPurseStore = create(
        * stays consistent across balances, group totals, and Lent/Borrowed.
        * Works for both manual group expenses and tagged SMS transactions.
        */
-      updateGroupExpense: (txnId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, location } = {}) => {
+      updateGroupExpense: (txnId, { amount, merchant, categoryId, parentCategory, childCategory, paidByMemberId, paidByName, shares, accountId, location, note, date } = {}) => {
         const s = get();
         const old = s.transactions.find((t) => t.id === txnId);
         if (!old || !old.groupId) return null;
@@ -1734,6 +1735,8 @@ export const useEPurseStore = create(
           amount: newAmount,
           merchant: (merchant || old.merchant || 'Group Expense').trim(),
           categoryId: resolvedCategoryId,
+          note: note !== undefined ? note.trim() : old.note,
+          createdAt: date || old.createdAt,
         };
         if (parentCategory) updatedTxn.parentCategory = parentCategory; else delete updatedTxn.parentCategory;
         if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
@@ -2364,6 +2367,66 @@ export const useEPurseStore = create(
         }),
 
       /**
+       * Full-field edit of a PLAIN (non-group) transaction — amount, type, account,
+       * merchant, category, note, date. Mirrors `updateGroupExpense`'s reversal/reapply
+       * approach so balances stay correct: reverses the OLD delta (skipped if the
+       * txn is ignored — an ignored txn's delta is already parked out) and applies
+       * the NEW one, keeping id/source (createdAt only changes if a new one is passed).
+       * Refuses group-tagged or LB-linked transactions — those have their own dedicated
+       * edit flows (group expense form / LB re-link) that keep their own ledgers in sync.
+       */
+      updateTransaction: (txnId, { amount, type, accountId, merchant, categoryId, parentCategory, childCategory, note, createdAt } = {}) => {
+        const old = get().transactions.find((t) => t.id === txnId);
+        if (!old || old.groupId || old.lbLocked) return null;
+
+        const newAmount = Number(amount) || 0;
+        if (newAmount <= 0 || newAmount > MAX_ALLOWED_AMOUNT) return null;
+        const newType = type === TRANSACTION_TYPES.CREDIT ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
+        const newAccountId = accountId || old.accountId || null;
+
+        const updatedTxn = {
+          ...old,
+          type: newType,
+          amount: newAmount,
+          accountId: newAccountId,
+          merchant: (merchant || old.merchant || 'Transaction').trim(),
+          categoryId: categoryId || old.categoryId,
+          note: note ?? old.note,
+          createdAt: createdAt || old.createdAt,
+        };
+        if (parentCategory) updatedTxn.parentCategory = parentCategory; else delete updatedTxn.parentCategory;
+        if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
+
+        // Amount/category changes can invalidate an existing direct split
+        // (shares were computed against the old amount/category) — clear it,
+        // matching updateTransactionCategory's mustClearSplit guard.
+        const mustClearSplit = old.isSplit && (newAmount !== old.amount || !canSplitTransaction(updatedTxn));
+        if (mustClearSplit) {
+          updatedTxn.isSplit = false;
+          updatedTxn.splitWith = [];
+          updatedTxn.myShareAmount = undefined;
+        }
+
+        set((s) => {
+          let accounts = s.accounts;
+          if (!old.isIgnored) {
+            accounts = applyDelta(accounts, old.accountId, { ...old, type: oppositeType(old.type) });
+            accounts = applyDelta(accounts, newAccountId, updatedTxn);
+          }
+          return {
+            transactions: s.transactions.map((t) => (t.id === txnId ? updatedTxn : t)),
+            accounts,
+            lentBorrowed: mustClearSplit
+              ? s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId)
+              : s.lentBorrowed,
+          };
+        });
+
+        if (updatedTxn.categoryId) get().checkBudgetBreach(updatedTxn.categoryId);
+        return txnId;
+      },
+
+      /**
        * Equal split: `others` = friends (not you). Creates lent rows with `sourceTxnId`.
        * Pass empty `others` to clear split and remove linked lent rows.
        */
@@ -2679,7 +2742,9 @@ export const useEPurseStore = create(
        * pair. getPersonBalances nets it against the person's outstanding lent/borrowed
        * (net = Σlent − Σlent_settled − Σborrowed + Σborrow_repaid), so it reduces the
        * balance just like any real settled transaction.
-       * entry: { kind: 'lent' | 'borrowed', person, amount, note?, contactId?, phone? }
+       * entry: { kind: 'lent' | 'borrowed', person, amount, note?, contactId?, phone?, date? }
+       * entry.date — ISO string to backdate the entry; defaults to now. Also dates the
+       * booked Repayment expense below, so ledger and transaction list agree.
        * opts.accountId — for a 'borrowed' toggle (→ 'borrow_repaid', a real expense, since
        * the money left an account just now with no bank SMS backing it), also books a
        * "Repayment" debit on that account via bookRepaymentExpense — same treatment as
@@ -2690,7 +2755,10 @@ export const useEPurseStore = create(
         set((s) => {
           if (!entry?.amount || entry.amount <= 0 || entry.amount > MAX_ALLOWED_AMOUNT) return s;
           if (entry.kind !== 'lent' && entry.kind !== 'borrowed') return s;
-          const now = new Date().toISOString();
+          // Caller may backdate the entry (the form's date picker); the booked
+          // Repayment expense is dated to match so the ledger and the account's
+          // transaction list agree on when the money moved.
+          const now = entry.date || new Date().toISOString();
           const settleKind = entry.kind === 'lent' ? 'lent_settled' : 'borrow_repaid';
           const booked = settleKind === 'borrow_repaid' && opts.accountId
             ? bookRepaymentExpense(s, opts.accountId, entry.amount, entry.person, now)
@@ -3278,15 +3346,31 @@ export const useEPurseStore = create(
       /**
        * Returns per-person cumulative net balance across lentBorrowed entries.
        *
-       * Grouping uses UNION-FIND across THREE identifiers — contactId, normalised
-       * phone, and lowercased name — because legacy entries may carry only a
-       * subset of identifiers (e.g. an old manual "Lend to someone" form may
-       * have stored only `phone`, while a later settlement coming through the
-       * contact-picker carries both `phone` and `contactId`). Falling back to a
-       * single-priority key (the previous implementation) split such entries
-       * into separate "persons", causing settlements to appear as the OPPOSITE
-       * kind in totals (lent_settled with no matching prior `lent` makes net
-       * negative → contributes to "borrowed" total).
+       * ─── Identity: PHONE FIRST, then name ───────────────────────────────
+       * The phone number is the authoritative identifier. Consequences:
+       *   • Same phone, different names → ONE person. A contact saved as
+       *     "Rohit" and later as "Rohit Sharma" (or renamed in the phonebook)
+       *     must not split into two sections. The displayed name is the one
+       *     from the person's MOST RECENT entry, so a rename takes effect.
+       *   • Different phones → DIFFERENT people, even when the names match.
+       *     Two unrelated "Rohit"s stay separate; previously a shared name
+       *     merged them (name was treated as an equal-weight identifier), which
+       *     silently pooled two people's debts.
+       *   • Phones are compared by their LAST 10 DIGITS, so "+91 99999 12345",
+       *     "099999 12345" and "9999912345" are the same person — a country
+       *     code or trunk prefix alone must not fork someone into two sections.
+       *   • `contactId` is a second authoritative id, unioned with the phone
+       *     when both appear on one entry (so a later contactId-only entry
+       *     still finds the phone's group).
+       *   • Entries carrying NEITHER phone nor contactId fall back to the
+       *     lowercased name, and attach to a phone-bearing person only when
+       *     exactly ONE such person has that name (unambiguous). If the name is
+       *     ambiguous they stay their own group rather than guessing — a wrong
+       *     merge corrupts two balances, a missed merge is merely untidy.
+       *
+       * Grouping matters beyond cosmetics: a settlement landing in a different
+       * group from its origin makes the net negative with no matching `lent`,
+       * so it shows up as the OPPOSITE kind in the totals.
        *
        * Returns array of { personKey, person, contactId, phone, lent, borrowed,
        * net, entries } sorted by absolute net (largest first).
@@ -3294,28 +3378,28 @@ export const useEPurseStore = create(
       getPersonBalances: () => {
         const entries = get().lentBorrowed;
 
-        // Normalise to canonical strings for matching. Strips non-digits from
-        // phone numbers so "+91 99999 12345" matches "9999912345".
+        // Last 10 digits — drops country code / trunk prefix so the same mobile
+        // written any which way collapses to one key. Shorter numbers (landline
+        // fragments, partial data) are used as-is.
         const normPhone = (p) => {
-          const d = (p || '').replace(/\D/g, '');
-          return d.length ? d : null;
+          const d = onlyDigits(p);
+          if (!d.length) return null;
+          return d.length > 10 ? d.slice(-10) : d;
         };
-        const normName  = (n) => {
+        const normName = (n) => {
           const t = (n || '').trim().toLowerCase();
           return t.length ? t : null;
         };
 
-        // ─── Union-find over identifier tokens ──────────────────────────
-        // Each unique identifier (contactId/phone/name) is a node. Two
-        // identifiers from the same entry get unioned. Two entries that
-        // share any identifier are therefore in the same component.
+        // ─── Union-find, but ONLY over authoritative ids (phone/contactId) ──
+        // Name is deliberately NOT a union token: unioning by name is what let
+        // two different phones bleed into one person.
         const parent = new Map(); // token → its parent token
         const makeSet = (x) => { if (!parent.has(x)) parent.set(x, x); };
         const find = (x) => {
           let r = x;
           while (parent.get(r) !== r) r = parent.get(r);
-          // Path compression
-          let cur = x;
+          let cur = x; // path compression
           while (parent.get(cur) !== r) {
             const next = parent.get(cur);
             parent.set(cur, r);
@@ -3329,27 +3413,52 @@ export const useEPurseStore = create(
           if (ra !== rb) parent.set(ra, rb);
         };
 
-        // First pass — register all tokens and link the ones that co-occur
-        // on the same entry. Use a per-entry fallback token so entries with
-        // zero identifiers still get a unique group.
-        const entryToken = new Array(entries.length);
+        // Pass 1 — register authoritative tokens; link phone ↔ contactId when
+        // they co-occur on one entry (same person, two ids).
+        const strongToken = new Array(entries.length); // null for name-only entries
         entries.forEach((e, i) => {
-          const tokens = [];
-          if (e.contactId)               tokens.push(`cid:${e.contactId}`);
-          const ph = normPhone(e.phone); if (ph) tokens.push(`ph:${ph}`);
-          const nm = normName(e.person); if (nm) tokens.push(`nm:${nm}`);
-          if (tokens.length === 0) tokens.push(`anon:${i}`);
-
-          tokens.forEach(makeSet);
-          entryToken[i] = tokens[0];
-          // Union all tokens of this entry into one component.
-          for (let t = 1; t < tokens.length; t++) union(tokens[0], tokens[t]);
+          const ph  = normPhone(e.phone);
+          const cid = e.contactId ? `cid:${e.contactId}` : null;
+          const pht = ph ? `ph:${ph}` : null;
+          if (pht) makeSet(pht);
+          if (cid) makeSet(cid);
+          if (pht && cid) union(pht, cid);
+          // Phone wins as the primary token when both exist.
+          strongToken[i] = pht || cid || null;
         });
 
-        // ─── Second pass — aggregate per component root ────────────────
-        const groups = new Map(); // root token → record
+        // Pass 2 — map each name to the authoritative groups that use it, so a
+        // name-only entry can attach when the name points at exactly one person.
+        const nameToRoots = new Map(); // name → Set<root>
         entries.forEach((e, i) => {
-          const root = find(entryToken[i]);
+          const t = strongToken[i];
+          const nm = normName(e.person);
+          if (!t || !nm) return;
+          if (!nameToRoots.has(nm)) nameToRoots.set(nm, new Set());
+          nameToRoots.get(nm).add(find(t));
+        });
+
+        // Pass 3 — resolve every entry to its final group token.
+        const entryRoot = new Array(entries.length);
+        entries.forEach((e, i) => {
+          if (strongToken[i]) { entryRoot[i] = find(strongToken[i]); return; }
+          const nm = normName(e.person);
+          if (!nm) { const anon = `anon:${i}`; makeSet(anon); entryRoot[i] = anon; return; }
+          const candidates = nameToRoots.get(nm);
+          if (candidates && candidates.size === 1) {
+            entryRoot[i] = [...candidates][0]; // unambiguous → join that person
+          } else {
+            const nmt = `nm:${nm}`;            // ambiguous or name-only → own group
+            makeSet(nmt);
+            entryRoot[i] = find(nmt);
+          }
+        });
+
+        // ─── Aggregate per group ───────────────────────────────────────────
+        const groups = new Map(); // root token → record
+        const latestAt = new Map(); // root token → timestamp of the name we kept
+        entries.forEach((e, i) => {
+          const root = entryRoot[i];
           if (!groups.has(root)) {
             groups.set(root, {
               personKey: root,
@@ -3360,13 +3469,20 @@ export const useEPurseStore = create(
               borrowed:  0,
               entries:   [],
             });
+            latestAt.set(root, -Infinity);
           }
           const rec = groups.get(root);
           // Promote the richest contact info we've seen in this group.
           if (e.contactId && !rec.contactId) rec.contactId = e.contactId;
           if (e.phone && !rec.phone)         rec.phone     = e.phone;
-          if (e.person && (!rec.person || rec.person.length < e.person.length)) {
+          // Display the name from the MOST RECENT entry, so renaming a contact
+          // (or saving a fuller name later) updates the section label. Undated
+          // entries can't win against a dated one.
+          const at = e.date ? new Date(e.date).getTime() : NaN;
+          const ts = Number.isNaN(at) ? -Infinity : at;
+          if (e.person && ts >= latestAt.get(root)) {
             rec.person = e.person;
+            latestAt.set(root, ts);
           }
 
           // Additive formula — every entry contributes to net:

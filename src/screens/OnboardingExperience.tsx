@@ -1119,7 +1119,7 @@ const deckStyles = (t: Theme) =>
     phoneDivider: { width: 1, height: 22, backgroundColor: t.divider, marginHorizontal: spacing.md },
     phoneInput: { flex: 1, fontSize: 16, color: t.textPrimary, paddingVertical: Platform.OS === 'ios' ? 14 : 10 },
     primaryBtn: {
-      borderRadius: radius.md,
+      borderRadius: radius.lg,
       paddingVertical: 16,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1202,7 +1202,7 @@ const filterStyles = (t: Theme) =>
     segmentText: { fontSize: 13, fontWeight: '600', color: t.textSecondary },
     segmentTextActive: { color: '#FFFFFF' },
     footer: { paddingHorizontal: 24, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: t.divider },
-    primaryBtn: { borderRadius: radius.md, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
+    primaryBtn: { borderRadius: radius.lg, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
     primaryBtnPressed: { opacity: 0.9 },
     primaryBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
 

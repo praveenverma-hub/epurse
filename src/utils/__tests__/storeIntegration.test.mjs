@@ -483,5 +483,65 @@ ingest('HDFCBK', 'Rs.1000 debited from A/c XX4021 at AMAZON on 22-07-26.', { sms
 ingest('HDFCBK', 'Rs.300 refunded to A/c XX4021 by AMAZON on 22-07-26.',   { smsId: 'gr2' });
 check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds()) === 300, `got ${useStore.getState().getMonthlyRefunds()}`);
 
+// ── Lent/Borrowed person identity: PHONE FIRST, then name ───────────────────
+// Phone is authoritative: same number = one person however the name is spelled;
+// different numbers = different people even when the names match.
+{
+  const lb = (entry) => useStore.getState().addLentBorrowed(entry);
+  const balances = () => useStore.getState().getPersonBalances();
+  const shape = () => balances().map((p) => `"${p.person}"[${p.phone}]=${p.net}`).join(' | ');
+  const onlyLb = (rows) => useStore.setState({ lentBorrowed: [], transactions: [], accounts: [] }) || rows;
+
+  // Same phone written three ways + a rename → one person, newest name shown.
+  onlyLb();
+  lb({ kind: 'lent', person: 'Rohit',        phone: '9999912345',      amount: 500, date: '2026-07-01T10:00:00Z' });
+  lb({ kind: 'lent', person: 'Rohit Sharma', phone: '+91 99999 12345', amount: 300, date: '2026-07-20T10:00:00Z' });
+  check('LB identity: country-code variant is the SAME person', balances().length === 1, shape());
+  check('LB identity: nets pool to 800',                        balances()[0]?.net === 800, shape());
+  check('LB identity: shows the most recent name',              balances()[0]?.person === 'Rohit Sharma', shape());
+  // A later, SHORTER name must still win (the old rule kept the longest name).
+  lb({ kind: 'lent', person: 'Ro', phone: '09999912345', amount: 100, date: '2026-07-29T10:00:00Z' });
+  check('LB identity: newer shorter name still wins', balances().length === 1 && balances()[0]?.person === 'Ro', shape());
+
+  // Two unrelated people who share a first name must NOT be pooled.
+  onlyLb();
+  lb({ kind: 'lent', person: 'Rohit', phone: '1111111111', amount: 500 });
+  lb({ kind: 'lent', person: 'Rohit', phone: '2222222222', amount: 300 });
+  check('LB identity: different phones stay separate despite same name', balances().length === 2, shape());
+
+  // No phone anywhere → fall back to the name.
+  onlyLb();
+  lb({ kind: 'lent', person: 'Meera', amount: 100 });
+  lb({ kind: 'lent', person: 'meera', amount: 200 });
+  check('LB identity: name-only entries group by name', balances().length === 1 && balances()[0].net === 300, shape());
+
+  // A name-only entry attaches when the name points at exactly one phone-person…
+  onlyLb();
+  lb({ kind: 'lent', person: 'Kabir', amount: 100 });
+  lb({ kind: 'lent', person: 'Kabir', phone: '3333333333', amount: 200 });
+  check('LB identity: name-only joins its single phone match', balances().length === 1 && balances()[0].net === 300, shape());
+
+  // …but must NOT guess when the name is ambiguous across two phone-people.
+  onlyLb();
+  lb({ kind: 'lent', person: 'Rohit', phone: '1111111111', amount: 500 });
+  lb({ kind: 'lent', person: 'Rohit', phone: '2222222222', amount: 300 });
+  lb({ kind: 'lent', person: 'Rohit', amount: 70 });
+  check('LB identity: ambiguous name-only is not merged', balances().length === 3, shape());
+
+  // A settlement whose phone is formatted differently must still net the origin
+  // to zero — a split here would surface it as the OPPOSITE kind in totals.
+  onlyLb();
+  lb({ kind: 'lent', person: 'Ana', phone: '+919888812345', amount: 400, date: '2026-07-01T00:00:00Z' });
+  useStore.getState().addAlreadySettledLentBorrowed({ kind: 'lent', person: 'Ana K', phone: '9888812345', amount: 400, date: '2026-07-10T00:00:00Z' });
+  check('LB identity: settle across phone formats nets to zero', balances().length === 1 && balances()[0].net === 0, shape());
+
+  // contactId is a second authoritative id: an entry carrying only the
+  // contactId still finds the group whose phone it once co-occurred with.
+  onlyLb();
+  lb({ kind: 'lent', person: 'Zoe',   phone: '7777712345', contactId: 'c9', amount: 200 });
+  lb({ kind: 'lent', person: 'Zoe Q', contactId: 'c9', amount: 150 });
+  check('LB identity: contactId-only joins its phone group', balances().length === 1 && balances()[0].net === 350, shape());
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

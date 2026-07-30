@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import EditIcon from './EditIcon';
+import SheetCloseButton from './SheetCloseButton';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
@@ -74,6 +75,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit }: TxnDetailSheetP
     <Modal visible={!!txn} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
@@ -125,9 +127,6 @@ export default function TxnDetailSheet({ txn, onClose, onEdit }: TxnDetailSheetP
             ) : null}
           </ScrollView>
 
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeTxt}>Close</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -173,6 +172,4 @@ const styles = StyleSheet.create({
   detailRowLast: { borderBottomWidth: 0 },
   detailLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   detailValue: { ...typography.body, color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
-  closeBtn: { marginTop: spacing.lg, alignItems: 'center' },
-  closeTxt: { ...typography.body, color: colors.textSecondary },
 });

@@ -24,6 +24,7 @@ import {
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import GradientButton from './GradientButton';
+import SheetCloseButton from './SheetCloseButton';
 import { fetchContactsForPicker } from '../services/contactsService';
 import { formatCurrency } from '../utils/format';
 
@@ -142,6 +143,7 @@ const LinkContactModal = ({
         style={styles.backdrop}
       >
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
 
         <View style={styles.sheet}>
           <View style={styles.handle} />

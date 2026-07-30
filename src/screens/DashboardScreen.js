@@ -737,14 +737,22 @@ const DashboardScreen = ({ navigation }) => {
         }}
       />
 
-      {/* Plain-transaction detail — view first, Edit hands off to the manage sheet. */}
+      {/* Plain-transaction detail — view first, Edit opens the full edit form
+          (amount/merchant/account/category/note), mirroring the group edit
+          flow. LB-linked transactions keep their own dedicated edit path
+          (the manage sheet's "Edit person"), since a lend/borrow link isn't
+          editable from this form. */}
       <TxnDetailSheet
         txn={detailTxn}
         onClose={() => setDetailTxn(null)}
         onEdit={() => {
           const t = detailTxn;
           setDetailTxn(null);
-          setActiveTxn(t);
+          if (t.lbLocked) {
+            setActiveTxn(t);
+          } else {
+            navigation.navigate('AddTransaction', { editTxnId: t.id });
+          }
         }}
       />
 

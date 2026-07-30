@@ -39,6 +39,28 @@ export const formatDateTime = (date) => {
   });
 };
 
+/**
+ * Label for the transaction date field. Always includes the real date so it's
+ * never hidden behind a relative word alone:
+ *   "Today · 31 Jul" / "Yesterday · 30 Jul" / "28 Jul" / "28 Jul 2025"
+ */
+export const formatDateLabel = (date) => {
+  const d = new Date(date);
+  const now = new Date();
+  const sameDay = (a, b) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const dayMonth = d.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+  });
+  if (sameDay(d, now)) return `Today · ${dayMonth}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(d, yesterday)) return `Yesterday · ${dayMonth}`;
+  return dayMonth;
+};
+
 export const monthKey = (date) => {
   const d = new Date(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

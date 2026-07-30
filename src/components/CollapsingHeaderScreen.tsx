@@ -108,35 +108,63 @@ export interface CollapsingHeaderScreenProps {
   showsVerticalScrollIndicator?: boolean;
 }
 
-/** Standardized title row: [chevron-back?] title [right?]. */
+/**
+ * Standardized title row: [chevron-back?] title [right?].
+ *
+ * A back chevron means this is a pushed (second-level or deeper) screen, and
+ * those centre their title; root/tab screens keep it left-aligned. When centred
+ * the title is absolutely positioned rather than flexed, so unequal side slots
+ * (a 24px chevron on the left vs. an action icon or nothing on the right) can't
+ * push it off true centre.
+ */
 const StandardBar: React.FC<{
   title?: string;
   onBack?: () => void;
   right?: ReactNode;
   tint: string;
-}> = ({ title, onBack, right, tint }) => (
-  <View style={styles.stdBar}>
-    {onBack ? (
-      <TouchableOpacity
-        onPress={onBack}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        style={styles.stdBackBtn}
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-      >
-        <Ionicons name="chevron-back" size={24} color={tint} />
-      </TouchableOpacity>
-    ) : null}
-    {title ? (
-      <Text style={[styles.stdTitle, { color: tint }]} numberOfLines={1}>
-        {title}
-      </Text>
-    ) : (
-      <View style={styles.stdTitle} />
-    )}
-    {right ? <View style={styles.stdRight}>{right}</View> : null}
-  </View>
-);
+}> = ({ title, onBack, right, tint }) => {
+  const centred = !!onBack;
+  return (
+    <View style={styles.stdBar}>
+      {onBack ? (
+        <TouchableOpacity
+          onPress={onBack}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.stdBackBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="chevron-back" size={24} color={tint} />
+        </TouchableOpacity>
+      ) : null}
+
+      {centred ? (
+        <View style={styles.stdFlex} />
+      ) : title ? (
+        <Text style={[styles.stdTitle, styles.stdTitleText, { color: tint }]} numberOfLines={1}>
+          {title}
+        </Text>
+      ) : (
+        <View style={styles.stdTitle} />
+      )}
+
+      {right ? <View style={styles.stdRight}>{right}</View> : null}
+
+      {/* Centred title sits on top of the row; pointerEvents none so it can
+          never swallow taps meant for the chevron or a right-slot action. */}
+      {centred && title ? (
+        <View style={styles.stdTitleCentreWrap} pointerEvents="none">
+          <Text
+            style={[styles.stdTitleText, styles.stdTitleCentre, { color: tint }]}
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+};
 
 const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
   gradientColors,
@@ -328,6 +356,17 @@ const styles = StyleSheet.create({
   // Standard bar
   stdBar: { flexDirection: 'row', alignItems: 'center', minHeight: DEFAULT_BAR_H },
   stdBackBtn: { marginRight: spacing.sm, marginLeft: -4 },
-  stdTitle: { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  stdTitleText: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  stdTitle: { flex: 1 },
+  stdFlex: { flex: 1 },
   stdRight: { flexDirection: 'row', alignItems: 'center', marginLeft: spacing.sm },
+  // Centred (pushed-screen) title — absolutely centred over the row. The side
+  // padding keeps a long title truncating instead of running under the chevron.
+  stdTitleCentreWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  stdTitleCentre: { textAlign: 'center' },
 });

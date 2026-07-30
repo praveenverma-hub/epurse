@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { radius, spacing, typography } from '../constants/theme';
+import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
 
 const TxnDebugSheet = ({ txn, onClose }) => {
@@ -64,6 +65,7 @@ const TxnDebugSheet = ({ txn, onClose }) => {
       </Animated.View>
 
       <Animated.View style={[styles.sheet, { transform: [{ translateY: slideY }] }]}>
+        <SheetCloseButton onPress={onClose} variant="absolute" />
         <View style={styles.handleRow}>
           <View style={styles.handle} />
           <Text style={styles.badge}>🔬 DEBUG</Text>
@@ -96,10 +98,6 @@ const TxnDebugSheet = ({ txn, onClose }) => {
 
           <View style={{ height: 24 }} />
         </ScrollView>
-
-        <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
-          <Text style={styles.closeBtnText}>Close</Text>
-        </TouchableOpacity>
       </Animated.View>
     </Modal>
   );
@@ -208,7 +206,7 @@ const styles = StyleSheet.create({
   closeBtn: {
     marginTop: spacing.md,
     backgroundColor: '#FFFFFF12',
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     paddingVertical: 13,
     alignItems: 'center',
   },

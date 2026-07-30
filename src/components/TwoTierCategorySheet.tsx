@@ -26,6 +26,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { radius } from '../constants/theme';
+import SheetCloseButton from './SheetCloseButton';
 import {
   ParentCat,
   ChildCat,
@@ -144,6 +146,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
       {/* Sheet */}
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.sheet, sheetStyle]}>
+          <SheetCloseButton onPress={dismissSheet} variant="absolute" />
 
           {/* Drag handle */}
           <View style={styles.handleRow}>
@@ -277,8 +280,8 @@ const styles = StyleSheet.create({
     right: 0,
     height: SHEET_H,
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     shadowColor: '#000',
     shadowOpacity: 0.16,
     shadowRadius: 24,
@@ -380,7 +383,7 @@ const styles = StyleSheet.create({
   },
   saveBtn: {
     backgroundColor: '#FF5A1F',
-    borderRadius: 14,
+    borderRadius: radius.lg,
     paddingVertical: 16,
     alignItems: 'center',
   },

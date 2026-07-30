@@ -25,6 +25,7 @@ import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import EditIcon from './EditIcon';
+import SheetCloseButton from './SheetCloseButton';
 import {
   ParentCat,
   ChildCat,
@@ -275,6 +276,7 @@ const CategoryPickerModal: React.FC<Props> = ({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
+        <SheetCloseButton onPress={onClose} />
 
         <View style={styles.sheet}>
           <View style={styles.handle} />
