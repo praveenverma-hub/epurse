@@ -70,13 +70,13 @@ export interface GroupSettlement {
   amount: number;
 }
 
-/** Payload emitted by GroupExpenseSheet → addGroupExpense / tagTransactionToGroup. */
-export interface TxnLocation {
-  latitude: number;
-  longitude: number;
-  /** ISO timestamp of the fix. */
-  capturedAt: string;
-}
+/**
+ * Coarse place label stamped on a transaction. Re-exported from the one definition in
+ * `services/locationService` — it used to be duplicated here, which let the two drift
+ * (this copy still had lat/lng after the service switched to district-level labels).
+ */
+import type { TxnLocation } from '../services/locationService';
+export type { TxnLocation };
 
 export interface GroupExpenseData {
   amount: number;

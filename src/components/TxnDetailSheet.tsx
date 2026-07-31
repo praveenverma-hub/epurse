@@ -119,6 +119,9 @@ export default function TxnDetailSheet({ txn, onClose, onEdit }: TxnDetailSheetP
                 <Text style={styles.detailValue} numberOfLines={1}>{accountLabel}</Text>
               </View>
             ) : null}
+            {/* The USER's note only. Never render `txn.smsText` (the bank message
+                body) here — until Jul-31 the parser stored that in `note`, so this row
+                showed the whole SMS on every auto-imported transaction. */}
             {txn.note ? (
               <View style={[styles.detailRow, styles.detailRowLast]}>
                 <Text style={styles.detailLabel}>Note</Text>

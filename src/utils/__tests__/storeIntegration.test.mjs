@@ -543,5 +543,116 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('LB identity: contactId-only joins its phone group', balances().length === 1 && balances()[0].net === 350, shape());
 }
 
+// ---------------------------------------------------------------------------
+// LB entry edit / delete (LbPersonScreen). A row DERIVED from a group expense
+// (groupId) or a real transaction (sourceTxnId) must stay read-only — editing it
+// here would desync it from the expense, or contradict the account balance the
+// transaction already moved.
+// ---------------------------------------------------------------------------
+{
+  const S = () => useStore.getState();
+  const only = () => useStore.setState({ lentBorrowed: [], transactions: [], accounts: [] });
+  const rohit = () => S().getPersonBalances().find((p) => p.person === 'Rohit' || p.person === 'Rohan');
+
+  only();
+  S().addLentBorrowed({ kind: 'lent', person: 'Rohit', phone: '9876543210', amount: 500, note: 'lunch' });
+  let row = S().lentBorrowed[0];
+  check('LB edit: manual row is editable', S().isLentBorrowedEditable(row) === true);
+
+  check('LB edit: amount change re-nets the balance',
+    S().updateLentBorrowedEntry(row.id, { amount: 800 }) === true && rohit().net === 800,
+    `net=${rohit().net}`);
+
+  check('LB edit: rejects amount 0',        S().updateLentBorrowedEntry(row.id, { amount: 0 }) === false);
+  check('LB edit: rejects over-max amount', S().updateLentBorrowedEntry(row.id, { amount: 1e12 }) === false);
+  check('LB edit: rejects blank person',    S().updateLentBorrowedEntry(row.id, { person: '  ' }) === false);
+  check('LB edit: amount survives rejected patches',
+    S().lentBorrowed.find((l) => l.id === row.id).amount === 800);
+
+  check('LB edit: backdating keeps the row',
+    S().updateLentBorrowedEntry(row.id, { date: '2026-05-01T00:00:00Z' }) === true &&
+    S().lentBorrowed.find((l) => l.id === row.id).date.startsWith('2026-05-01'));
+
+  // Derived rows: refused for both update and delete, and left in place.
+  useStore.setState({
+    lentBorrowed: [
+      { id: 'lb_g1', kind: 'lent', person: 'Rohit', phone: '9876543210', amount: 300, groupId: 'grp_1', date: '2026-07-01T00:00:00Z' },
+      { id: 'lb_t1', kind: 'lent', person: 'Rohit', phone: '9876543210', amount: 150, sourceTxnId: 'txn_1', date: '2026-07-02T00:00:00Z' },
+      ...S().lentBorrowed,
+    ],
+  });
+  check('LB edit: group row is NOT editable',
+    S().isLentBorrowedEditable(S().lentBorrowed.find((l) => l.id === 'lb_g1')) === false &&
+    S().updateLentBorrowedEntry('lb_g1', { amount: 1 }) === false &&
+    S().deleteLentBorrowedEntry('lb_g1') === false &&
+    !!S().lentBorrowed.find((l) => l.id === 'lb_g1'));
+  check('LB edit: txn-backed row is NOT editable',
+    S().isLentBorrowedEditable(S().lentBorrowed.find((l) => l.id === 'lb_t1')) === false &&
+    S().updateLentBorrowedEntry('lb_t1', { amount: 1 }) === false &&
+    S().deleteLentBorrowedEntry('lb_t1') === false &&
+    !!S().lentBorrowed.find((l) => l.id === 'lb_t1'));
+
+  check('LB edit: net includes locked rows', rohit().net === 800 + 300 + 150, `net=${rohit().net}`);
+
+  check('LB edit: deleting a manual row re-nets',
+    S().deleteLentBorrowedEntry(row.id) === true && rohit().net === 450, `net=${rohit().net}`);
+  check('LB edit: delete of an unknown id is refused', S().deleteLentBorrowedEntry('nope') === false);
+}
+
+// ---------------------------------------------------------------------------
+// note vs smsText. `note` is the USER's note (rendered as "Note" in the detail
+// sheets, prefilled into the edit form); the bank message body lives in `smsText`.
+// Before Jul-31 the parser wrote the SMS into `note`, so every auto-imported
+// transaction looked like the user had typed the whole SMS.
+// ---------------------------------------------------------------------------
+{
+  const S = () => useStore.getState();
+  useStore.setState({ transactions: [], accounts: [], lentBorrowed: [], preOnboarding: false, onboardedAt: null });
+
+  const body = 'Rs.450.00 debited from A/c XX1234 on 31-07-26 to ZOMATO via UPI Ref 1234567890. Avl Bal Rs.5000';
+  S().ingestMessage(body, { sender: 'HDFCBK', receivedAt: new Date().toISOString(), smsId: 'sms_note_1' });
+  const t = S().transactions[0];
+  check('note/smsText: ingested txn leaves `note` empty', !t.note, `note=${JSON.stringify(t.note)}`);
+  check('note/smsText: ingested txn carries the body in `smsText`',
+    !!t.smsText && t.smsText.includes('ZOMATO'), `smsText=${JSON.stringify(t.smsText)}`);
+
+  S().addTransaction({ amount: 200, type: 'debit', merchant: 'Chai', categoryId: 'food', note: 'team offsite' });
+  const m = S().transactions[0];
+  check('note/smsText: a manual note is kept in `note`', m.note === 'team offsite' && !m.smsText);
+}
+
+// ---------------------------------------------------------------------------
+// Location: coarse place labels, and `byLocation` in the monthly aggregates so the
+// data outlives RAW_RETENTION_MS (raw txns are dropped at 90 days).
+// ---------------------------------------------------------------------------
+{
+  const loc = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/location.js');
+  const pune = { city: 'Pune', district: 'Shivajinagar', region: 'Maharashtra', country: 'India' };
+  const mum  = { city: 'Mumbai', district: null, region: 'Maharashtra', country: 'India' };
+
+  check('location: key is the city', loc.locationKey(pune) === 'Pune' && loc.locationKey(mum) === 'Mumbai');
+  check('location: no location → null key', loc.locationKey(null) === null);
+  check('location: label de-dupes district/city', loc.formatLocation(mum) === 'Mumbai, Maharashtra',
+    loc.formatLocation(mum));
+
+  const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+  useStore.setState({
+    transactions: [
+      { id: 'L1', amount: 500, type: 'debit',  categoryId: 'food',   createdAt: old, location: pune },
+      { id: 'L2', amount: 300, type: 'debit',  categoryId: 'food',   createdAt: old, location: pune },
+      { id: 'L3', amount: 200, type: 'debit',  categoryId: 'travel', createdAt: old, location: mum  },
+      { id: 'L4', amount: 900, type: 'credit', categoryId: 'salary', createdAt: old, location: pune },
+      { id: 'L5', amount: 400, type: 'debit',  categoryId: 'food',   createdAt: old },
+    ],
+    accounts: [], monthlyAggregates: {}, groups: [],
+  });
+  useStore.getState().compactTransactions(true);
+  const agg = useStore.getState().monthlyAggregates;
+  const byLoc = agg[Object.keys(agg)[0]].byLocation;
+  check('location: spend survives compaction in byLocation',
+    byLoc.Pune === 800 && byLoc.Mumbai === 200, JSON.stringify(byLoc));
+  check('location: income is NOT bucketed by place', !Object.values(byLoc).includes(900), JSON.stringify(byLoc));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

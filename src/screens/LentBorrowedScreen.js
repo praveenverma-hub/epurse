@@ -10,7 +10,6 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   Dimensions,
 } from 'react-native';
 import { TabView } from 'react-native-tab-view';
@@ -26,7 +25,7 @@ import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizePhone, normalizePhone, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency } from '../utils/format';
 import GradientButton from '../components/GradientButton';
 import CenterModal from '../components/CenterModal';
 import AccountPickerSheet from '../components/AccountPickerSheet';
@@ -34,15 +33,9 @@ import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
 import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
 import DateField from '../components/DateField';
 import InfoIcon from '../components/InfoIcon';
+import EditIcon from '../components/EditIcon';
 import InfoSheet from '../components/InfoSheet';
 import Svg, { Path } from 'react-native-svg';
-
-const ENTRY_LABEL = {
-  lent: 'Lent',
-  borrowed: 'Borrowed',
-  lent_settled: 'Received back',
-  borrow_repaid: 'Repaid',
-};
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -53,9 +46,6 @@ const LB_ROUTES = [
 
 const keyToIndex = (k) => (k === 'borrowed' ? 1 : 0);
 const initialLayout = { width: Dimensions.get('window').width };
-
-// +/- direction for net contribution to "they owe me" balance
-const isPositiveEntry = (kind) => kind === 'lent' || kind === 'borrow_repaid';
 
 const LentBorrowedScreen = ({ route, navigation }) => {
   const theme = useTheme();
@@ -74,9 +64,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [note, setNote] = useState('');
   const [alreadySettled, setAlreadySettled] = useState(false); // log as already lent_settled/borrow_repaid
   const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
-  const [expandedPerson, setExpandedPerson] = useState(null);
   const [confirm, setConfirm] = useState(null);
-  const [settleTarget, setSettleTarget] = useState(null); // borrow settle awaiting account pick
   const [reminderTarget, setReminderTarget] = useState(null);
   const [borrowReminderTarget, setBorrowReminderTarget] = useState(null);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
@@ -90,15 +78,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const accounts = useEPurseStore((s) => s.accounts);
   const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
   const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
-  const settlePersonBalance  = useEPurseStore((s) => s.settlePersonBalance);
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   const userName        = useEPurseStore((s) => s.userName);
   const notificationIds = useEPurseStore((s) => s.notificationIds);
-  const groupNameById = useMemo(
-    () => Object.fromEntries((groups || []).map((g) => [g.id, g.name])),
-    [groups]
-  );
-
   const resetForm = useCallback(() => {
     setPerson('');
     setPhone('');
@@ -252,71 +234,17 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       const netAbs = Math.abs(pb.net);
       const netLabel = pb.net > 0 ? 'owes you' : 'you owe';
       const netColor = pb.net > 0 ? colors.success : '#EF4444';
-      const isExpanded = expandedPerson === pb.personKey;
 
-      // Collapse all entries belonging to one group into a single cumulative line,
-      // so a person who shares many group expenses shows one row per group (not per txn).
-      // Non-group entries (manual IOUs, direct splits) stay individual.
-      const groupAcc = {}; // groupId -> { net, date }
-      const singles = [];
-      pb.entries.forEach((e) => {
-        if (e.groupId) {
-          if (!groupAcc[e.groupId]) groupAcc[e.groupId] = { groupId: e.groupId, net: 0, date: e.date };
-          const g = groupAcc[e.groupId];
-          g.net += isPositiveEntry(e.kind) ? e.amount : -e.amount;
-          if (new Date(e.date) > new Date(g.date)) g.date = e.date;
-        } else {
-          singles.push(e);
-        }
-      });
-      const groupLines = Object.values(groupAcc)
-        .filter((g) => Math.abs(g.net) > 0.005)
-        .map((g) => ({
-          id: `grp_${g.groupId}`,
-          isGroupLine: true,
-          groupName: groupNameById[g.groupId] || 'Group',
-          kind: g.net > 0 ? 'lent' : 'borrowed',
-          amount: Math.abs(g.net),
-          date: g.date,
-        }));
-      const displayEntries = [...groupLines, ...singles].sort(
-        (a, b) => new Date(b.date) - new Date(a.date)
-      );
-
-      const toggle = () => setExpandedPerson(isExpanded ? null : pb.personKey);
-
-      // Settle the FULL net outstanding for this person. You owe them (net < 0) →
-      // repaying is a real expense, so pick the source account. They owe you
-      // (net > 0) → ledger-only confirmation.
-      const handleSettlePress = () => {
-        if (pb.net < 0) {
-          setSettleTarget(pb);
-          return;
-        }
-        setConfirm({
-          title: 'Mark as settled?',
-          message:
-            `${pb.person} · ${formatCurrency(netAbs)}\n\n` +
-            `Settles the FULL net outstanding of ${formatCurrency(netAbs)} ` +
-            `across all groups, splits and manual entries.`,
-          primaryText: 'Settle',
-          destructive: true,
-          secondaryText: 'Cancel',
-          onSecondary: () => setConfirm(null),
-          onConfirm: () => {
-            settlePersonBalance(pb.personKey);
-            setConfirm(null);
-          },
-        });
-      };
+      // The card is a pure summary now — tapping it opens this person's own ledger
+      // screen (LbPersonScreen), which owns the entry list, the per-entry edit and
+      // the net Settle action that all used to live in an inline accordion here.
+      const openPerson = () => navigation.navigate('LbPerson', { personKey: pb.personKey });
 
       return (
-        // Plain View wrapper — the header is the only touchable, so the entries
-        // ScrollView below is NOT a descendant of a touchable and can scroll freely.
         <View style={[styles.personCard, isFullySettled && styles.personCardSettled]}>
           <TouchableOpacity
             style={styles.personCardHeader}
-            onPress={toggle}
+            onPress={openPerson}
             activeOpacity={0.85}
           >
             <View
@@ -387,79 +315,26 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <BellIconSvg
-                  size={14}
+                  size={16}
                   color={notificationIds[pb.personKey] ? '#6366F1' : '#6366F188'}
                 />
               </TouchableOpacity>
             ) : null}
-            <Text style={styles.expandArrow}>{isExpanded ? '▲' : '▼'}</Text>
+            {/* Pencil (was a ▼ accordion arrow): the entry list moved to its own
+                screen so each row can be edited/deleted — see LbPersonScreen. */}
+            <View
+              style={[
+                styles.personEdit,
+                { backgroundColor: theme.primary + '18', borderColor: theme.primary + '33' },
+              ]}
+            >
+              <EditIcon size={16} color={theme.primary} />
+            </View>
           </TouchableOpacity>
-
-          {isExpanded && (
-            <>
-              <ScrollView
-                style={styles.entriesScroll}
-                nestedScrollEnabled
-                showsVerticalScrollIndicator={false}
-              >
-                {displayEntries.map((entry) => {
-                  const positive = isPositiveEntry(entry.kind);
-                  const entryColor = positive ? colors.success : '#EF4444';
-                  const entrySign = positive ? '+' : '−';
-                  const primaryText = entry.isGroupLine
-                    ? `Group · ${entry.groupName}`
-                    : (entry.note && entry.note !== 'Manual settlement'
-                        ? entry.note
-                        : ENTRY_LABEL[entry.kind] || entry.kind);
-                  const subText = entry.isGroupLine
-                    ? 'Group total'
-                    : `${ENTRY_LABEL[entry.kind]} · ${formatDate(entry.date)}`;
-
-                  return (
-                    <View
-                      key={entry.id}
-                      style={[
-                        styles.entryRow,
-                        entry.settledAt && styles.entrySettled,
-                      ]}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.entryNote}>{primaryText}</Text>
-                        <Text style={styles.entryDate}>{subText}</Text>
-                      </View>
-                      <Text style={[styles.entryAmt, { color: entryColor }]}>
-                        {entrySign} {formatCurrency(entry.amount)}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </ScrollView>
-              {/* Settle acts on the person's NET total, so it lives on its own
-                  pinned footer row (not attached to whatever entry renders last). */}
-              {!isFullySettled ? (
-                <View style={styles.settleFooter}>
-                  <View style={{ flex: 1, marginRight: spacing.sm }}>
-                    <Text style={styles.settleFooterLabel} numberOfLines={1}>
-                      {pb.net > 0 ? 'Total owed to you' : 'Total you owe'}
-                    </Text>
-                    <Text
-                      style={[styles.settleFooterAmt, { color: netColor }]}
-                      numberOfLines={1}
-                    >
-                      {formatCurrency(netAbs)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity style={styles.settleNetBtn} onPress={handleSettlePress}>
-                    <Text style={styles.settleNetText}>Settle</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-            </>
-          )}
         </View>
       );
     },
-    [expandedPerson, settlePersonBalance, notificationIds, groupNameById]
+    [navigation, notificationIds, theme.primary]
   );
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
@@ -693,25 +568,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
         />
 
-        <AccountPickerSheet
-          visible={!!settleTarget}
-          title="Repay from which account?"
-          subtitle={settleTarget
-            ? `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
-            : undefined}
-          accounts={accounts}
-          onSelect={(accountId) => {
-            settlePersonBalance(settleTarget.personKey, { accountId });
-            setSettleTarget(null);
-          }}
-          skipLabel="Just mark repaid (no expense)"
-          onSkip={() => {
-            settlePersonBalance(settleTarget.personKey);
-            setSettleTarget(null);
-          }}
-          onClose={() => setSettleTarget(null)}
-        />
-
+        {/* The net-settle account picker moved to LbPersonScreen along with the
+            Settle button. The one below is a different flow — the add form's
+            "already settled" toggle, which still lives on this screen. */}
         <AccountPickerSheet
           visible={!!pendingSettledAdd}
           title="Repaid from which account?"
@@ -828,27 +687,27 @@ const Toggle = ({ label, active, onPress }) => (
   </TouchableOpacity>
 );
 
-const ENTRY_ROW_HEIGHT = 58; // approximate height per entry row
-const ENTRIES_MAX_VISIBLE = 3.5; // show 3 full + partial 4th
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   listContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2, flexGrow: 1 },
 
   // Hero text is centred to match the centred screen title above it (pushed
   // screens centre their header — see ui-consistency §2).
+  // Hero label + amount are LEFT-aligned (the screen TITLE above them stays centred —
+  // that's the pushed-screen header convention, ui-consistency §2; this is body-style
+  // hero content inside the header, and it lines up with the cards below).
   subLabel: {
     color: '#FFFFFFCC',
     ...typography.small,
     marginTop: spacing.lg,
-    textAlign: 'center',
+    textAlign: 'left',
   },
   bigAmount: {
     color: '#fff',
     fontSize: 36,
     fontWeight: '800',
     marginTop: 4,
-    textAlign: 'center',
+    textAlign: 'left',
   },
   toggleRow: {
     flexDirection: 'row',
@@ -999,7 +858,23 @@ const styles = StyleSheet.create({
   },
   netAmount: { ...typography.bodyBold, fontWeight: '800' },
   netLabel: { ...typography.tiny, fontWeight: '600', marginTop: 1 },
-  expandArrow: { color: colors.textSecondary, fontSize: 10, marginLeft: 4 },
+  // Same 28×28 tinted circle as waBtn / bellBtn beside it — the three trailing
+  // affordances on a person card must read as one set. Fill/border are inline
+  // (theme.primary) since this one follows the accent, not a fixed brand colour.
+  //
+  // Glyph sizes are 16 (pencil) / 16 (bell) / 17 (WhatsApp) — NOT identical on
+  // purpose. The WhatsApp mark is a filled disc, so at an equal nominal size it
+  // reads larger than a thin line glyph; the extra px on the line icons evens them
+  // out optically. Don't "fix" all three to one number.
+  personEdit: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
+  },
   waBtn: {
     width: 28,
     height: 28,
@@ -1040,51 +915,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  entriesScroll: {
-    maxHeight: ENTRY_ROW_HEIGHT * ENTRIES_MAX_VISIBLE,
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
-    paddingHorizontal: spacing.md,
-  },
-
-  entryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-  },
-  entrySettled: { opacity: 0.55 },
-  entryNote: { ...typography.small, color: colors.textPrimary },
-  entryDate: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
-  entryAmt: { ...typography.bodyBold, fontWeight: '700' },
-
-  settleFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
-  },
-  settleFooterLabel: { ...typography.tiny, color: colors.textSecondary },
-  settleFooterAmt: { ...typography.bodyBold, fontWeight: '700', marginTop: 1 },
-
-  settleNetBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 1,
-    backgroundColor: colors.success + '18',
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.success + '44',
-    flexShrink: 0,
-  },
-  settleNetText: {
-    color: colors.success,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
   settledPill: {
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: spacing.xs,

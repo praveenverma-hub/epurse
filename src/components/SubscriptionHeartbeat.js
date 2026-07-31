@@ -22,7 +22,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { colors, spacing, radius, typography } from '../constants/theme';
-import { formatCurrency, formatCompact } from '../utils/format';
+import { formatCompact } from '../utils/format';
 
 const SCREEN_W = Dimensions.get('window').width;
 const DAY_W = 26;
@@ -86,7 +86,7 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
   // NOTE: no early return here — the hooks below (useMemo/useEffect) must run on
   // every render, so `subscriptions` toggling empty↔non-empty can't change the
   // hook count. The empty-state return lives AFTER all hooks.
-  const subs = subscriptions || [];
+  const allSubs = subscriptions || [];
   const targetDate = date || new Date();
   const y = targetDate.getFullYear();
   const m = targetDate.getMonth();
@@ -94,6 +94,25 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
   const now = new Date();
   const isCurrentMonth = y === now.getFullYear() && m === now.getMonth();
   const currentDay = isCurrentMonth ? now.getDate() : daysInMonth;
+
+  // `detectSubscriptions` scans ALL history and is not month-scoped, so the same
+  // list arrives whichever month is being viewed. Without this filter, a
+  // subscription that only started in June draws a full-strength "already paid"
+  // spike on March's timeline too. Keep a sub only for months it was actually
+  // active: never before its first charge, and never after its last — except in
+  // the CURRENT month, where a charge that hasn't landed yet is the legitimate
+  // dimmed forecast this chart is built around.
+  const subs = useMemo(() => {
+    const viewedMk = y * 12 + m;
+    return allSubs.filter((s) => {
+      if (!s.firstDate) return true;   // pre-fix payload — don't hide it
+      const f = new Date(s.firstDate);
+      if (y * 12 + m < f.getFullYear() * 12 + f.getMonth()) return false;
+      if (isCurrentMonth) return true;
+      const l = new Date(s.lastDate);
+      return viewedMk <= l.getFullYear() * 12 + l.getMonth();
+    });
+  }, [allSubs, y, m, isCurrentMonth]);
 
   // Build a map of day → charges
   const dayCharges = useMemo(() => {
@@ -220,11 +239,16 @@ const SubscriptionHeartbeat = ({ subscriptions, date }) => {
   const hikingSubscriptions = subs.filter((s) => s.priceHike);
 
   // Empty state — AFTER all hooks so the hook count is render-stable.
+  // Two distinct cases: nothing detected at all, vs. detected but none of them were
+  // active in the month being viewed (the month filter above). AnalyticsScreen gates
+  // on the UNFILTERED list, so the second case reaches here and needs its own copy.
   if (subs.length === 0) {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyText}>
-          {'No recurring subscriptions detected yet.\nThey appear after 2+ months of the same charge.'}
+          {allSubs.length > 0
+            ? 'None of your subscriptions were active this month.'
+            : 'No recurring subscriptions detected yet.\nThey appear after 2+ months of the same charge.'}
         </Text>
       </View>
     );

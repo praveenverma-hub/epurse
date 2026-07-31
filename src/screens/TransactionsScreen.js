@@ -419,10 +419,14 @@ const TransactionsScreen = ({ navigation, route }) => {
     // Inline search
     if (search.trim()) {
       const q = search.toLowerCase();
+      // `smsText` is the bank message body (was stored in `note` until the Jul-31
+      // split); `note` is now only the user's own note. Match BOTH so searching for
+      // something that appears in the SMS still finds the transaction.
       list = list.filter(
         (t) =>
           (t.merchant || '').toLowerCase().includes(q) ||
-          (t.note || '').toLowerCase().includes(q),
+          (t.note || '').toLowerCase().includes(q) ||
+          (t.smsText || '').toLowerCase().includes(q),
       );
     }
 
@@ -743,6 +747,7 @@ const TransactionsScreen = ({ navigation, route }) => {
       <FlatList
         data={listData}
         keyExtractor={(item) => item.id}
+        style={styles.body}
         contentContainerStyle={styles.list}
         renderItem={({ item }) =>
           item._divider ? (
@@ -1210,7 +1215,12 @@ const TransactionsScreen = ({ navigation, route }) => {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
+  // WHITE, not the page gray: SafeAreaView paints the status-bar inset from this, and
+  // a gray strip above the white `headerSection` reads as a rendering glitch. (Android
+  // already got white via StatusBar.setBackgroundColor; iOS ignores that call, so the
+  // inset was the only thing still showing gray.) The page gray moves to `body`.
+  root: { flex: 1, backgroundColor: colors.card },
+  body: { flex: 1, backgroundColor: colors.background },
 
   // ── Header ──────────────────────────────────────────────────────────────────
   headerSection: {

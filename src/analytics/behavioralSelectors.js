@@ -122,7 +122,11 @@ export function getMerchantBubbles(transactions, targetDate = new Date()) {
  * Criteria: same merchant in >= 2 distinct months, amount consistent (±15% of median),
  * day-of-month consistent (±4 days, 65%+ of occurrences).
  * Returns entries sorted by amount desc with priceHike flag if latest > prev by 5%+.
- * Each entry: { merchant, merchantKey, amount, dayOfMonth, months, priceHike, hikeFrom, hikeTo, lastDate, categoryId }
+ * Each entry: { merchant, merchantKey, amount, dayOfMonth, months, priceHike, hikeFrom, hikeTo,
+ *               firstDate, lastDate, categoryId }
+ * `firstDate`/`lastDate` bound the months the subscription was actually active — a caller
+ * rendering a specific month must not draw a charge outside that window (see
+ * SubscriptionHeartbeat).
  */
 export function detectSubscriptions(transactions) {
   const byMerchant = new Map();
@@ -137,8 +141,15 @@ export function detectSubscriptions(transactions) {
 
   const subscriptions = [];
 
-  byMerchant.forEach((txns, key) => {
-    if (txns.length < 2) return;
+  byMerchant.forEach((rawTxns, key) => {
+    if (rawTxns.length < 2) return;
+
+    // Sort newest-first ONCE, up front. The incoming array is in store-insertion
+    // order, which is NOT date order (a backdated manual entry is prepended), so
+    // picking "the latest charge" positionally off an unsorted array made `amount`
+    // and `priceHike` depend on ingest order — the same transactions could report a
+    // hike or not. Everything below reads from this sorted copy.
+    const txns = [...rawTxns].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const byMonth = new Map();
     txns.forEach((t) => {
@@ -163,11 +174,14 @@ export function detectSubscriptions(transactions) {
     const sortedMonths = [...byMonth.keys()].sort();
     const latestMk = sortedMonths[sortedMonths.length - 1];
     const prevMk = sortedMonths[sortedMonths.length - 2];
+    // `txns` is newest-first, so each month bucket is too — [0] is genuinely that
+    // month's most recent charge.
     const latestAmt = debitDisplayAmount(byMonth.get(latestMk)[0]);
     const prevAmt = debitDisplayAmount(byMonth.get(prevMk)[0]);
     const priceHike = latestAmt > prevAmt * 1.05;
 
-    const latest = [...txns].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+    const latest = txns[0];
+    const earliest = txns[txns.length - 1];
 
     subscriptions.push({
       merchant: latest.merchant || key,
@@ -178,6 +192,7 @@ export function detectSubscriptions(transactions) {
       priceHike,
       hikeFrom: priceHike ? prevAmt : null,
       hikeTo: priceHike ? latestAmt : null,
+      firstDate: earliest.createdAt,
       lastDate: latest.createdAt,
       categoryId: latest.categoryId,
     });

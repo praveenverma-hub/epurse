@@ -21,6 +21,7 @@ import {
   TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -147,7 +148,11 @@ const BudgetPlanScreen = ({ navigation }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: colors.background }}
     >
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+      {/* SafeAreaView is WHITE so the status-bar inset matches the white header bar
+          below it; the page gray comes from the KeyboardAvoidingView + `scroll`. */}
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        {/* Light header → dark glyphs (static palette, so not theme-driven). */}
+        <StatusBar style="dark" />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
@@ -157,6 +162,7 @@ const BudgetPlanScreen = ({ navigation }) => {
         </View>
 
         <ScrollView
+          style={styles.body}
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -322,6 +328,8 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title:   { ...typography.h3, color: colors.textPrimary, flex: 1, textAlign: 'center' },
 
+  safe:    { flex: 1, backgroundColor: colors.card },
+  body:    { flex: 1, backgroundColor: colors.background },
   scroll:  { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   section: { marginBottom: spacing.xl },
   fieldLabel: {

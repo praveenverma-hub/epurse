@@ -14,6 +14,7 @@ import {
 import { radius, spacing, typography } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
+import { formatLocation } from '../utils/location';
 
 const TxnDebugSheet = ({ txn, onClose }) => {
   const slideY = useRef(new Animated.Value(400)).current;
@@ -35,10 +36,9 @@ const TxnDebugSheet = ({ txn, onClose }) => {
 
   if (!txn) return null;
 
-  const loc = txn.location;
-  const locStr = loc && typeof loc.latitude === 'number'
-    ? `${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)}`
-    : '—';
+  // Location is a coarse place LABEL now (city/district), not coordinates — the old
+  // `latitude.toFixed(5)` readout would always print '—'.
+  const locStr = formatLocation(txn.location) || '—';
 
   const rows = [
     ['type',        txn.type],

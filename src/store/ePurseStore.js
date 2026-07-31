@@ -54,6 +54,7 @@ import {
 import { isSameMonth, monthKey } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification } from '../utils/notifications';
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
+import { locationKey } from '../utils/location';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import { useNotificationStore } from './useNotificationStore';
 import {
@@ -538,9 +539,15 @@ const sumCaps = (perCategory) =>
 
 /**
  * Produce monthly aggregates from a list of transactions.
- * Returns `{ '2025-12': { totalSpend, totalIncome, byCategory, byAccount } }`.
+ * Returns `{ '2025-12': { totalSpend, totalIncome, byCategory, byAccount, byLocation } }`.
  * Lent/borrow categories are stored in byCategory for reference but excluded
  * from totalSpend/totalIncome so they don't skew normal expense tracking.
+ *
+ * `byLocation` (Jul-31) is spend keyed by the coarse place label on the transaction
+ * (see locationService — city/district, never coordinates). Raw transactions are
+ * dropped past RAW_RETENTION_MS, so WITHOUT this bucket every stamped location
+ * vanished after 90 days and long-run "spend by place" analytics were impossible.
+ * Additive + backward compatible: older aggregates simply have no `byLocation`.
  */
 const aggregate = (transactions, groups = []) => {
   const out = {};
@@ -551,13 +558,19 @@ const aggregate = (transactions, groups = []) => {
     if (isGroupExcluded(t, groups)) return;
     const key = monthKey(t.createdAt);
     if (!out[key]) {
-      out[key] = { totalSpend: 0, totalIncome: 0, byCategory: {}, byAccount: {} };
+      out[key] = { totalSpend: 0, totalIncome: 0, byCategory: {}, byAccount: {}, byLocation: {} };
     }
     const a = out[key];
+    // Only real spend is bucketed by place — a place total is meant to answer "how
+    // much did I spend in Pune", so income and non-spend categories stay out.
+    const place = locationKey(t.location);
     if (t.type === TRANSACTION_TYPES.DEBIT) {
       const spend = debitDisplayAmount(t);
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + spend;
       if (!NON_SPEND_CATS.has(t.categoryId)) a.totalSpend += spend;
+      if (place && !NON_SPEND_CATS.has(t.categoryId)) {
+        a.byLocation[place] = (a.byLocation[place] || 0) + spend;
+      }
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) - t.amount;
     } else if (isRefundCredit(t)) {
       // Refund/cashback: money back for a prior payment. Nets DOWN spend and its
@@ -565,6 +578,7 @@ const aggregate = (transactions, groups = []) => {
       if (!NON_SPEND_CATS.has(t.categoryId)) {
         a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) - t.amount;
         a.totalSpend -= t.amount;
+        if (place) a.byLocation[place] = (a.byLocation[place] || 0) - t.amount;
       }
       if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) + t.amount;
     } else if (t.type === TRANSACTION_TYPES.CREDIT) {
@@ -2734,6 +2748,71 @@ export const useEPurseStore = create(
         }),
 
       /**
+       * True when an LB row may be edited/deleted in place from the ledger UI.
+       *
+       * A row is DERIVED — and therefore read-only here — when it carries either:
+       *   • `groupId`     — materialised from a group expense (buildGroupLbRows). Editing it
+       *                     would desync the row from the expense; edit the group expense.
+       *   • `sourceTxnId` — backed by a real transaction, either a re-tagged bank SMS
+       *                     (`lbLocked`) or a booked Repayment expense. The amount belongs
+       *                     to that transaction, so changing it here would contradict the
+       *                     account balance the transaction already moved.
+       * Everything else came from the LB add form and is the user's own bookkeeping, so it
+       * is safe to change. Exported so the UI can grey the row instead of failing on tap.
+       */
+      isLentBorrowedEditable: (entry) =>
+        !!entry && !entry.groupId && !entry.sourceTxnId,
+
+      /**
+       * Edit a MANUAL lent/borrowed row in place. Returns true on success, false if the
+       * row is missing, derived (see isLentBorrowedEditable) or the amount is invalid.
+       * patch may set: { amount, note, date, person, phone, contactId }.
+       *
+       * No balance reversal is needed (unlike updateTransaction): an LB row never moved an
+       * account — getPersonBalances re-derives every net from the rows on read, so writing
+       * the new values is the whole update.
+       */
+      updateLentBorrowedEntry: (id, patch = {}) => {
+        const s = get();
+        const old = (s.lentBorrowed || []).find((l) => l.id === id);
+        if (!old || old.groupId || old.sourceTxnId) return false;
+
+        const next = { ...old };
+        if (patch.amount !== undefined) {
+          const amt = Number(patch.amount);
+          if (!Number.isFinite(amt) || amt <= 0 || amt > MAX_ALLOWED_AMOUNT) return false;
+          next.amount = amt;
+        }
+        if (patch.note   !== undefined) next.note   = patch.note || null;
+        if (patch.date   !== undefined) next.date   = patch.date || old.date;
+        if (patch.person !== undefined) {
+          const p = String(patch.person || '').trim();
+          if (!p) return false;
+          next.person = p;
+        }
+        // phone/contactId are cleared with an explicit null, so `undefined` (absent) and
+        // null (unlink) must stay distinguishable.
+        if (patch.phone     !== undefined) next.phone     = patch.phone || null;
+        if (patch.contactId !== undefined) next.contactId = patch.contactId || null;
+
+        set({ lentBorrowed: s.lentBorrowed.map((l) => (l.id === id ? next : l)) });
+        return true;
+      },
+
+      /**
+       * Delete a MANUAL lent/borrowed row. Returns true on success. Derived rows are
+       * refused — a group row is removed by untagging/deleting its group expense, and a
+       * txn-backed row by deleting its transaction, so that the two systems can't drift.
+       */
+      deleteLentBorrowedEntry: (id) => {
+        const s = get();
+        const old = (s.lentBorrowed || []).find((l) => l.id === id);
+        if (!old || old.groupId || old.sourceTxnId) return false;
+        set({ lentBorrowed: s.lentBorrowed.filter((l) => l.id !== id) });
+        return true;
+      },
+
+      /**
        * Log a settlement against a person's EXISTING outstanding balance in one step —
        * e.g. "Rohit already paid me back the ₹500 I lent him." Mirrors what re-tagging a
        * normal transaction to lent_settled/borrow_repaid does (updateTransactionCategoryWithContact):
@@ -3548,7 +3627,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 22,
+      version: 23,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -3909,6 +3988,35 @@ export const useEPurseStore = create(
               ...a,
             })),
             declinedAccountLinks: Array.isArray(state.declinedAccountLinks) ? state.declinedAccountLinks : [],
+          };
+        }
+
+        if (version < 23) {
+          // `note` used to hold a 117-char copy of the bank SMS for every ingested
+          // transaction, so the detail sheet's "Note" row showed the bank's message and
+          // the edit form prefilled it. Move that text to `smsText` (its own field, still
+          // searchable) and leave `note` empty unless the user actually typed one.
+          //
+          // Only `source === 'sms'` rows are touched: a manual transaction's note has
+          // always been the user's, and group/LB rows use note for their own label
+          // ("Group · Trip", "Manual settlement").
+          // A user CAN have typed their own note on an SMS transaction (the edit form
+          // prefilled the SMS text, but they could clear it and type). So don't move
+          // every note blindly — only text that actually looks like a bank message:
+          // the parser's 120-char truncation marker, or an amount plus a bank verb /
+          // account ref. Anything else is treated as the user's and left in `note`.
+          const LOOKS_LIKE_SMS =
+            /(?:…$)|(?:(?:rs\.?|inr|₹)\s?[\d,]+(?:\.\d+)?[\s\S]*\b(?:debited|credited|spent|withdrawn|deducted|deposited|refunded|transferred|paid|txn|upi|a\/c|acct|avl\s*bal|available\s*balance)\b)/i;
+          const splitNote = (t) => {
+            if (!t || t.source !== 'sms' || !t.note || t.smsText) return t;
+            if (!LOOKS_LIKE_SMS.test(t.note)) return t;   // user's own note — keep it
+            const { note, ...rest } = t;
+            return { ...rest, smsText: note };
+          };
+          state = {
+            ...state,
+            transactions: (state.transactions || []).map(splitNote),
+            archivedTransactions: (state.archivedTransactions || []).map(splitNote),
           };
         }
 

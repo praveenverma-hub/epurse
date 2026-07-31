@@ -127,6 +127,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
 }
 
 const styles = StyleSheet.create({
+  // Gray body — see AddTransactionScreen.root for why this isn't white.
   root: { flex: 1, backgroundColor: colors.background },
   headerSafe: {
     backgroundColor: colors.card,

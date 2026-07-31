@@ -860,6 +860,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 // components/FormField.tsx so this screen and GroupExpenseForm stay identical.
 
 const styles = StyleSheet.create({
+  // Gray body, kept deliberately (tried white Jul-31, reverted): it separates the
+  // scrolling form from the white header/footer bands. The outlined controls
+  // (FormField.tsx) read correctly on gray AND on the white GroupExpenseSheet, which
+  // is the point of them being unfilled — the surface can differ per shell.
   root: { flex: 1, backgroundColor: colors.background },
   headerSafe: {
     backgroundColor: colors.card,
