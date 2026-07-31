@@ -9,17 +9,14 @@
 // Layout (no plan):
 //   • Illustrated empty state with "Create Plan" CTA
 //
-// Plan Modal (create or edit):
-//   • Total budget input
-//   • Category rows (defaults: Food, Travel, Bills, Shopping on first create)
-//   • "+ Add Category" via bottom sheet picker
-//   • "Save Plan" button — persists to store on tap
+// "Edit Plan" (and the empty-state "Create Plan" CTA) push BudgetPlanScreen —
+// a full stack screen, not a modal — for create AND edit alike.
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, KeyboardAvoidingView, Platform, Modal,
+  KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
@@ -30,7 +27,6 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
-import { INPUT_LIMITS } from '../utils/validation';
 import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
 import SheetCloseButton from '../components/SheetCloseButton';
@@ -90,9 +86,6 @@ const ringColor = (pct, daysElapsedPct) => {
 const DEFINED_SUBCOUNT = Object.fromEntries(
   PARENT_CATEGORIES.map((p) => [p.id, (p.children || []).length]),
 );
-// Categories pre-added when creating the very first plan (no history to seed from).
-const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
-
 // Sentinel id for the "Unbudgeted expenses" drill-down.
 const UNBUDGETED_ID = '__unbudgeted__';
 
@@ -111,24 +104,16 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const toast    = useToast();
 
   const budget                  = useEPurseStore((s) => s.budget);
-  const lastBudgetPlan          = useEPurseStore((s) => s.lastBudgetPlan);
   const transactions            = useEPurseStore((s) => s.transactions);
   const budgetStreak            = useEPurseStore((s) => s.budgetStreak);
   const categories              = useEPurseStore((s) => s.categories);
-  const setBudget               = useEPurseStore((s) => s.setBudget);
   const clearBudget             = useEPurseStore((s) => s.clearBudget);
   const getBudgetUsage          = useEPurseStore((s) => s.getBudgetUsage);
-  const getParentCategoryAverage = useEPurseStore((s) => s.getParentCategoryAverage);
   const getBudgetChildBreakdown = useEPurseStore((s) => s.getBudgetChildBreakdown);
   const getUnbudgetedBreakdown  = useEPurseStore((s) => s.getUnbudgetedBreakdown);
   const getCategoryMastery      = useEPurseStore((s) => s.getCategoryMastery);
 
-  const [confirm,         setConfirm]         = useState(null);
-  const [planModalVisible, setPlanModalVisible] = useState(false);
-
-  // Local state for the plan modal
-  const [localCats,        setLocalCats]         = useState([]); // [{ catId, cap: string }]
-  const [localPickerOpen,  setLocalPickerOpen]   = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   // Drill-down sheet: which budget category's sub-categories to show.
   const [drillCatId,       setDrillCatId]         = useState(null);
@@ -149,111 +134,16 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const BUDGETABLE = useMemo(() => new Set(BUDGETABLE_IDS), []);
 
   // Sum of the category caps the user is editing — the total is derived, never typed.
-  const localTotal = useMemo(
-    () => localCats.reduce((sum, { cap }) => sum + (parseInt(cap, 10) || 0), 0),
-    [localCats]
-  );
-
-  // Seed the plan form from the previous month's plan (so the user just nudges
-  // each category up/down). Falls back to a few common categories on first ever
-  // use. Returns [{ catId, cap }].
-  const seedFromHistory = useCallback(() => {
-    const prev = lastBudgetPlan?.perCategory;
-    if (prev && Object.keys(prev).length > 0) {
-      return Object.entries(prev)
-        .filter(([catId]) => BUDGETABLE.has(catId))
-        .map(([catId, cap]) => ({ catId, cap: cap ? String(cap) : '' }));
-    }
-    return DEFAULT_BUDGET_IDS
-      .filter((catId) => categories.some((c) => c.id === catId))
-      .map((catId) => ({ catId, cap: '' }));
-  }, [lastBudgetPlan, categories, BUDGETABLE]);
-
-  // ── Modal handlers ────────────────────────────────────────────────────────
-  const openCreateModal = useCallback(() => {
-    setLocalCats(seedFromHistory());
-    setPlanModalVisible(true);
-  }, [seedFromHistory]);
-
-  // Auto-open the create modal when arriving from the dashboard with no plan.
+  // Auto-open the plan SCREEN when arriving from the dashboard with no plan yet.
   // Ref guard ensures it fires only once per mount even if deps change.
   const didAutoOpen = useRef(false);
   useEffect(() => {
     if (openPlan && !budget && !didAutoOpen.current) {
       didAutoOpen.current = true;
-      const t = setTimeout(openCreateModal, 120);
+      const t = setTimeout(() => navigation.navigate('BudgetPlan'), 120);
       return () => clearTimeout(t);
     }
-  }, [openPlan, budget, openCreateModal]);
-
-  const openEditModal = useCallback(() => {
-    setLocalCats(
-      Object.entries(budget?.perCategory || {})
-        .filter(([catId]) => BUDGETABLE.has(catId))
-        .map(([catId, cap]) => ({ catId, cap: String(cap) }))
-    );
-    setPlanModalVisible(true);
-  }, [budget, BUDGETABLE]);
-
-  const handleLocalCatCapChange = useCallback((catId, text) => {
-    setLocalCats((prev) =>
-      prev.map((c) => c.catId === catId ? { ...c, cap: text.replace(/\D/g, '').slice(0, INPUT_LIMITS.AMOUNT_INT_DIGITS) } : c)
-    );
-  }, []);
-
-  const handleLocalAddCat = useCallback((catId) => {
-    const avg = getParentCategoryAverage(catId, 3);
-    setLocalCats((prev) => [
-      ...prev,
-      { catId, cap: avg > 0 ? String(Math.round(avg)) : '' },
-    ]);
-    setLocalPickerOpen(false);
-  }, [getParentCategoryAverage]);
-
-  const handleLocalRemoveCat = useCallback((catId) => {
-    setLocalCats((prev) => prev.filter((c) => c.catId !== catId));
-  }, []);
-
-  const resetLocalState = useCallback(() => {
-    if (budget) {
-      // Edit mode — revert to saved plan
-      setLocalCats(
-        Object.entries(budget.perCategory || {})
-          .filter(([catId]) => BUDGETABLE.has(catId))
-          .map(([catId, cap]) => ({ catId, cap: String(cap) }))
-      );
-    } else {
-      // Create mode — go back to the seeded defaults
-      setLocalCats(seedFromHistory());
-    }
-  }, [budget, BUDGETABLE, seedFromHistory]);
-
-  const savePlan = useCallback(() => {
-    // Every listed category must have a cap > 0.
-    if (localCats.length > 0) {
-      const hasEmpty = localCats.some(({ cap }) => {
-        const num = parseInt(cap, 10);
-        return !Number.isFinite(num) || num <= 0;
-      });
-      if (hasEmpty) {
-        setConfirm({
-          title: 'Empty category budgets',
-          message: 'Give every category a budget greater than 0, or remove it from the plan.',
-          primaryText: 'OK',
-        });
-        return;
-      }
-    }
-
-    // Build the plan; the store derives the (non-editable) total from the sum.
-    const perCategory = {};
-    localCats.forEach(({ catId, cap }) => {
-      const num = parseInt(cap, 10);
-      if (Number.isFinite(num) && num > 0) perCategory[catId] = num;
-    });
-    setBudget({ perCategory });
-    setPlanModalVisible(false);
-  }, [localCats, setBudget, setConfirm]);
+  }, [openPlan, budget, navigation]);
 
   const handleResetPlan = useCallback(() => {
     setConfirm({
@@ -266,14 +156,6 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
       onConfirm: () => { clearBudget(); setConfirm(null); },
     });
   }, [clearBudget]);
-
-  // First-level categories available to add in the modal (not yet in local list)
-  const localPickerCategories = useMemo(() => {
-    const addedIds = new Set(localCats.map((c) => c.catId));
-    return BUDGETABLE_IDS
-      .map((id) => categories.find((c) => c.id === id))
-      .filter((c) => c && !addedIds.has(c.id));
-  }, [categories, localCats]);
 
   // Drill-down: sub-category stats for the tapped budget category (current
   // month). The special '__unbudgeted__' id drills the unbudgeted slice instead.
@@ -338,7 +220,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                   <Text style={styles.streakText}>{budgetStreak.current}mo</Text>
                 </View>
               ) : null}
-              <TouchableOpacity style={[styles.editPlanBtn, { borderColor: theme.primary }]} onPress={openEditModal} activeOpacity={0.75}>
+              <TouchableOpacity style={[styles.editPlanBtn, { borderColor: theme.primary }]} onPress={() => navigation.navigate('BudgetPlan')} activeOpacity={0.75}>
                 <Text style={[styles.editPlanText, { color: theme.primary }]}>Edit Plan</Text>
               </TouchableOpacity>
             </View>
@@ -488,176 +370,10 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
       title="No plan yet"
       subtitle="Set a monthly budget and track your spending in real time."
       actionLabel={`Create ${monthName} Plan`}
-      onAction={openCreateModal}
+      onAction={() => navigation.navigate('BudgetPlan')}
     />
   );
 
-  // ── Plan Modal ───────────────────────────────────────────────────────────
-  const renderPlanModal = () => (
-    <Modal
-      visible={planModalVisible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={() => setPlanModalVisible(false)}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1, backgroundColor: colors.background }}
-      >
-        <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-          {/* Modal header */}
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setPlanModalVisible(false)} style={styles.modalClose}>
-              <Text style={styles.modalCloseText}>✕</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>
-              {budget ? 'Edit Plan' : `${monthName} Plan`}
-            </Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          <ScrollView
-            contentContainerStyle={styles.modalScroll}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Total budget — derived, non-editable (sum of the categories below) */}
-            <View style={styles.modalSection}>
-              <Text style={styles.modalFieldLabel}>Total monthly budget</Text>
-              <View style={styles.totalReadonlyWrap}>
-                <Text style={styles.totalReadonlyValue}>
-                  ₹{localTotal.toLocaleString('en-IN')}
-                </Text>
-                <Text style={styles.totalReadonlyTag}>auto</Text>
-              </View>
-              <Text style={styles.totalInputHint}>
-                Adds up automatically from your category budgets below.
-              </Text>
-            </View>
-
-            {/* Category rows */}
-            <View style={styles.modalSection}>
-              <Text style={styles.modalFieldLabel}>
-                Categories {localCats.length > 0 ? `(${localCats.length})` : ''}
-              </Text>
-
-              {localCats.length === 0 ? (
-                <View style={styles.modalEmptyHint}>
-                  <Text style={styles.modalEmptyText}>
-                    Add first-level categories below to build your budget.
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.catList}>
-                  {localCats.map(({ catId, cap }) => {
-                    const cat = categoryById.get(catId);
-                    if (!cat) return null;
-                    return (
-                      <View key={catId} style={styles.catInputRow}>
-                        <Text style={styles.catInputEmoji}>{cat.emoji}</Text>
-                        <Text style={styles.catInputName} numberOfLines={1}>{cat.name}</Text>
-                        <View style={styles.catAmountWrap}>
-                          <Text style={styles.catAmountPrefix}>₹</Text>
-                          <TextInput
-                            value={cap}
-                            onChangeText={(t) => handleLocalCatCapChange(catId, t)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textMuted}
-                            keyboardType="numeric"
-                            style={styles.catAmountInput}
-                            maxLength={INPUT_LIMITS.AMOUNT_INT_DIGITS}
-                          />
-                        </View>
-                        <TouchableOpacity
-                          onPress={() => handleLocalRemoveCat(catId)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          style={styles.catRemoveBtn}
-                        >
-                          <Text style={styles.catRemoveText}>✕</Text>
-                        </TouchableOpacity>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-
-              {/* Add category button */}
-              <TouchableOpacity
-                style={[styles.addCatBtn, { borderColor: theme.primary + '66' }]}
-                onPress={() => setLocalPickerOpen(true)}
-                activeOpacity={0.75}
-              >
-                <Text style={[styles.addCatBtnText, { color: theme.primary }]}>+ Add Category</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Action row — Reset (narrow) + Save Plan (wide) */}
-            <View style={styles.modalActionRow}>
-              <TouchableOpacity
-                style={styles.resetModalBtn}
-                onPress={resetLocalState}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.resetModalBtnText, { color: colors.danger }]}>Reset</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.savePlanBtn, { backgroundColor: theme.primary }]}
-                onPress={savePlan}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.savePlanBtnText}>Save Plan</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </SafeAreaView>
-
-        {/* Category picker bottom sheet (inside modal) */}
-        {localPickerOpen && (
-          <TouchableOpacity
-            style={styles.pickerBackdrop}
-            activeOpacity={1}
-            onPress={() => setLocalPickerOpen(false)}
-          >
-            <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
-              <SheetCloseButton onPress={() => setLocalPickerOpen(false)} variant="absolute" />
-              <View style={styles.pickerHandle} />
-              <Text style={styles.pickerTitle}>Add category</Text>
-              <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
-                {localPickerCategories.length === 0 ? (
-                  <Text style={styles.pickerEmpty}>All categories are already added.</Text>
-                ) : (
-                  localPickerCategories.map((c) => {
-                    const avg = getParentCategoryAverage(c.id, 3);
-                    return (
-                      <TouchableOpacity
-                        key={c.id}
-                        style={styles.pickerRow}
-                        onPress={() => handleLocalAddCat(c.id)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.pickerEmoji}>{c.emoji}</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.pickerName} numberOfLines={1} ellipsizeMode="tail">{c.name}</Text>
-                          {avg > 0 ? (
-                            <Text style={styles.pickerAvg}>avg ₹{avg.toLocaleString('en-IN')}/mo</Text>
-                          ) : (
-                            <Text style={styles.pickerAvg}>no history yet</Text>
-                          )}
-                        </View>
-                        <Text style={[styles.pickerArrow, { color: theme.primary }]}>›</Text>
-                      </TouchableOpacity>
-                    );
-                  })
-                )}
-              </ScrollView>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        )}
-      </KeyboardAvoidingView>
-    </Modal>
-  );
 
   // ── Main render ──────────────────────────────────────────────────────────
   return (
@@ -685,8 +401,6 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
           {budget ? renderProgress() : renderEmpty()}
         </ScrollView>
       </SafeAreaView>
-
-      {renderPlanModal()}
 
       {/* Category drill-down — sub-category stats for the tapped budget card */}
       <Modal
@@ -865,115 +579,8 @@ const styles = StyleSheet.create({
   resetLink:     { alignSelf: 'center', paddingVertical: spacing.md },
   resetLinkText: { ...typography.small, fontWeight: '700' },
 
-  // ── Plan modal ──
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-    backgroundColor: colors.card,
-  },
-  modalClose:     { padding: spacing.sm },
-  modalCloseText: { fontSize: 18, color: colors.textSecondary },
-  modalTitle:     { ...typography.h3, color: colors.textPrimary },
-
-  modalScroll:    { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
-  modalSection:   { marginBottom: spacing.xl },
-  modalFieldLabel: {
-    ...typography.small, color: colors.textSecondary, fontWeight: '700',
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase', letterSpacing: 0.5,
-  },
-
-  totalInputWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    ...shadows.card,
-  },
-  totalInputPrefix: { fontSize: 24, color: colors.textSecondary, fontWeight: '600', marginRight: spacing.sm },
-  totalInput: {
-    flex: 1, paddingVertical: spacing.md,
-    fontSize: 28, fontWeight: '800', color: colors.textPrimary,
-  },
-  totalInputHint: { ...typography.tiny, color: colors.textMuted, marginTop: spacing.xs },
-
-  totalReadonlyWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
-  },
-  totalReadonlyValue: { flex: 1, fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
-  totalReadonlyTag: {
-    ...typography.tiny, fontWeight: '700', color: colors.textSecondary,
-    backgroundColor: colors.divider, paddingHorizontal: spacing.sm, paddingVertical: 2,
-    borderRadius: radius.pill, textTransform: 'uppercase', letterSpacing: 0.5,
-  },
-
-  catList:      { gap: spacing.sm, marginBottom: spacing.md },
-  catInputRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.md, padding: spacing.md, gap: spacing.sm,
-    ...shadows.card,
-  },
-  catInputEmoji: { fontSize: 20 },
-  catInputName:  { flex: 1, ...typography.bodyBold, color: colors.textPrimary },
-  catAmountWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 4,
-  },
-  catAmountPrefix: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
-  catAmountInput: {
-    minWidth: 60, fontSize: 15, fontWeight: '700',
-    color: colors.textPrimary, textAlign: 'right',
-    paddingVertical: 0,
-  },
-  catRemoveBtn:  { padding: 4 },
-  catRemoveText: { fontSize: 14, color: colors.textSecondary },
-
-  addCatBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderStyle: 'dashed',
-    borderRadius: radius.md, paddingVertical: spacing.md,
-    gap: spacing.sm,
-  },
-  addCatBtnText: { ...typography.bodyBold, fontWeight: '700' },
-
-  modalActionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  resetModalBtn: {
-    paddingVertical: spacing.md + 4,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.lg,
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.danger + '66',
-    backgroundColor: colors.danger + '0D',
-  },
-  resetModalBtnText: { ...typography.bodyBold, fontWeight: '700', fontSize: 15 },
-  savePlanBtn: {
-    flex: 1,
-    paddingVertical: spacing.md + 4,
-    borderRadius: radius.lg, alignItems: 'center',
-    ...shadows.elevated,
-  },
-  savePlanBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800', fontSize: 17 },
-
-  // ── Category picker (in modal) ──
+  // ── Category drill-down sheet (also shares pickerBackdrop/Sheet/Handle/Empty
+  //     below — the "Add Category" picker moved to BudgetPlanScreen) ──
   pickerBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#00000060',
@@ -990,17 +597,6 @@ const styles = StyleSheet.create({
     width: 40, height: 4, borderRadius: 2,
     backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md,
   },
-  pickerTitle:  { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
-  pickerRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-  },
-  pickerEmoji: { fontSize: 22 },
-  pickerName:  { ...typography.bodyBold, color: colors.textPrimary },
-  pickerAvg:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  pickerArrow: { fontSize: 22, fontWeight: '300' },
   pickerEmpty: { ...typography.small, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl },
 
   // ── Category drill-down sheet ──

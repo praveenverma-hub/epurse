@@ -320,10 +320,12 @@ const styles = StyleSheet.create<{
     marginBottom: spacing.xl,
   },
 
-  // Primary CTA
+  // Primary CTA — full-width, so `radius.lg` like every other full-width button
+  // (GradientButton et al). A pill radius stretched edge-to-edge reads as a
+  // stadium/capsule, not a button; the pill tier is for auto-width buttons only.
   claimBtnWrap: {
     width: '100%',
-    borderRadius: 999,
+    borderRadius: radius.lg,
     overflow: 'hidden',
     ...shadows.elevated,
   },
@@ -331,7 +333,7 @@ const styles = StyleSheet.create<{
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 999,
+    borderRadius: radius.lg,
   },
   claimBtnText: {
     color: '#1A1305',

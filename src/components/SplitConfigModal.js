@@ -705,7 +705,7 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
   cancelBtn: {
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.divider,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
   },
   cancelText: { color: colors.textSecondary, ...typography.bodyBold, fontWeight: '700' },
   submitBtn: { flex: 1 },

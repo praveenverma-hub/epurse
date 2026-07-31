@@ -412,6 +412,10 @@ const DashboardScreen = ({ navigation }) => {
               icon="receipt-outline"
               title={`Nothing this ${periodTitle}`}
               subtitle="Add a manual entry or switch to a wider period."
+              // Holds roughly the height of a few transaction rows, so an empty
+              // period doesn't collapse the page and pull the brand footer up
+              // into view right under the section heading.
+              style={styles.recentEmpty}
             />
           ) : (
             periodStats.recent.map((t) => (
@@ -925,6 +929,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   viewAll: { ...typography.small, color: colors.primary, fontWeight: '700' },
+  // `compact` EmptyState is intentionally short (it's built to sit inside a card),
+  // which on Home leaves the whole page barely taller than the header. Reserve the
+  // space a populated list would occupy and centre the placeholder inside it.
+  recentEmpty: { minHeight: 300, justifyContent: 'center' },
 });
 
 export default DashboardScreen;

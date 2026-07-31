@@ -398,6 +398,7 @@ export default function AccountsScreen({ navigation }) {
             icon="card-outline"
             title="No accounts yet"
             subtitle="Tap + above to add your first account."
+            style={styles.accountsEmpty}
           />
         ) : (
           sortedAccounts.map((a) => (
@@ -826,4 +827,8 @@ const styles = StyleSheet.create({
   pickRowSub:  { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
   pickCancel:  { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
   pickCancelTxt: { ...typography.body, color: colors.textSecondary },
+  // Same fix as DashboardScreen's `recentEmpty`: `compact` EmptyState is short
+  // by design, so with no accounts the whole page barely clears the header.
+  // Reserve the space a populated account list would occupy and centre inside it.
+  accountsEmpty: { minHeight: 300, justifyContent: 'center' },
 });

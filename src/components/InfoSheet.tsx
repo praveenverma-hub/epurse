@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
   bulletDot: {
     width:           7,
     height:          7,
-    borderRadius:    4,
+    borderRadius:    3.5,   // exactly half of 7 — a true circle, not a squarish dot
     backgroundColor: '#FF5A1F',
     marginTop:       7,
   },
@@ -298,16 +298,19 @@ const styles = StyleSheet.create({
     marginTop:  1,
   },
   // Wrapper owns position + clip so the gradient respects the pill radius on Android.
+  // radius 16 (`radius.lg`), like every other button — the pill tier is for chips
+  // only. paddingVertical is 13 (not 10) so the button clears ~43px tall; at 37px a
+  // 16 radius is still half the height and would render as a capsule.
   ctaWrap: {
     alignSelf:    'flex-end',
     marginTop:    22,
-    borderRadius: 999,
+    borderRadius: 16,
     overflow:     'hidden',
   },
   cta: {
     paddingHorizontal: 24,
-    paddingVertical:   10,
-    borderRadius:      999,
+    paddingVertical:   13,
+    borderRadius:      16,
     alignItems:        'center',
     justifyContent:    'center',
   },

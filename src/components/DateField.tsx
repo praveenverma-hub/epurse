@@ -72,7 +72,9 @@ export default function DateField({
       <TouchableOpacity
         style={[
           styles.iconBtn,
-          backdated && { borderColor: tint, backgroundColor: tint + '14' },
+          // Backdated swaps the gray fill for an accent wash. (No border here —
+          // the button is borderless, so a borderColor alone would do nothing.)
+          backdated && { backgroundColor: tint + '1F' },
         ]}
         onPress={openPicker}
         disabled={disabled}
@@ -80,7 +82,9 @@ export default function DateField({
         accessibilityRole="button"
         accessibilityLabel={`Date: ${formatDateLabel(value)}`}
       >
-        <Ionicons name="calendar-outline" size={19} color={backdated ? tint : colors.textSecondary} />
+        {/* Always tinted with the live accent — the calendar is the affordance
+            here (there's no label beside it), so it must read as tappable. */}
+        <Ionicons name="calendar-outline" size={19} color={tint} />
         {backdated ? (
           <Text style={[styles.iconBtnTxt, { color: tint }]} numberOfLines={1}>
             {formatDateLabel(value)}
@@ -165,10 +169,11 @@ const styles = StyleSheet.create({
     minWidth: 48,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    backgroundColor: colors.card,
+    // FILLED gray, borderless — matches `LentBorrowedScreen`'s inputs, the only
+    // place this variant is used. It deliberately does NOT follow the outlined
+    // FormField treatment (`variant="row"` does, via FormSelectRow).
+    backgroundColor: colors.background,
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.divider,
   },
   iconBtnTxt: { ...typography.small, fontWeight: '700' },
 

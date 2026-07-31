@@ -23,7 +23,7 @@ import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
-import { INPUT_LIMITS, sanitizeName, sanitizePhone, sanitizeAmount } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeName, sanitizePhone, normalizePhone, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate } from '../utils/format';
@@ -33,6 +33,8 @@ import AccountPickerSheet from '../components/AccountPickerSheet';
 import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
 import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
 import DateField from '../components/DateField';
+import InfoIcon from '../components/InfoIcon';
+import InfoSheet from '../components/InfoSheet';
 import Svg, { Path } from 'react-native-svg';
 
 const ENTRY_LABEL = {
@@ -78,6 +80,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [reminderTarget, setReminderTarget] = useState(null);
   const [borrowReminderTarget, setBorrowReminderTarget] = useState(null);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
+  const [infoVisible, setInfoVisible] = useState(false);
   const [contactQuery, setContactQuery] = useState('');
   const [allContacts, setAllContacts] = useState([]);
   const [contactsLoading, setContactsLoading] = useState(false);
@@ -186,7 +189,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   const handleSelectContact = useCallback((c) => {
     if (c.phoneNumbers?.length) {
-      setPhone(c.phoneNumbers[0].number?.replace(/[^\d+]/g, '') || '');
+      // Contacts hand back "+91 98765 43210" — normalise to the local 10 digits or
+      // the field's maxLength would clip the tail off the real number.
+      setPhone(normalizePhone(c.phoneNumbers[0].number));
       setContactId(c.id ?? null);
     }
     if (!person.trim() && c.name) setPerson(c.name);
@@ -510,14 +515,16 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           style={[styles.input, styles.phoneInput]}
           maxLength={INPUT_LIMITS.PHONE_LEN}
         />
+        {/* Mirrors the date button beside the amount: gray at rest, accent wash
+            once it holds a value (there = backdated, here = a linked contact). */}
         <TouchableOpacity
-          style={[
-            styles.contactPickBtn,
-            { backgroundColor: theme.primary + '18', borderColor: theme.primary + '33' },
-          ]}
+          style={[styles.contactPickBtn, contactId && { backgroundColor: theme.primary + '1F' }]}
           onPress={pickContact}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Pick a contact"
         >
-          <ContactPickIcon color={theme.primary} />
+          <ContactPickIcon size={19} color={theme.primary} />
         </TouchableOpacity>
       </View>
       <TextInput
@@ -585,6 +592,16 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       gradientColors={grad}
       onBack={() => navigation.goBack()}
       title={kind === 'lent' ? 'You Lent' : 'You Borrowed'}
+      headerRight={
+        <TouchableOpacity
+          onPress={() => setInfoVisible(true)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="About lent and borrowed"
+        >
+          <InfoIcon size={22} color={colors.textOnGradient} />
+        </TouchableOpacity>
+      }
       renderHero={() => (
         <>
           <Text style={styles.subLabel}>
@@ -642,6 +659,27 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         initialLayout={initialLayout}
         swipeEnabled
       />
+
+        {/* Explains the FOUR categories an entry can land in, because the form
+            only surfaces two ("Lend to someone" / "Borrow from someone") — the
+            settled pair is reachable via the "already settled" toggle, which
+            isn't self-explanatory. */}
+        <InfoSheet
+          visible={infoVisible}
+          onClose={() => setInfoVisible(false)}
+          title="Lent & Borrowed"
+          eyebrow="Four kinds of entry"
+          body="Every IOU is one of four kinds. Add the two open ones from the form below, or tick “already settled” to log one that's already closed."
+          icon={<Ionicons name="swap-horizontal" size={28} color={theme.primary} />}
+          bullets={[
+            { emoji: '📤', label: 'Lent',          value: 'You gave money out — they owe you. Shows under “You Lent”.' },
+            { emoji: '📥', label: 'Borrowed',      value: 'You took money — you owe them. Shows under “You Borrowed”.' },
+            { emoji: '✅', label: 'Lent settled',  value: 'They paid you back. Tick “as Lent settled” to log a loan that is already closed.' },
+            { emoji: '🤝', label: 'Borrow repaid', value: 'You paid them back. Tick “as Borrow repaid”; you can also book it as a real Repayment expense on an account.' },
+            { emoji: '📱', label: 'From an SMS',   value: 'You can also re-tag any bank transaction into one of these four from its category picker.' },
+            { emoji: '🧮', label: 'Not spending',  value: 'None of these count towards your monthly spend — only a Repayment expense does. Balances still move.' },
+          ]}
+        />
 
         <CenterModal
           visible={!!confirm}
@@ -847,6 +885,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   formTitleInline: { flex: 1 },
+  // FILLED (gray, borderless) — deliberately NOT the outlined FormField treatment
+  // the other add forms use. This form is a compact block inside a white card, so
+  // the fill is what separates the inputs from the card; kept on purpose.
+  // `DateField variant="icon"` matches it (that variant exists only for this form).
   input: {
     backgroundColor: colors.background,
     borderRadius: radius.md,
@@ -904,13 +946,16 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 0,
   },
+  // Must stay pixel-identical to `DateField`'s `iconBtn`: these are the form's two
+  // trailing icon buttons, one row apart, so any difference in fill or height reads
+  // as a mistake. Same recipe — gray fill, borderless, minWidth 48, spacing.md pad,
+  // accent-tinted glyph — which also makes both flush with the input beside them.
   contactPickBtn: {
-    width: 44,
-    height: 44,
+    minWidth: 48,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: colors.primary + '18',
-    borderWidth: 1,
-    borderColor: colors.primary + '33',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },

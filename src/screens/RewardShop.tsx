@@ -950,7 +950,7 @@ function makeStyles(D: any) {
 
     // ── Buy button ──────────────────────────────────────────────────────────
     buyBtn: {
-      borderRadius: 12,
+      borderRadius: radius.md,
       paddingHorizontal: 14,
       paddingVertical: 10,
       alignItems: 'center',

@@ -269,11 +269,11 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
       {isBudgetExhausted && (
         <View style={[styles.footer, { marginTop: 12 }]}>
           <TouchableOpacity
-            style={[styles.pillButton, { backgroundColor: essentialMode ? theme.textPrimary : theme.background }]}
+            style={[styles.essentialBtn, { backgroundColor: essentialMode ? theme.textPrimary : theme.background }]}
             onPress={() => setEssentialMode(!essentialMode)}
           >
             <Ionicons name="lock-closed-outline" size={14} color={essentialMode ? '#ffffff' : theme.textPrimary} style={{ marginRight: 4 }} />
-            <Text style={[styles.pillText, { color: essentialMode ? '#ffffff' : theme.textPrimary }]}>
+            <Text style={[styles.essentialText, { color: essentialMode ? '#ffffff' : theme.textPrimary }]}>
               Essential Mode
             </Text>
           </TouchableOpacity>
@@ -492,16 +492,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  pillButton: {
+  // Full-width (sole child of the footer), so NOT a pill: at ~33px tall any radius
+  // over ~16 renders as a stadium, which looks wrong stretched edge-to-edge. 12 =
+  // `radius.md`, the small-control tier. (Can't import the token here — this file
+  // already binds `radius` locally for the progress ring.)
+  essentialBtn: {
     flex: 1,
     flexDirection: 'row',
     paddingVertical: 8,
     paddingHorizontal: 10,
-    borderRadius: 20,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pillText: {
+  essentialText: {
     fontSize: 12,
     fontWeight: '600',
   },
@@ -605,7 +609,7 @@ const styles = StyleSheet.create({
   rebalanceButton: {
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: 12,   // radius.md (token shadowed locally, see essentialBtn)
     alignItems: 'center',
   },
   rebalanceButtonText: {

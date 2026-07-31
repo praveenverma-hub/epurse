@@ -21,7 +21,7 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
-import { colors, radius, shadows, spacing } from '../constants/theme';
+import { colors, radius, spacing } from '../constants/theme';
 
 // ─── FormField — labelled wrapper ────────────────────────────────────────────
 
@@ -164,6 +164,9 @@ export const FormChip: React.FC<FormChipProps> = ({
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+/** Border for every form control — see `colors.inputBorder` in constants/theme. */
+const OUTLINE = colors.inputBorder;
+
 const styles = StyleSheet.create({
   field: { marginBottom: spacing.lg },
   fieldLabel: {
@@ -179,13 +182,17 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 
-  // One surface for every control: card fill, hairline border, soft shadow.
+  // One surface for every control: OUTLINED — a visible border, no fill, no
+  // shadow. Two reasons this beats the old card+shadow treatment: the control
+  // inherits whatever surface it sits on, so the same field looks right on the
+  // gray screen body (AddTransactionScreen) AND on the white sheet
+  // (GroupExpenseSheet); and a form is 6-8 controls in a column, where that many
+  // floating cards read as separate sections and drown out the field labels.
   input: {
-    ...shadows.card,
-    backgroundColor: colors.card,
+    backgroundColor: 'transparent',
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: OUTLINE,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     color: colors.textPrimary,
@@ -193,18 +200,23 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   inputMultiline: { minHeight: 60, textAlignVertical: 'top' },
-  inputLocked: { backgroundColor: colors.cardAlt, color: colors.textSecondary },
+  // Locked needs a recessed fill, and with no base fill it must be a translucent
+  // wash (not `cardAlt`) so it darkens on gray and white alike.
+  inputLocked: {
+    backgroundColor: 'rgba(0,0,0,0.04)',
+    borderColor: colors.divider,
+    color: colors.textSecondary,
+  },
   amountInput: { fontSize: 28, fontWeight: '800' },
 
   selectRow: {
-    ...shadows.card,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.card,
+    backgroundColor: 'transparent',
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: OUTLINE,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },
@@ -221,10 +233,10 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.card,
+    backgroundColor: 'transparent',
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: OUTLINE,
     maxWidth: '100%',
   },
   chipText: { fontSize: 13, fontWeight: '400', color: colors.textSecondary },

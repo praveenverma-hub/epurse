@@ -135,26 +135,31 @@ const WelcomeStreakModal: React.FC = () => {
       <Animated.View style={[styles.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissEarly} />
 
-        <Animated.View style={[styles.sheet, sheetStyle]}>
-          <SheetCloseButton onPress={dismissEarly} variant="absolute" />
-          <LinearGradient
-            colors={['#1B2342', '#0F1428']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
-          />
+        {/* Shell carries the animation; the sheet keeps `overflow:'hidden'` (it clips
+            the absolute-fill gradient to the rounded corners). The floating ✕ has to
+            sit on the SHELL — inside the sheet its negative offset is clipped away. */}
+        <Animated.View style={sheetStyle}>
+          <SheetCloseButton onPress={dismissEarly} variant="absolute" dark />
+          <View style={styles.sheet}>
+            <LinearGradient
+              colors={['#1B2342', '#0F1428']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
 
-          <View style={styles.flameWrap}>
-            <LiveFlame size={56} />
+            <View style={styles.flameWrap}>
+              <LiveFlame size={56} />
+            </View>
+
+            <Text style={styles.headline}>{REWARD_COPY.WELCOME_HEADLINE}</Text>
+
+            <Text style={styles.description}>{REWARD_COPY.WELCOME_DESCRIPTION}</Text>
+
+            <Pressable style={styles.cta} onPress={dismissEarly}>
+              <Text style={styles.ctaText}>{REWARD_COPY.WELCOME_CTA}</Text>
+            </Pressable>
           </View>
-
-          <Text style={styles.headline}>{REWARD_COPY.WELCOME_HEADLINE}</Text>
-
-          <Text style={styles.description}>{REWARD_COPY.WELCOME_DESCRIPTION}</Text>
-
-          <Pressable style={styles.cta} onPress={dismissEarly}>
-            <Text style={styles.ctaText}>{REWARD_COPY.WELCOME_CTA}</Text>
-          </Pressable>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -211,8 +216,8 @@ const styles = StyleSheet.create({
     alignSelf:        'center',
     marginTop:        24,
     paddingHorizontal: 36,
-    paddingVertical:   12,
-    borderRadius:      999,
+    paddingVertical:   13,
+    borderRadius:      16,   // radius.lg — pill is for chips only
     backgroundColor:   '#FF5A1F',
   },
   ctaText: {

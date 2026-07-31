@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: spacing.md,
     paddingVertical: 10,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     borderWidth: 1,
   },
   viewDetailsText: { ...typography.small, fontWeight: '700' },

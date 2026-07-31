@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   },
   btn: {
     flex: 1,
-    borderRadius: 13,
+    borderRadius: 16,   // radius.lg — this file has no theme import
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',

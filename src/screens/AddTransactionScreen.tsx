@@ -29,7 +29,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree, useCategoryMaps } from '../hooks/useCategoryTree';
 import GradientButtonBase from '../components/GradientButton';
@@ -636,24 +636,18 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 
             <FormField label="Account">
               <FormChipRow>
-                {accounts.map((a: any) => {
-                  const emoji = ({ bank: '🏦', credit_card: '💳', wallet: '👛', cash: '💵' } as any)[a.type] ?? '💳';
-                  const shortName = a.bankName
-                    ? a.bankName
-                    : a.mask
-                    ? `${a.name.split('··')[0].trim()} ··${a.mask.slice(-4)}`
-                    : a.name;
-                  const isActive = (accountId ?? defaultAccountId) === a.id;
-                  return (
-                    <FormChip
-                      key={a.id}
-                      label={`${emoji} ${shortName}`}
-                      active={isActive}
-                      onPress={() => setAccountId(a.id)}
-                      accentColor={theme.primary}
-                    />
-                  );
-                })}
+                {/* Plain `a.name` — same as the group form's account chips. It already
+                    reads "HDFC ··1234"; the old label dropped the mask whenever
+                    `bankName` was set, so two accounts at one bank looked identical. */}
+                {accounts.map((a: any) => (
+                  <FormChip
+                    key={a.id}
+                    label={a.name}
+                    active={(accountId ?? defaultAccountId) === a.id}
+                    onPress={() => setAccountId(a.id)}
+                    accentColor={theme.primary}
+                  />
+                ))}
               </FormChipRow>
             </FormField>
 
@@ -986,8 +980,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: radius.pill,
     borderWidth: 1.5,
-    borderColor: colors.divider,
-    backgroundColor: colors.card,
+    borderColor: colors.inputBorder,
+    backgroundColor: 'transparent',
   },
   chipEmoji: { fontSize: 14 },
   childChipLabel: {
@@ -998,14 +992,17 @@ const styles = StyleSheet.create({
   childChipLabelActive: { color: '#FFFFFF' },
 
   // ── Split ──────────────────────────────────────────────────────────────────
+  // Outlined like the fields above it — a shadowed card here would be the only
+  // floating surface left in the form and would read as a separate section.
   splitToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    backgroundColor: 'transparent',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
     padding: spacing.md,
     gap: spacing.md,
-    ...shadows.card,
   },
   splitEmoji: { fontSize: 22 },
   splitTitle: {

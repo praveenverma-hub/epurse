@@ -20,6 +20,10 @@ export const colors = {
   card: '#FFFFFF',
   cardAlt: '#FAFAFB',
   divider: '#EAECEE',
+  // Border for OUTLINED form controls (inputs, select rows, chips). Deliberately
+  // darker than `divider`: divider is tuned to separate rows inside a filled card,
+  // and at that lightness an unfilled control has no visible edge at all.
+  inputBorder: '#D7DADE',
 
   // Text
   textPrimary: '#1C1C1E',

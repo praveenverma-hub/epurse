@@ -61,9 +61,9 @@ const styles = StyleSheet.create({
   doneBtn: {
     alignSelf: 'center',
     marginTop: 14,
-    paddingVertical: 10,
+    paddingVertical: 13,
     paddingHorizontal: 22,
-    borderRadius: 999,
+    borderRadius: 16,   // radius.lg — pill is for chips only
   },
   doneText: { fontSize: 14, fontWeight: '700' },
 });

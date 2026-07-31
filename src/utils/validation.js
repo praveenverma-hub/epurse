@@ -46,6 +46,23 @@ export const isValidName = (raw) => {
 export const sanitizePhone = (raw) =>
   String(raw ?? '').replace(/\D/g, '').slice(0, INPUT_LIMITS.PHONE_LEN);
 
+/**
+ * Normalise a number from an EXTERNAL source (contact picker, paste, SMS) to the
+ * local 10-digit form. Same as `sanitizePhone` except it keeps the LAST 10 digits,
+ * so a country code ("+91 98765 43210") is dropped from the FRONT instead of the
+ * real number being truncated from the back.
+ *
+ * Use this for anything you didn't watch the user type; `sanitizePhone` stays the
+ * per-keystroke handler. Mirrors the `normPhone` keying in `getPersonBalances`, so
+ * a picked contact matches an existing person instead of opening a second section.
+ */
+export const normalizePhone = (raw) => {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  return digits.length > INPUT_LIMITS.PHONE_LEN
+    ? digits.slice(-INPUT_LIMITS.PHONE_LEN)
+    : digits;
+};
+
 /** Exactly 10 digits. (Keep loose — don't reject test numbers by first digit.) */
 export const isValidPhone = (raw) => /^\d{10}$/.test(String(raw ?? ''));
 

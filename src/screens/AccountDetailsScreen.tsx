@@ -753,7 +753,7 @@ const styles = StyleSheet.create({
     gap:               8,
     paddingHorizontal: spacing.xl,
     paddingVertical:   spacing.md,
-    borderRadius:      radius.pill,
+    borderRadius:      radius.lg,
   },
   unlockText: { fontSize: 15, fontWeight: '700' },
 });

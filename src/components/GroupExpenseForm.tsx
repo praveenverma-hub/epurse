@@ -688,11 +688,11 @@ const styles = StyleSheet.create({
   },
   paidByMeTxt: { ...typography.small, fontWeight: '700' },
   // Bordered, scrollable box so a long member list doesn't push the form around.
-  // Card surface + hairline border to match the shared FormField controls.
+  // Outlined, no fill — matches the shared FormField controls.
   sharesList: {
     maxHeight: 200,
-    borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md,
-    backgroundColor: colors.card,
+    borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md,
+    backgroundColor: 'transparent',
   },
   sharesListContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   shareRow: {
@@ -703,8 +703,8 @@ const styles = StyleSheet.create({
   checkboxWrap: { marginRight: spacing.sm },
   checkbox: {
     width: 20, height: 20, borderRadius: 4,
-    borderWidth: 1.5, borderColor: colors.divider,
-    backgroundColor: colors.background,
+    borderWidth: 1.5, borderColor: colors.inputBorder,
+    backgroundColor: 'transparent',
     alignItems: 'center', justifyContent: 'center',
   },
   checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -717,11 +717,11 @@ const styles = StyleSheet.create({
   sharePaid: { color: colors.success },
   // Wide enough to view ~6 digits; fixed width keeps the input column aligned.
   shareInput: {
-    width: 100, backgroundColor: colors.card,
+    width: 100, backgroundColor: 'transparent',
     borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 6,
     textAlign: 'center', color: colors.textPrimary,
     ...typography.bodyBold, fontWeight: '700',
-    borderWidth: 1, borderColor: colors.divider,
+    borderWidth: 1, borderColor: colors.inputBorder,
   },
   shareSuffix: { marginLeft: 4, ...typography.small, color: colors.textSecondary },
   // Fixed width + right-aligned so rows with fewer digits don't shift the input.

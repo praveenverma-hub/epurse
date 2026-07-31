@@ -81,7 +81,7 @@ const DISMISS_DIST = 130;
 const PERIOD_TO_CHIP = { D: 'all', W: 'all', M: 'month', Y: 'all' };
 
 const QUICK_CHIPS = [
-  { id: 'all',   label: 'All Transactions', icon: 'list-outline'     },
+  { id: 'all',   label: 'All',              icon: 'list-outline'     },
   { id: 'month', label: 'This Month',       icon: 'calendar-outline' },
   { id: 'bank',  label: 'Bank Accounts',    icon: 'business-outline' },
   { id: 'cc',    label: 'Credit Cards',     icon: 'card-outline'     },
@@ -855,134 +855,137 @@ const TransactionsScreen = ({ navigation, route }) => {
             <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closeSheet} />
           </Animated.View>
 
+          {/* The animated shell carries the transform; `styles.sheet` inside it keeps
+              `overflow:'hidden'` (needed so the left panel's fill clips to the rounded
+              top corners). The floating ✕ must live on the SHELL — inside the sheet
+              its negative top offset gets clipped away and it vanishes. */}
           <GestureDetector gesture={panGesture}>
-            <Animated.View style={[styles.sheet, sheetStyle]}>
+            <Animated.View style={sheetStyle}>
               <SheetCloseButton onPress={closeSheet} variant="absolute" />
 
-              <View style={styles.handleArea}>
-                <View style={styles.handle} />
-              </View>
-
-              <View style={styles.sheetTitleRow}>
-                <Text style={styles.sheetTitle}>Filter Transactions</Text>
-                <Pressable style={styles.closeBtn} onPress={closeSheet}>
-                  <Ionicons name="close" size={19} color={colors.textSecondary} />
-                </Pressable>
-              </View>
-
-              <View style={styles.dualPanel}>
-
-                {/* LEFT: master category sidebar */}
-                <View style={styles.leftPanel}>
-                  <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-                    {FILTER_PANELS.map((panel) => {
-                      const isActive   = activePanelId === panel.id;
-                      const draftCount = draft[panel.id].size;
-                      return (
-                        <Pressable
-                          key={panel.id}
-                          onPress={() => setActivePanelId(panel.id)}
-                          style={[
-                            styles.leftItem,
-                            isActive && [styles.leftItemActive, { borderLeftColor: theme.primary }],
-                          ]}
-                          android_ripple={{ color: theme.primary + '18' }}
-                        >
-                          <Ionicons
-                            name={panel.icon}
-                            size={15}
-                            color={isActive ? theme.primary : colors.textSecondary}
-                            style={{ marginBottom: 3 }}
-                          />
-                          <Text
-                            style={[
-                              styles.leftLabel,
-                              isActive && { color: theme.primary, fontWeight: '700' },
-                            ]}
-                          >
-                            {panel.label}
-                          </Text>
-                          {draftCount > 0 && (
-                            <View style={[styles.leftBadge, { backgroundColor: theme.primary }]}>
-                              <Text style={styles.leftBadgeText}>{draftCount}</Text>
-                            </View>
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
+              <View style={styles.sheet}>
+                <View style={styles.handleArea}>
+                  <View style={styles.handle} />
                 </View>
 
-                {/* RIGHT: dynamic option list */}
-                <View style={styles.rightPanel}>
-                  {panelOptions.length === 0 ? (
-                    <View style={styles.rightEmpty}>
-                      <Ionicons name="folder-open-outline" size={36} color={colors.textMuted} />
-                      <Text style={styles.rightEmptyText}>
-                        {activePanelId === 'groups'
-                          ? 'No groups yet — create one from the Groups tab.'
-                          : 'No options available'}
-                      </Text>
-                    </View>
-                  ) : (
-                    <ScrollView
-                      showsVerticalScrollIndicator={false}
-                      bounces={false}
-                      contentContainerStyle={{ paddingBottom: spacing.xl }}
-                    >
-                      {panelOptions.map((opt) => {
-                        const checked = draft[activePanelId].has(opt.id);
-                        const isRadio = activePanelId === 'dateRange';
+                <View style={styles.sheetTitleRow}>
+                  <Text style={styles.sheetTitle}>Filter Transactions</Text>
+                </View>
+
+                <View style={styles.dualPanel}>
+
+                  {/* LEFT: master category sidebar */}
+                  <View style={styles.leftPanel}>
+                    <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                      {FILTER_PANELS.map((panel) => {
+                        const isActive   = activePanelId === panel.id;
+                        const draftCount = draft[panel.id].size;
                         return (
                           <Pressable
-                            key={opt.id}
-                            onPress={() => toggleDraft(activePanelId, opt.id)}
-                            style={[styles.rightItem, checked && styles.rightItemChecked]}
+                            key={panel.id}
+                            onPress={() => setActivePanelId(panel.id)}
+                            style={[
+                              styles.leftItem,
+                              isActive && [styles.leftItemActive, { borderLeftColor: theme.primary }],
+                            ]}
                             android_ripple={{ color: theme.primary + '18' }}
                           >
-                            <View style={styles.rightItemText}>
-                              <Text
-                                style={[
-                                  styles.rightItemLabel,
-                                  checked && { color: '#0F172A', fontWeight: '600' },
-                                ]}
-                              >
-                                {opt.label}
-                              </Text>
-                              {opt.sublabel ? (
-                                <Text style={styles.rightItemSub}>{opt.sublabel}</Text>
-                              ) : null}
-                            </View>
-                            {isRadio ? (
-                              <View style={[styles.radioOuter, checked && { borderColor: theme.primary }]}>
-                                {checked && <View style={[styles.radioDot, { backgroundColor: theme.primary }]} />}
-                              </View>
-                            ) : (
-                              <View
-                                style={[
-                                  styles.checkbox,
-                                  checked && { borderColor: theme.primary, backgroundColor: theme.primary },
-                                ]}
-                              >
-                                {checked && <Ionicons name="checkmark" size={11} color="#fff" />}
+                            <Ionicons
+                              name={panel.icon}
+                              size={15}
+                              color={isActive ? theme.primary : colors.textSecondary}
+                              style={{ marginBottom: 3 }}
+                            />
+                            <Text
+                              style={[
+                                styles.leftLabel,
+                                isActive && { color: theme.primary, fontWeight: '700' },
+                              ]}
+                            >
+                              {panel.label}
+                            </Text>
+                            {draftCount > 0 && (
+                              <View style={[styles.leftBadge, { backgroundColor: theme.primary }]}>
+                                <Text style={styles.leftBadgeText}>{draftCount}</Text>
                               </View>
                             )}
                           </Pressable>
                         );
                       })}
                     </ScrollView>
-                  )}
+                  </View>
+
+                  {/* RIGHT: dynamic option list */}
+                  <View style={styles.rightPanel}>
+                    {panelOptions.length === 0 ? (
+                      <View style={styles.rightEmpty}>
+                        <Ionicons name="folder-open-outline" size={36} color={colors.textMuted} />
+                        <Text style={styles.rightEmptyText}>
+                          {activePanelId === 'groups'
+                            ? 'No groups yet — create one from the Groups tab.'
+                            : 'No options available'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        bounces={false}
+                        contentContainerStyle={{ paddingBottom: spacing.xl }}
+                      >
+                        {panelOptions.map((opt) => {
+                          const checked = draft[activePanelId].has(opt.id);
+                          const isRadio = activePanelId === 'dateRange';
+                          return (
+                            <Pressable
+                              key={opt.id}
+                              onPress={() => toggleDraft(activePanelId, opt.id)}
+                              style={[styles.rightItem, checked && styles.rightItemChecked]}
+                              android_ripple={{ color: theme.primary + '18' }}
+                            >
+                              <View style={styles.rightItemText}>
+                                <Text
+                                  style={[
+                                    styles.rightItemLabel,
+                                    checked && { color: '#0F172A', fontWeight: '600' },
+                                  ]}
+                                >
+                                  {opt.label}
+                                </Text>
+                                {opt.sublabel ? (
+                                  <Text style={styles.rightItemSub}>{opt.sublabel}</Text>
+                                ) : null}
+                              </View>
+                              {isRadio ? (
+                                <View style={[styles.radioOuter, checked && { borderColor: theme.primary }]}>
+                                  {checked && <View style={[styles.radioDot, { backgroundColor: theme.primary }]} />}
+                                </View>
+                              ) : (
+                                <View
+                                  style={[
+                                    styles.checkbox,
+                                    checked && { borderColor: theme.primary, backgroundColor: theme.primary },
+                                  ]}
+                                >
+                                  {checked && <Ionicons name="checkmark" size={11} color="#fff" />}
+                                </View>
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    )}
+                  </View>
+
                 </View>
 
-              </View>
-
-              {/* Sticky footer — 40% Clear / 60% Apply */}
-              <View style={styles.sheetFooter}>
-                <Pressable style={styles.clearAllBtn} onPress={clearAllDraft}>
-                  <Text style={styles.clearAllText}>Clear All</Text>
-                </Pressable>
-                <View style={styles.applyBtnWrap}>
-                  <GradientButton title="Apply" onPress={applyFilters} />
+                {/* Sticky footer — 40% Clear / 60% Apply */}
+                <View style={styles.sheetFooter}>
+                  <Pressable style={styles.clearAllBtn} onPress={clearAllDraft}>
+                    <Text style={styles.clearAllText}>Clear All</Text>
+                  </Pressable>
+                  <View style={styles.applyBtnWrap}>
+                    <GradientButton title="Apply" onPress={applyFilters} />
+                  </View>
                 </View>
               </View>
 
@@ -1364,21 +1367,16 @@ const styles = StyleSheet.create({
   },
   handleArea: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider },
+  // No trailing ✕ here — closing is the floating SheetCloseButton above the sheet.
   sheetTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
   },
   sheetTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A', letterSpacing: -0.2 },
-  closeBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center', justifyContent: 'center',
-  },
 
   // ── Dual panel ─────────────────────────────────────────────────────────────
   dualPanel: { flex: 1, flexDirection: 'row' },
