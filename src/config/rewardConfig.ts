@@ -19,7 +19,8 @@ import type { ImageSourcePropType } from 'react-native';
 export type WidgetId =
   | 'liquid_wave'
   | 'concentric_rings'
-  | 'particle_flame';
+  | 'particle_flame'
+  | 'gradient_gauge';
 
 // ─── Multiplier tier definition ──────────────────────────────────────────────
 
@@ -107,6 +108,14 @@ export const REWARD_CONFIG = {
       emoji:               '🔥',
       cost:                1200,
       minLevelRequirement: 6,
+    },
+    {
+      id:                  'gradient_gauge',
+      name:                'Gradient Budget Gauge',
+      description:         'Swaps the Budget ring for a glowing green-to-red gauge that sweeps to your spend.',
+      emoji:               '🎚️',
+      cost:                800,
+      minLevelRequirement: 3,
     },
   ] as readonly ShopItemConfig[],
 

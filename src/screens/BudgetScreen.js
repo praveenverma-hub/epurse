@@ -19,7 +19,7 @@ import {
   KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle } from 'react-native-svg';
+import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -29,35 +29,16 @@ import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
+import {
+  BudgetRingWidget,
+  budgetRingColor,
+  useGaugeWidgetActive,
+} from '../components/CustomWidgetContainer';
 import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
 import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
-
-// ── Progress ring SVG ─────────────────────────────────────────────────────────
-const ProgressRing = ({ pct, size = 140, strokeWidth = 12, color, trackColor, children }) => {
-  const r = (size - strokeWidth) / 2;
-  const c = 2 * Math.PI * r;
-  const dashOffset = c - (Math.min(pct, 100) / 100) * c;
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width={size} height={size}>
-        <Circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={trackColor} strokeWidth={strokeWidth} />
-        <Circle
-          cx={size / 2} cy={size / 2} r={r} fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={`${c} ${c}`}
-          strokeDashoffset={dashOffset}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </Svg>
-      <View style={styles.ringCenter}>{children}</View>
-    </View>
-  );
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const computeStatus = (pct, daysElapsedPct, hasCap) => {
@@ -68,12 +49,10 @@ const computeStatus = (pct, daysElapsedPct, hasCap) => {
   return                                 { key: 'on',      label: 'On track',      color: colors.success,    emoji: '✅' };
 };
 
-const ringColor = (pct, daysElapsedPct) => {
-  if (pct >= 100)                return colors.danger;
-  if (pct > daysElapsedPct + 10) return colors.danger;
-  if (pct > daysElapsedPct + 5)  return colors.warning;
-  return colors.success;
-};
+// (A local `ringColor` used to live here. It moved into CustomWidgetContainer as
+//  `budgetRingColor`, next to the two rings it has to agree with — the classic ring keeps
+//  the old pace thresholds, the paid gauge reads its gradient. `computeStatus` above still
+//  owns the PACE verdict; that's a separate question from the ring's colour.)
 
 // Budget operates on FIRST-LEVEL (parent) categories only. Children (e.g.
 // Groceries) roll up into their parent (Food & Dining) in the store, so there's
@@ -174,6 +153,20 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   }, [drillCatId, isUnbudgetedDrill, getBudgetChildBreakdown, getUnbudgetedBreakdown, transactions, categoryById]);
   const drillTotal = useMemo(() => drillRows.reduce((s, r) => s + r.total, 0), [drillRows]);
 
+  // The tab keeps this screen mounted, so the gauge would only ever sweep up once —
+  // on the very first visit. Bumping a token on each focus replays the 0 → used fill
+  // every time the user actually opens Budget.
+  const isFocused = useIsFocused();
+  const [gaugeReplay, setGaugeReplay] = useState(0);
+  useEffect(() => {
+    if (isFocused) setGaugeReplay((n) => n + 1);
+  }, [isFocused]);
+
+  // Which hero ring is rendering. Read HERE, at the top level — `renderProgress`
+  // below returns early when there's no usage, so a hook called inside it would
+  // change hook order between renders.
+  const isGaugeWidget = useGaugeWidgetActive();
+
   // ── Progress section ─────────────────────────────────────────────────────
   const renderProgress = () => {
     if (!usage) return null;
@@ -181,7 +174,9 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     const hasCap   = total.cap != null && total.cap > 0;
     const pctVal   = hasCap ? total.pct : 0;
     const status   = computeStatus(pctVal, daysElapsedPct, hasCap);
-    const rColor   = hasCap ? ringColor(pctVal, daysElapsedPct) : colors.divider;
+    // Tinted for whichever ring is actually rendering — the gauge's own gradient when
+    // the paid widget is on, the classic pace thresholds otherwise.
+    const rColor   = budgetRingColor(pctVal, daysElapsedPct, hasCap, isGaugeWidget);
 
     const paceText = hasCap && total.remaining != null && daysLeftInMonth > 0
       ? `₹${Math.max(0, Math.round(total.remaining / Math.max(1, daysLeftInMonth))).toLocaleString('en-IN')}/day`
@@ -228,14 +223,25 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
           {/* Ring + info */}
           <View style={styles.heroBody}>
-            <ProgressRing pct={pctVal} size={140} strokeWidth={12} color={rColor} trackColor={colors.divider}>
+            {/* Classic ring by default; the Gradient Budget Gauge swaps in when bought
+                and switched on in the Reward Shop. Fed the percentage USED — the same
+                number printed in the middle — so the gauge's pointer can never
+                contradict the label. With no cap set there's nothing to be a fraction
+                of, so the pointer is hidden rather than parked at a misleading 0%. */}
+            <BudgetRingWidget
+              pct={pctVal}
+              daysElapsedPct={daysElapsedPct}
+              hasCap={hasCap}
+              discColor={colors.card}
+              replayKey={gaugeReplay}
+            >
               <Text style={[styles.ringPct, { color: rColor }]}>
                 {hasCap ? `${Math.round(pctVal)}%` : '—'}
               </Text>
               {hasCap && (
                 <Text style={styles.ringLabel}>used</Text>
               )}
-            </ProgressRing>
+            </BudgetRingWidget>
 
             <View style={styles.heroInfo}>
               <Text style={styles.heroActual}>{formatCompact(total.actual)}</Text>
@@ -524,7 +530,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.lg,
   },
-  ringCenter: { position: 'absolute', alignItems: 'center' },
   ringPct:    { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
   ringLabel:  { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
 

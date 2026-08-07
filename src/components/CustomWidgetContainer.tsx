@@ -9,6 +9,7 @@
 
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -20,6 +21,8 @@ import { useRewardStore, selectWidgetActive } from '../store/useRewardStore';
 import DailyBudgetLiquidWave from './DailyBudgetLiquidWave';
 import ConcentricSpendingRings, { type RingData } from './ConcentricSpendingRings';
 import StreakFlameEmitter from './StreakFlameEmitter';
+import GaugeProgress, { gaugeColorAt } from './GaugeProgress.native';
+import { colors } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 
 // ─── Budget widget ───────────────────────────────────────────────────────────
@@ -79,6 +82,149 @@ const FlatBudgetBar: React.FC<{ pct: number; label?: string; caption?: string }>
         </Text>
         {caption ? <Text style={flatStyles.captionText}>{caption}</Text> : null}
       </View>
+    </View>
+  );
+};
+
+// ─── Budget hero ring (Budget tab) ───────────────────────────────────────────
+//
+// Distinct from BudgetWidget above: this is the big ring in the Budget screen's
+// hero card, not the Dashboard's daily capsule.
+
+/** Default hero diameter. Was 140; reduced so the amounts beside it get more room. */
+const HERO_RING_SIZE = 110;
+/** Classic ring stroke as a fraction of its diameter — the original 12px on a 140 box. */
+const CLASSIC_STROKE_RATIO = 12 / 140;
+
+/**
+ * True when the user owns AND has enabled the Gradient Budget Gauge.
+ *
+ * Exported because the hero's "%" label has to be tinted from whichever ring is
+ * actually rendering — the two use different colour logic (see `budgetRingColor`)
+ * and a mismatch is immediately visible. Call it at the top level of a screen,
+ * never inside a conditional render helper.
+ */
+export const useGaugeWidgetActive = (): boolean =>
+  useRewardStore(selectWidgetActive('gradient_gauge'));
+
+/**
+ * The colour for the number printed inside the hero ring.
+ *
+ * The two rings answer different questions, so they genuinely need different
+ * colours — this isn't duplication that should be collapsed:
+ *   • classic — a PACE verdict. Amber/red mean "ahead of where the month is",
+ *     so it can be red at 60% spent on the 5th.
+ *   • gauge   — the gradient's own colour at that value, so the label matches
+ *     the shade the knob comes to rest in.
+ */
+export const budgetRingColor = (
+  pct: number,
+  daysElapsedPct: number,
+  hasCap: boolean,
+  isGauge: boolean,
+): string => {
+  if (!hasCap) return colors.divider;
+  if (isGauge) return gaugeColorAt(pct);
+  if (pct >= 100) return colors.danger;
+  if (pct > daysElapsedPct + 10) return colors.danger;
+  if (pct > daysElapsedPct + 5) return colors.warning;
+  return colors.success;
+};
+
+interface BudgetRingWidgetProps {
+  /** 0-100, percentage of the budget CONSUMED. */
+  pct:             number;
+  daysElapsedPct:  number;
+  hasCap:          boolean;
+  size?:           number;
+  /** Centre fill for the gauge — match the card behind it. */
+  discColor?:      string;
+  /** Bump to replay the gauge's fill animation (see GaugeProgress). */
+  replayKey?:      number | string;
+  children?:       React.ReactNode;
+}
+
+export const BudgetRingWidget: React.FC<BudgetRingWidgetProps> = ({
+  pct,
+  daysElapsedPct,
+  hasCap,
+  size = HERO_RING_SIZE,
+  discColor,
+  replayKey,
+  children,
+}) => {
+  const isGauge = useGaugeWidgetActive();
+  const color   = budgetRingColor(pct, daysElapsedPct, hasCap, isGauge);
+
+  if (isGauge) {
+    return (
+      <GaugeProgress
+        value={hasCap ? pct : 0}
+        size={size}
+        showPointer={hasCap}
+        discColor={discColor}
+        replayKey={replayKey}
+      >
+        {children}
+      </GaugeProgress>
+    );
+  }
+
+  return (
+    <ClassicProgressRing pct={pct} size={size} color={color}>
+      {children}
+    </ClassicProgressRing>
+  );
+};
+
+/**
+ * The stock Budget ring: a plain 360° track with a dash-revealed arc. This is the
+ * DEFAULT — the gauge is a paid swap-in, so nobody loses their hero card by not
+ * buying it. Kept dependency-light on purpose; it's what every user sees.
+ */
+const ClassicProgressRing: React.FC<{
+  pct:       number;
+  size:      number;
+  color:     string;
+  children?: React.ReactNode;
+}> = ({ pct, size, color, children }) => {
+  // Stroke scales with the ring instead of being a fixed 12. The original hardcoded it
+  // against a 140 box; keeping that literal while shrinking the ring would have made it
+  // proportionally chunkier, which is the opposite of the intent. 12/140 preserves the
+  // weight the design had at its original size.
+  const strokeWidth = size * CLASSIC_STROKE_RATIO;
+  const r = (size - strokeWidth) / 2;
+  const c = 2 * Math.PI * r;
+  // Guard the same non-finite input GaugeProgress guards: a NaN dashoffset blanks
+  // the arc entirely rather than degrading to "empty".
+  const safePct = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
+  const dashOffset = c - (safePct / 100) * c;
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size}>
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={colors.divider}
+          strokeWidth={strokeWidth}
+        />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${c} ${c}`}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <View style={flatStyles.ringCenter}>{children}</View>
     </View>
   );
 };
@@ -175,6 +321,9 @@ const FlatStreakBadge: React.FC<{ streak: number }> = ({ streak }) => {
 // ─── Fallback styles ─────────────────────────────────────────────────────────
 
 const flatStyles = StyleSheet.create({
+  // Classic hero ring — absolute so the label centres over the SVG.
+  ringCenter: { position: 'absolute', alignItems: 'center' },
+
   // Budget
   barWrap: {
     width: '100%',

@@ -3,7 +3,8 @@
 //
 // Region A: top bar (back + "Profile & Perks" + settings gear)
 // Region B: profile block (avatar + name + level), animated XP bar, coin balance
-// Region C: 3 widget cards with locked / purchasable / owned-toggle states
+// Region C: one widget card per REWARD_CONFIG.SHOP_ITEMS entry, each in a
+//           locked / purchasable / owned-toggle state (the list is not fixed-length)
 // Region D: settings bottom sheet (gear icon) — recap prefs, Categories, SMS Diagnostic
 //
 // Theme-adaptive: palette D is derived from useTheme() each render, so this
@@ -114,6 +115,21 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
   const coins     = useRewardStore(selectEpcBalance);
   const level     = useRewardStore(selectLevel);
   const inventory = useRewardStore((s) => s.inventory);
+
+  // Ordered by unlock level so the list reads as a ladder: what's reachable now sits
+  // at the top and the aspirational items trail off below. Catalogue order is just
+  // the order items were added, which puts a LV3 widget under a LV6 one. Sorted on a
+  // copy — `inventory` is store state. Cost breaks ties; id keeps it stable after that.
+  const shopItems = useMemo(
+    () =>
+      [...inventory].sort(
+        (a, b) =>
+          a.minLevelRequirement - b.minLevelRequirement ||
+          a.cost - b.cost ||
+          a.id.localeCompare(b.id),
+      ),
+    [inventory],
+  );
 
   const title         = useMemo(() => levelTitle(level),         [level]);
   const nextThreshold = useMemo(() => rpForNextLevel(totalRP),    [totalRP]);
@@ -278,7 +294,7 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
             </Text>
           </View>
 
-          {inventory.map((item, i) => (
+          {shopItems.map((item, i) => (
             <Animated.View
               key={item.id}
               entering={FadeInUp.delay(160 + i * 90)
