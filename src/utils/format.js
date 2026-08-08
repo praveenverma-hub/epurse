@@ -40,26 +40,51 @@ export const formatDateTime = (date) => {
 };
 
 /**
- * Label for the transaction date field. Always includes the real date so it's
- * never hidden behind a relative word alone:
- *   "Today · 31 Jul" / "Yesterday · 30 Jul" / "28 Jul" / "28 Jul 2025"
+ * Label for the transaction date field. The two recent days get a bare relative
+ * word (shortest form, and unambiguous on its own); everything older shows the
+ * real date, with the year only when it isn't the current one:
+ *   "Today" / "Yesterday" / "28 Jul" / "28 Jul 2025"
  */
 export const formatDateLabel = (date) => {
   const d = new Date(date);
   const now = new Date();
   const sameDay = (a, b) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const dayMonth = d.toLocaleDateString('en-IN', {
+  // "Today" / "Yesterday" stand ALONE — no "· 8 Aug" tail. A relative day is
+  // already unambiguous, so the numeric date added no information while nearly
+  // doubling the label's width, which crowded the compact LB date button.
+  if (sameDay(d, now)) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', {
     day: 'numeric',
     month: 'short',
     year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
   });
-  if (sameDay(d, now)) return `Today · ${dayMonth}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (sameDay(d, yesterday)) return `Yesterday · ${dayMonth}`;
-  return dayMonth;
 };
+
+/**
+ * One-line running balance with a person, for Lent/Borrowed confirmations.
+ * `net` is the signed owed-to-me figure from `getPersonBalances` (> 0 = they owe
+ * you), so the sign — not the caller — decides the wording.
+ *
+ * This is what makes an LB toast worth reading: echoing back the amount the user
+ * just typed tells them nothing, whereas the resulting position does (and it
+ * quietly catches a wrong-direction entry, since the total moves the wrong way).
+ * Returns null when there's no balance to describe.
+ */
+export const formatOutstanding = (net, name) => {
+  if (net == null || Number.isNaN(net)) return null;
+  const who = (name || '').trim() || 'them';
+  if (Math.abs(net) < 0.01) return `You're all square with ${who}`;
+  return net > 0
+    ? `${who} owes you ${formatCurrency(net)} in total`
+    : `You owe ${who} ${formatCurrency(-net)} in total`;
+};
+
+/** First name only — toasts and chips read better without a full legal name. */
+export const firstName = (full) => (full || '').trim().split(/\s+/)[0] || (full || '').trim();
 
 export const monthKey = (date) => {
   const d = new Date(date);

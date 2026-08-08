@@ -3,9 +3,17 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { useCategoryMaps } from '../hooks/useCategoryTree';
+import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency, formatDateTime } from '../utils/format';
-import { debitDisplayAmount, splitParticipantsLabel, groupLbChipKind } from '../utils/split';
+import {
+  debitDisplayAmount,
+  splitParticipantsLabel,
+  groupLbChipKind,
+  splitLbChipKind,
+  isMemoTxn,
+} from '../utils/split';
 import CategoryIcon from './CategoryIcon';
 
 const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip, hideGroupChip = false, muted = false }) => {
@@ -23,11 +31,22 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
     [groups, txn.groupId]
   );
 
+  // "Counts as expense" rule (SpendRulesScreen). The row must SAY so: an exclusion that
+  // only shows up as a smaller Spent figure is undiscoverable — you'd have no way to tell
+  // a missing transaction from an uncounted one. Debits only; the rule is about spending.
+  const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
+  const catMaps = useCategoryMaps();
+  const notCounted = useMemo(() => {
+    if (!excludedExpenseParents?.length || txn.type !== 'debit') return false;
+    return excludedExpenseParents.includes(parentCatIdForTxn(txn, catMaps));
+  }, [excludedExpenseParents, catMaps, txn.type, txn.parentCategory, txn.categoryId]);
+
   const isCredit = txn.type === 'credit';
   const sign = isCredit ? '+' : '−';
   // Memo = someone else paid; no money left your account (it's a debt, not spend),
-  // so de-emphasise its amount so it doesn't read as a real outflow.
-  const isMemo = !!txn.isGroupMemo;
+  // so de-emphasise its amount so it doesn't read as a real outflow. Covers both a
+  // group memo and a plain split whose payer isn't me (isSplitMemo).
+  const isMemo = isMemoTxn(txn);
   const amountColor = isCredit ? colors.success : (isMemo ? colors.textMuted : colors.textPrimary);
   const displayAmount = isCredit ? txn.amount : debitDisplayAmount(txn);
   // In a group, a 0 personal share means I owe nothing → "Not involved".
@@ -44,7 +63,9 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
   // A shared-group expense surfaces its lent/borrow framing as its OWN chip (the txn's
   // categoryId is the real spend category, so getStatusChip wouldn't catch it). Replaces
   // the old "Paid by X" text — borrow = I owe a share, lent = I fronted the whole bill.
-  const groupLbChip = GROUP_LB_CHIP[groupLbChipKind(txn)] || null;
+  // A plain split carries the same framing via splitLbChipKind, so "Rahul paid, I owe
+  // my share" reads as BORROWED on the card exactly like its group equivalent.
+  const groupLbChip = GROUP_LB_CHIP[groupLbChipKind(txn) || splitLbChipKind(txn)] || null;
   // Group badge floats on the top-right corner (half in / half out of the card edge)
   // instead of sitting inline — keeps the meta row uncluttered when several chips
   // (status / lent-borrow / private) are present. Name capped to ~10 chars.
@@ -101,6 +122,9 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
           {txn.isIgnored ? <Text style={styles.ignoredTag}>IGNORED</Text> : null}
           {!txn.isIgnored && txn.isHidden ? <Text style={styles.hiddenTag}>PRIVATE</Text> : null}
           {isMemo ? <Text style={styles.memoTag}>MEMO</Text> : null}
+          {/* Deliberately does NOT mute the amount the way a memo does: this money really
+              did leave the account, it just isn't counted as spending. */}
+          {notCounted ? <Text style={styles.notCountedTag}>NOT COUNTED</Text> : null}
         </View>
         <Text style={styles.time}>{formatDateTime(txn.createdAt)}</Text>
       </View>
@@ -227,6 +251,16 @@ const styles = StyleSheet.create({
   },
   // Memo = someone else paid; tracked as a debt, not counted in your spend totals
   // (kept quiet/neutral so it reads as "placeholder, not an actual transaction yet").
+  notCountedTag: {
+    marginLeft: spacing.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: colors.warning + '1F',
+    color: colors.warning,
+    ...typography.tiny,
+    fontWeight: '700',
+  },
   memoTag: {
     marginLeft: spacing.xs,
     paddingHorizontal: 6,

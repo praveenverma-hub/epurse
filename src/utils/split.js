@@ -146,13 +146,34 @@ export function countsForSpend(txn) {
 const GROUP_NON_SPEND_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self']);
 
 /**
- * Returns true when a transaction should be excluded from ALL spend/income totals
- * because of its group membership — either it's a group-memo (paid by someone else)
- * or it belongs to a personal group the user has toggled off from main totals.
+ * A MEMO transaction — someone ELSE's money paid the bill, so nothing left the
+ * user's account and it must never count as their spend. It's a debt placeholder
+ * until settled: the user's own share is tracked as a `borrowed` LB row instead.
+ *
+ * Two flavours, same meaning:
+ *   • `isGroupMemo` — a shared-group expense whose payer isn't 'me'.
+ *   • `isSplitMemo` — a PLAIN (non-group) split whose payer isn't me.
+ * Keeping them as one predicate is what lets the plain-split payer feature reuse
+ * every exclusion site the group memo already flows through.
+ */
+export function isMemoTxn(txn) {
+  return !!txn && (!!txn.isGroupMemo || !!txn.isSplitMemo);
+}
+
+/**
+ * Returns true when a transaction should be excluded from ALL spend/income totals:
+ * it's a memo (someone else's money paid — see isMemoTxn), or it belongs to a
+ * personal group the user has toggled off from main totals.
+ *
+ * The memo check deliberately sits BEFORE the `groupId` guard: a plain-split memo
+ * has no group, and every spend surface in the app funnels through this one helper,
+ * so short-circuiting here is what keeps a non-group memo out of Home / Analytics /
+ * Budget / Activity totals / compaction without touching any of them individually.
  */
 export function isGroupExcluded(txn, groups) {
-  if (!txn || !txn.groupId) return false;
-  if (txn.isGroupMemo) return true;
+  if (!txn) return false;
+  if (isMemoTxn(txn)) return true;
+  if (!txn.groupId) return false;
   const g = (groups || []).find((gr) => gr.id === txn.groupId);
   return !!(g && g.excludeFromTotals);
 }
@@ -230,6 +251,22 @@ export function groupLbChipKind(txn) {
   if (!iPaid) return myShare > 0 ? 'borrowed' : null;
   if (myShare > 0) return null; // I paid but also kept a share → it's my spend, not a pure loan.
   const othersOwe = gs.shares.some((s) => s.memberId !== 'me' && (Number(s.shareAmount) || 0) > 0);
+  return othersOwe ? 'lent' : null;
+}
+
+/**
+ * Lent/Borrowed framing for a PLAIN (non-group) split — the direct mirror of
+ * groupLbChipKind, driving the same chip on the transaction card.
+ *   'borrowed' — someone else paid and I owe my share (isSplitMemo).
+ *   'lent'     — I paid and kept NO share for myself (fronted the whole bill).
+ *   null       — an ordinary split I both paid and share in, or not a split.
+ */
+export function splitLbChipKind(txn) {
+  if (!txn || !txn.isSplit) return null;
+  const myShare = Number(txn.myShareAmount) || 0;
+  if (txn.isSplitMemo) return myShare > 0 ? 'borrowed' : null;
+  if (myShare > 0) return null; // I paid but kept a share → primarily my own spend.
+  const othersOwe = (txn.splitWith || []).some((o) => (Number(o.shareAmount) || 0) > 0);
   return othersOwe ? 'lent' : null;
 }
 

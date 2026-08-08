@@ -5,7 +5,6 @@
 // Region B: profile block (avatar + name + level), animated XP bar, coin balance
 // Region C: one widget card per REWARD_CONFIG.SHOP_ITEMS entry, each in a
 //           locked / purchasable / owned-toggle state (the list is not fixed-length)
-// Region D: settings bottom sheet (gear icon) — recap prefs, Categories, SMS Diagnostic
 //
 // Theme-adaptive: palette D is derived from useTheme() each render, so this
 // screen follows the app's accent theme and light/dark mode instead of being
@@ -14,8 +13,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Animated as RNAnimated,
-  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -57,7 +54,6 @@ import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 import { useToast } from '../components/Toast';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
-import SheetCloseButton from '../components/SheetCloseButton';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography, shadows } from '../constants/theme';
 
@@ -139,23 +135,13 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
   // them mutually exclusive — tapping RP closes EPC and vice-versa.
   const [infoOpen, setInfoOpen] = useState<'rp' | 'epc' | null>(null);
 
-  // Settings bottom sheet (gear icon) — moved here from the Dashboard's
-  // long-press avatar trigger so it lives inside the Profile section.
-  const [showSettings, setShowSettings] = useState(false);
-  const settingsSlide = useState(() => new RNAnimated.Value(0))[0];
-
-  const showMonthlyRecap     = useEPurseStore((s: any) => s.showMonthlyRecap);
-  const setShowMonthlyRecap  = useEPurseStore((s: any) => s.setShowMonthlyRecap);
-  const recapOptions         = useEPurseStore((s: any) => s.recapOptions);
-  const setRecapOption       = useEPurseStore((s: any) => s.setRecapOption);
-
+  // The gear now PUSHES SettingsScreen (Aug-26). It used to open a bottom sheet
+  // held right here — recap toggles, their sub-toggles and the nav rows — which
+  // outgrew the container: a sheet can't scroll to fit, and every nav row had to
+  // dismiss it before pushing. All of that state moved with the screen.
   const openSettings = () => {
     hapticLight();
-    setShowSettings(true);
-    RNAnimated.spring(settingsSlide, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
-  };
-  const closeSettings = () => {
-    RNAnimated.timing(settingsSlide, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowSettings(false));
+    navigation.navigate('Settings');
   };
 
   const initial = userName?.trim()?.charAt(0)?.toUpperCase() || '🙂';
@@ -334,81 +320,6 @@ const RewardShop: React.FC<Props> = ({ navigation }) => {
         ]}
       />
 
-      {/* ── Region D: Settings bottom sheet (gear icon) ─────────────────── */}
-      <Modal
-        visible={showSettings}
-        transparent
-        animationType="none"
-        onRequestClose={closeSettings}
-      >
-        <Pressable style={styles.settingsBackdrop} onPress={closeSettings}>
-          <RNAnimated.View
-            style={[
-              styles.settingsSheet,
-              { transform: [{ translateY: settingsSlide.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] },
-            ]}
-          >
-            <SheetCloseButton onPress={closeSettings} variant="absolute" />
-            <View style={styles.settingsHandle} />
-
-            {/* Preference: monthly recap (modal + card + PDF) */}
-            <View style={styles.settingsRow}>
-              <Text style={styles.settingsRowEmoji}>📊</Text>
-              <Text style={styles.settingsRowLabel}>Monthly recap</Text>
-              <Switch
-                value={showMonthlyRecap}
-                onValueChange={setShowMonthlyRecap}
-                trackColor={{ true: D.primary, false: D.switchTrackOff }}
-                thumbColor="#fff"
-                ios_backgroundColor={D.switchTrackOff}
-              />
-            </View>
-
-            {/* Sub-preferences: what the recap report / PDF includes */}
-            {showMonthlyRecap && (
-              <>
-                <Text style={styles.settingsSubHeader}>Report includes</Text>
-                {[
-                  { key: 'includePrivate', label: 'Private transactions' },
-                  { key: 'includeGroups',  label: 'Group & trip spend' },
-                  { key: 'includeTxnList', label: 'Full transaction list (PDF)' },
-                ].map(({ key, label }) => (
-                  <View key={key} style={[styles.settingsRow, styles.settingsSubRow]}>
-                    <Text style={styles.settingsSubLabel}>{label}</Text>
-                    <Switch
-                      value={!!recapOptions?.[key]}
-                      onValueChange={(v) => setRecapOption(key, v)}
-                      trackColor={{ true: D.primary, false: D.switchTrackOff }}
-                      thumbColor="#fff"
-                      ios_backgroundColor={D.switchTrackOff}
-                    />
-                  </View>
-                ))}
-              </>
-            )}
-
-            {[
-              { emoji: '📂', label: 'Categories', route: 'Categories' },
-              { emoji: '🔬', label: 'SMS Diagnostic', route: 'SmsDiagnostic' },
-            ].map(({ emoji, label, route }) => (
-              <TouchableOpacity
-                key={route}
-                style={styles.settingsRow}
-                activeOpacity={0.7}
-                onPress={() => {
-                  setShowSettings(false);
-                  settingsSlide.setValue(0);
-                  navigation.navigate(route);
-                }}
-              >
-                <Text style={styles.settingsRowEmoji}>{emoji}</Text>
-                <Text style={styles.settingsRowLabel}>{label}</Text>
-                <Text style={styles.settingsRowChevron}>›</Text>
-              </TouchableOpacity>
-            ))}
-          </RNAnimated.View>
-        </Pressable>
-      </Modal>
     </View>
   );
 };
@@ -1027,40 +938,5 @@ function makeStyles(D: any) {
       textTransform: 'uppercase',
     },
 
-    // ── Region D: settings sheet ────────────────────────────────────────────
-    settingsBackdrop: {
-      flex: 1,
-      backgroundColor: '#00000066',
-      justifyContent: 'flex-end',
-    },
-    settingsSheet: {
-      backgroundColor: D.card,
-      borderTopLeftRadius: radius.xl,
-      borderTopRightRadius: radius.xl,
-      paddingHorizontal: spacing.lg,
-      paddingBottom: 36,
-      paddingTop: spacing.sm,
-      ...shadows.elevated,
-    },
-    settingsHandle: {
-      width: 36, height: 4, borderRadius: 2,
-      backgroundColor: D.border,
-      alignSelf: 'center',
-      marginBottom: spacing.md,
-    },
-    settingsRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: D.border,
-      gap: spacing.md,
-    },
-    settingsRowEmoji: { fontSize: 20 },
-    settingsRowLabel: { flex: 1, ...typography.body, color: D.white, fontWeight: '600' },
-    settingsSubHeader: { ...typography.tiny, color: D.textMuted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: spacing.md, marginBottom: spacing.xxs, marginLeft: spacing.xs },
-    settingsSubRow: { paddingVertical: 12, paddingLeft: spacing.md },
-    settingsSubLabel: { flex: 1, ...typography.small, color: D.textSec, fontWeight: '600' },
-    settingsRowChevron: { fontSize: 22, color: D.textSec, fontWeight: '300' },
   });
 }

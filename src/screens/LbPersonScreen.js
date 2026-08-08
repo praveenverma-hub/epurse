@@ -27,7 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency, formatDate, formatOutstanding, firstName } from '../utils/format';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
 import { FormField, FormTextInput, FormAmountInput } from '../components/FormField';
@@ -38,6 +38,7 @@ import CenterModal from '../components/CenterModal';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import EmptyState from '../components/EmptyState';
 import EditIcon from '../components/EditIcon';
+import LbEntryForm from '../components/LbEntryForm';
 import { useToast } from '../components/Toast';
 
 // Why a row can't be edited here — shown inline so the restriction explains itself
@@ -57,10 +58,15 @@ const LbPersonScreen = ({ route, navigation }) => {
   const groups                = useEPurseStore((s) => s.groups);
   const accounts              = useEPurseStore((s) => s.accounts);
   const settlePersonBalance   = useEPurseStore((s) => s.settlePersonBalance);
+  const addLentBorrowed       = useEPurseStore((s) => s.addLentBorrowed);
+  const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
   const updateLentBorrowedEntry = useEPurseStore((s) => s.updateLentBorrowedEntry);
   const deleteLentBorrowedEntry = useEPurseStore((s) => s.deleteLentBorrowedEntry);
 
   const [editEntry,    setEditEntry]    = useState(null);  // the row being edited
+  const [addOpen,      setAddOpen]      = useState(false);  // new entry for this person
+  const [addKind,      setAddKind]      = useState('lent');  // direction of that new entry
+  const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
   const [confirm,      setConfirm]      = useState(null);
   const [settleTarget, setSettleTarget] = useState(null);
 
@@ -110,6 +116,17 @@ const LbPersonScreen = ({ route, navigation }) => {
 
   const net      = person?.net ?? 0;
   const netAbs   = Math.abs(net);
+
+  /**
+   * This person's net AFTER a store write — `person` above is memoised off the
+   * previous render, so a callback that just fired an edit/delete would report the
+   * stale balance. getPersonBalances caches nothing, so re-reading is exact.
+   * Returns 0 once the person has no rows left at all (fully cleared).
+   */
+  const freshNet = useCallback(
+    () => getPersonBalances().find((p) => p.personKey === personKey)?.net ?? 0,
+    [getPersonBalances, personKey],
+  );
   const netColor = net > 0 ? colors.success : net < 0 ? '#EF4444' : colors.textSecondary;
   const netLabel = net > 0 ? 'owes you' : net < 0 ? 'you owe' : 'all settled';
 
@@ -127,9 +144,93 @@ const LbPersonScreen = ({ route, navigation }) => {
       destructive: true,
       secondaryText: 'Cancel',
       onSecondary: () => setConfirm(null),
-      onConfirm: () => { settlePersonBalance(person.personKey); setConfirm(null); },
+      onConfirm: () => {
+        settlePersonBalance(person.personKey);
+        setConfirm(null);
+        const who = firstName(person.person);
+        toast.success(
+          `Settled ${formatCurrency(netAbs)} with ${who}`,
+          formatOutstanding(freshNet(), who),
+        );
+      },
     });
-  }, [person, net, netAbs, settlePersonBalance]);
+  }, [person, net, netAbs, settlePersonBalance, toast, freshNet]);
+
+  /**
+   * Add a new row for THIS person, straight from their ledger — saves bouncing back
+   * to the LB tab and re-picking someone you're already looking at.
+   *
+   * contactId / phone are carried over deliberately: getPersonBalances groups by
+   * those authoritative ids first, so omitting them would file the entry under a
+   * name-only key and split one person into two rows on the LB screen.
+   */
+  const handleAddEntry = useCallback((entry) => {
+    if (!person) return;
+    const { kind, alreadySettled, ...base } = entry;
+    // Always file against THIS person's authoritative ids, whatever the form sent:
+    // getPersonBalances groups by contactId / phone first, so a name-only row would
+    // split one person into two on the LB screen.
+    const seeded = {
+      ...base,
+      person:    base.person || person.person,
+      contactId: person.contactId ?? null,
+      phone:     person.phone ?? null,
+    };
+    const who = firstName(seeded.person);
+    setAddOpen(false);
+
+    if (alreadySettled) {
+      // Same handoff as the LB tab: an already-repaid BORROW books a real Repayment
+      // expense, so it needs an account before it can commit.
+      if (kind === 'borrowed') {
+        setPendingSettledAdd({ ...seeded, kind: 'borrowed' });
+        return;
+      }
+      addAlreadySettledLentBorrowed({ ...seeded, kind: 'lent' });
+      toast.success(
+        `Settled ${formatCurrency(seeded.amount)} with ${who}`,
+        formatOutstanding(freshNet(), who),
+      );
+      return;
+    }
+
+    addLentBorrowed({ ...seeded, kind: kind === 'borrowed' ? 'borrowed' : 'lent' });
+    toast.success(
+      kind === 'borrowed'
+        ? `Borrowed ${formatCurrency(seeded.amount)} from ${who}`
+        : `Lent ${formatCurrency(seeded.amount)} to ${who}`,
+      formatOutstanding(freshNet(), who),
+    );
+  }, [person, addLentBorrowed, addAlreadySettledLentBorrowed, toast, freshNet]);
+
+  /** The already-repaid BORROW added from this screen, after its account question. */
+  const commitSettledAdd = useCallback((accountId) => {
+    const entry = pendingSettledAdd;
+    if (!entry) return;
+    addAlreadySettledLentBorrowed(entry, accountId ? { accountId } : undefined);
+    const who = firstName(entry.person);
+    toast.success(
+      `Repaid ${formatCurrency(entry.amount)} to ${who}`,
+      formatOutstanding(freshNet(), who),
+    );
+    setPendingSettledAdd(null);
+  }, [pendingSettledAdd, addAlreadySettledLentBorrowed, toast, freshNet]);
+
+  /**
+   * Both committing exits of the repay-account picker (a BORROW settle): with an
+   * account, which also books the real Repayment expense, or without it.
+   */
+  const commitBorrowSettle = useCallback((accountId) => {
+    const target = settleTarget;
+    if (!target) return;
+    settlePersonBalance(target.personKey, accountId ? { accountId } : undefined);
+    const who = firstName(target.person);
+    toast.success(
+      `Repaid ${formatCurrency(Math.abs(target.net))} to ${who}`,
+      formatOutstanding(freshNet(), who),
+    );
+    setSettleTarget(null);
+  }, [settleTarget, settlePersonBalance, toast, freshNet]);
 
   // ── Delete a manual row ─────────────────────────────────────────────────────
   const handleDelete = useCallback((entry) => {
@@ -146,10 +247,16 @@ const LbPersonScreen = ({ route, navigation }) => {
         const ok = deleteLentBorrowedEntry(entry.id);
         setConfirm(null);
         setEditEntry(null);
-        if (!ok) toast.info('Could not delete', 'This entry comes from a group or a transaction.');
+        if (ok) {
+          const who = firstName(person?.person);
+          toast.success(
+            `Deleted ${ENTRY_LABEL[entry.kind]?.toLowerCase() || 'entry'} of ${formatCurrency(entry.amount)}`,
+            formatOutstanding(freshNet(), who),
+          );
+        } else toast.info('Could not delete', 'This entry comes from a group or a transaction.');
       },
     });
-  }, [deleteLentBorrowedEntry, toast]);
+  }, [deleteLentBorrowedEntry, toast, person, freshNet]);
 
   // ── Rows ────────────────────────────────────────────────────────────────────
   const renderEntry = useCallback(({ item: entry }) => {
@@ -240,7 +347,22 @@ const LbPersonScreen = ({ route, navigation }) => {
           <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{person.person || 'Unknown'}</Text>
-        <View style={styles.backBtn} />
+        {/* Takes the place of the layout spacer, so it costs no width and the title
+            stays truly centred (both sides are one backBtn wide). */}
+        <TouchableOpacity
+          onPress={() => {
+            // Pre-pick the likelier direction: if you already owe them, the next
+            // entry is usually another borrow. Still one tap to flip.
+            setAddKind(net < 0 ? 'borrowed' : 'lent');
+            setAddOpen(true);
+          }}
+          hitSlop={10}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`Add an entry with ${person.person || 'this person'}`}
+        >
+          <Ionicons name="add" size={26} color={theme.primary} />
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -263,8 +385,8 @@ const LbPersonScreen = ({ route, navigation }) => {
             <Text style={[styles.heroLabel, { color: netColor }]}>{netLabel}</Text>
             {person.phone ? <Text style={styles.heroPhone}>{person.phone}</Text> : null}
             <Text style={styles.heroHint}>
-              {displayEntries.length} {displayEntries.length === 1 ? 'entry' : 'entries'} · tap an
-              entry to edit it
+              {displayEntries.length} {displayEntries.length === 1 ? 'entry' : 'entries'} · tap one
+              to edit, or + to add another
             </Text>
           </View>
         }
@@ -290,10 +412,79 @@ const LbPersonScreen = ({ route, navigation }) => {
         onClose={() => setEditEntry(null)}
         onSave={(patch) => {
           const ok = updateLentBorrowedEntry(editEntry.id, patch);
-          if (ok) { setEditEntry(null); toast.success('Entry updated'); }
-          else toast.info('Could not save', 'Check the amount and name, then try again.');
+          if (ok) {
+            setEditEntry(null);
+            toast.success(
+              `Updated to ${formatCurrency(patch.amount)}`,
+              formatOutstanding(freshNet(), firstName(patch.person || person?.person)),
+            );
+          } else toast.info('Could not save', 'Check the amount and name, then try again.');
         }}
         onDelete={() => handleDelete(editEntry)}
+      />
+
+      {/* Add — a thin shell around the SAME form the LB tab uses, so this screen gets
+          every section of it (already-settled toggle included) rather than a reduced
+          copy that drifts. `lockedPerson` hides the name/phone/contact fields, and
+          passing onKindChange is what surfaces the Lent/Borrowed selector, since
+          there's no panel here to imply the direction. */}
+      <Modal
+        visible={addOpen}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setAddOpen(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.sheetBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setAddOpen(false)} />
+          <SheetCloseButton onPress={() => setAddOpen(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle} numberOfLines={1}>
+              New entry with {firstName(person.person) || 'this person'}
+            </Text>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <LbEntryForm
+                kind={addKind}
+                onKindChange={setAddKind}
+                lockedPerson={{
+                  person: person.person,
+                  contactId: person.contactId ?? null,
+                  phone: person.phone ?? null,
+                }}
+                onSubmit={handleAddEntry}
+                theme={theme}
+                submitColors={
+                  addKind === 'lent'
+                    ? [colors.gradientGreenStart, colors.gradientGreenEnd]
+                    : [colors.gradientPurpleStart, colors.gradientPurpleEnd]
+                }
+                submitLabel="Add entry"
+                hideHeading
+                // The sheet already provides the card surface + padding.
+                style={styles.addFormInSheet}
+              />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <AccountPickerSheet
+        visible={!!pendingSettledAdd}
+        title="Repaid from which account?"
+        subtitle={pendingSettledAdd
+          ? `${pendingSettledAdd.person} · ${formatCurrency(pendingSettledAdd.amount)} — records a Repayment expense`
+          : undefined}
+        accounts={accounts}
+        onSelect={(accountId) => commitSettledAdd(accountId)}
+        skipLabel="Just mark repaid (no expense)"
+        // Dismissing still logs it — the user already committed by tapping Add; only
+        // the account question was left open (same rule as the LB tab's picker).
+        onSkip={() => commitSettledAdd(null)}
+        onClose={() => commitSettledAdd(null)}
       />
 
       <AccountPickerSheet
@@ -303,12 +494,11 @@ const LbPersonScreen = ({ route, navigation }) => {
           ? `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
           : undefined}
         accounts={accounts}
-        onSelect={(accountId) => {
-          settlePersonBalance(settleTarget.personKey, { accountId });
-          setSettleTarget(null);
-        }}
+        onSelect={(accountId) => commitBorrowSettle(accountId)}
         skipLabel="Just mark repaid (no expense)"
-        onSkip={() => { settlePersonBalance(settleTarget.personKey); setSettleTarget(null); }}
+        onSkip={() => commitBorrowSettle(null)}
+        // Dismissing cancels outright — unlike the add form's picker, nothing has
+        // been committed yet here; the settle IS the action being chosen.
         onClose={() => setSettleTarget(null)}
       />
 
@@ -330,10 +520,11 @@ const LbPersonScreen = ({ route, navigation }) => {
 // ─── Edit sheet ───────────────────────────────────────────────────────────────
 // Keyed on the entry id so switching rows remounts it with fresh state — a shared
 // instance would keep the previous row's draft in its inputs.
+/** Gate + remount: the `key` forces fresh useState seeds each time it opens. */
 const EditEntrySheet = ({ entry, theme, onClose, onSave, onDelete }) => {
   if (!entry) return null;
   return (
-    <EditEntrySheetBody
+    <EntrySheetBody
       key={entry.id}
       entry={entry}
       theme={theme}
@@ -344,7 +535,8 @@ const EditEntrySheet = ({ entry, theme, onClose, onSave, onDelete }) => {
   );
 };
 
-const EditEntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
+/** Edit an existing row. Adding is a different shape entirely — see LbEntryForm. */
+const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
   const [person, setPerson] = useState(entry.person || '');
   const [amount, setAmount] = useState(String(entry.amount ?? ''));
   const [note,   setNote]   = useState(entry.note || '');
@@ -362,7 +554,9 @@ const EditEntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
         <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Edit {ENTRY_LABEL[entry.kind] || 'entry'}</Text>
+          <Text style={styles.sheetTitle} numberOfLines={1}>
+            Edit {ENTRY_LABEL[entry.kind] || 'entry'}
+          </Text>
 
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             {/* Amount + date share a row, matching the LB add form's layout. */}
@@ -524,8 +718,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md,
   },
   sheetTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.lg },
-  amountRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // Matches LbEntryForm's amountRow — the amount and the date button must not read
+  // as one merged field (see the note there).
+  amountRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   amountInput: { flex: 1 },
+  // LbEntryForm renders as a card (fill + shadow + margin). Inside this sheet the
+  // sheet IS the surface, so flatten it rather than nesting a card in a card.
+  addFormInSheet: { backgroundColor: 'transparent', padding: 0, marginBottom: 0 },
   sheetActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   deleteBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,

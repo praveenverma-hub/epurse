@@ -394,7 +394,13 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       amount,
       merchant: merchant.trim() || 'Group Expense',
       note: note.trim(),
-      date: amountLocked ? undefined : date.toISOString(),
+      // Send the date whenever the field is actually SHOWN — the render condition
+      // below is `(!amountLocked || editTxn)`, and gating the value on `amountLocked`
+      // alone meant an edit rendered a working date picker whose value was thrown
+      // away: you could change the date, save, and nothing happened. `amountLocked`
+      // without `editTxn` is the tag-an-existing-SMS flow, where the transaction's own
+      // date is authoritative and must not be overwritten with today's.
+      date: (!amountLocked || editTxn) ? date.toISOString() : undefined,
       // categoryId is derived from the two-tier labels by addGroupExpense; pass labels through.
       ...(parentCat ? { parentCategory: parentCat } : {}),
       ...(childCat ? { childCategory: childCat } : {}),

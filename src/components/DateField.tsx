@@ -31,22 +31,13 @@ interface DateFieldProps {
   accentColor?: string;
   /**
    * `row` (default) — a full labelled FormSelectRow, for the main entry forms.
-   * `icon` — a square calendar button for tight rows (e.g. beside the amount
-   *   input on the Lent/Borrowed form) where a full row would crowd the card.
-   *   It stays icon-only while the date is today and grows to show the date
-   *   once it isn't, so a backdated entry can never look like today's.
+   * `icon` — a compact calendar button + date, for tight rows (beside the amount
+   *   input on the Lent/Borrowed add + edit forms) where a full row would crowd
+   *   the card. The date always shows, in the ordinary field text colour —
+   *   "Today" / "Yesterday" for the two recent days, else the real date.
    */
   variant?: 'row' | 'icon';
 }
-
-const isToday = (d: Date) => {
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-};
 
 export default function DateField({
   value,
@@ -64,32 +55,31 @@ export default function DateField({
     setOpen(true);
   };
 
-  const backdated = !isToday(value);
   const tint = disabled ? colors.textMuted : accentColor;
 
   const row =
     variant === 'icon' ? (
       <TouchableOpacity
-        style={[
-          styles.iconBtn,
-          // Backdated swaps the gray fill for an accent wash. (No border here —
-          // the button is borderless, so a borderColor alone would do nothing.)
-          backdated && { backgroundColor: tint + '1F' },
-        ]}
+        // No accent wash for a backdated date: the fill is what makes this read as
+        // one of the form's inputs, and recolouring it made the field look like a
+        // warning rather than a filled-in value.
+        style={styles.iconBtn}
         onPress={openPicker}
         disabled={disabled}
         activeOpacity={0.75}
         accessibilityRole="button"
         accessibilityLabel={`Date: ${formatDateLabel(value)}`}
       >
-        {/* Always tinted with the live accent — the calendar is the affordance
-            here (there's no label beside it), so it must read as tappable. */}
+        {/* Always tinted with the live accent so the calendar reads as tappable. */}
         <Ionicons name="calendar-outline" size={19} color={tint} />
-        {backdated ? (
-          <Text style={[styles.iconBtnTxt, { color: tint }]} numberOfLines={1}>
-            {formatDateLabel(value)}
-          </Text>
-        ) : null}
+        {/* The date is ALWAYS shown, not just when backdated: an icon-only button
+            left the reader guessing which date an LB entry would be filed under,
+            and "probably today" is exactly the assumption that produces a
+            mis-dated ledger. It's the ordinary field text colour in every case —
+            a date is a filled-in value, not a state worth flagging. */}
+        <Text style={styles.iconBtnTxt} numberOfLines={1}>
+          {formatDateLabel(value)}
+        </Text>
       </TouchableOpacity>
     ) : (
       <FormSelectRow
@@ -169,13 +159,14 @@ const styles = StyleSheet.create({
     minWidth: 48,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    // FILLED gray, borderless — matches `LentBorrowedScreen`'s inputs, the only
-    // place this variant is used. It deliberately does NOT follow the outlined
+    // FILLED gray, borderless — matches `LentBorrowedScreen`'s inputs. Used only by
+    // the two LB forms (add + edit). It deliberately does NOT follow the outlined
     // FormField treatment (`variant="row"` does, via FormSelectRow).
     backgroundColor: colors.background,
     borderRadius: radius.md,
   },
-  iconBtnTxt: { ...typography.small, fontWeight: '700' },
+  // Same colour as the form's own input text — this is a value, not an accent.
+  iconBtnTxt: { ...typography.small, fontWeight: '700', color: colors.textPrimary },
 
   backdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   dismiss: { flex: 1 },

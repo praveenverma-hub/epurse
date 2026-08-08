@@ -14,6 +14,7 @@ import {
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import Svg, { Circle, G, Rect } from 'react-native-svg';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
+import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -22,7 +23,8 @@ import { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } from '../constants/categories';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
-import { debitDisplayAmount, isGroupExcluded, countsForSpend, spendContribution } from '../utils/split';
+import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
+import { spendExcluded } from '../store/ePurseStore';
 import {
   getDailyCumulative,
   getMerchantBubbles,
@@ -66,6 +68,7 @@ const SECTION_INFO = {
 
 const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const theme = useTheme();
+  const tabBarScroll = useTabBarScroll();
   const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
   const [infoKey, setInfoKey] = useState(null); // which section explainer is open
   // Group carousel focus — null = all spending. Drives the reactive line + bar charts.
@@ -78,6 +81,8 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
   const transactions = useEPurseStore(selectTransactions);
   const groups = useEPurseStore((s) => s.groups);
+  // Subscribed purely so a "counts in expenses" rule change re-renders this screen.
+  const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
   const accounts = useEPurseStore((s) => s.accounts);
   const categories = useEPurseStore((s) => s.categories);
 
@@ -85,9 +90,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   // memos) before the chart selectors run — so the spend pace, merchant bubbles
   // and subscription detection match the Spent/Earned summary, which already
   // excludes them via getMonthlySpend / getCategoryBreakdown.
+  // `excludedExpenseParents` is in the deps for RE-RENDER, not because it's read here:
+  // spendExcluded consults a module-level mirror, so without this dep a rule change
+  // wouldn't invalidate the memo and the charts would keep the old totals.
   const visibleTxns = useMemo(
-    () => transactions.filter((t) => !t.isIgnored && !isGroupExcluded(t, groups)),
-    [transactions, groups],
+    () => transactions.filter((t) => !t.isIgnored && !spendExcluded(t, groups)),
+    [transactions, groups, excludedExpenseParents],
   );
   const dailyData = useMemo(() => getDailyCumulative(visibleTxns, date), [visibleTxns, date]);
   const merchantBubbles = useMemo(() => getMerchantBubbles(visibleTxns, date), [visibleTxns, date]);
@@ -165,7 +173,7 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       if (!countsForSpend(t)) return;               // expense debit or refund credit
       if (!isSameMonth(t.createdAt, date)) return;
       if (NON_SPEND.has(t.categoryId)) return;
-      if (isGroupExcluded(t, groups)) return;
+      if (spendExcluded(t, groups)) return;
       const acct =
         (t.accountId && byId.get(t.accountId)) ||
         (t.accountMask && byMask.get(t.accountMask)) ||
@@ -266,6 +274,9 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       <ScrollView
         contentContainerStyle={[styles.body, headerless && { marginTop: 0, paddingTop: spacing.md }]}
         showsVerticalScrollIndicator={false}
+        // Hide-on-scroll for the tab bar — Analytics + Budget are the Insights tab's
+        // scenes, so the hook belongs here, not on InsightsScreen (which doesn't scroll).
+        {...tabBarScroll}
       >
         {noDataEver ? (
           <EmptyState

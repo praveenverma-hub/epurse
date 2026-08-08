@@ -39,6 +39,8 @@ import Animated, {
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore, selectTransactions } from '../store/ePurseStore';
+import { useCategoryMaps } from '../hooks/useCategoryTree';
+import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, typography as typographyBase } from '../constants/theme';
 import { formatCurrency, isSameMonth } from '../utils/format';
@@ -221,6 +223,16 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
 
   const groups       = useEPurseStore((s: any) => s.groups) as any[];
   const storeTxns    = useEPurseStore(selectTransactions) as CarouselTxn[];
+  // "Counts as expense" rules — same predicate as the row tag / Activity filter.
+  const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
+  const catMaps = useCategoryMaps();
+  const isNotCounted = useCallback(
+    (t: any) =>
+      t?.type === 'debit' &&
+      !!excludedExpenseParents?.length &&
+      excludedExpenseParents.includes(parentCatIdForTxn(t, catMaps)),
+    [excludedExpenseParents, catMaps],
+  );
   const getBalances  = useEPurseStore((s: any) => s.getPersonBalances) as () => any[];
   const lentBorrowed = useEPurseStore((s: any) => s.lentBorrowed); // recompute trigger
 
@@ -253,8 +265,14 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
       const s = acc[t.groupId];
       if (!s || !isSameMonth(t.createdAt as any, date)) continue;
       if (countsForSpend(t as any)) {
-        // Expense adds, refund credit nets both your share and the group total down.
-        s.personalShare += spendContribution(t as any);
+        // `personalShare` is YOUR spend, so it must agree with Spent everywhere else —
+        // including the user's "counts as expense" rules. `groupTotal` deliberately does
+        // NOT: that's what the group actually cost, which is a different question and the
+        // reason you'd open a group view at all.
+        if (!isNotCounted(t as any)) {
+          // Expense adds, refund credit nets your share down.
+          s.personalShare += spendContribution(t as any);
+        }
         s.groupTotal += (t.type === 'debit' ? (Number(t.amount) || 0) : -(Number(t.amount) || 0));
         s.txnCount += 1;
       }
@@ -262,7 +280,7 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
     return Object.values(acc).sort(
       (a, b) => (b.groupTotal - a.groupTotal) || (Math.abs(b.net) - Math.abs(a.net)),
     );
-  }, [groups, txns, date, getBalances, lentBorrowed]);
+  }, [groups, txns, date, getBalances, lentBorrowed, isNotCounted]);
 
   const allTotal = allSpendTotal != null ? allSpendTotal : stats.reduce((s, g) => s + g.personalShare, 0);
 

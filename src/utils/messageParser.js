@@ -270,7 +270,7 @@ const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-
 // and "to/by mobile <digits>" — "a/c linked to mobile 9XXXXXX13245" is a P2P/self-transfer
 // routing description (the counterparty's masked phone), never a real merchant name.
 const MERCHANT_REGEX =
-  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d|mobile\s+[0-9x]{2,})([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\.|,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
+  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d|mobile\s+[0-9x]{2,})([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\s*\.|\s*,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
 
 const MERCHANT_STOP =
   /\s+(?:(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|from\s+(?:a\/c|acct\.?|account|your)\b).*$/i;
@@ -958,7 +958,13 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // Check for "credited to beneficiary" or "debited from beneficiary" patterns.
   // These indicate money moved for the OTHER party, so it's the opposite direction
   // from the user's perspective.
-  const creditedToOther = /credited\s+to\s+(?:the\s+|a\s+)?(?:beneficiary|your\s+(?:beneficiary|account))/i.test(text);
+  // NOTE "your account" is deliberately NOT in here. It used to be, and it inverted
+  // every "…has been credited to your account XXXX9532" — a plain incoming credit (IT
+  // refunds, NACH payouts) — into a DEBIT, i.e. real income booked as spend. The
+  // inversion is only correct when the money landed with the OTHER party, which is what
+  // "beneficiary" marks; "your beneficiary" still matches, "your account" is the user's
+  // own and must stay a credit.
+  const creditedToOther = /credited\s+to\s+(?:the\s+|a\s+)?(?:your\s+)?beneficiary/i.test(text);
   const debitedFromOther = /debited\s+from\s+beneficiary/i.test(text);
 
   // Direction is read from `textSansFuture` (future clauses stripped) so a

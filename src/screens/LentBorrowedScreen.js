@@ -1,39 +1,31 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
 } from 'react-native';
 import { TabView } from 'react-native-tab-view';
-import * as Contacts from 'expo-contacts';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
-import SheetCloseButton from '../components/SheetCloseButton';
 
 import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
-import { INPUT_LIMITS, sanitizeName, sanitizePhone, normalizePhone, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency } from '../utils/format';
-import GradientButton from '../components/GradientButton';
+import { formatCurrency, formatOutstanding, firstName } from '../utils/format';
 import CenterModal from '../components/CenterModal';
+import { useToast } from '../components/Toast';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
 import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
-import DateField from '../components/DateField';
+import LbEntryForm from '../components/LbEntryForm';
 import InfoIcon from '../components/InfoIcon';
-import EditIcon from '../components/EditIcon';
 import InfoSheet from '../components/InfoSheet';
 import Svg, { Path } from 'react-native-svg';
 
@@ -49,6 +41,7 @@ const initialLayout = { width: Dimensions.get('window').width };
 
 const LentBorrowedScreen = ({ route, navigation }) => {
   const theme = useTheme();
+  const toast = useToast();
   const initialKind = route?.params?.kind || 'lent';
   // Tab index is the source of truth; `kind` is the active route's key. This
   // keeps the existing kind-based logic intact while the native pager drives
@@ -56,22 +49,11 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [index, setIndex] = useState(() => keyToIndex(initialKind));
   const kind = LB_ROUTES[index].key;
   const setKind = useCallback((k) => setIndex(keyToIndex(k)), []);
-  const [person, setPerson] = useState('');
-  const [phone, setPhone] = useState('');
-  const [contactId, setContactId] = useState(null);
-  const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(() => new Date()); // when it was lent/borrowed
-  const [note, setNote] = useState('');
-  const [alreadySettled, setAlreadySettled] = useState(false); // log as already lent_settled/borrow_repaid
   const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
   const [confirm, setConfirm] = useState(null);
   const [reminderTarget, setReminderTarget] = useState(null);
   const [borrowReminderTarget, setBorrowReminderTarget] = useState(null);
-  const [contactSheetVisible, setContactSheetVisible] = useState(false);
   const [infoVisible, setInfoVisible] = useState(false);
-  const [contactQuery, setContactQuery] = useState('');
-  const [allContacts, setAllContacts] = useState([]);
-  const [contactsLoading, setContactsLoading] = useState(false);
 
   const all = useEPurseStore((s) => s.lentBorrowed);
   const groups = useEPurseStore((s) => s.groups);
@@ -81,104 +63,82 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   const userName        = useEPurseStore((s) => s.userName);
   const notificationIds = useEPurseStore((s) => s.notificationIds);
-  const resetForm = useCallback(() => {
-    setPerson('');
-    setPhone('');
-    setContactId(null);
-    setAmount('');
-    setDate(new Date());
-    setNote('');
-    setAlreadySettled(false);
-  }, []);
+  /**
+   * The person's signed net (> 0 = they owe you) as it stands NOW — call after the
+   * store write so a toast can report the resulting position. Matches on the
+   * strongest id available, mirroring how getPersonBalances groups entries
+   * (contactId / phone are authoritative; name is the fallback).
+   * Returns null when the person can't be resolved, so callers just omit the line.
+   */
+  const netWithPerson = useCallback((entry) => {
+    const rows = getPersonBalances();
+    const name = (entry.person || '').trim().toLowerCase();
+    const match = rows.find((p) =>
+      (entry.contactId && p.contactId === entry.contactId) ||
+      (entry.phone && p.phone === entry.phone) ||
+      (p.person || '').trim().toLowerCase() === name
+    );
+    return match ? match.net : null;
+  }, [getPersonBalances]);
 
-  const handleAdd = useCallback((addKind) => {
-    const n = parseFloat(amount);
-    if (!person.trim()) {
-      setConfirm({ title: 'Missing name', message: 'Enter a person name.', primaryText: 'OK' });
-      return;
-    }
-    if (!n || n <= 0) {
-      setConfirm({ title: 'Invalid amount', message: 'Enter a positive amount.', primaryText: 'OK' });
-      return;
-    }
-    if (n > MAX_ALLOWED_AMOUNT) {
-      setConfirm({ title: 'Amount too large', message: 'Maximum allowed is ₹10,00,00,000.', primaryText: 'OK' });
-      return;
-    }
-    const baseEntry = {
-      person: person.trim(),
-      amount: n,
-      date: date.toISOString(),
-      note: note.trim(),
-      contactId: contactId ?? null,
-      phone: phone.trim() || null,
-    };
+  /**
+   * Commit a validated entry from LbEntryForm. Validation + field state live in the
+   * form now; this owns only what the STORE should do with the result — including
+   * the one branch that can't just write and finish: an already-repaid BORROW books
+   * a real Repayment expense, so it needs an account before it can commit.
+   */
+  const handleAdd = useCallback((entry) => {
+    const { kind: addKind, alreadySettled: settled, ...baseEntry } = entry;
+    const n = baseEntry.amount;
 
-    if (alreadySettled) {
-      // addAlreadySettledLentBorrowed creates BOTH the origin + settlement rows so
-      // they net to zero. A borrow's counterpart (borrow_repaid) is a real expense —
-      // pick which account it left before committing (same as the Settle flow).
+    if (settled) {
+      // A borrow's counterpart (borrow_repaid) is a real expense — pick which
+      // account it left before committing (same as the Settle flow). No toast on
+      // this branch: the account picker below is the actual commit point.
       if (addKind === 'borrowed') {
         setPendingSettledAdd({ ...baseEntry, kind: 'borrowed' });
-        resetForm();
         return;
       }
       addAlreadySettledLentBorrowed({ ...baseEntry, kind: 'lent' });
-      resetForm();
+      const settledWho = firstName(baseEntry.person);
+      toast.success(
+        `Settled ${formatCurrency(n)} with ${settledWho}`,
+        formatOutstanding(netWithPerson(baseEntry), settledWho),
+      );
       return;
     }
 
     addLentBorrowed({ ...baseEntry, kind: addKind });
-    resetForm();
-  }, [person, phone, contactId, amount, date, note, alreadySettled, addLentBorrowed, addAlreadySettledLentBorrowed, resetForm]);
+    const who = firstName(baseEntry.person);
+    const net = netWithPerson(baseEntry);
+    toast.success(
+      addKind === 'lent'
+        ? `Lent ${formatCurrency(n)} to ${who}`
+        : `Borrowed ${formatCurrency(n)} from ${who}`,
+      // Only worth a second line when the running total says something the title
+      // doesn't — on a first entry the two are identical.
+      net != null && Math.abs(Math.abs(net) - n) > 0.01
+        ? formatOutstanding(net, who)
+        : undefined,
+    );
+  }, [addLentBorrowed, addAlreadySettledLentBorrowed, toast, netWithPerson]);
 
-  const pickContact = useCallback(async () => {
-    const { status } = await Contacts.requestPermissionsAsync();
-    if (status !== 'granted') {
-      setConfirm({
-        title: 'Permission needed',
-        message: 'Allow contacts access so you can pick a phone number from your list.',
-        primaryText: 'OK',
-      });
-      return;
-    }
-    setContactQuery('');
-    setContactSheetVisible(true);
-    setContactsLoading(true);
-    try {
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
-      });
-      setAllContacts(data.filter((c) => c.name && c.phoneNumbers?.length > 0));
-    } catch {
-      // permission revoked mid-flow or contacts unavailable
-    } finally {
-      setContactsLoading(false);
-    }
-  }, []);
-
-  const filteredContacts = useMemo(() => {
-    const q = contactQuery.trim().toLowerCase();
-    const base = q
-      ? allContacts.filter(
-          (c) =>
-            c.name?.toLowerCase().includes(q) ||
-            c.phoneNumbers?.some((p) => p.number?.includes(q)),
-        )
-      : allContacts;
-    return base.slice(0, 60);
-  }, [allContacts, contactQuery]);
-
-  const handleSelectContact = useCallback((c) => {
-    if (c.phoneNumbers?.length) {
-      // Contacts hand back "+91 98765 43210" — normalise to the local 10 digits or
-      // the field's maxLength would clip the tail off the real number.
-      setPhone(normalizePhone(c.phoneNumbers[0].number));
-      setContactId(c.id ?? null);
-    }
-    if (!person.trim() && c.name) setPerson(c.name);
-    setContactSheetVisible(false);
-  }, [person]);
+  /**
+   * Commit an "already repaid" BORROW. All three exits of the account picker land
+   * here — pick an account (books the Repayment expense), skip, or dismiss — since
+   * the entry itself is committed either way; only the account question differs.
+   */
+  const commitSettledBorrow = useCallback((accountId) => {
+    const entry = pendingSettledAdd;
+    if (!entry) return;
+    addAlreadySettledLentBorrowed(entry, accountId ? { accountId } : undefined);
+    const who = firstName(entry.person);
+    toast.success(
+      `Repaid ${formatCurrency(entry.amount)} to ${who}`,
+      formatOutstanding(netWithPerson(entry), who),
+    );
+    setPendingSettledAdd(null);
+  }, [pendingSettledAdd, addAlreadySettledLentBorrowed, toast, netWithPerson]);
 
   // Per-person balances for BOTH panels (both scenes are mounted by the pager).
   // lent panel shows net > 0, borrowed panel shows net < 0. Also include
@@ -190,11 +150,16 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       const active = allBalances.filter((p) => (k === 'lent' ? p.net > 0 : p.net < 0));
       const recentlySettled = allBalances.filter((p) => {
         if (p.net !== 0 || !p.entries.length) return false;
+        // Recency includes `createdAt` (when the row was recorded), not just `date`,
+        // which the user can backdate. Without it, settling a months-old debt today
+        // dropped the person off BOTH panels the instant they hit zero — the entry
+        // was saved, but nothing on this screen showed it.
         const mostRecent = Math.max(
           ...p.entries.map((e) => {
-            const d = new Date(e.date).getTime();
-            const s = e.settledAt ? new Date(e.settledAt).getTime() : 0;
-            return Math.max(d, s);
+            const d = new Date(e.date).getTime() || 0;
+            const c = e.createdAt ? new Date(e.createdAt).getTime() || 0 : 0;
+            const s = e.settledAt ? new Date(e.settledAt).getTime() || 0 : 0;
+            return Math.max(d, c, s);
           })
         );
         if (nowMs - mostRecent > THREE_MONTHS_MS) return false;
@@ -320,16 +285,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 />
               </TouchableOpacity>
             ) : null}
-            {/* Pencil (was a ▼ accordion arrow): the entry list moved to its own
-                screen so each row can be edited/deleted — see LbPersonScreen. */}
-            <View
-              style={[
-                styles.personEdit,
-                { backgroundColor: theme.primary + '18', borderColor: theme.primary + '33' },
-              ]}
-            >
-              <EditIcon size={16} color={theme.primary} />
-            </View>
+            {/* No edit affordance here on purpose: the whole card already opens this
+                person's ledger, and editing happens per-entry there. A pencil implied
+                the card itself was editable and duplicated the card's own tap. */}
           </TouchableOpacity>
         </View>
       );
@@ -339,115 +297,15 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
   // take the panel's kind `k` so the offscreen page shows the correct copy.
-  const renderForm = (k) => {
-    // Heading + chip reflect the resulting category when "already settled" is on:
-    // lent → Lent Settled, borrowed → Borrow Repaid.
-    const settledChipLabel = k === 'lent' ? 'as Lent settled' : 'as Borrow repaid';
-    // Both headings are verb-first and parallel ("Lend to someone" /
-    // "Borrow from someone"), matching LinkContactModal's "Who did you lend
-    // to?" / "Who did you borrow from?".
-    const heading = alreadySettled
-      ? (k === 'lent' ? 'Lent settled' : 'Borrow repaid')
-      : (k === 'lent' ? 'Lend to someone' : 'Borrow from someone');
-
-    return (
-    <View style={styles.formCard}>
-      <View style={styles.formHeaderRow}>
-        <Text style={[styles.formTitle, styles.formTitleInline]}>{heading}</Text>
-        {/* Toggle: log straight into the existing Lent Settled / Borrow Repaid
-            categories (addAlreadySettledLentBorrowed) instead of an open
-            'lent'/'borrowed' entry you'd have to Settle separately later. */}
-        <TouchableOpacity
-          style={[
-            styles.settledChip,
-            alreadySettled && { backgroundColor: theme.primary + '14', borderColor: theme.primary + '55' },
-          ]}
-          onPress={() => setAlreadySettled((v) => !v)}
-          activeOpacity={0.75}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: alreadySettled }}
-        >
-          <View
-            style={[
-              styles.settledBox,
-              alreadySettled && { backgroundColor: theme.primary, borderColor: theme.primary },
-            ]}
-          >
-            {alreadySettled ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
-          </View>
-          <Text style={[styles.settledChipText, alreadySettled && { color: theme.primary }]}>
-            {settledChipLabel}
-          </Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.phoneRow}>
-        <TextInput
-          value={phone}
-          onChangeText={(t) => { setPhone(sanitizePhone(t)); setContactId(null); }}
-          placeholder="Phone number (optional)"
-          placeholderTextColor={colors.textMuted}
-          keyboardType="phone-pad"
-          style={[styles.input, styles.phoneInput]}
-          maxLength={INPUT_LIMITS.PHONE_LEN}
-        />
-        {/* Mirrors the date button beside the amount: gray at rest, accent wash
-            once it holds a value (there = backdated, here = a linked contact). */}
-        <TouchableOpacity
-          style={[styles.contactPickBtn, contactId && { backgroundColor: theme.primary + '1F' }]}
-          onPress={pickContact}
-          activeOpacity={0.75}
-          accessibilityRole="button"
-          accessibilityLabel="Pick a contact"
-        >
-          <ContactPickIcon size={19} color={theme.primary} />
-        </TouchableOpacity>
-      </View>
-      <TextInput
-        value={person}
-        onChangeText={(t) => setPerson(sanitizeName(t))}
-        placeholder="Person name *"
-        placeholderTextColor={colors.textMuted}
-        style={styles.input}
-        maxLength={INPUT_LIMITS.NAME_MAX}
-      />
-      {/* Amount + date. The calendar sits beside the amount (not on its own
-          row) to keep this card compact; it stays icon-only until the entry is
-          backdated, then shows the date so it's never mistaken for today's. */}
-      <View style={styles.amountRow}>
-        <TextInput
-          value={amount}
-          onChangeText={(t) => setAmount(sanitizeAmount(t))}
-          keyboardType="decimal-pad"
-          placeholder="Amount *"
-          placeholderTextColor={colors.textMuted}
-          style={[styles.input, styles.amountInput]}
-          maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
-        />
-        <DateField
-          value={date}
-          onChange={setDate}
-          maximumDate={new Date()}
-          variant="icon"
-          accentColor={theme.primary}
-        />
-      </View>
-      <TextInput
-        value={note}
-        onChangeText={(t) => setNote(t.slice(0, INPUT_LIMITS.NOTE_MAX))}
-        placeholder="Note (optional)"
-        placeholderTextColor={colors.textMuted}
-        style={styles.input}
-        maxLength={INPUT_LIMITS.NOTE_MAX}
-      />
-      <GradientButton
-        title="Add"
-        onPress={() => handleAdd(k)}
-        colors={gradFor(k)}
-        style={{ marginTop: spacing.sm }}
-      />
-    </View>
-    );
-  };
+  const renderForm = (k) => (
+    <LbEntryForm
+      // `kind` comes from the panel, so no direction selector here.
+      kind={k}
+      onSubmit={handleAdd}
+      theme={theme}
+      submitColors={gradFor(k)}
+    />
+  );
 
   const renderEmpty = (k) => (
     <EmptyState
@@ -578,22 +436,13 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             ? `${pendingSettledAdd.person} · ${formatCurrency(pendingSettledAdd.amount)} — records a Repayment expense`
             : undefined}
           accounts={accounts}
-          onSelect={(accountId) => {
-            addAlreadySettledLentBorrowed(pendingSettledAdd, { accountId });
-            setPendingSettledAdd(null);
-          }}
+          onSelect={(accountId) => commitSettledBorrow(accountId)}
           skipLabel="Just mark repaid (no expense)"
-          onSkip={() => {
-            addAlreadySettledLentBorrowed(pendingSettledAdd);
-            setPendingSettledAdd(null);
-          }}
+          onSkip={() => commitSettledBorrow(null)}
           // Dismissing the backdrop still logs the entry (ledger-only) — the user
           // already committed to adding it by tapping "Add"; only the account
           // question was left open, so declining it shouldn't discard the entry.
-          onClose={() => {
-            addAlreadySettledLentBorrowed(pendingSettledAdd);
-            setPendingSettledAdd(null);
-          }}
+          onClose={() => commitSettledBorrow(null)}
         />
 
         <WhatsAppReminderModal
@@ -611,62 +460,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           onClose={() => setBorrowReminderTarget(null)}
         />
 
-        {/* ── Contact search sheet ── */}
-        <Modal
-          visible={contactSheetVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setContactSheetVisible(false)}
-        >
-          <View style={styles.contactBackdrop}>
-            <TouchableOpacity
-              style={styles.contactDismiss}
-              activeOpacity={1}
-              onPress={() => setContactSheetVisible(false)}
-            />
-            <View style={styles.contactSheet}>
-              <SheetCloseButton onPress={() => setContactSheetVisible(false)} variant="absolute" />
-              <View style={styles.contactHandle} />
-              <Text style={styles.contactTitle}>Pick a contact</Text>
-              <TextInput
-                autoFocus
-                value={contactQuery}
-                onChangeText={setContactQuery}
-                placeholder="Search name or number…"
-                placeholderTextColor={colors.textMuted}
-                style={styles.contactSearch}
-              />
-              {contactsLoading ? (
-                <ActivityIndicator
-                  style={{ marginVertical: 32 }}
-                  color={theme.primary}
-                />
-              ) : (
-                <FlatList
-                  data={filteredContacts}
-                  keyExtractor={(c) => c.id}
-                  keyboardShouldPersistTaps="handled"
-                  style={styles.contactList}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.contactRow}
-                      onPress={() => handleSelectContact(item)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.contactName}>{item.name}</Text>
-                      <Text style={styles.contactPhone}>
-                        {item.phoneNumbers[0].number}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  ListEmptyComponent={
-                    <Text style={styles.contactEmpty}>No contacts found.</Text>
-                  }
-                />
-              )}
-            </View>
-          </View>
-        </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -725,99 +518,6 @@ const styles = StyleSheet.create({
   },
   toggleText: { color: '#FFFFFFCC', ...typography.bodyBold },
 
-  formCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
-  formTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-  },
-  formHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  formTitleInline: { flex: 1 },
-  // FILLED (gray, borderless) — deliberately NOT the outlined FormField treatment
-  // the other add forms use. This form is a compact block inside a white card, so
-  // the fill is what separates the inputs from the card; kept on purpose.
-  // `DateField variant="icon"` matches it (that variant exists only for this form).
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.sm,
-    color: colors.textPrimary,
-    ...typography.body,
-  },
-  phoneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  // "Already settled" chip — front-of-form toggle beside the title.
-  settledChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    flexShrink: 0,
-  },
-  settledChipText: {
-    ...typography.tiny,
-    color: colors.textSecondary,
-    fontWeight: '700',
-  },
-  settledBox: {
-    width: 16,
-    height: 16,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: colors.textMuted,
-    backgroundColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  phoneInput: {
-    flex: 1,
-    marginBottom: 0,
-  },
-  // Amount + date-picker button share a row (see the render comment).
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  amountInput: {
-    flex: 1,
-    marginBottom: 0,
-  },
-  // Must stay pixel-identical to `DateField`'s `iconBtn`: these are the form's two
-  // trailing icon buttons, one row apart, so any difference in fill or height reads
-  // as a mistake. Same recipe — gray fill, borderless, minWidth 48, spacing.md pad,
-  // accent-tinted glyph — which also makes both flush with the input beside them.
-  contactPickBtn: {
-    minWidth: 48,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 
   // Per-person card
   personCard: {
@@ -858,23 +558,12 @@ const styles = StyleSheet.create({
   },
   netAmount: { ...typography.bodyBold, fontWeight: '800' },
   netLabel: { ...typography.tiny, fontWeight: '600', marginTop: 1 },
-  // Same 28×28 tinted circle as waBtn / bellBtn beside it — the three trailing
-  // affordances on a person card must read as one set. Fill/border are inline
-  // (theme.primary) since this one follows the accent, not a fixed brand colour.
+  // waBtn / bellBtn are a matched pair of 28×28 tinted circles — the trailing
+  // affordances on a person card must read as one set.
   //
-  // Glyph sizes are 16 (pencil) / 16 (bell) / 17 (WhatsApp) — NOT identical on
-  // purpose. The WhatsApp mark is a filled disc, so at an equal nominal size it
-  // reads larger than a thin line glyph; the extra px on the line icons evens them
-  // out optically. Don't "fix" all three to one number.
-  personEdit: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.xs,
-  },
+  // Glyph sizes are 16 (bell) / 17 (WhatsApp) — NOT identical on purpose. The
+  // WhatsApp mark is a filled disc, so at an equal nominal size it reads larger
+  // than a thin line glyph; the extra px evens them out optically.
   waBtn: {
     width: 28,
     height: 28,
@@ -915,88 +604,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  settledPill: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.textMuted + '22',
-    borderRadius: radius.pill,
-  },
-  settledPillText: {
-    color: colors.textSecondary,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
 
-  emptyText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
 
-  // ── Contact search sheet ────────────────────────────────────────────────
-  contactBackdrop: {
-    flex:            1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent:  'flex-end',
-  },
-  contactDismiss: { flex: 1 },
-  contactSheet: {
-    backgroundColor:      colors.card,
-    borderTopLeftRadius:  24,
-    borderTopRightRadius: 24,
-    paddingHorizontal:    20,
-    paddingBottom:        32,
-    maxHeight:            '75%',
-  },
-  contactHandle: {
-    width:           36,
-    height:          4,
-    borderRadius:    2,
-    backgroundColor: colors.divider,
-    alignSelf:       'center',
-    marginTop:       10,
-    marginBottom:    14,
-  },
-  contactTitle: {
-    ...typography.h2,
-    fontWeight:   '700',
-    color:        colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  contactSearch: {
-    ...typography.body,
-    color:           colors.textPrimary,
-    borderWidth:     1.5,
-    borderColor:     colors.divider,
-    borderRadius:    radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical:   10,
-    marginBottom:    spacing.sm,
-    backgroundColor: colors.background,
-  },
-  contactList: { maxHeight: 380 },
-  contactRow: {
-    paddingVertical:   12,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-  },
-  contactName: {
-    ...typography.bodyBold,
-    fontWeight: '600',
-    color:      colors.textPrimary,
-  },
-  contactPhone: {
-    ...typography.small,
-    color:     colors.textSecondary,
-    marginTop: 2,
-  },
-  contactEmpty: {
-    ...typography.body,
-    color:     colors.textMuted,
-    textAlign: 'center',
-    marginTop: spacing.lg,
-  },
 });
 
 const ContactPickIcon = ({ size = 18, color = colors.primary }) => (

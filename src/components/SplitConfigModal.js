@@ -296,12 +296,31 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
         { mode: 'percent', myPercent: Number(myPercent) || 0 }
       );
     }
-    onClose();
+    // No trailing onClose() here — `onApply` already closes the modal in every
+    // caller (it sets the visibility state itself). Calling onClose() as well used
+    // to fire it in the SAME tick as onApply, using a stale closure from the
+    // PREVIOUS render. In AddTransactionScreen that closure re-checks
+    // `splitPicks.length === 0` to snap the toggle off on a bare dismiss — read
+    // before onApply's setSplitPicks(others) had taken effect, it always saw the
+    // old empty array and immediately undid the isSplit(true) onApply had just
+    // set. Net effect: picks were saved but the confirmed-split summary didn't
+    // render until the user reopened the picker, because reopening re-set
+    // isSplit(true) against picks that were never actually cleared.
   };
 
   const handleClear = () => {
-    onApply([]);
-    onClose();
+    const n = selected.size;
+    setConfirm({
+      title: 'Remove split?',
+      message: `This removes ${n} friend${n === 1 ? '' : 's'} from the split — their share${n === 1 ? '' : 's'} will be taken off Lent too.`,
+      primaryText: 'Remove',
+      destructive: true,
+      secondaryText: 'Cancel',
+      onConfirm: () => {
+        setConfirm(null);
+        onApply([]);
+      },
+    });
   };
 
   const n = 1 + selected.size;

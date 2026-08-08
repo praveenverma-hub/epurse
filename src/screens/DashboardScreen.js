@@ -60,8 +60,8 @@ import CategoryPickerModal from '../components/CategoryPickerModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
-import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
+import { useToast } from '../components/Toast';
 import { canSplitTransaction } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
 import GroupPickerSheet from '../components/GroupPickerSheet';
@@ -79,6 +79,7 @@ const PERIODS = [
 // ── Main screen ───────────────────────────────────────────────────────────────
 const DashboardScreen = ({ navigation }) => {
   const theme           = useTheme();
+  const toast           = useToast();
   const transactions    = useEPurseStore((s) => s.transactions);
   const categories      = useEPurseStore((s) => s.categories);
   const monthlyAggs     = useEPurseStore((s) => s.monthlyAggregates);
@@ -123,7 +124,6 @@ const DashboardScreen = ({ navigation }) => {
   const [lbLinkTxn, setLbLinkTxn] = useState(null);   // { txn, categoryId }
   const [ccBillTxn, setCcBillTxn] = useState(null);   // txn being reclassified as a CC bill payment
   const [splitTxn, setSplitTxn] = useState(null);
-  const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm, setConfirm] = useState(null); // { title, message, primaryText, destructive, onConfirm }
   const [debugTxn, setDebugTxn] = useState(null);
   const [groupPickerTxn, setGroupPickerTxn] = useState(null);
@@ -425,18 +425,23 @@ const DashboardScreen = ({ navigation }) => {
                 onPress={() => {
                   // Tapping the card opens the most relevant DETAIL view for
                   // what this transaction actually is — always view-first, then
-                  // edit: a shared-group expense shows its split detail (who
-                  // paid, per-member shares); a direct split shows its share
-                  // breakdown; a plain transaction shows its own detail sheet.
+                  // edit. A shared-group expense still gets its own detail sheet
+                  // (who paid, per-member shares — a different ledger entirely,
+                  // see the groups skill). A direct split now goes through the
+                  // SAME TxnDetailSheet as a plain transaction: it renders a
+                  // split breakdown section when txn.isSplit, and its Edit opens
+                  // the full form (amount/merchant/category/…) with the shares
+                  // editable inline there — split used to be its own island via
+                  // SplitDetailsModal → SplitConfigModal, reachable only from
+                  // this tap, with no way to touch anything else about the txn.
                   // The category-icon tap still skips straight to the manage
                   // sheet as a fast path.
                   const group = t.groupId ? groups.find((g) => g.id === t.groupId) : null;
                   if (group && group.type === 'shared') { setGroupDetailTxn({ txn: t, group }); return; }
-                  if (t.isSplit) { setSplitDetailsTxn(t); return; }
                   setDetailTxn(t);
                 }}
                 onPressCategory={() => setActiveTxn(t)}
-                onPressSplitChip={() => setSplitDetailsTxn(t)}
+                onPressSplitChip={() => setDetailTxn(t)}
                 onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(t) : undefined}
               />
             ))
@@ -483,6 +488,7 @@ const DashboardScreen = ({ navigation }) => {
         onPressRemoveFromGroup={() => {
           if (!activeTxn) return;
           untagTransactionFromGroup(activeTxn.id);
+          toast.success('Removed from group');
           setActiveTxn(null);
         }}
         onPressEditGroup={(() => {
@@ -632,20 +638,11 @@ const DashboardScreen = ({ navigation }) => {
         transaction={splitTxn}
         onClose={() => setSplitTxn(null)}
         onApply={(others, meta) => {
-          if (splitTxn) setTransactionSplit(splitTxn.id, others, meta);
+          if (splitTxn) {
+            setTransactionSplit(splitTxn.id, others, meta);
+            toast.success(others.length ? 'Split saved' : 'Split removed');
+          }
           setSplitTxn(null);
-        }}
-      />
-
-      <SplitDetailsModal
-        visible={!!splitDetailsTxn}
-        txn={splitDetailsTxn}
-        myName={userName ? `You (${userName})` : 'You'}
-        onClose={() => setSplitDetailsTxn(null)}
-        onEdit={() => {
-          const t = splitDetailsTxn;
-          setSplitDetailsTxn(null);
-          setSplitTxn(t);
         }}
       />
 
@@ -691,6 +688,7 @@ const DashboardScreen = ({ navigation }) => {
             setGroupExpenseTxn({ txn, group });
           } else {
             tagTransactionToGroup(txn.id, groupId);
+            toast.success('Added to group');
           }
         }}
       />
@@ -707,6 +705,7 @@ const DashboardScreen = ({ navigation }) => {
               paidByName: expenseData.paidByName,
               shares: expenseData.shares,
             } : null);
+            toast.success('Added to group');
             setGroupExpenseTxn(null);
           }}
         />
@@ -717,12 +716,19 @@ const DashboardScreen = ({ navigation }) => {
           visible={!!editGroupTxn}
           group={editGroupTxn.group}
           editTxn={editGroupTxn.txn}
-          presetAmount={editGroupTxn.txn?.amount}
+          presetAmount={
+            // Lock the amount ONLY for SMS-derived rows, where the bank is the source
+            // of truth. A MANUAL group expense stays editable — the rule
+            // AddGroupExpenseScreen already used. Passing it unconditionally made the
+            // same manual expense editable from the Groups tab but frozen here.
+            editGroupTxn.txn?.source !== 'manual' ? editGroupTxn.txn?.amount : undefined
+          }
           showCategory
           lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
           onClose={() => setEditGroupTxn(null)}
           onAdd={(expenseData) => {
             updateGroupExpense(editGroupTxn.txn.id, expenseData);
+            toast.success('Changes saved');
             setEditGroupTxn(null);
           }}
         />
@@ -748,6 +754,7 @@ const DashboardScreen = ({ navigation }) => {
           editable from this form. */}
       <TxnDetailSheet
         txn={detailTxn}
+        myName={userName ? `You (${userName})` : 'You'}
         onClose={() => setDetailTxn(null)}
         onEdit={() => {
           const t = detailTxn;

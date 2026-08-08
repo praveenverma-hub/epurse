@@ -11,11 +11,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { THEMES } from '../constants/themes';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import GradientButton from '../components/GradientButton';
@@ -40,8 +38,6 @@ const CategoriesScreen = ({ navigation }) => {
   const addCustomChild       = useEPurseStore((s) => s.addCustomChild);
   const removeCustomCategory = useEPurseStore((s) => s.removeCustomCategory);
   const resetAll             = useEPurseStore((s) => s.resetAll);
-  const themeId              = useEPurseStore((s) => s.themeId);
-  const setThemeId           = useEPurseStore((s) => s.setThemeId);
 
   const toast = useToast();
   const [confirm, setConfirm]   = useState(null);
@@ -98,44 +94,11 @@ const CategoriesScreen = ({ navigation }) => {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Categories & Settings</Text>
+        <Text style={styles.title}>Categories</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* ── Theme picker ────────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>App theme</Text>
-          <Text style={styles.hint}>
-            Pick an accent — gradients, buttons and highlights update across the app.
-          </Text>
-          <View style={styles.themeRow}>
-            {Object.values(THEMES).map((t) => {
-              const active = themeId === t.id;
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  onPress={() => setThemeId(t.id)}
-                  style={[styles.themeTile, active && { borderColor: t.primary, borderWidth: 2 }]}
-                  activeOpacity={0.85}
-                >
-                  <LinearGradient
-                    colors={[t.gradientStart, t.gradientEnd]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.themeSwatch}
-                  >
-                    {active ? <Text style={styles.themeCheck}>✓</Text> : null}
-                  </LinearGradient>
-                  <Text style={[styles.themeLabel, active && { color: t.primary, fontWeight: '700' }]}>
-                    {t.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
         {/* ── Category tree ───────────────────────────────────────────── */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Categories</Text>
@@ -444,27 +407,6 @@ const styles = StyleSheet.create({
   },
   dangerText: { color: colors.danger, ...typography.bodyBold, fontWeight: '700' },
 
-  // Theme picker
-  themeRow: { flexDirection: 'row', gap: spacing.md, flexWrap: 'wrap' },
-  themeTile: {
-    alignItems: 'center',
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    gap: 6,
-    flexBasis: '22%',
-  },
-  themeSwatch: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.card,
-  },
-  themeCheck: { color: '#fff', fontSize: 24, fontWeight: '800' },
-  themeLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
 });
 
 export default CategoriesScreen;

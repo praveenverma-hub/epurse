@@ -30,6 +30,7 @@ import { useTheme } from '../hooks/useTheme';
 import { INPUT_LIMITS } from '../utils/validation';
 import { BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
+import { useToast } from '../components/Toast';
 import SheetCloseButton from '../components/SheetCloseButton';
 import GradientButton from '../components/GradientButton';
 
@@ -38,6 +39,7 @@ const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
 
 const BudgetPlanScreen = ({ navigation }) => {
   const theme = useTheme();
+  const toast = useToast();
 
   const budget                  = useEPurseStore((s) => s.budget);
   const lastBudgetPlan          = useEPurseStore((s) => s.lastBudgetPlan);
@@ -132,8 +134,9 @@ const BudgetPlanScreen = ({ navigation }) => {
       if (Number.isFinite(num) && num > 0) perCategory[catId] = num;
     });
     setBudget({ perCategory });
+    toast.success(isEdit ? 'Plan updated' : 'Plan created');
     navigation.goBack();
-  }, [localCats, setBudget, navigation]);
+  }, [localCats, setBudget, navigation, isEdit, toast]);
 
   // First-level categories available to add (not yet in the local list)
   const pickerCategories = useMemo(() => {

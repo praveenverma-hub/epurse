@@ -229,10 +229,12 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
   const handleSaveGroup = (data: CreateGroupData) => {
     if (editTarget) {
       updateGroup(editTarget.id, data);
+      toast.success('Group updated');
       setEditTarget(null);
     } else {
       const id = createGroup(data);
       setSelectedId(id);
+      toast.success('Group created');
     }
     setCreateVisible(false);
   };
@@ -252,7 +254,11 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
       primaryText: 'Settle',
       secondaryText: 'Cancel',
       destructive: true,
-      onPrimary: () => { settleGroupPersonBalance(selectedGroupId, pb.personKey); setConfirm(null); },
+      onPrimary: () => {
+        settleGroupPersonBalance(selectedGroupId, pb.personKey);
+        setConfirm(null);
+        toast.success('Settled', `${pb.person} · ${formatCurrency(Math.abs(pb.net))}`);
+      },
       onSecondary: () => setConfirm(null),
     });
   };
@@ -270,7 +276,12 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
       primaryText: 'Delete',
       secondaryText: 'Cancel',
       destructive: true,
-      onPrimary: () => { deleteGroup(g.id); setSelectedId(null); setConfirm(null); },
+      onPrimary: () => {
+        deleteGroup(g.id);
+        setSelectedId(null);
+        setConfirm(null);
+        toast.success('Group deleted');
+      },
       onSecondary: () => setConfirm(null),
     });
   };
@@ -693,12 +704,18 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
           : undefined}
         accounts={accounts}
         onSelect={(accountId: string) => {
-          if (selectedGroupId && settleTarget) settleGroupPersonBalance(selectedGroupId, settleTarget.personKey, { accountId });
+          if (selectedGroupId && settleTarget) {
+            settleGroupPersonBalance(selectedGroupId, settleTarget.personKey, { accountId });
+            toast.success('Settled', `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))}`);
+          }
           setSettleTarget(null);
         }}
         skipLabel="Just mark repaid (no expense)"
         onSkip={() => {
-          if (selectedGroupId && settleTarget) settleGroupPersonBalance(selectedGroupId, settleTarget.personKey);
+          if (selectedGroupId && settleTarget) {
+            settleGroupPersonBalance(selectedGroupId, settleTarget.personKey);
+            toast.success('Settled', `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))}`);
+          }
           setSettleTarget(null);
         }}
         onClose={() => setSettleTarget(null)}

@@ -16,6 +16,8 @@ register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook
 const mod = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
 const useStore = mod.useEPurseStore || mod.default;
 const beh = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/analytics/behavioralSelectors.js');
+const { isGroupExcluded, isMemoTxn, splitLbChipKind } =
+  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
 
 const reset = () =>
   useStore.setState({
@@ -174,7 +176,13 @@ check('CC true-up: confirming zeroes the CC outstanding balance',
   Math.round(accts().find((a) => a.mask === '7890').balance) === 0,
   `bal ${accts().find((a) => a.mask === '7890').balance}`);
 
-// ── CC payment with a source account debits the payer + books a cc_bill txn ────
+// ── CC bill payment: the PAYER side is only ever RE-TAGGED, never invented ─────
+// The bank sends its own "Rs.X debited …" for the payment, and that message is what
+// moves the balance. Synthesising a debit in the true-up flow on top of it charged the
+// account twice. These four cases pin the whole contract down.
+
+// (a) No bank message yet → picking a source must NOT move the balance or add a row.
+//     The card's "payment received" SMS frequently lands before the bank's debit.
 reset();
 useStore.setState({ accounts: [
   { id: 'cc', type: 'Credit Card', bankName: 'SBI', mask: '7890', balance: -5000, aliasMasks: [], ccPaymentsTracked: true },
@@ -184,9 +192,74 @@ useStore.getState().applyCCPayment({ amount: 5000, accountMask: '7890', bankName
 useStore.getState().confirmCCTrueUp('bank');
 {
   const bank = accts().find((a) => a.mask === '4021');
-  const ccBillTxns = useStore.getState().transactions.filter((t) => t.categoryId === 'cc_bill');
-  check('CC payment: paying account debited (20000 → 15000)', bank && Math.round(bank.balance) === 15000, `bal ${bank ? bank.balance : '?'}`);
-  check('CC payment: a cc_bill transaction is booked on the payer', ccBillTxns.length === 1, `got ${ccBillTxns.length}`);
+  check('CC pay: no bank SMS yet → payer balance untouched (no invented debit)',
+    bank && Math.round(bank.balance) === 20000, `bal ${bank ? bank.balance : '?'}`);
+  check('CC pay: no bank SMS yet → no transaction fabricated',
+    useStore.getState().transactions.length === 0, `got ${useStore.getState().transactions.length}`);
+  check('CC pay: the card is still zeroed regardless of the payer side',
+    Math.round(accts().find((a) => a.mask === '7890').balance) === 0);
+}
+
+// (b) The bank's own outgoing-payment SMS books ONE cc_bill debit and moves the balance
+//     exactly once — and re-sweeping the same message must not move it again. (The
+//     launch sweep re-reads the whole inbox; this path had no smsId guard at all, so
+//     the balance drifted down by the bill on every single app open.)
+reset();
+useStore.setState({ accounts: [
+  { id: 'bank', type: 'Bank', bankName: 'HDFC Bank', mask: '4021', balance: 20000, aliasMasks: [] },
+] });
+const CC_OUT_SMS = 'Rs.5000.00 debited from A/c XX4021 towards CREDIT CARD PAYMENT on 06-08-26.';
+ingest('HDFCBK', CC_OUT_SMS, { receivedAt: T0, smsId: 'cc-out-1' });
+check('CC outgoing: bank SMS books a cc_bill debit (20000 → 15000)',
+  Math.round(accts()[0].balance) === 15000, `bal ${accts()[0].balance}`);
+check('CC outgoing: it is a real transaction, categorised cc_bill',
+  useStore.getState().transactions.filter((t) => t.categoryId === 'cc_bill').length === 1,
+  `got ${useStore.getState().transactions.length} txns`);
+ingest('HDFCBK', CC_OUT_SMS, { receivedAt: T0, smsId: 'cc-out-1' });
+ingest('HDFCBK', CC_OUT_SMS, { receivedAt: T0, smsId: 'cc-out-1' });
+check('CC outgoing: re-sweeping the same SMS does NOT re-debit the bank',
+  Math.round(accts()[0].balance) === 15000, `bal ${accts()[0].balance} after 3 sweeps`);
+check('CC outgoing: bill payment is excluded from spend (cc_bill is non-spend)',
+  useStore.getState().getMonthlySpend() === 0, `spend ${useStore.getState().getMonthlySpend()}`);
+
+// (c) Bank SMS AND the card's payment-received SMS → the true-up must not add a second
+//     debit on top of the one the bank already booked.
+reset();
+useStore.setState({ accounts: [
+  { id: 'cc', type: 'Credit Card', bankName: 'SBI', mask: '7890', balance: -5000, aliasMasks: [], ccPaymentsTracked: true },
+  { id: 'bank', type: 'Bank', bankName: 'HDFC Bank', mask: '4021', balance: 20000, aliasMasks: [] },
+] });
+ingest('HDFCBK', CC_OUT_SMS, { receivedAt: T0, smsId: 'cc-out-2' });
+useStore.getState().applyCCPayment({ amount: 5000, accountMask: '7890', bankName: 'SBI' }, 'ccp-c', T0);
+useStore.getState().confirmCCTrueUp('bank');
+{
+  const bank = accts().find((a) => a.mask === '4021');
+  check('CC pay: both SMS present → payer debited ONCE (15000, not 10000)',
+    bank && Math.round(bank.balance) === 15000, `bal ${bank ? bank.balance : '?'}`);
+  check('CC pay: both SMS present → exactly one cc_bill row',
+    useStore.getState().transactions.filter((t) => t.categoryId === 'cc_bill').length === 1,
+    `got ${useStore.getState().transactions.filter((t) => t.categoryId === 'cc_bill').length}`);
+}
+
+// (d) A plain bank debit the parser did NOT recognise as a bill payment gets re-tagged
+//     to cc_bill by the source pick — the balance already moved, only the label changes,
+//     which is what removes it from spend.
+reset();
+useStore.setState({ accounts: [
+  { id: 'cc', type: 'Credit Card', bankName: 'SBI', mask: '7890', balance: -5000, aliasMasks: [], ccPaymentsTracked: true },
+  { id: 'bank', type: 'Bank', bankName: 'HDFC Bank', mask: '4021', balance: 20000, aliasMasks: [] },
+] });
+ingest('HDFCBK', 'Rs.5000.00 debited from A/c XX4021 at BILLDESK on 06-08-26.', { receivedAt: T0, smsId: 'plain-1' });
+{
+  const spendBefore = useStore.getState().getMonthlySpend();
+  useStore.getState().applyCCPayment({ amount: 5000, accountMask: '7890', bankName: 'SBI' }, 'ccp-d', T0);
+  useStore.getState().confirmCCTrueUp('bank');
+  const bank = accts().find((a) => a.mask === '4021');
+  check('CC pay: unrecognised bank debit is RE-TAGGED, balance unchanged by the re-tag',
+    bank && Math.round(bank.balance) === 15000, `bal ${bank ? bank.balance : '?'}`);
+  check('CC pay: re-tag moves it out of spend',
+    spendBefore === 5000 && useStore.getState().getMonthlySpend() === 0,
+    `before ${spendBefore} after ${useStore.getState().getMonthlySpend()}`);
 }
 
 // ── Debit-card ↔ bank merge (linkDebitCardToBank) — same money, not two balances ──
@@ -652,6 +725,382 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('location: spend survives compaction in byLocation',
     byLoc.Pune === 800 && byLoc.Mumbai === 200, JSON.stringify(byLoc));
   check('location: income is NOT bucketed by place', !Object.values(byLoc).includes(900), JSON.stringify(byLoc));
+}
+
+// ── Editing a split transaction's amount keeps the split, pro-rata ────────────
+// `updateTransaction` deliberately CLEARS a split when the amount changes: the stored
+// shares were computed against the old total, so leaving them would make the parts stop
+// summing to the whole. The edit screen used to stop there — split gone, LB rows gone,
+// no warning, and the split wasn't even rendered in edit mode so it couldn't be seen.
+// commitEdit now re-applies the picks by PERCENT afterwards, which rebuilds shares and
+// LB rows against the new amount. These cases pin that whole sequence.
+{
+  reset();
+  useStore.setState({ accounts: [
+    { id: 'a1', type: 'Bank', bankName: 'HDFC Bank', mask: '4021', balance: 10000, aliasMasks: [] },
+  ] });
+  useStore.getState().addTransaction({
+    amount: 900, type: 'debit', accountId: 'a1', categoryId: 'food',
+    parentCategory: 'Food & Dining', childCategory: 'Restaurants',
+    merchant: 'Barbeque Nation', source: 'manual', isReviewed: true,
+    isSplit: true, myPercent: 34,
+    splitOthers: [
+      { contactId: 'c1', name: 'Amit', percent: 33 },
+      { contactId: 'c2', name: 'Riya', percent: 33 },
+    ],
+  });
+  const t0 = useStore.getState().transactions[0];
+  check('split edit: created with shares summing to the amount',
+    t0.myShareAmount + t0.splitWith.reduce((s, o) => s + o.shareAmount, 0) === 900,
+    `${t0.myShareAmount} + ${JSON.stringify(t0.splitWith.map((s) => s.shareAmount))}`);
+  check('split edit: one lent row per other person',
+    useStore.getState().lentBorrowed.length === 2 &&
+    useStore.getState().lentBorrowed.every((l) => l.kind === 'lent'));
+
+  // Percent picks, exactly as the edit screen's prefill derives them.
+  const amt = t0.amount;
+  const myPct = Math.round((t0.myShareAmount / amt) * 100);
+  const picks = t0.splitWith.map((o) => ({
+    contactId: o.contactId, name: o.name, percent: Math.round((o.shareAmount / amt) * 100),
+  }));
+
+  useStore.getState().updateTransaction(t0.id, {
+    amount: 1200, type: t0.type, accountId: 'a1', merchant: t0.merchant,
+    categoryId: t0.categoryId, parentCategory: t0.parentCategory,
+    childCategory: t0.childCategory, note: '', createdAt: t0.createdAt,
+  });
+  // Documents WHY the re-apply is needed — this is the state the old flow shipped.
+  check('split edit: updateTransaction alone still drops the split (by design)',
+    useStore.getState().transactions[0].isSplit === false &&
+    useStore.getState().lentBorrowed.length === 0);
+
+  useStore.getState().setTransactionSplit(t0.id, picks, { mode: 'percent', myPercent: myPct });
+  const t1 = useStore.getState().transactions[0];
+  const lb1 = useStore.getState().lentBorrowed;
+  check('split edit: re-applying rebuilds shares against the NEW amount',
+    t1.myShareAmount + t1.splitWith.reduce((s, o) => s + o.shareAmount, 0) === 1200,
+    `${t1.myShareAmount} + ${JSON.stringify(t1.splitWith.map((s) => s.shareAmount))}`);
+  check('split edit: proportions are preserved (34/33/33)',
+    Math.round((t1.myShareAmount / 1200) * 100) === 34 &&
+    t1.splitWith.every((o) => Math.round((o.shareAmount / 1200) * 100) === 33));
+  check('split edit: LB rows are rebuilt at the new share amounts',
+    lb1.length === 2 && lb1.every((l) => l.kind === 'lent' && l.amount === 396),
+    JSON.stringify(lb1.map((l) => [l.person, l.amount])));
+  check('split edit: the account reflects the new full amount, not the share',
+    Math.round(useStore.getState().accounts[0].balance) === 8800,
+    `bal ${useStore.getState().accounts[0].balance}`);
+
+  useStore.getState().setTransactionSplit(t0.id, [], {});
+  check('split edit: toggling the split off clears shares AND its LB rows',
+    useStore.getState().transactions[0].isSplit === false &&
+    useStore.getState().transactions[0].splitWith.length === 0 &&
+    useStore.getState().lentBorrowed.length === 0);
+}
+
+// ─── SPLIT PAYER (plain split, group parity) ─────────────────────────────────
+// A plain split's payer carries the SAME accounting as a shared group's:
+//   paidBy me    → my account debits the full amount, others owe me (lent).
+//   paidBy other → memo: NO balance moves, excluded from spend, and I owe that
+//                  person my own share (borrowed).
+// The balance round-trip across payer flips is the part most worth pinning: a
+// missed applyDelta there is silent money loss.
+{
+  reset();
+  const bal = () => Math.round(useStore.getState().accounts[0].balance);
+  const txn0 = () => useStore.getState().transactions[0];
+  const lbRows = () => useStore.getState().lentBorrowed;
+  const acct = () => [{ id: 'a1', type: 'Bank', bankName: 'HDFC Bank', mask: '4021', balance: 10000, aliasMasks: [] }];
+  const addSplit = (extra = {}) => {
+    useStore.setState({ accounts: acct(), transactions: [], lentBorrowed: [] });
+    useStore.getState().addTransaction({
+      amount: 1000, type: 'debit', accountId: 'a1', categoryId: 'food',
+      parentCategory: 'Food & Dining', childCategory: 'Restaurants',
+      merchant: 'Dinner', source: 'manual', isReviewed: true,
+      isSplit: true, myPercent: 50,
+      splitOthers: [{ contactId: 'c1', name: 'Rahul', percent: 50 }],
+      ...extra,
+    });
+  };
+
+  // ── Created directly as a memo (someone else paid) ──
+  addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
+  check('split payer: created memo moves NO balance', bal() === 10000, `bal ${bal()}`);
+  check('split payer: memo is flagged and carries its payer',
+    txn0().isSplitMemo === true && txn0().splitPaidBy?.name === 'Rahul');
+  check('split payer: memo parks the account instead of owning it',
+    !txn0().accountId && txn0().memoAccountId === 'a1');
+  check('split payer: memo owes MY share as one borrowed row',
+    lbRows().length === 1 && lbRows()[0].kind === 'borrowed' &&
+    lbRows()[0].amount === 500 && lbRows()[0].person === 'Rahul',
+    JSON.stringify(lbRows().map((l) => [l.kind, l.person, l.amount])));
+  check('split payer: a memo is excluded from spend everywhere',
+    isGroupExcluded(txn0(), []) === true && isMemoTxn(txn0()) === true);
+  check('split payer: memo contributes nothing to monthly spend',
+    useStore.getState().getMonthlySpend() === 0,
+    `spend ${useStore.getState().getMonthlySpend()}`);
+  check('split payer: memo reads as BORROWED on the card',
+    splitLbChipKind(txn0()) === 'borrowed');
+
+  // ── Created as a normal split (I paid) — the pre-existing behaviour ──
+  addSplit();
+  check('split payer: I-paid split debits the FULL amount', bal() === 9000, `bal ${bal()}`);
+  check('split payer: I-paid split lends out their share',
+    lbRows().length === 1 && lbRows()[0].kind === 'lent' && lbRows()[0].amount === 500);
+  check('split payer: I-paid split counts only MY share as spend',
+    useStore.getState().getMonthlySpend() === 500,
+    `spend ${useStore.getState().getMonthlySpend()}`);
+
+  // ── Flip I-paid → memo, then back. The balance must land exactly where it started.
+  const picks = [{ contactId: 'c1', name: 'Rahul', percent: 50 }];
+  useStore.getState().setTransactionSplit(txn0().id, picks,
+    { mode: 'percent', myPercent: 50, paidBy: { contactId: 'c1', name: 'Rahul' } });
+  check('split payer: flipping to a memo GIVES THE MONEY BACK', bal() === 10000, `bal ${bal()}`);
+  check('split payer: flipping to a memo swaps lent → borrowed',
+    lbRows().length === 1 && lbRows()[0].kind === 'borrowed' && lbRows()[0].amount === 500);
+
+  useStore.getState().setTransactionSplit(txn0().id, picks, { mode: 'percent', myPercent: 50, paidBy: null });
+  check('split payer: flipping back to me re-applies the debit', bal() === 9000, `bal ${bal()}`);
+  check('split payer: flipping back restores the account on the txn',
+    txn0().accountId === 'a1' && !txn0().isSplitMemo && !txn0().memoAccountId);
+  check('split payer: flipping back swaps borrowed → lent',
+    lbRows().length === 1 && lbRows()[0].kind === 'lent');
+
+  // ── Clearing a memo's split entirely must also restore the debit.
+  addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
+  useStore.getState().setTransactionSplit(txn0().id, [], {});
+  check('split payer: clearing a memo split re-applies the debit', bal() === 9000, `bal ${bal()}`);
+  check('split payer: clearing a memo leaves no memo flags stranded',
+    !txn0().isSplitMemo && !txn0().splitPaidBy && !txn0().memoAccountId &&
+    txn0().accountId === 'a1' && txn0().isSplit === false);
+  check('split payer: clearing a memo drops its borrowed row', lbRows().length === 0);
+
+  // ── An amount edit drops the split (by design) — a memo must not strand.
+  addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
+  const memoId = txn0().id;
+  useStore.getState().updateTransaction(memoId, {
+    amount: 1200, type: 'debit', accountId: 'a1', merchant: 'Dinner',
+    categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants',
+    note: '', createdAt: txn0().createdAt,
+  });
+  check('split payer: an amount edit that drops a memo split re-debits the new amount',
+    bal() === 8800, `bal ${bal()}`);
+  check('split payer: an amount edit leaves no stranded memo',
+    !txn0().isSplitMemo && !txn0().splitPaidBy && txn0().accountId === 'a1');
+  check('split payer: a re-debited ex-memo is back in spend',
+    useStore.getState().getMonthlySpend() === 1200,
+    `spend ${useStore.getState().getMonthlySpend()}`);
+
+  // ── Editing a memo WITHOUT changing the amount keeps it a memo and moves nothing.
+  addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
+  useStore.getState().updateTransaction(txn0().id, {
+    amount: 1000, type: 'debit', accountId: 'a1', merchant: 'Dinner (edited)',
+    categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants',
+    note: '', createdAt: txn0().createdAt,
+  });
+  check('split payer: editing a memo in place still moves no money', bal() === 10000, `bal ${bal()}`);
+  check('split payer: editing a memo in place keeps it a memo',
+    txn0().isSplitMemo === true && !txn0().accountId && txn0().memoAccountId === 'a1' &&
+    txn0().merchant === 'Dinner (edited)');
+
+  // ── Deleting a memo must not "give back" money that never left.
+  addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
+  useStore.getState().deleteTransaction(txn0().id);
+  check('split payer: deleting a memo leaves the balance untouched', bal() === 10000, `bal ${bal()}`);
+  check('split payer: deleting a memo drops its borrowed row', lbRows().length === 0);
+
+  // ── A payer whose share is zero owes nothing → no LB row, still a memo.
+  useStore.setState({ accounts: acct(), transactions: [], lentBorrowed: [] });
+  useStore.getState().addTransaction({
+    amount: 1000, type: 'debit', accountId: 'a1', categoryId: 'food',
+    parentCategory: 'Food & Dining', childCategory: 'Restaurants',
+    merchant: 'Treat', source: 'manual', isReviewed: true,
+    isSplit: true, myPercent: 0,
+    splitOthers: [{ contactId: 'c1', name: 'Rahul', percent: 100 }],
+    splitPaidBy: { contactId: 'c1', name: 'Rahul' },
+  });
+  check('split payer: Rahul paid and I owe nothing → memo with no debt',
+    txn0().isSplitMemo === true && lbRows().length === 0 && bal() === 10000);
+
+  // ── A stray splitPaidBy with no actual split must NOT suppress the debit.
+  useStore.setState({ accounts: acct(), transactions: [], lentBorrowed: [] });
+  useStore.getState().addTransaction({
+    amount: 700, type: 'debit', accountId: 'a1', categoryId: 'food',
+    parentCategory: 'Food & Dining', childCategory: 'Restaurants',
+    merchant: 'Solo', source: 'manual', isReviewed: true,
+    isSplit: false, splitPaidBy: { contactId: 'c1', name: 'Rahul' },
+  });
+  check('split payer: a payer without a split is ignored (money still moves)',
+    bal() === 9300 && !txn0().isSplitMemo && !txn0().splitPaidBy && txn0().accountId === 'a1',
+    `bal ${bal()}`);
+}
+
+// ─── LB SETTLED RETENTION runs from createdAt, not the (backdatable) date ─────
+// Regression: a borrow_repaid the user entered against an OLD date was deleted by
+// the next launch's compaction, because retention was measured from `date`. They
+// typed an entry, saw it, restarted, and it was gone. Retention must run from when
+// the row was RECORDED; `date` is the event date and is user-editable.
+{
+  const DAY = 86400000;
+  const ago = (d) => new Date(Date.now() - d * DAY).toISOString();
+  const survives = (row) => {
+    useStore.setState({
+      transactions: [], accounts: [], groups: [], monthlyAggregates: {},
+      lastCompactedAt: 0, lentBorrowed: [{ id: 'x', kind: 'borrow_repaid', person: 'Rahul', amount: 500, ...row }],
+    });
+    useStore.getState().compactTransactions(true);
+    return useStore.getState().lentBorrowed.length === 1;
+  };
+
+  check('lb retention: a settlement backdated years but recorded TODAY survives compaction',
+    survives({ date: ago(900), createdAt: ago(0) }) === true);
+  check('lb retention: a settlement actually recorded >2yr ago is still pruned',
+    survives({ date: ago(900), createdAt: ago(900) }) === false);
+  // Window is 730 days (LB_SETTLED_RETENTION_MS) — raised from 365.
+  check('lb retention: the 2-year boundary holds (729d kept, 731d pruned)',
+    survives({ date: ago(729), createdAt: ago(729) }) === true &&
+    survives({ date: ago(731), createdAt: ago(731) }) === false);
+  check('lb retention: a row inside the OLD 1-year window is now comfortably kept',
+    survives({ date: ago(400), createdAt: ago(400) }) === true);
+  check('lb retention: legacy rows with no createdAt fall back to date',
+    survives({ date: ago(10) }) === true && survives({ date: ago(900) }) === false);
+  // NaN comparisons are all false, so the old `>= cutoff` form dropped these.
+  check('lb retention: a row with an unparseable date is KEPT, not silently deleted',
+    survives({ date: undefined }) === true && survives({ date: 'not-a-date' }) === true);
+  check('lb retention: outstanding rows are never pruned however old',
+    survives({ kind: 'borrowed', date: ago(1200), createdAt: ago(1200) }) === true);
+
+  // The writers must actually stamp it, or every guard above silently falls back.
+  useStore.setState({ transactions: [], accounts: [], lentBorrowed: [], groups: [] });
+  useStore.getState().addAlreadySettledLentBorrowed({
+    person: 'Rahul', amount: 500, kind: 'borrowed', date: ago(900), note: '', contactId: 'c1', phone: '9876543210',
+  });
+  const stamped = useStore.getState().lentBorrowed[0];
+  check('lb retention: addAlreadySettledLentBorrowed stamps createdAt and keeps the backdated date',
+    !!stamped.createdAt &&
+    Date.now() - new Date(stamped.createdAt).getTime() < 60_000 &&
+    stamped.date === ago(900).slice(0, 10) + stamped.date.slice(10),
+    `createdAt=${stamped.createdAt} date=${stamped.date}`);
+  useStore.getState().compactTransactions(true);
+  check('lb retention: …and it survives the very next compaction',
+    useStore.getState().lentBorrowed.length === 1);
+}
+
+// ─── SPEND RULES — user-chosen "counts as expense" per PARENT category ────────
+// Parent-level by necessity: most sub-categories share their parent's legacyId, txns
+// don't always carry childCategory, and compacted history is legacy-keyed. The rule
+// must reach every spend surface (spendExcluded), must NOT touch balances, and must
+// not leak into income.
+{
+  const acct = () => [{ id: 'a1', type: 'Bank', bankName: 'HDFC Bank', mask: '4021', balance: 100000, aliasMasks: [] }];
+  const seed = () => {
+    useStore.setState({
+      transactions: [], accounts: acct(), lentBorrowed: [], groups: [],
+      monthlyAggregates: {}, excludedExpenseParents: [], budget: null, lastCompactedAt: 0,
+    });
+    const add = (amount, parent, child, type = 'debit') => useStore.getState().addTransaction({
+      amount, type, accountId: 'a1', merchant: 'M', source: 'manual', isReviewed: true,
+      parentCategory: parent, childCategory: child,
+    });
+    add(1000, 'Food & Dining', 'Restaurants');
+    add(2000, 'Shopping', 'Clothing');
+    add(500,  'Bills & Utilities', 'Electricity');
+    add(5000, 'Income', 'Salary', 'credit');
+  };
+  const spend  = () => useStore.getState().getMonthlySpend();
+  const income = () => useStore.getState().getMonthlyIncome();
+  const bal    = () => Math.round(useStore.getState().accounts[0].balance);
+
+  seed();
+  check('spend rules: everything counts by default', spend() === 3500, `spend ${spend()}`);
+  const baseBal = bal();
+
+  useStore.getState().setExpenseParentCounted('shopping', false);
+  check('spend rules: excluding a parent drops exactly its spend',
+    spend() === 1500, `spend ${spend()}`);
+  check('spend rules: an excluded parent leaves the account balance untouched',
+    bal() === baseBal, `bal ${bal()} vs ${baseBal}`);
+  check('spend rules: the category breakdown drops it too',
+    !useStore.getState().getCategoryBreakdown().some((b) => (b.categoryId || b.id) === 'shopping'),
+    JSON.stringify(useStore.getState().getCategoryBreakdown().map((b) => b.categoryId || b.id)));
+
+  useStore.getState().setExpenseParentCounted('shopping', true);
+  check('spend rules: re-including restores it', spend() === 3500, `spend ${spend()}`);
+
+  // An EXPENSE rule must not touch income — they're separate totals.
+  useStore.getState().setExpenseParentCounted('food', false);
+  check('spend rules: an expense rule leaves income alone',
+    income() === 5000 && spend() === 2500, `income ${income()} spend ${spend()}`);
+
+  // The setter REFUSES non-budgetable parents. Without that guard this would zero the
+  // user's income, because spendExcluded gates getMonthlyIncome as well as spend.
+  useStore.getState().setExpenseParentCounted('income', false);
+  check('spend rules: the setter refuses Income/Transfers (would otherwise zero income)',
+    income() === 5000 && !useStore.getState().excludedExpenseParents.includes('income'),
+    `income ${income()} excluded ${JSON.stringify(useStore.getState().excludedExpenseParents)}`);
+  useStore.getState().setExpenseParentCounted('transfers', false);
+  check('spend rules: …transfers too',
+    !useStore.getState().excludedExpenseParents.includes('transfers'));
+
+  useStore.getState().resetSpendRules();
+  check('spend rules: reset counts everything again',
+    spend() === 3500 && useStore.getState().excludedExpenseParents.length === 0);
+
+  // The predicate reads STATE, not a cached mirror — so a direct setState applies.
+  // A module-level mirror refreshed only by the setters would silently ignore this.
+  useStore.setState({ excludedExpenseParents: ['shopping'] });
+  check('spend rules: state is the single source (a direct setState takes effect)',
+    spend() === 1500, `spend ${spend()}`);
+
+  // Persisted rules must survive a cold start with no setter call at all.
+  seed();
+  useStore.setState({ excludedExpenseParents: ['bills'] });
+  check('spend rules: rules apply straight from rehydrated state',
+    spend() === 3000, `spend ${spend()}`);
+}
+
+// ─── SPEND RULES reach COMPACTED history, not just the live month ─────────────
+// Aggregates are materialised at compaction, so getMonthlySpend returns a stored
+// number for old months. Without excludedSpendInAggregate a rule set today would
+// leave last year's totals counting the category — the chart contradicting the rule.
+{
+  const DAY = 86400000;
+  const old = new Date(Date.now() - 200 * DAY);
+  const mk = `${old.getFullYear()}-${String(old.getMonth() + 1).padStart(2, '0')}`;
+  useStore.setState({
+    transactions: [], accounts: [{ id: 'a1', type: 'Bank', bankName: 'H', mask: '1', balance: 99999, aliasMasks: [] }],
+    lentBorrowed: [], groups: [], monthlyAggregates: {}, excludedExpenseParents: [], lastCompactedAt: 0,
+  });
+  const addOld = (amount, legacy, parent) => useStore.getState().addTransaction({
+    amount, type: 'debit', accountId: 'a1', merchant: 'M', source: 'manual', isReviewed: true,
+    categoryId: legacy, parentCategory: parent, createdAt: old.toISOString(),
+  });
+  addOld(3000, 'shopping', 'Shopping');
+  addOld(1000, 'food', 'Food & Dining');
+  useStore.getState().compactTransactions(true);
+
+  const agg = useStore.getState().monthlyAggregates[mk];
+  check('history rules: the month really did compact to an aggregate',
+    useStore.getState().transactions.length === 0 && agg?.totalSpend === 4000,
+    `raw ${useStore.getState().transactions.length} agg ${JSON.stringify(agg?.byCategory)}`);
+
+  const spendOld = () => useStore.getState().getMonthlySpend(old);
+  check('history rules: aggregate total is intact with no rules', spendOld() === 4000, `${spendOld()}`);
+
+  useStore.getState().setExpenseParentCounted('shopping', false);
+  check('history rules: a rule set TODAY applies to a compacted month',
+    spendOld() === 1000, `spend ${spendOld()} (expected 1000)`);
+  const brk = useStore.getState().getCategoryBreakdown(mk);
+  check('history rules: the historical breakdown drops the excluded category',
+    !brk.some((b) => (b.id || b.categoryId) === 'shopping'),
+    JSON.stringify(brk.map((b) => b.id || b.categoryId)));
+  check('history rules: remaining slices are rebased to 100%, not left at 25%',
+    Math.round(brk.find((b) => (b.id || b.categoryId) === 'food')?.percent ?? 0) === 100,
+    JSON.stringify(brk.map((b) => [b.id || b.categoryId, Math.round(b.percent)])));
+  check('history rules: an excluded parent averages 0 over history',
+    useStore.getState().getParentCategoryAverage('shopping', 6) === 0);
+
+  useStore.getState().setExpenseParentCounted('shopping', true);
+  check('history rules: re-including restores the historical total', spendOld() === 4000, `${spendOld()}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

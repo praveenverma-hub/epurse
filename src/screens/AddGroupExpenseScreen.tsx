@@ -23,6 +23,7 @@ const typography = typographyBase as unknown as Record<string, import('react-nat
 import GroupExpenseForm from '../components/GroupExpenseForm';
 import GradientButtonBase from '../components/GradientButton';
 import { requestAndGetLocation } from '../services/locationService';
+import { useToast } from '../components/Toast';
 import type { Group, GroupExpenseData } from '../types/group';
 
 const GradientButton = GradientButtonBase as React.FC<{ title: string; onPress: () => void; style?: object }>;
@@ -48,17 +49,20 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
   const isEdit = !!editTxnId;
   const insets = useSafeAreaInsets();
   const submitRef = useRef<(() => void) | null>(null);
+  const toast = useToast();
 
   const handleAdd = async (expenseData: GroupExpenseData) => {
     if (isEdit && editTxnId) {
       // Keep the existing location/createdAt — editing shouldn't re-stamp them.
       updateGroupExpense(editTxnId, expenseData);
+      toast.success('Changes saved');
       navigation.goBack();
       return;
     }
     // Manual add → capture the point of purchase (prompts first time; never blocks).
     const location = await requestAndGetLocation();
     if (groupId) addGroupExpense(groupId, location ? { ...expenseData, location } : expenseData);
+    toast.success('Expense added');
     navigation.goBack();
   };
 

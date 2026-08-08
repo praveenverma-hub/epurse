@@ -36,6 +36,7 @@ import AddAccountModal from '../components/AddAccountModal';
 import CenterModal    from '../components/CenterModal';
 import InfoSheet      from '../components/InfoSheet';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
+import { useTabBarScroll } from '../hooks/useTabBarScroll';
 
 const TYPE_ORDER = {
   [ACCOUNT_TYPES.CASH]:        0,
@@ -84,6 +85,7 @@ const HEADER_HERO_H = 84;
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
+  const tabBarScroll = useTabBarScroll();
   const isFocused    = useIsFocused();
   const accounts     = useEPurseStore((s) => s.accounts);
   const userName     = useEPurseStore((s) => s.userName);
@@ -216,6 +218,9 @@ export default function AccountsScreen({ navigation }) {
           The gradient header (with curve) slides up on scroll; the big "Net Worth"
           hero fades out while a compact balance chip slides into the pinned bar. */}
       <CollapsingHeaderScreen
+        // Hide-on-scroll for the tab bar, same as every other tab (Aug-26).
+        // CollapsingHeaderScreen chains this into its own Animated.event listener.
+        onScroll={tabBarScroll.onScroll}
         gradientColors={[theme.gradientStart, theme.gradientEnd]}
         barHeight={HEADER_BAR_H}
         heroHeight={HEADER_HERO_H}

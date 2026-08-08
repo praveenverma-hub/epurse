@@ -4,11 +4,14 @@
 // Behaviour:
 //   • Outlined icons at rest, filled + theme-primary when selected.
 //   • Slides down and hides on scroll-down; snaps back on scroll-up.
+//   • ALWAYS reveals itself on a tab change (see the effect below) — the hidden
+//     state is global, and it slides fully off-screen, so a tab left hidden is
+//     untappable and therefore unrecoverable.
 //   • Position is absolute so page content flows under it (screens must
 //     add bottom padding equal to TAB_BAR_HEIGHT + safeArea.bottom).
 // =============================================================================
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, TouchableOpacity, Text, Animated, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +31,24 @@ const TAB_CONFIG = [
 export default function AnimatedTabBar({ state, navigation }) {
   const insets = useSafeAreaInsets();
   const theme  = useTheme();
-  const { tabBarAnim } = useTabBarVisibility();
+  const { tabBarAnim, showTabBar } = useTabBarVisibility();
+
+  /**
+   * Reveal on every tab change — the backstop for "the bar vanished and never came
+   * back". Hidden-ness lives in one global ref, but only SOME screens wire
+   * `useTabBarScroll` (Dashboard, Groups). Scroll down on one of those to hide the
+   * bar, then land on a screen that doesn't wire it — e.g. Dashboard's account chips
+   * and "View all" push straight to Transactions — and nothing was left to call
+   * `showTabBar()`. Since the bar translates FULLY off-screen it can't be tapped to
+   * recover, so it stayed hidden until the app was relaunched.
+   *
+   * Fixing it here rather than in each screen is deliberate: this runs for every tab
+   * regardless of what the destination screen remembers to wire up, so a future
+   * screen can't reintroduce the bug by omission.
+   */
+  useEffect(() => {
+    showTabBar();
+  }, [state.index, showTabBar]);
 
   const bottomPad = Math.max(insets.bottom, 8);
 

@@ -26,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
+import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { formatCompact } from '../utils/format';
 import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
@@ -80,6 +81,7 @@ const BUDGET_INFO = {
 const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const theme    = useTheme();
   const gradient = useGradient();
+  const tabBarScroll = useTabBarScroll();
   const toast    = useToast();
 
   const budget                  = useEPurseStore((s) => s.budget);
@@ -132,9 +134,13 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
       destructive: true,
       secondaryText: 'Cancel',
       onSecondary: () => setConfirm(null),
-      onConfirm: () => { clearBudget(); setConfirm(null); },
+      onConfirm: () => {
+        clearBudget();
+        setConfirm(null);
+        toast.success('Plan reset');
+      },
     });
-  }, [clearBudget]);
+  }, [clearBudget, toast]);
 
   // Drill-down: sub-category stats for the tapped budget category (current
   // month). The special '__unbudgeted__' id drills the unbudgeted slice instead.
@@ -403,6 +409,9 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
           contentContainerStyle={[styles.scroll, headerless && { paddingBottom: TAB_BAR_HEIGHT + 24, paddingTop: spacing.lg }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          // Hide-on-scroll for the tab bar — Analytics + Budget are the Insights tab's
+          // scenes, so the hook belongs here, not on InsightsScreen (which doesn't scroll).
+          {...tabBarScroll}
         >
           {budget ? renderProgress() : renderEmpty()}
         </ScrollView>

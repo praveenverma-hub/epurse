@@ -21,9 +21,9 @@
 //   • Lent / borrow (REAL txns too — any SMS or manual row with these categoryIds):
 //       · `lent`, `borrowed` — stay raw forever; never rolled into monthly aggregates
 //         (so they are not lost when general data older than 3 months compacts away).
-//       · `lent_settled`, `borrow_repaid` — stay raw up to 1 year from that row’s date,
+//       · `lent_settled`, `borrow_repaid` — stay raw up to 2 years from when recorded,
 //         then removed; still never aggregated.
-//   • Manual IOU list (`lentBorrowed`): unsettled kept; settled rows pruned after 1 year (`settledAt`)
+//   • Manual IOU list (`lentBorrowed`): unsettled kept; settled rows pruned after 2 years (`recordedAt`)
 // =============================================================================
 
 import { create } from 'zustand';
@@ -80,9 +80,29 @@ const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repai
 
 /** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
-/** Settled categories — same; kept raw ≤ 1 yr then dropped, never merged into monthly aggregates. */
+/** Settled categories — same; kept raw ≤ 2 yr then dropped, never merged into monthly aggregates. */
 const LB_SETTLED_CATS = new Set(['lent_settled', 'borrow_repaid']);
-const LB_SETTLED_RETENTION_MS = 365 * DAY_MS;
+// 2 years (was 1): a settled IOU is the receipt for a debt and people look those up
+// long after the fact. Matches AGG_RETENTION_MS, so the ledger reaches as far back as
+// the monthly aggregates do. Measured from `recordedAt`, never the backdatable `date`.
+const LB_SETTLED_RETENTION_MS = 730 * DAY_MS;
+/**
+ * When a lentBorrowed row was RECORDED, for retention/recency decisions.
+ *
+ * Deliberately not `date`: that's the event date and the user can backdate it from
+ * the form's picker, so anything measuring "how old is this row" against it treats a
+ * just-typed entry as ancient. `createdAt` is stamped at write time; rows written
+ * before it existed fall back to `date`.
+ *
+ * An unparseable value returns Infinity — i.e. "as recent as possible", so it is
+ * KEPT. The previous `new Date(l.date).getTime() >= cutoff` form silently DELETED
+ * such rows, because every comparison against NaN is false.
+ */
+const recordedAt = (l) => {
+  const t = new Date(l?.createdAt || l?.date).getTime();
+  return Number.isNaN(t) ? Infinity : t;
+};
+
 /** Groups untouched this long AND fully settled are auto-removed (debts, if any, keep them alive). */
 const GROUP_INACTIVE_PRUNE_MS = 180 * DAY_MS;
 
@@ -247,11 +267,55 @@ const applyDelta = (accounts, accountId, parsed) => {
 };
 
 /**
- * Book the PAYING side of a CC bill payment onto the source (bank/debit) account:
- * a `cc_bill` debit that reduces its balance and shows under it. If the bank's own
- * debit SMS already recorded this outflow (a recent same-amount debit on that
- * account), reclassify THAT to `cc_bill` instead of adding a second — no double-count.
- * Returns { accounts, transactions } or null (no source / account not found).
+ * The patch that clears a PLAIN split — used by every path that has to drop one
+ * (amount edit, re-categorise to a split-blocked category, LB re-tag).
+ *
+ * Clearing the split necessarily clears its payer too: with no split there is no
+ * "someone else paid", so a memo reverts to the user's own expense. That means the
+ * account debit which was reversed when it BECAME a memo has to be re-applied —
+ * `restoreAccountId` is non-null exactly when the caller still owes that applyDelta.
+ * Missing it is silent money loss: the txn stops being a memo but the balance never
+ * gets the outflow back.
+ */
+const clearPlainSplit = (txn) => {
+  const wasMemo = !!txn.isSplitMemo;
+  const parkedAccountId = txn.memoAccountId || txn.accountId || null;
+  return {
+    patch: {
+      isSplit: false,
+      splitWith: [],
+      myShareAmount: undefined,
+      isSplitMemo: undefined,
+      splitPaidBy: undefined,
+      memoAccountId: undefined,
+      ...(wasMemo && parkedAccountId ? { accountId: parkedAccountId } : {}),
+    },
+    restoreAccountId: wasMemo ? parkedAccountId : null,
+  };
+};
+
+/**
+ * Mark the PAYING side of a CC bill payment on the source (bank/debit) account.
+ *
+ * It only ever RE-TAGS a debit the bank already told us about — it never creates one.
+ * The bank always sends its own "Rs.X debited … " message for the payment, and that
+ * message moves the balance when it lands (as a plain debit, or as a `cc_bill` row via
+ * the cc_payment_outgoing path in ingestMessage). Synthesising a debit here on top of
+ * that double-charged the account: the balance ended up 2× the bill.
+ *
+ * So when the user picks "paid from <account>" in the true-up sheet, all that's needed
+ * is to relabel the real outflow as `cc_bill` so it drops out of spend totals. If no
+ * matching debit exists yet — the card's "payment received" SMS often arrives first —
+ * this is a no-op, and the bank's message books it correctly on arrival.
+ *
+ * Note the match deliberately INCLUDES rows already tagged `cc_bill`: those are the
+ * bank's own outgoing-payment messages, and skipping them was what let a duplicate
+ * through. Re-tagging one is harmless (it's already correct) and, crucially, stops a
+ * second debit being written.
+ *
+ * The only debit this app invents is one the USER enters manually.
+ *
+ * Returns { accounts, transactions } or null (nothing to do).
  */
 const CC_SOURCE_DEDUP_MS = 6 * 24 * 60 * 60 * 1000; // ~6 days — matches a bank's own SMS
 const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
@@ -264,41 +328,26 @@ const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
       !t.isIgnored &&
       t.type === TRANSACTION_TYPES.DEBIT &&
       t.accountId === sourceAccountId &&
-      t.categoryId !== 'cc_bill' &&
       Math.round(t.amount) === Math.round(amount) &&
       Math.abs(ts - new Date(t.createdAt).getTime()) <= CC_SOURCE_DEDUP_MS,
   );
-  if (existing) {
-    // The bank already booked this outflow — just recategorise it (balance already moved).
-    return {
-      accounts: state.accounts,
-      transactions: state.transactions.map((t) =>
-        t.id === existing.id
-          ? { ...t, categoryId: 'cc_bill', userEditedCategory: true, isSplit: false, splitWith: [] }
-          : t,
-      ),
-    };
+  // Nothing to re-tag. The bank's own debit hasn't arrived yet (or never will) — do
+  // NOT invent one; the balance would then be wrong the moment it does arrive.
+  if (!existing) return null;
+  if (existing.categoryId === 'cc_bill') {
+    // Already booked correctly by the cc_payment_outgoing path — the important thing
+    // is that we return WITHOUT writing a second debit.
+    return { accounts: state.accounts, transactions: state.transactions };
   }
-  const txn = {
-    id: `txn_ccpay_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    amount,
-    type: TRANSACTION_TYPES.DEBIT,
-    categoryId: 'cc_bill',
-    accountId: sourceAccountId,
-    accountType: acct.type,
-    accountMask: acct.mask || null,
-    bankName: acct.bankName || null,
-    merchant: 'Credit card bill payment',
-    createdAt: nowIso,
-    source: 'manual',
-    isReviewed: true,
-    userEditedCategory: true,
-    isSplit: false,
-    splitWith: [],
-  };
+  // A plain bank debit the parser didn't recognise as a bill payment. The money has
+  // already left (balance moved at ingest), so only the label changes.
   return {
-    accounts: applyDelta(state.accounts, sourceAccountId, txn),
-    transactions: [txn, ...state.transactions],
+    accounts: state.accounts,
+    transactions: state.transactions.map((t) =>
+      t.id === existing.id
+        ? { ...t, categoryId: 'cc_bill', userEditedCategory: true, isSplit: false, splitWith: [] }
+        : t,
+    ),
   };
 };
 
@@ -530,6 +579,82 @@ const refreshCatMaps = (customParents, customChildren) => {
 };
 // txn → first-level (parent) budget category id (custom-aware).
 const parentCatId = (t) => parentCatIdForTxn(t, CAT_MAPS);
+
+/**
+ * USER-CONFIGURED spend exclusions — "which categories count in expenses / budget"
+ * (SpendRulesScreen). Parent-level only, and that's a data constraint, not a
+ * simplification: most sub-categories have no `legacyId` of their own (Food Delivery,
+ * Fast Food and Restaurants all resolve to legacy `food`), transactions don't always
+ * carry a `childCategory`, and compaction keeps history as legacy `byCategory` — so a
+ * sub-category rule could not be applied to SMS rows or to anything past 90 days.
+ * Parent ids resolve for every transaction and for aggregated history alike.
+ *
+ * We persist what is EXCLUDED, never what's included: with an inclusion list every
+ * new built-in or custom category would default to "not counted" and money would
+ * silently vanish from totals. Excluded-by-omission fails safe in the right direction.
+ *
+ * Read via `excludedExpenseSet()` below so the ~13 spend/income/budget/analytics call
+ * sites keep their existing signatures.
+ *
+ * EXPENSES ONLY, by design. There is no separate budget list: budget actuals are
+ * derived from the expense walk (getBudgetUsage reuses the same filter), so a category
+ * excluded from expenses is necessarily out of the budget rollup too. "Not an expense
+ * but still budgeted" isn't a representable state, so it isn't offered.
+ */
+/**
+ * The user's excluded-parent ids as a Set, derived from state on demand.
+ *
+ * Deliberately NOT a mirror refreshed by the setters: a module-level copy can silently
+ * desync from state (a direct `setState`, a migration, a test harness) and then the
+ * user's rules stop applying with nothing to show why. Reading state is the only way
+ * the two can't disagree. Cached on the array's identity, so the Set is rebuilt only
+ * when the rules actually change — not once per transaction per total.
+ */
+let _exclArrRef = null;
+let _exclSet = new Set();
+const excludedExpenseSet = () => {
+  const arr = useEPurseStore?.getState?.().excludedExpenseParents || [];
+  if (arr !== _exclArrRef) {
+    _exclArrRef = arr;
+    _exclSet = new Set(arr);
+  }
+  return _exclSet;
+};
+
+export const spendExcluded = (t, groups) => {
+  if (isGroupExcluded(t, groups)) return true;
+  const ex = excludedExpenseSet();
+  return ex.size > 0 && ex.has(parentCatId(t));
+};
+
+/**
+ * Spend that a stored monthly aggregate attributes to categories the user has since
+ * EXCLUDED from expenses. Subtract it from `agg.totalSpend` so a rule applies to
+ * history too, not just the live month.
+ *
+ * Needed because aggregates are MATERIALISED at compaction: `getMonthlySpend` returns
+ * `agg.totalSpend` verbatim for any month past RAW_RETENTION_MS, so without this a
+ * rule set today would silently leave last year's totals counting the category — the
+ * chart would contradict the rule with no explanation.
+ *
+ * Safe to subtract straight from totalSpend because `byCategory` is built in the same
+ * pass and with the same sign convention: debits add, refunds subtract, so an expense
+ * category's bucket is already net-of-refunds exactly as it contributed. Income lives
+ * under the `income` parent, which `setExpenseParentCounted` refuses to exclude, so an
+ * income bucket can never be picked up here.
+ */
+const excludedSpendInAggregate = (agg) => {
+  const ex = excludedExpenseSet();
+  if (!ex.size || !agg?.byCategory) return 0;
+  let sum = 0;
+  Object.entries(agg.byCategory).forEach(([legacyId, amount]) => {
+    if (NON_SPEND_CATS.has(legacyId)) return;   // never in totalSpend to begin with
+    const pid = CAT_MAPS.legacyToParentId[legacyId] || legacyId;
+    if (ex.has(pid)) sum += Number(amount) || 0;
+  });
+  return sum;
+};
+
 // two-tier labels → legacy flat categoryId (custom-aware).
 const toLegacyCat = (parentLabel, childLabel) => twoTierToLegacyCatId(parentLabel, childLabel, CAT_MAPS);
 
@@ -555,7 +680,7 @@ const aggregate = (transactions, groups = []) => {
     if (t.isIgnored) return;
     // Group memos AND txns in an excluded personal group stay out of historical totals,
     // matching the live spend paths (isGroupExcluded covers both).
-    if (isGroupExcluded(t, groups)) return;
+    if (spendExcluded(t, groups)) return;
     const key = monthKey(t.createdAt);
     if (!out[key]) {
       out[key] = { totalSpend: 0, totalIncome: 0, byCategory: {}, byAccount: {}, byLocation: {} };
@@ -741,6 +866,11 @@ export const useEPurseStore = create(
       // linkKey(cardMask, bankMask)) — so we never re-suggest a rejected pairing.
       declinedAccountLinks: [],
 
+      // User rules for "what counts in expenses / budget" (SpendRulesScreen).
+      // Arrays of PARENT category ids that are EXCLUDED. Empty = everything counts,
+      // which is the correct default for a new install and for a new category.
+      excludedExpenseParents: [],
+
       hydrated: false,
 
       // ----- onboarding setters -----------------------------------------
@@ -778,6 +908,27 @@ export const useEPurseStore = create(
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
 
       // ----- theme setters ----------------------------------------------
+      /**
+       * Toggle whether a PARENT category counts toward expense totals.
+       * `counted === false` adds it to the excluded list. Selectors derive from this
+       * state directly (see excludedExpenseSet), so there's nothing else to keep in sync.
+       *
+       * Only BUDGETABLE parents are accepted. Transfers/Income are structurally not
+       * spend, and `spendExcluded` also gates getMonthlyIncome — so excluding 'income'
+       * here would zero the user's INCOME total. The UI never offers those rows, but
+       * that's not a guarantee worth relying on for something this destructive.
+       */
+      setExpenseParentCounted: (parentId, counted) =>
+        set((s) => {
+          if (!parentId || !BUDGETABLE_PARENT_IDS.has(parentId)) return s;
+          const next = new Set(s.excludedExpenseParents || []);
+          if (counted) next.delete(parentId); else next.add(parentId);
+          return { excludedExpenseParents: Array.from(next) };
+        }),
+
+      /** Clear all rules — "count everything again". */
+      resetSpendRules: () => set({ excludedExpenseParents: [] }),
+
       setThemeId: (id) => set({ themeId: id || DEFAULT_THEME_ID }),
       setDarkMode: (v) => set({ darkMode: !!v }),
       /** Dashboard: show/hide the weekly spend recap (week-end modal). */
@@ -1055,7 +1206,11 @@ export const useEPurseStore = create(
        */
       maybeFireSubscriptionAlerts: () => {
         const s = get();
-        const subs = detectSubscriptions(s.transactions || []).filter(
+        // Pre-filter: a category the user excluded from expenses shouldn't push
+        // price-hike notifications — the whole point of excluding it is that its
+        // spending isn't being tracked.
+        const scan = (s.transactions || []).filter((t) => !spendExcluded(t, s.groups));
+        const subs = detectSubscriptions(scan).filter(
           (sub) => sub.priceHike && sub.hikeTo,
         );
         if (subs.length === 0) return;
@@ -1416,20 +1571,56 @@ export const useEPurseStore = create(
               }));
             }
             const stamp = Date.now();
-            const newRows = newTxn.splitWith.map((o, i) => ({
-              id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
-              kind: 'lent',
-              person: (o.name || 'Friend').trim(),
-              amount: Number(o.shareAmount) || 0,
-              note: `Split · ${newTxn.merchant || 'Expense'}`,
-              date: newTxn.createdAt,
-              sourceTxnId: newTxn.id,
-            }));
+            const splitNote = `Split · ${newTxn.merchant || 'Expense'}`;
+            // `splitPaidBy` — someone ELSE paid (same contract as setTransactionSplit /
+            // a group's non-'me' payer): mark it a memo so no balance moves and it stays
+            // out of spend totals, and owe them my own share instead of lending out theirs.
+            const paidBy =
+              txn?.splitPaidBy && (txn.splitPaidBy.name || txn.splitPaidBy.contactId)
+                ? {
+                    contactId: txn.splitPaidBy.contactId ?? null,
+                    name: (txn.splitPaidBy.name || 'Friend').trim(),
+                  }
+                : null;
+            let newRows;
+            if (paidBy) {
+              newTxn.isSplitMemo = true;
+              newTxn.splitPaidBy = paidBy;
+              const mine = Number(newTxn.myShareAmount) || 0;
+              newRows = mine > 0
+                ? [{
+                    id: `lb_${stamp}_0_${Math.random().toString(36).slice(2, 8)}`,
+                    kind: 'borrowed',
+                    person: paidBy.name,
+                    contactId: paidBy.contactId,
+                    amount: mine,
+                    note: splitNote,
+                    date: newTxn.createdAt,
+                    sourceTxnId: newTxn.id,
+                  }]
+                : [];
+            } else {
+              delete newTxn.isSplitMemo;
+              delete newTxn.splitPaidBy;
+              newRows = newTxn.splitWith.map((o, i) => ({
+                id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+                kind: 'lent',
+                person: (o.name || 'Friend').trim(),
+                amount: Number(o.shareAmount) || 0,
+                note: splitNote,
+                date: newTxn.createdAt,
+                sourceTxnId: newTxn.id,
+              }));
+            }
             nextLent = [...newRows, ...nextLent];
           } else {
             newTxn.isSplit = false;
             newTxn.splitWith = [];
             delete newTxn.myShareAmount;
+            // No split → no payer concept, so a stray splitPaidBy must not survive and
+            // silently suppress this txn's balance delta / spend.
+            delete newTxn.isSplitMemo;
+            delete newTxn.splitPaidBy;
           }
 
           // ─── LB entry creation ───────────────────────────────────────
@@ -1467,6 +1658,14 @@ export const useEPurseStore = create(
             newTxn.accountId = resolvedAccountId;
           }
 
+          // A split memo is someone else's outflow: park the account in memoAccountId
+          // (so flipping the payer back can restore the debit) and leave accountId off,
+          // so the txn never reads as money that left that account.
+          if (newTxn.isSplitMemo) {
+            newTxn.memoAccountId = resolvedAccountId;
+            delete newTxn.accountId;
+          }
+
           // Group Zone: auto-tag a plain expense to the active zone group (no split —
           // the user refines/untags later). Skips income, self/LB, splits, already-tagged.
           let zoneGroups = s.groups;
@@ -1489,14 +1688,18 @@ export const useEPurseStore = create(
 
           return {
             transactions: [newTxn, ...s.transactions],
-            accounts: applyDelta(resolvedAccounts, resolvedAccountId, newTxn),
+            accounts: newTxn.isSplitMemo
+              ? resolvedAccounts
+              : applyDelta(resolvedAccounts, resolvedAccountId, newTxn),
             lentBorrowed: nextLent,
             ...(zoneGroups !== s.groups ? { groups: zoneGroups } : {}),
             ...(useProvidedId ? {} : { manualTxnSeq: nextSeq }),
           };
         });
         // Budget breach detection runs after the state commits — fire-and-forget.
-        if (txn?.categoryId) get().checkBudgetBreach(txn.categoryId);
+        // Skipped for a split memo: someone else's money, so it isn't my spend and
+        // can't push my budget over (mirrors addGroupExpense's !isGroupMemo guard).
+        if (txn?.categoryId && !txn?.splitPaidBy) get().checkBudgetBreach(txn.categoryId);
       },
 
       // ─── Group actions ────────────────────────────────────────────────────
@@ -1832,6 +2035,7 @@ export const useEPurseStore = create(
           amount: Math.abs(net),
           note: `Group settle · ${group?.name || 'Group'}`,
           date: now,
+          createdAt: new Date().toISOString(),
           groupId,
           ...(booked ? { sourceTxnId: booked.txnId } : {}),
         };
@@ -2076,26 +2280,66 @@ export const useEPurseStore = create(
               }
             }
           }
-          // Outgoing CC bill payment from source bank account — adjust the bank
-          // account balance without creating a transaction entry. Individual CC
-          // purchases are already counted as expenses; the bill payment is a
-          // liability settlement and must not inflate the monthly spend total.
+          // Outgoing CC bill payment from the source bank account. This books a REAL
+          // `cc_bill` transaction on that account rather than nudging the balance
+          // silently, for two reasons:
+          //
+          //   1. DEDUP. A bare `applyDelta` here had no smsId guard, and the launch
+          //      sweep re-reads the whole inbox — so the same bill re-debited the bank
+          //      on EVERY app open and the balance drifted down without bound. Going
+          //      through `isDuplicate` fixes that: the txn carries the smsId, so a
+          //      re-swept message is recognised and skipped.
+          //   2. It gives `bookCcPaymentSource` a row to find. With no row, the
+          //      true-up sheet's "paid from" choice booked a SECOND debit for the same
+          //      bill (see that helper).
+          //
+          // `cc_bill` is in NON_SPEND_CATS, so the row is visible in Activity and on the
+          // account but never inflates spend — individual card purchases were already
+          // counted as expenses; settling the bill is a liability transfer.
           if (
             parsedResult?.error?.code === 'cc_payment_outgoing' &&
             parsedResult.ccOutgoing
           ) {
             const { amount, accountMask, bankName } = parsedResult.ccOutgoing;
+            const st = get();
+            const sid = opts.smsId ? String(opts.smsId) : null;
             const pseudoDebit = {
               amount,
               type:        TRANSACTION_TYPES.DEBIT,
               accountType: ACCOUNT_TYPES.BANK,
               accountMask: accountMask || null,
               bankName:    bankName    || null,
+              createdAt:   opts.receivedAt ? new Date(opts.receivedAt).toISOString() : new Date().toISOString(),
             };
+            if (isDuplicate(st.transactions, pseudoDebit, sid, st.suppressedSmsIds || [])) {
+              return null;
+            }
             const { accounts: srcAccounts, account: srcAccount } =
-              ensureAccountForParsed([...get().accounts], pseudoDebit);
+              ensureAccountForParsed([...st.accounts], pseudoDebit);
             if (srcAccount) {
-              set({ accounts: applyDelta(srcAccounts, srcAccount.id, pseudoDebit) });
+              const txn = {
+                ...pseudoDebit,
+                id:          `txn_ccout_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                categoryId:  'cc_bill',
+                accountId:   srcAccount.id,
+                accountType: srcAccount.type,
+                accountMask: srcAccount.mask || accountMask || null,
+                bankName:    srcAccount.bankName || bankName || null,
+                merchant:    'Credit card bill payment',
+                source:      'sms',
+                smsText:     rawMessage || '',
+                isReviewed:  true,
+                // The category is decided by the parser, not guessed — protect it from
+                // self-transfer reconciliation, which would otherwise re-tag it.
+                userEditedCategory: true,
+                isSplit:     false,
+                splitWith:   [],
+                ...(sid ? { smsId: sid } : {}),
+              };
+              set({
+                accounts:     applyDelta(srcAccounts, srcAccount.id, txn),
+                transactions: [txn, ...st.transactions],
+              });
             }
           }
           return null;
@@ -2396,13 +2640,15 @@ export const useEPurseStore = create(
         const newAmount = Number(amount) || 0;
         if (newAmount <= 0 || newAmount > MAX_ALLOWED_AMOUNT) return null;
         const newType = type === TRANSACTION_TYPES.CREDIT ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
-        const newAccountId = accountId || old.accountId || null;
+        const wasMemo = !!old.isSplitMemo;
+        // While it's a split memo the txn carries no accountId (someone else's money),
+        // so the paying account lives in memoAccountId — resolve from all three.
+        const payingAccountId = accountId || old.accountId || old.memoAccountId || null;
 
         const updatedTxn = {
           ...old,
           type: newType,
           amount: newAmount,
-          accountId: newAccountId,
           merchant: (merchant || old.merchant || 'Transaction').trim(),
           categoryId: categoryId || old.categoryId,
           note: note ?? old.note,
@@ -2419,13 +2665,33 @@ export const useEPurseStore = create(
           updatedTxn.isSplit = false;
           updatedTxn.splitWith = [];
           updatedTxn.myShareAmount = undefined;
+          // Losing the split also loses its payer — without this a memo would strand:
+          // excluded from spend forever with no split left to explain why.
+          delete updatedTxn.isSplitMemo;
+          delete updatedTxn.splitPaidBy;
+          delete updatedTxn.memoAccountId;
+        }
+
+        // Still someone else's money → keep the account parked and move no balance.
+        const stillMemo = wasMemo && !mustClearSplit;
+        if (stillMemo) {
+          updatedTxn.memoAccountId = payingAccountId;
+          delete updatedTxn.accountId;
+        } else {
+          updatedTxn.accountId = payingAccountId;
         }
 
         set((s) => {
           let accounts = s.accounts;
           if (!old.isIgnored) {
-            accounts = applyDelta(accounts, old.accountId, { ...old, type: oppositeType(old.type) });
-            accounts = applyDelta(accounts, newAccountId, updatedTxn);
+            // A memo never moved a balance, so there is nothing to reverse …
+            if (!wasMemo) {
+              accounts = applyDelta(accounts, old.accountId, { ...old, type: oppositeType(old.type) });
+            }
+            // … and nothing to apply for as long as it stays one.
+            if (!stillMemo) {
+              accounts = applyDelta(accounts, updatedTxn.accountId, updatedTxn);
+            }
           }
           return {
             transactions: s.transactions.map((t) => (t.id === txnId ? updatedTxn : t)),
@@ -2436,7 +2702,8 @@ export const useEPurseStore = create(
           };
         });
 
-        if (updatedTxn.categoryId) get().checkBudgetBreach(updatedTxn.categoryId);
+        // A memo isn't my spend, so it can't breach my budget.
+        if (updatedTxn.categoryId && !stillMemo) get().checkBudgetBreach(updatedTxn.categoryId);
         return txnId;
       },
 
@@ -2444,23 +2711,50 @@ export const useEPurseStore = create(
        * Equal split: `others` = friends (not you). Creates lent rows with `sourceTxnId`.
        * Pass empty `others` to clear split and remove linked lent rows.
        */
+      /**
+       * Apply (or clear) a PLAIN — non-group — split on an existing transaction.
+       *
+       * `meta.paidBy` mirrors a shared group's payer and carries the same accounting,
+       * so a plain split and a group expense behave identically (see buildGroupLbRows):
+       *   • paidBy null/absent  → I paid. Account debits the full amount (already did),
+       *     one `lent` row per other person's share.
+       *   • paidBy {contactId,name} → SOMEONE ELSE paid. The txn becomes a memo
+       *     (`isSplitMemo`): no money left my account, so the balance delta is REVERSED
+       *     and the txn drops out of every spend total (isGroupExcluded → isMemoTxn).
+       *     My own share becomes a single `borrowed` row owed to the payer; the other
+       *     participants' debts to that payer are not my ledger's business.
+       *
+       * Flipping the payer either way re-settles the account balance, exactly as
+       * updateGroupExpense does — the account the money would come from is stashed in
+       * `memoAccountId` while it's a memo so flipping back can restore the debit.
+       */
       setTransactionSplit: (txnId, others, meta = {}) =>
         set((s) => {
           const txn = s.transactions.find((t) => t.id === txnId);
           if (!txn) return s;
           if (txn.lbLocked) return s; // LB-tagged transactions cannot be split
           const lb = s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
-          const clearSplit = {
-            isSplit: false,
-            splitWith: [],
-            myShareAmount: undefined,
-          };
+
+          const wasMemo = !!txn.isSplitMemo;
+          const payer =
+            meta?.paidBy && (meta.paidBy.name || meta.paidBy.contactId)
+              ? { contactId: meta.paidBy.contactId ?? null, name: (meta.paidBy.name || 'Friend').trim() }
+              : null;
+          // While a memo, the txn carries no accountId (so it can't look like it moved
+          // that account's balance); memoAccountId remembers where it WOULD come from.
+          const payingAccountId = txn.accountId || txn.memoAccountId || null;
 
           if (!others || others.length === 0 || !canSplitTransaction(txn)) {
+            // Clearing a split that was a memo turns it back into a real expense of
+            // mine — the money has to leave the account again.
+            const cleared = clearPlainSplit(txn);
             return {
               transactions: s.transactions.map((t) =>
-                t.id === txnId ? { ...t, ...clearSplit } : t
+                t.id === txnId ? { ...t, ...cleared.patch } : t
               ),
+              accounts: cleared.restoreAccountId
+                ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
+                : s.accounts,
               lentBorrowed: lb,
             };
           }
@@ -2503,25 +2797,75 @@ export const useEPurseStore = create(
           }
 
           const stamp = Date.now();
-          const newLent = splitWith.map((o, i) => ({
-            id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
-            kind: 'lent',
-            person: (o.name || 'Friend').trim(),
-            contactId: o.contactId || null,
-            phone: o.phone || null,
-            amount: Number(o.shareAmount) || 0,
-            note: `Split · ${txn.merchant || 'Expense'}`,
-            date: txn.createdAt,
-            sourceTxnId: txnId,
-          }));
+          const note = `Split · ${txn.merchant || 'Expense'}`;
+          const rnd = () => Math.random().toString(36).slice(2, 8);
+
+          // Debt legs — the SAME two shapes buildGroupLbRows produces for a group.
+          let newRows;
+          if (payer) {
+            // Someone else paid → I owe only my own share, to them.
+            const mine = Number(myShare) || 0;
+            newRows = mine > 0
+              ? [{
+                  id: `lb_${stamp}_0_${rnd()}`,
+                  kind: 'borrowed',
+                  person: payer.name,
+                  contactId: payer.contactId,
+                  phone: null,
+                  amount: mine,
+                  note,
+                  date: txn.createdAt,
+                  sourceTxnId: txnId,
+                }]
+              : [];
+          } else {
+            newRows = splitWith.map((o, i) => ({
+              id: `lb_${stamp}_${i}_${rnd()}`,
+              kind: 'lent',
+              person: (o.name || 'Friend').trim(),
+              contactId: o.contactId || null,
+              phone: o.phone || null,
+              amount: Number(o.shareAmount) || 0,
+              note,
+              date: txn.createdAt,
+              sourceTxnId: txnId,
+            }));
+          }
+
+          // Re-settle the account balance across a payer flip. Net zero when the
+          // payer side didn't change.
+          let accounts = s.accounts;
+          if (!wasMemo && payer && payingAccountId) {
+            // Became someone else's spend → give the money back.
+            accounts = applyDelta(accounts, payingAccountId, { ...txn, type: TRANSACTION_TYPES.CREDIT });
+          } else if (wasMemo && !payer && payingAccountId) {
+            // Back to my spend → take it out again.
+            accounts = applyDelta(accounts, payingAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT });
+          }
+
+          const memoFields = payer
+            ? {
+                isSplitMemo: true,
+                splitPaidBy: payer,
+                // Park the account off the txn so it can't read as an outflow there.
+                memoAccountId: payingAccountId,
+                accountId: undefined,
+              }
+            : {
+                isSplitMemo: undefined,
+                splitPaidBy: undefined,
+                memoAccountId: undefined,
+                ...(payingAccountId ? { accountId: payingAccountId } : {}),
+              };
 
           return {
             transactions: s.transactions.map((t) =>
               t.id === txnId
-                ? { ...t, isSplit: true, myShareAmount: Number(myShare) || 0, splitWith }
+                ? { ...t, isSplit: true, myShareAmount: Number(myShare) || 0, splitWith, ...memoFields }
                 : t
             ),
-            lentBorrowed: [...newLent, ...lb],
+            accounts,
+            lentBorrowed: [...newRows, ...lb],
           };
         }),
 
@@ -2560,14 +2904,17 @@ export const useEPurseStore = create(
           const lb = mustClearSplit
             ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id)
             : s.lentBorrowed;
+          const cleared = mustClearSplit ? clearPlainSplit(txn) : null;
           return {
             transactions: s.transactions.map((t) => {
               if (t.id !== id) return t;
-              if (mustClearSplit) {
-                return { ...t, categoryId, isSplit: false, splitWith: [], myShareAmount: undefined };
-              }
+              if (cleared) return { ...t, categoryId, ...cleared.patch };
               return { ...t, categoryId };
             }),
+            // Dropping the split un-memos it → the outflow is mine again.
+            accounts: cleared?.restoreAccountId
+              ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
+              : s.accounts,
             lentBorrowed: lb,
           };
         }),
@@ -2589,12 +2936,16 @@ export const useEPurseStore = create(
             const hypothetical = { ...txn, categoryId };
             const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
             const lb = mustClearSplit ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id) : s.lentBorrowed;
+            const cleared = mustClearSplit ? clearPlainSplit(txn) : null;
             return {
               transactions: s.transactions.map((t) => {
                 if (t.id !== id) return t;
-                if (mustClearSplit) return { ...t, categoryId, isSplit: false, splitWith: [], myShareAmount: undefined };
+                if (cleared) return { ...t, categoryId, ...cleared.patch };
                 return { ...t, categoryId };
               }),
+              accounts: cleared?.restoreAccountId
+                ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
+                : s.accounts,
               lentBorrowed: lb,
             };
           }
@@ -2607,9 +2958,8 @@ export const useEPurseStore = create(
           const lbList = s.lentBorrowed.filter((l) => l.sourceTxnId !== id);
 
           // LB and split are mutually exclusive — clear split if set
-          const splitClear = txn.isSplit
-            ? { isSplit: false, splitWith: [], myShareAmount: undefined }
-            : {};
+          const cleared = txn.isSplit ? clearPlainSplit(txn) : null;
+          const splitClear = cleared ? cleared.patch : {};
 
           // One simple entry per transaction — kind mirrors categoryId exactly.
           // Balance is always net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid.
@@ -2629,6 +2979,10 @@ export const useEPurseStore = create(
             transactions: s.transactions.map((t) =>
               t.id === id ? { ...t, ...splitClear, categoryId, lbLocked: true } : t
             ),
+            // Was a memo → it's a real outflow of mine again now it's LB-tagged.
+            accounts: cleared?.restoreAccountId
+              ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
+              : s.accounts,
             lentBorrowed: [newEntry, ...lbList],
           };
         }),
@@ -2740,6 +3094,7 @@ export const useEPurseStore = create(
               {
                 id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                 date: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
                 ...entry,
               },
               ...s.lentBorrowed,
@@ -2851,6 +3206,10 @@ export const useEPurseStore = create(
             amount: entry.amount,
             note: entry.note || 'Manual settlement',
             date: now,
+            // When WE recorded it — `date` above may be backdated by the user, and
+            // pruning on that is what used to delete a just-added entry. See
+            // recordedAt() in compactTransactions.
+            createdAt: new Date().toISOString(),
             ...(booked ? { sourceTxnId: booked.txnId } : {}),
           };
           return {
@@ -2880,6 +3239,7 @@ export const useEPurseStore = create(
             amount: entry.amount,
             note: 'Manual settlement',
             date: now,
+            createdAt: new Date().toISOString(),
             sourceSettledId: id,
           };
           return {
@@ -2919,6 +3279,7 @@ export const useEPurseStore = create(
               amount:    netAmt,
               note:      'Manual settlement',
               date:      now,
+              createdAt: new Date().toISOString(),
               ...(booked ? { sourceTxnId: booked.txnId } : {}),
             },
             ...s.lentBorrowed,
@@ -2971,7 +3332,7 @@ export const useEPurseStore = create(
             }
 
             const cat = t.categoryId;
-            // Real bank/SMS/manual txns tagged settled: same rule as manual IOUs — raw ≤ 1 yr, not aggregated.
+            // Real bank/SMS/manual txns tagged settled: same rule as manual IOUs — raw ≤ 2 yr, not aggregated.
             if (LB_SETTLED_CATS.has(cat)) {
               if (now - ts > LB_SETTLED_RETENTION_MS) return;
               stillRaw.push(t);
@@ -3002,8 +3363,13 @@ export const useEPurseStore = create(
           const lentBorrowedPruned = (s.lentBorrowed || []).filter((l) => {
             // Unsettled outstanding entries (lent/borrowed) kept forever.
             if (l.kind === 'lent' || l.kind === 'borrowed') return true;
-            // Settlement entries (lent_settled / borrow_repaid) kept for 1 year from their date.
-            return new Date(l.date).getTime() >= now - LB_SETTLED_RETENTION_MS;
+            // Settlement entries (lent_settled / borrow_repaid) are kept for 2 years
+            // from when they were RECORDED — never from `date`, which the user can
+            // backdate. Judging by `date` meant backdating a repayment more than a
+            // year deleted it on the very next launch: the user typed an entry, saw
+            // it, restarted, and it was gone. Legacy rows have no createdAt and fall
+            // back to `date` (their behaviour is unchanged).
+            return recordedAt(l) >= now - LB_SETTLED_RETENTION_MS;
           });
 
           // Merge new aggregates into the existing map.
@@ -3116,13 +3482,17 @@ export const useEPurseStore = create(
             !t.isIgnored &&
             countsForSpend(t) &&
             !NON_SPEND_CATS.has(t.categoryId) &&
-            !isGroupExcluded(t, groups) &&
+            !spendExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) {
           return Math.max(0, txns.reduce((sum, t) => sum + spendContribution(t), 0));
         }
-        return get().monthlyAggregates[monthKey(date)]?.totalSpend || 0;
+        // Historical month → materialised total, minus anything the user has since
+        // excluded (see excludedSpendInAggregate).
+        const agg = get().monthlyAggregates[monthKey(date)];
+        if (!agg) return 0;
+        return Math.max(0, (agg.totalSpend || 0) - excludedSpendInAggregate(agg));
       },
 
       // Monthly INCOME = credits that are NOT refunds (salary, interest, P2P-in).
@@ -3134,7 +3504,7 @@ export const useEPurseStore = create(
             t.type === TRANSACTION_TYPES.CREDIT &&
             !isRefundCredit(t) &&
             !NON_SPEND_CATS.has(t.categoryId) &&
-            !isGroupExcluded(t, groups) &&
+            !spendExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
         if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
@@ -3152,7 +3522,7 @@ export const useEPurseStore = create(
               !t.isIgnored &&
               isRefundCredit(t) &&
               !NON_SPEND_CATS.has(t.categoryId) &&
-              !isGroupExcluded(t, groups) &&
+              !spendExcluded(t, groups) &&
               isSameMonth(t.createdAt, date)
           )
           .reduce((s, t) => s + (t.amount || 0), 0);
@@ -3172,7 +3542,7 @@ export const useEPurseStore = create(
             !t.isIgnored &&
             countsForSpend(t) &&
             !NON_SPEND_CATS.has(t.categoryId) &&
-            !isGroupExcluded(t, groups) &&
+            !spendExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
 
@@ -3192,10 +3562,17 @@ export const useEPurseStore = create(
           if (!agg) return [];
           // byCategory may include LB entries from historical aggregation — strip them
           totals = {};
+          const exParents = excludedExpenseSet();
           Object.entries(agg.byCategory || {}).forEach(([catId, val]) => {
-            if (!NON_SPEND_CATS.has(catId)) totals[catId] = val;
+            if (NON_SPEND_CATS.has(catId)) return;
+            // A user-excluded parent is dropped here too, or a historical month would
+            // list a category the current rules say isn't spend.
+            if (exParents.size && exParents.has(CAT_MAPS.legacyToParentId[catId] || catId)) return;
+            totals[catId] = val;
           });
-          grandTotal = agg.totalSpend || 1;
+          // Percentages must be rebased on the REMAINING spend, else the visible slices
+          // wouldn't add up to 100%.
+          grandTotal = Math.max(0, (agg.totalSpend || 0) - excludedSpendInAggregate(agg)) || 1;
         }
 
         return cats
@@ -3237,7 +3614,7 @@ export const useEPurseStore = create(
           // a returned purchase lowers that category's budget usage.
           if (!countsForSpend(t)) return;
           if (NON_SPEND_CATS.has(t.categoryId)) return; // self + lent/borrow
-          if (isGroupExcluded(t, s.groups)) return;
+          if (spendExcluded(t, s.groups)) return;
           const amt = spendContribution(t); // +expense share, −refund amount
           allExpense += amt;
           const pid = parentCatId(t);
@@ -3312,6 +3689,8 @@ export const useEPurseStore = create(
           const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
           const agg = s.monthlyAggregates[monthKey(d)];
           if (!agg?.byCategory) continue;
+          // An excluded parent has no spend by definition — don't average history for it.
+          if (excludedExpenseSet().has(parentId)) return 0;
           let monthSum = 0;
           let has = false;
           Object.entries(agg.byCategory).forEach(([cid, amt]) => {
@@ -3365,7 +3744,7 @@ export const useEPurseStore = create(
           if (t.isIgnored) return;
           if (!countsForSpend(t)) return;              // expense debit or refund credit
           if (NON_SPEND_CATS.has(t.categoryId)) return;
-          if (isGroupExcluded(t, s.groups)) return;
+          if (spendExcluded(t, s.groups)) return;
           if (!isSameMonth(t.createdAt, date)) return;
           const pid = parentCatId(t);
           if (budgeted.has(pid)) return; // already tracked by a budget line
@@ -3385,6 +3764,10 @@ export const useEPurseStore = create(
        */
       getCategoryAverage: (categoryId, months = 3) => {
         const s = get();
+        // A category whose parent the user excluded from expenses has no spend by
+        // definition — averaging its history would resurrect it in comparisons.
+        const exParents = excludedExpenseSet();
+        if (exParents.size && exParents.has(CAT_MAPS.legacyToParentId[categoryId] || categoryId)) return 0;
         const now = new Date();
         let total = 0;
         let count = 0;
@@ -3403,6 +3786,7 @@ export const useEPurseStore = create(
       /** Top N categories by historical avg spend — used to seed empty-form suggestions. */
       getTopCategoriesByAverage: (limit = 6) => {
         const s = get();
+        const exParents = excludedExpenseSet();
         const now = new Date();
         const totals = {};
         const counts = {};
@@ -3412,6 +3796,9 @@ export const useEPurseStore = create(
           if (!agg?.byCategory) continue;
           Object.entries(agg.byCategory).forEach(([catId, amt]) => {
             if (NON_SPEND_CATS.has(catId)) return;
+            // …and skip user-excluded parents, or an "off" category still shows up in
+            // Top categories.
+            if (exParents.size && exParents.has(CAT_MAPS.legacyToParentId[catId] || catId)) return;
             totals[catId] = (totals[catId] || 0) + amt;
             counts[catId] = (counts[catId] || 0) + 1;
           });
@@ -4073,6 +4460,7 @@ export const useEPurseStore = create(
         groups: state.groups ?? [],
         activeGroupZoneId: state.activeGroupZoneId ?? null,
         declinedAccountLinks: state.declinedAccountLinks ?? [],
+        excludedExpenseParents: state.excludedExpenseParents ?? [],
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -4211,7 +4599,7 @@ export const selectExpenseStats = (period) => (state) => {
 
   // For the chips/header, also exclude private + Lent/Borrowed + self transfers + group exclusions.
   const eligible = inPeriod.filter(
-    (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !isGroupExcluded(t, state.groups)
+    (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !spendExcluded(t, state.groups)
   );
 
   // Gross expenses (debit share), refunds (isRefund credits) that net them down,
@@ -4306,7 +4694,7 @@ export const selectWeeklySummary = (state, anchor) => {
     !t.isHidden &&
     countsForSpend(t) &&
     !NON_SPEND_CATEGORY_IDS.has(t.categoryId) &&
-    !isGroupExcluded(t, state.groups);
+    !spendExcluded(t, state.groups);
 
   const perDay = WEEK_DAY_LABELS.map((label, i) => ({
     label,
@@ -4424,13 +4812,13 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
   const countsHere = (t) =>
     countsForSpend(t) &&
     !NON_SPEND_CATEGORY_IDS.has(t.categoryId) &&
-    !isGroupExcluded(t, state.groups);
+    !spendExcluded(t, state.groups);
 
   // ── Cashflow (spend nets refunds; income excludes refunds) ──
   let spent = 0, income = 0, refunds = 0;
   if (hasRaw) {
     rawKept.forEach((t) => {
-      if (NON_SPEND_CATEGORY_IDS.has(t.categoryId) || isGroupExcluded(t, state.groups)) return;
+      if (NON_SPEND_CATEGORY_IDS.has(t.categoryId) || spendExcluded(t, state.groups)) return;
       if (t.type === TRANSACTION_TYPES.DEBIT) spent += debitDisplayAmount(t);
       else if (isRefundCredit(t)) { spent -= t.amount; refunds += t.amount; }
       else if (t.type === TRANSACTION_TYPES.CREDIT) income += t.amount;
@@ -4568,14 +4956,17 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
       .filter((p) => p.total > 0)
       .sort((x, z) => z.total - x.total);
 
-    // Merchants/subscriptions scan the whole history; respect the private toggle
-    // by pre-filtering (both helpers already skip isIgnored internally).
-    const scanList = state.transactions.filter(keepHidden);
+    // Merchants/subscriptions scan the whole history; respect the private toggle AND
+    // every spend exclusion by pre-filtering once (both helpers already skip isIgnored
+    // internally, and neither can see `groups` or the user's rules for itself).
+    // `merchants` previously used an unfiltered list while `subscriptions` filtered —
+    // so the same report could name a merchant in a category it wasn't counting.
+    const scanList = state.transactions.filter((t) => keepHidden(t) && !spendExcluded(t, state.groups));
     merchants = getMerchantBubbles(scanList, monthDate)
       .slice(0, 6)
       .map((mb) => ({ name: mb.name, amount: mb.volume, count: mb.frequency }));
 
-    subscriptions = detectSubscriptions(scanList.filter((t) => !isGroupExcluded(t, state.groups)))
+    subscriptions = detectSubscriptions(scanList)
       .map((su) => ({ merchant: su.merchant, amount: su.amount, priceHike: !!su.priceHike, hikeFrom: su.hikeFrom, hikeTo: su.hikeTo }));
     subscriptionTotal = subscriptions.reduce((s, x) => s + (x.amount || 0), 0);
 

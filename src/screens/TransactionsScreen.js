@@ -57,13 +57,17 @@ import LinkContactModal from '../components/LinkContactModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
 import SplitConfigModal from '../components/SplitConfigModal';
-import SplitDetailsModal from '../components/SplitDetailsModal';
 import CenterModal from '../components/CenterModal';
+import { useToast } from '../components/Toast';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
-import { canSplitTransaction, debitDisplayAmount, isGroupExcluded } from '../utils/split';
+import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
+import { spendExcluded } from '../store/ePurseStore';
+import { useCategoryMaps } from '../hooks/useCategoryTree';
+import { useTabBarScroll } from '../hooks/useTabBarScroll';
+import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { formatCurrency, monthKey } from '../utils/format';
 
 // ---------------------------------------------------------------------------
@@ -109,6 +113,7 @@ const STATIC_OPTIONS = {
     { id: 'lent_settled',  label: 'Settled',       sublabel: 'Lent money returned'       },
     { id: 'borrow_repaid', label: 'Repaid',        sublabel: 'Borrowed money repaid'     },
     { id: 'split',         label: 'Split',         sublabel: 'Shared with others'        },
+    { id: 'not_counted',   label: 'Not counted',   sublabel: 'Category off in Settings'   },
     { id: 'private',       label: 'Private',       sublabel: 'Hidden from default views' },
     { id: 'ignored',       label: 'Ignored',       sublabel: 'Excluded from all totals'  },
   ],
@@ -150,7 +155,9 @@ function resolveRangeCutoff(rangeId) {
 }
 
 /** True if a txn matches ANY selected status chip (union). Mirrors getStatusChip + tags. */
-function matchesStatus(t, statusSet) {
+// `isNotCounted` is injected rather than read here: this is a pure module function and
+// the "counts as expense" rule needs store state + the custom-aware category maps.
+function matchesStatus(t, statusSet, isNotCounted) {
   if (statusSet.has('private')       && t.isHidden) return true;
   if (statusSet.has('ignored')       && t.isIgnored) return true;
   if (statusSet.has('self')          && (t.categoryId === 'self' || t.childCategory === 'Self')) return true;
@@ -159,6 +166,7 @@ function matchesStatus(t, statusSet) {
   if (statusSet.has('lent_settled')  && t.categoryId === 'lent_settled') return true;
   if (statusSet.has('borrow_repaid') && t.categoryId === 'borrow_repaid') return true;
   if (statusSet.has('split')         && t.isSplit) return true;
+  if (statusSet.has('not_counted')   && isNotCounted?.(t)) return true;
   return false;
 }
 
@@ -168,12 +176,25 @@ function matchesStatus(t, statusSet) {
 
 const TransactionsScreen = ({ navigation, route }) => {
   const theme = useTheme();
+  const toast = useToast();
 
   // ── Store ──────────────────────────────────────────────────────────────────
   const transactions = useEPurseStore((s) => s.transactions);
   const accounts     = useEPurseStore((s) => s.accounts);
   const categories   = useEPurseStore((s) => s.categories);
   const groups       = useEPurseStore((s) => s.groups);
+  // Subscribed purely so a "counts in expenses" rule change re-renders the totals.
+  const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
+  const catMaps = useCategoryMaps();
+  // Same predicate the NOT COUNTED tag on the row uses, so the filter and the tag can
+  // never disagree about which transactions are excluded.
+  const isNotCounted = useCallback(
+    (t) =>
+      t.type === 'debit' &&
+      !!excludedExpenseParents?.length &&
+      excludedExpenseParents.includes(parentCatIdForTxn(t, catMaps)),
+    [excludedExpenseParents, catMaps],
+  );
   const userName     = useEPurseStore((s) => s.userName);
   const lentBorrowed = useEPurseStore((s) => s.lentBorrowed);
 
@@ -217,7 +238,6 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [activeTxn,       setActiveTxn]       = useState(null);
   const [lbLinkTxn,       setLbLinkTxn]       = useState(null);
   const [splitTxn,        setSplitTxn]        = useState(null);
-  const [splitDetailsTxn, setSplitDetailsTxn] = useState(null);
   const [confirm,         setConfirm]         = useState(null);
   const [debugTxn,        setDebugTxn]        = useState(null);
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
@@ -288,7 +308,14 @@ const TransactionsScreen = ({ navigation, route }) => {
     opacity: stickyOpa.value,
   }));
 
+  // Hide-on-scroll for the tab bar, on every tab (Aug-26) — it used to be wired on
+  // Dashboard + Groups only, which read as a bug rather than a feature. This screen
+  // already owns an onScroll for its sticky chips, so the two are composed rather
+  // than one replacing the other.
+  const tabBarScroll = useTabBarScroll();
+
   const handleScroll = useCallback((e) => {
+    tabBarScroll.onScroll(e);
     const y    = e.nativeEvent.contentOffset.y;
     const prev = lastScrollY.current;
     lastScrollY.current = y;
@@ -308,7 +335,7 @@ const TransactionsScreen = ({ navigation, route }) => {
     }
     // Scrolling down while 2 < y <= CHIP_RIBBON_H: inline chips travelling back
     // into view — keep sticky as-is so there's no gap while they emerge
-  }, []);
+  }, [tabBarScroll]);
 
   // ── Reanimated sheet ───────────────────────────────────────────────────────
   const sheetY      = useSharedValue(SHEET_H);
@@ -452,7 +479,7 @@ const TransactionsScreen = ({ navigation, route }) => {
     if (applied.groups.size > 0)     list = list.filter((t) => t.groupId && applied.groups.has(t.groupId));
 
     // Status — union (OR) across the selected chips.
-    if (statusActive) list = list.filter((t) => matchesStatus(t, statusSet));
+    if (statusActive) list = list.filter((t) => matchesStatus(t, statusSet, isNotCounted));
 
     if (applied.dateRange.size > 0) {
       const cutoff = resolveRangeCutoff([...applied.dateRange][0]);
@@ -462,7 +489,7 @@ const TransactionsScreen = ({ navigation, route }) => {
     return list.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-  }, [transactions, quickChip, search, applied]);
+  }, [transactions, quickChip, search, applied, isNotCounted]);
 
   // Interleave month dividers into the (date-desc) list. A divider is inserted
   // only at a month BOUNDARY — never above the first group, and never at all when
@@ -491,12 +518,14 @@ const TransactionsScreen = ({ navigation, route }) => {
       // Memos (someone else paid → you owe) and "excluded from totals" group rows
       // aren't your own money movement — keep them out of the spend/inflow figures
       // (matches Home's selectExpenseStats). They still appear in the list.
-      if (isGroupExcluded(t, groups)) continue;
+      if (spendExcluded(t, groups)) continue;
       if (t.type === 'credit') credit += t.amount || 0;
       else debit += debitDisplayAmount(t);
     }
     return { debit, credit };
-  }, [filtered, groups]);
+  // excludedExpenseParents is a RE-RENDER dep: spendExcluded reads a module-level
+  // mirror, so a rule change wouldn't otherwise invalidate this memo.
+  }, [filtered, groups, excludedExpenseParents]);
 
   const activeFilterCount = useMemo(
     () => Object.values(applied).reduce((n, s) => n + s.size, 0),
@@ -756,16 +785,20 @@ const TransactionsScreen = ({ navigation, route }) => {
             <TransactionItem
               txn={item}
               onPress={() => {
-                // Same routing as Dashboard: view-first for every kind — shared
-                // group → split detail, direct split → share breakdown, plain
-                // txn → its own detail sheet. Icon tap still skips to manage.
+                // Same routing as Dashboard. A shared-group expense keeps its own
+                // detail sheet (its own ledger — see the groups skill). A direct
+                // split now goes through TxnDetailSheet, same as a plain txn: it
+                // renders the split breakdown as a section there, and Edit opens
+                // the full form with the shares editable inline — split used to
+                // be reachable ONLY via SplitDetailsModal → SplitConfigModal from
+                // this exact tap, with no way to touch anything else about the
+                // transaction. Icon tap still skips to the manage sheet.
                 const group = item.groupId ? groups.find((g) => g.id === item.groupId) : null;
                 if (group && group.type === 'shared') { setGroupDetailTxn({ txn: item, group }); return; }
-                if (item.isSplit) { setSplitDetailsTxn(item); return; }
                 setDetailTxn(item);
               }}
               onPressCategory={() => setActiveTxn(item)}
-              onPressSplitChip={() => setSplitDetailsTxn(item)}
+              onPressSplitChip={() => setDetailTxn(item)}
               onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
             />
           )
@@ -1022,6 +1055,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         onPressRemoveFromGroup={() => {
           if (!activeTxn) return;
           untagTransactionFromGroup(activeTxn.id);
+          toast.success('Removed from group');
           setActiveTxn(null);
         }}
         onPressEditGroup={
@@ -1085,20 +1119,11 @@ const TransactionsScreen = ({ navigation, route }) => {
         transaction={splitTxn}
         onClose={() => setSplitTxn(null)}
         onApply={(others, meta) => {
-          if (splitTxn) setTransactionSplit(splitTxn.id, others, meta);
+          if (splitTxn) {
+            setTransactionSplit(splitTxn.id, others, meta);
+            toast.success(others.length ? 'Split saved' : 'Split removed');
+          }
           setSplitTxn(null);
-        }}
-      />
-
-      <SplitDetailsModal
-        visible={!!splitDetailsTxn}
-        txn={splitDetailsTxn}
-        myName={userName ? `You (${userName})` : 'You'}
-        onClose={() => setSplitDetailsTxn(null)}
-        onEdit={() => {
-          const t = splitDetailsTxn;
-          setSplitDetailsTxn(null);
-          setSplitTxn(t);
         }}
       />
 
@@ -1137,6 +1162,7 @@ const TransactionsScreen = ({ navigation, route }) => {
             setGroupExpenseTxn({ txn, group });
           } else {
             tagTransactionToGroup(txn.id, groupId);
+            toast.success('Added to group');
           }
         }}
       />
@@ -1153,6 +1179,7 @@ const TransactionsScreen = ({ navigation, route }) => {
               paidByName: expenseData.paidByName,
               shares: expenseData.shares,
             } : null);
+            toast.success('Added to group');
             setGroupExpenseTxn(null);
           }}
         />
@@ -1163,12 +1190,19 @@ const TransactionsScreen = ({ navigation, route }) => {
           visible={!!editGroupTxn}
           group={editGroupTxn.group}
           editTxn={editGroupTxn.txn}
-          presetAmount={editGroupTxn.txn?.amount}
+          presetAmount={
+            // Lock the amount ONLY for SMS-derived rows, where the bank is the source
+            // of truth. A MANUAL group expense stays editable — the rule
+            // AddGroupExpenseScreen already used. Passing it unconditionally made the
+            // same manual expense editable from the Groups tab but frozen here.
+            editGroupTxn.txn?.source !== 'manual' ? editGroupTxn.txn?.amount : undefined
+          }
           showCategory
           lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
           onClose={() => setEditGroupTxn(null)}
           onAdd={(expenseData) => {
             updateGroupExpense(editGroupTxn.txn.id, expenseData);
+            toast.success('Changes saved');
             setEditGroupTxn(null);
           }}
         />
@@ -1194,6 +1228,7 @@ const TransactionsScreen = ({ navigation, route }) => {
           editable from this form. */}
       <TxnDetailSheet
         txn={detailTxn}
+        myName={userName ? `You (${userName})` : 'You'}
         onClose={() => setDetailTxn(null)}
         onEdit={() => {
           const t = detailTxn;

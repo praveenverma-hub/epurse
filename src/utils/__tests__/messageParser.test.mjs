@@ -1289,6 +1289,39 @@ const REFUND_DETECTION_JUL26 = [
     expect: { accept: false } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 22 — "credited to your account" direction + spaced-period merchant (Aug-26)
+// Two real messages, each of which exposed a live bug:
+//
+//   1. "…has been credited to your account XXXXXXX9532" was matched by the
+//      BENEFICIARY-INVERSION rule (which flips a credit into a debit because the money
+//      landed with someone else) — its alternation included `your account`, which is
+//      the user's OWN account. Every SMS phrased that way — IT refunds, NACH payouts —
+//      booked incoming money as SPEND. `your beneficiary` still inverts; `your account`
+//      must not.
+//
+//   2. "…to PANKAJ  ..RRN 803587657568…" — the merchant lookahead could only stop at a
+//      period flush against the name (the REEMA KUMARI case in suite 15). With two
+//      spaces and ".." before RRN it failed there and fell through to the SECOND "to"
+//      in the message, capturing the anti-fraud helpline: "9289592895-Indian Bank".
+// ─────────────────────────────────────────────────────────────────────────────
+const CREDIT_DIRECTION_AUG26 = [
+  { name: 'IT refund "credited to your account" is a CREDIT, not a debit',
+    sender: 'SBIINB',
+    sms: 'Dear Customer, For PAN XXXXXX962N, An IT Refund amount of Rs 100 for AY-2026-27 has been credited to your account XXXXXXX9532 on 2026-08-06. -SBI',
+    expect: { accept: true, type: 'credit', amount: 100, accountMask: '9532' } },
+  // The inversion must SURVIVE for a genuine beneficiary payout — this is the case the
+  // rule exists for, and the guard above must not have disarmed it.
+  { name: 'Guard: "credited to the beneficiary" still inverts to DEBIT',
+    sender: 'HDFCBK',
+    sms: 'Rs.5000.00 has been credited to the beneficiary A/c XX1234 on 06-08-26 via NEFT. Ref 998877.',
+    expect: { accept: true, type: 'debit', amount: 5000 } },
+  { name: 'Merchant stops at a SPACED period ("to PANKAJ  ..RRN"), not the SMS-BLOCK number',
+    sender: 'INDBNK',
+    sms: 'Sent Rs.667.00 from A/c *9532 on 05-08-26 to PANKAJ  ..RRN 803587657568.Avl Bal Rs.22510.83.Not you?SMS BLOCK to 9289592895-Indian Bank',
+    expect: { accept: true, type: 'debit', amount: 667, accountMask: '9532', merchant: 'PANKAJ' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1311,6 +1344,7 @@ const SUITES = [
   ['100-msg stress findings (Jul-26)', STRESS_FINDINGS_JUL26],
   ['Adversarial false-positive traps (Jul-26)', ADVERSARIAL_FP_JUL26],
   ['Refund / reversal / cashback detection (Jul-26)', REFUND_DETECTION_JUL26],
+  ['Credit direction & spaced-period merchant (Aug-26)', CREDIT_DIRECTION_AUG26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
