@@ -43,7 +43,7 @@ import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, typography as typographyBase } from '../constants/theme';
-import { formatCurrency, isSameMonth } from '../utils/format';
+import { formatCurrency, formatCompact, isSameMonth } from '../utils/format';
 import { countsForSpend, spendContribution } from '../utils/split';
 
 // The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
@@ -153,10 +153,12 @@ const GroupCard: React.FC<{
           </View>
         </View>
         <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>This month</Text>
-          <Text style={[styles.metricValue, { color: theme.primary }]} numberOfLines={1}>
-            {formatCurrency(item.total)}
-          </Text>
+          <View style={styles.metricLeft}>
+            <Text style={styles.metricLabel} numberOfLines={1}>This month</Text>
+            <Text style={[styles.metricValue, { color: theme.primary }]} numberOfLines={1}>
+              {formatCurrency(item.total)}
+            </Text>
+          </View>
         </View>
       </Animated.View>
     );
@@ -165,6 +167,8 @@ const GroupCard: React.FC<{
   const owed = item.net > 0.005;
   const owe  = item.net < -0.005;
   const netColor = owed ? theme.success : owe ? theme.textSecondary : theme.textMuted;
+  // Shared groups only, and only when the two figures actually differ.
+  const showOfTotal = item.shared && item.groupTotal - item.personalShare > 0.005;
 
   return (
     <Animated.View style={[styles.card, { width: cardW }, animStyle]}>
@@ -181,24 +185,35 @@ const GroupCard: React.FC<{
         </View>
       </View>
 
+      {/* One skeleton for every card: the LEFT slot always holds this month's money
+          figure, the RIGHT slot holds the balance when there is one.
+          Previously the left slot meant different things per card type (balance on
+          shared, spend on personal) while the right slot repeated `personalShare`
+          verbatim on personal cards — where your share IS the total, so it printed
+          the same number twice and then "of" itself. */}
       <View style={styles.metricRow}>
         <View style={styles.metricLeft}>
-          <Text style={styles.metricLabel} numberOfLines={1}>
-            {item.shared ? (owe ? 'You owe' : 'Owed to you') : 'Your spend'}
-          </Text>
-          <Text style={[styles.metricValue, { color: item.shared ? netColor : theme.primary }]} numberOfLines={1}>
-            {item.shared
-              ? (item.net === 0 ? 'Settled' : formatCurrency(Math.abs(item.net)))
-              : formatCurrency(item.personalShare)}
-          </Text>
-        </View>
-        <View style={styles.metricRight}>
-          <Text style={styles.shareLabel} numberOfLines={1}>your share</Text>
-          <Text style={styles.shareValue} numberOfLines={1}>
+          <Text style={styles.metricLabel} numberOfLines={1}>Your spend</Text>
+          <Text style={[styles.metricValue, { color: theme.primary }]} numberOfLines={1}>
             {formatCurrency(item.personalShare)}
-            <Text style={styles.shareOf}>{`  of ${formatCurrency(item.groupTotal)}`}</Text>
+            {/* Only when the group total is genuinely a bigger number than your share
+                — on a personal tracker they're the same, so "of" would be noise.
+                Compact so a lakh-scale total can't truncate the figure beside it. */}
+            {showOfTotal ? (
+              <Text style={styles.metricSuffix}>{`  of ${formatCompact(item.groupTotal)}`}</Text>
+            ) : null}
           </Text>
         </View>
+        {item.shared ? (
+          <View style={styles.metricRight}>
+            <Text style={styles.metricLabel} numberOfLines={1}>
+              {item.net === 0 ? 'Balance' : owe ? 'You owe' : 'Owed to you'}
+            </Text>
+            <Text style={[styles.secondaryValue, { color: netColor }]} numberOfLines={1}>
+              {item.net === 0 ? 'Settled' : formatCurrency(Math.abs(item.net))}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Animated.View>
   );
@@ -387,7 +402,9 @@ const makeStyles = (t: any) =>
     metricRight: { alignItems: 'flex-end', flexShrink: 1, marginLeft: spacing.sm },
     metricLabel: { color: t.textMuted, ...typography.tiny, textTransform: 'uppercase', letterSpacing: 0.4 },
     metricValue: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginTop: 1 },
-    shareLabel: { color: t.textMuted, ...typography.tiny },
-    shareValue: { color: t.textSecondary, fontSize: 12, fontWeight: '700', marginTop: 1 },
-    shareOf: { color: t.textMuted, fontWeight: '500' },
+    // Suffix rides INSIDE metricValue, so it only needs the delta from it.
+    metricSuffix: { color: t.textMuted, fontSize: 12, fontWeight: '600', letterSpacing: 0 },
+    // Smaller than metricValue so the two columns read as primary + secondary
+    // rather than competing for the eye.
+    secondaryValue: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2, marginTop: 1 },
   });

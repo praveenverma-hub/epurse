@@ -38,6 +38,7 @@ import {
 import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
+import ProgressBar from '../components/ProgressBar';
 import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 
@@ -323,9 +324,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                     <Text style={[styles.catPct, { color: barColor }]}>{Math.round(r.pct)}%</Text>
                     <Text style={styles.catChevron}>›</Text>
                   </View>
-                  <View style={styles.barTrack}>
-                    <View style={[styles.barFill, { width: `${Math.min(100, r.pct)}%`, backgroundColor: barColor }]} />
-                  </View>
+                  <ProgressBar progress={r.pct / 100} color={barColor} height={7} />
                   <View style={styles.catCardBot}>
                     <Text style={styles.catActual} numberOfLines={1}>{formatCompact(r.actual)}</Text>
                     <Text style={styles.catCapLabel} numberOfLines={1}>{`/ ${formatCompact(r.cap)}`}</Text>
@@ -458,9 +457,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                         <Text style={styles.drillRowAmount}>{formatCompact(row.total)}</Text>
                         <Text style={styles.drillRowPct}>{Math.round(pct)}%</Text>
                       </View>
-                      <View style={styles.barTrack}>
-                        <View style={[styles.barFill, { width: `${Math.min(100, pct)}%`, backgroundColor: drillCat?.color ?? colors.info }]} />
-                      </View>
+                      <ProgressBar progress={pct / 100} color={drillCat?.color ?? colors.info} height={7} />
                     </View>
                   );
                 })
@@ -576,11 +573,6 @@ const styles = StyleSheet.create({
   masteryBadge: { fontSize: 13 },
   catPct:       { fontSize: 13, fontWeight: '800' },
   catChevron:   { fontSize: 18, color: colors.textMuted, marginLeft: 6, marginTop: -2 },
-  barTrack: {
-    height: 7, backgroundColor: colors.divider,
-    borderRadius: 4, overflow: 'hidden',
-  },
-  barFill:  { height: '100%', borderRadius: 4 },
   catCardBot: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 4 },
   catActual:    { ...typography.small, color: colors.textPrimary, fontWeight: '700' },
   catCapLabel:  { ...typography.small, color: colors.textSecondary },

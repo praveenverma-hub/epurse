@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { selectTransactions } from '../store/ePurseStore';
 import { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } from '../constants/categories';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, progressTrack } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
 import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
@@ -38,7 +38,8 @@ import SmartLedger from '../components/SmartLedger';
 import GroupInsightCarousel from '../components/GroupInsightCarousel';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
-import InfoIcon from '../components/InfoIcon';
+import SectionHeader from '../components/SectionHeader';
+import ProgressBar from '../components/ProgressBar';
 
 const SCREEN_W = Dimensions.get('window').width;
 
@@ -292,7 +293,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
                 this lives inside the "Spend by group" card at the BOTTOM instead. */}
             {groups.length === 0 && breakdown.length > 2 ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Spend by category</Text>
+                <SectionHeader
+                  icon="pricetags-outline"
+                  accentColor={theme.primary}
+                  title="Spend by category"
+                  subtitle="Where this month's money went, largest first."
+                />
                 <BarChart data={breakdown} />
               </View>
             ) : null}
@@ -300,7 +306,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             {/* Progress rings + rows — whole-month category breakdown */}
             {breakdown.length > 0 ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Category breakdown</Text>
+                <SectionHeader
+                  icon="pie-chart-outline"
+                  accentColor={theme.primary}
+                  title="Category breakdown"
+                  subtitle="Every category as a share of the month."
+                />
                 <View style={styles.ringsRow}>
                   {breakdown.slice(0, 4).map((c) => (
                     <ProgressRing key={c.id} category={c} />
@@ -322,7 +333,12 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
              {/* Account-wise expenses */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Spend by account</Text>
+              <SectionHeader
+                icon="card-outline"
+                accentColor={theme.primary}
+                title="Spend by account"
+                subtitle="Which accounts the spending came from."
+              />
               {accountBreakdown.length === 0 ? (
                 <EmptyState
                   compact
@@ -337,13 +353,13 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
             {/* ── Behavioral Insights ── */}
             <View style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>📈 Spending Pace</Text>
-                <TouchableOpacity onPress={() => setInfoKey('pace')} hitSlop={10}>
-                  <InfoIcon size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.sectionSubtitle}>Your trajectory vs last month — drag to compare any day.</Text>
+              <SectionHeader
+                icon="trending-up-outline"
+                accentColor={theme.primary}
+                title="Spending Pace"
+                subtitle="Your trajectory vs last month — drag to compare any day."
+                onInfo={() => setInfoKey('pace')}
+              />
               {hasPace ? (
                 <GhostLineChart data={dailyData} />
               ) : (
@@ -352,13 +368,13 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             </View>
 
             <View style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>⚡ Habit Leaks</Text>
-                <TouchableOpacity onPress={() => setInfoKey('habit')} hitSlop={10}>
-                  <InfoIcon size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.sectionSubtitle}>Frequency vs. spend — find the sneaky drains. Tap a bubble.</Text>
+              <SectionHeader
+                icon="flash-outline"
+                accentColor={theme.primary}
+                title="Habit Leaks"
+                subtitle="Frequency vs. spend — find the sneaky drains. Tap a bubble."
+                onInfo={() => setInfoKey('habit')}
+              />
               {hasBubbles ? (
                 <HabitLeakMatrix bubbles={merchantBubbles} />
               ) : (
@@ -367,13 +383,13 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
             </View>
 
             <View style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>💓 Subscription Heartbeat</Text>
-                <TouchableOpacity onPress={() => setInfoKey('heartbeat')} hitSlop={10}>
-                  <InfoIcon size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.sectionSubtitle}>Recurring charges visualised as an EKG. Scroll to explore.</Text>
+              <SectionHeader
+                icon="pulse-outline"
+                accentColor={theme.primary}
+                title="Subscription Heartbeat"
+                subtitle="Recurring charges visualised as an EKG. Scroll to explore."
+                onInfo={() => setInfoKey('heartbeat')}
+              />
               {hasSubs ? (
                 <SubscriptionHeartbeat subscriptions={allSubscriptions} date={date} />
               ) : (
@@ -383,25 +399,26 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
 
             {/* ── What-if Ledger (second-to-last) ── */}
             <View style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>🔮 What-if Ledger Playground</Text>
-                <TouchableOpacity onPress={() => setInfoKey('whatif')} hitSlop={10}>
-                  <InfoIcon size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.sectionSubtitle}>Toggle categories to see your month without them.</Text>
+              <SectionHeader
+                icon="bulb-outline"
+                accentColor={theme.primary}
+                title="What-if Ledger"
+                subtitle="Toggle categories to see your month without them."
+                onInfo={() => setInfoKey('whatif')}
+              />
               <SmartLedger transactions={whatIfTxns} />
             </View>
 
             {/* ── Spend by group — carousel selector + its category chart in ONE card (last) ── */}
             {groups.length > 0 ? (
               <View style={styles.section}>
-                <View style={styles.sectionHead}>
-                  <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>👥 Spend by group</Text>
-                  <TouchableOpacity onPress={() => setInfoKey('groups')} hitSlop={10}>
-                    <InfoIcon size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
+                <SectionHeader
+                  icon="people-outline"
+                  accentColor={theme.primary}
+                  title="Spend by group"
+                  subtitle="What each group cost you, and what it went on."
+                  onInfo={() => setInfoKey('groups')}
+                />
 
                 {/* Group selector strip */}
                 <GroupInsightCarousel
@@ -515,9 +532,7 @@ const HorizontalBarChart = ({ data }) => {
         return (
           <View key={i} style={styles.hBarRow}>
             <Text style={styles.hBarLabel} numberOfLines={1}>{label}</Text>
-            <View style={styles.hBarTrack}>
-              <View style={[styles.hBarFill, { width: `${pct * 100}%`, backgroundColor: barColor }]} />
-            </View>
+            <ProgressBar progress={pct} color={barColor} height={10} style={styles.hBarTrack} />
             <Text style={styles.hBarAmount}>{formatCurrency(d.total)}</Text>
           </View>
         );
@@ -571,7 +586,7 @@ const ProgressRing = ({ category, size = 70, stroke = 7 }) => {
           cx={size / 2}
           cy={size / 2}
           r={r}
-          stroke={category.color + '22'}
+          stroke={progressTrack(category.color)}
           strokeWidth={stroke}
           fill="none"
         />
@@ -652,16 +667,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   viewDetailsText: { ...typography.small, fontWeight: '700' },
-  sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
-  sectionTitleInline: { marginBottom: 0, flexShrink: 1 },
-  sectionSubtitle: {
-    ...typography.small,
-    color: colors.textSecondary,
-    marginTop: -spacing.xs,
-    marginBottom: spacing.md,
-    lineHeight: 18,
-  },
   empty: { ...typography.body, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
 
   barLabels: { flexDirection: 'row', marginTop: spacing.xs },
@@ -733,8 +738,7 @@ const styles = StyleSheet.create({
   // Horizontal bar chart — account name | bar | amount in one row
   hBarRow:    { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   hBarLabel:  { width: 128, ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
-  hBarTrack:  { flex: 1, height: 18, backgroundColor: colors.divider + '66', borderRadius: radius.sm, overflow: 'hidden' },
-  hBarFill:   { height: '100%', borderRadius: radius.sm },
+  hBarTrack:  { flex: 1 },
   hBarAmount: { width: 72, ...typography.tiny, color: colors.textPrimary, fontWeight: '700', textAlign: 'right' },
 });
 

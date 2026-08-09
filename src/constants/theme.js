@@ -94,4 +94,38 @@ export const shadows = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Progress surfaces — "same hue, two weights"
+// -----------------------------------------------------------------------------
+// Every progress indicator (bar or ring) is a TINTED track of the fill's own
+// colour with the solid colour running over it. A neutral gray track reads as
+// chrome and disconnects the bar from what it measures; the tint makes the
+// remaining amount obviously the same thing as the spent amount.
+// One alpha for all of them so bars and rings can never drift apart.
+// ─────────────────────────────────────────────────────────────────────────────
+// Expressed as /255 so it reproduces the original hand-written '22' suffix on the
+// Category-breakdown ring EXACTLY — that ring is where this pattern came from, and
+// it should look identical after being routed through the helper.
+export const PROGRESS_TRACK_ALPHA = 34 / 255;
+
+/**
+ * Append an alpha channel to a hex colour. Falls back to `colors.divider` for
+ * anything that can't take an 8-digit suffix (rgb()/rgba()/named colours) —
+ * returning the input unchanged there would paint the track SOLID and swallow
+ * the fill entirely.
+ */
+export const withAlpha = (color, a) => {
+  if (typeof color !== 'string') return colors.divider;
+  let hex = color.trim();
+  if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
+    hex = `#${hex.slice(1).split('').map((c) => c + c).join('')}`;
+  }
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return colors.divider;
+  const clamped = Math.max(0, Math.min(1, Number(a) || 0));
+  return hex + Math.round(clamped * 255).toString(16).padStart(2, '0');
+};
+
+/** The track colour for a given fill colour. Use this, don't re-pick an alpha. */
+export const progressTrack = (color) => withAlpha(color, PROGRESS_TRACK_ALPHA);
+
 export default { colors, spacing, radius, typography, shadows };

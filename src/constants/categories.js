@@ -160,8 +160,15 @@ export const CATEGORY_KEYWORDS = {
     'you borrowed', 'borrowed from', 'loan taken', 'took loan',
   ],
   lent_settled: [
-    'settled', 'settlement received', 'paid back', 'returned', 'returned amount',
-    'repayment received',
+    // NOT a bare 'returned' or 'settled' (both removed Aug-26): they fired on bank
+    // narration that has
+    // nothing to do with a person — "NEFT returned by the beneficiary bank",
+    // "returned cheque", "your transaction has been settled" (routine card-network
+    // wording) — and put those credits in the lend/borrow LEDGER as a
+    // phantom repayment, where they also stopped counting as money in (lent_settled
+    // is in NON_SPEND_CATS). Real returns of money are handled by the isRefund path.
+    // Keep every keyword here person-scoped for the same reason.
+    'settlement received', 'paid back', 'returned amount', 'repayment received',
   ],
   borrow_repaid: [
     'loan repaid', 'repaid', 'repayment done', 'paid back to', 'borrow repaid',

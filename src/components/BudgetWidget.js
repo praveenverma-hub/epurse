@@ -14,6 +14,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCompact } from '../utils/format';
+import ProgressBar from './ProgressBar';
 
 const MiniRing = ({ pct, color, size = 56, strokeWidth = 6 }) => {
   const r = (size - strokeWidth) / 2;
@@ -132,9 +133,7 @@ const BudgetWidget = ({ onPress }) => {
     return (
       <View key={b.catId} style={styles.catRow}>
         <Text style={styles.catEmoji}>{cat.emoji}</Text>
-        <View style={styles.catBarTrack}>
-          <View style={[styles.catBarFill, { width: `${Math.min(100, b.pct)}%`, backgroundColor: pctColor }]} />
-        </View>
+        <ProgressBar progress={b.pct / 100} color={pctColor} height={4} style={styles.catBarTrack} />
         <Text style={[styles.catPct, { color: pctColor }]}>{Math.round(b.pct)}%</Text>
       </View>
     );
@@ -285,14 +284,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   catEmoji:    { fontSize: 11 },
-  catBarTrack: {
-    flex: 1,
-    height: 4,
-    backgroundColor: colors.divider,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  catBarFill: { height: '100%', borderRadius: 2 },
+  catBarTrack: { flex: 1 },
   catPct:     { fontSize: 10, fontWeight: '700', minWidth: 28, textAlign: 'right' },
 
   // ── Streak row ──

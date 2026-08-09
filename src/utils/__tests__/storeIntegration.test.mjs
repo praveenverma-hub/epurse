@@ -1103,5 +1103,133 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('history rules: re-including restores the historical total', spendOld() === 4000, `${spendOld()}`);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SPLIT FLOWS — the SAME two people reached through every split path (Aug-26).
+//
+// The invariant under test: one friend = ONE balance, however the debt was
+// created (group expense, plain split at add-time, plain split applied later,
+// manual IOU). getPersonBalances unions only on STRONG ids (phone/contactId);
+// a name-only row attaches only while that name maps to exactly one person, so
+// any row that silently loses its contactId is a latent balance split.
+//
+// Found and fixed here:
+//   • addTransaction's lent legs dropped contactId/phone (setTransactionSplit
+//     always carried them) → a later phone-only IOU DETACHED the earlier split.
+//   • untagging a group MEMO stripped isGroupMemo from a txn that has no
+//     accountId → a phantom expense: full amount into spend, no balance moved.
+// ═════════════════════════════════════════════════════════════════════════════
+{
+  const resetSplit = () => {
+    useStore.setState({
+      transactions: [], accounts: [{ id: 'acc1', name: 'HDFC', type: 'Bank', mask: '4021', balance: 100000 }],
+      archivedTransactions: [], lentBorrowed: [], groups: [], monthlyAggregates: {},
+      excludedExpenseParents: [], suppressedSmsIds: [], manualTxnSeq: 0,
+      userOnboardedAt: 0, activeGroupZoneId: null, budgetHistory: {},
+    });
+  };
+  const G = () => useStore.getState();
+  const bal = () => G().accounts.find((a) => a.id === 'acc1').balance;
+  const spend = () => G().getMonthlySpend();
+  const who = (name) => G().getPersonBalances().filter((p) => p.person === name);
+  const net = (name) => who(name).reduce((a, p) => a + p.net, 0);
+  const share = (memberId, name, shareAmount) => ({ memberId, name, shareAmount });
+
+  resetSplit();
+  const gid = G().createGroup({
+    name: 'Goa Trip', type: 'shared',
+    members: [{ memberId: 'm1', name: 'Rahul', contactId: 'c-rahul' },
+              { memberId: 'm2', name: 'Priya', contactId: 'c-priya' }],
+  });
+
+  // ── Group expense, I paid, two entries ──
+  G().addGroupExpense(gid, { amount: 3000, merchant: 'Hotel', categoryId: 'travel',
+    paidByMemberId: 'me', accountId: 'acc1',
+    shares: [share('me', 'You', 1000), share('m1', 'Rahul', 1000), share('m2', 'Priya', 1000)] });
+  G().addGroupExpense(gid, { amount: 600, merchant: 'Lunch', categoryId: 'food',
+    paidByMemberId: 'me', accountId: 'acc1',
+    shares: [share('me', 'You', 200), share('m1', 'Rahul', 200), share('m2', 'Priya', 200)] });
+  check('split/group: my spend counts MY SHARE only across 2 expenses', spend() === 1200, `${spend()}`);
+  check('split/group: the FULL amount leaves the account', bal() === 96400, `${bal()}`);
+  check('split/group: each member owes their share', net('Rahul') === 1200 && net('Priya') === 1200,
+    `R=${net('Rahul')} P=${net('Priya')}`);
+
+  // ── Group expense someone else paid → memo ──
+  G().addGroupExpense(gid, { amount: 1500, merchant: 'Scooter', categoryId: 'travel',
+    paidByMemberId: 'm1', paidByName: 'Rahul', accountId: 'acc1',
+    shares: [share('me', 'You', 500), share('m1', 'Rahul', 500), share('m2', 'Priya', 500)] });
+  check('split/memo: a group memo adds no spend and moves no balance',
+    spend() === 1200 && bal() === 96400, `spend ${spend()} bal ${bal()}`);
+  check('split/memo: I owe the payer my share only', net('Rahul') === 700, `${net('Rahul')}`);
+
+  // ── Plain split at ADD time, same two people ──
+  G().addTransaction({ amount: 900, type: 'debit', merchant: 'Dinner', categoryId: 'food',
+    accountId: 'acc1', isSplit: true, myShareAmount: 300,
+    splitOthers: [{ contactId: 'c-rahul', name: 'Rahul', shareAmount: 300 },
+                  { contactId: 'c-priya', name: 'Priya', shareAmount: 300 }] });
+  check('split/plain: plain split adds only my share to spend', spend() === 1500, `${spend()}`);
+  check('split/plain: full amount leaves the account', bal() === 95500, `${bal()}`);
+  check('split/plain: group + plain debts NET into one person',
+    who('Rahul').length === 1 && net('Rahul') === 1000, `${who('Rahul').length} rows, net ${net('Rahul')}`);
+
+  // ── Plain split applied LATER, someone else paid ──
+  G().addTransaction({ id: 'TX-CAB', amount: 1200, type: 'debit', merchant: 'Cab',
+    categoryId: 'travel', accountId: 'acc1' });
+  G().setTransactionSplit('TX-CAB', [{ contactId: 'c-priya', name: 'Priya', shareAmount: 400 }],
+    { mode: 'amount', myAmount: 400, paidBy: { contactId: 'c-rahul', name: 'Rahul' } });
+  check('split/plain-memo: flipping to someone-else-paid gives the money back',
+    bal() === 95500 && spend() === 1500, `bal ${bal()} spend ${spend()}`);
+  check('split/plain-memo: my share becomes a debt to the payer', net('Rahul') === 600, `${net('Rahul')}`);
+
+  // ── Manual IOU, same contactId ──
+  G().addLentBorrowed({ kind: 'lent', person: 'Rahul', contactId: 'c-rahul', phone: null,
+    amount: 250, date: new Date().toISOString() });
+  check('split/manual: a manual IOU with the same contactId merges',
+    who('Rahul').length === 1 && net('Rahul') === 850, `${who('Rahul').length} rows, net ${net('Rahul')}`);
+
+  // ── REGRESSION: a phone-only IOU must not detach the earlier split legs ──
+  G().addLentBorrowed({ kind: 'lent', person: 'Rahul', contactId: null, phone: '9821034512',
+    amount: 100, date: new Date().toISOString() });
+  const cid = who('Rahul').find((p) => String(p.personKey).startsWith('cid:'));
+  check('split/identity: a phone-only IOU does NOT fragment the contactId person',
+    cid && cid.net === 850, `cid net ${cid && cid.net} (expected 850 — 300 plain-split leg must stay attached)`);
+  check('split/identity: total across the phone-only row is still right', net('Rahul') === 950, `${net('Rahul')}`);
+
+  // ── Group-scoped settle touches only the group legs ──
+  G().settleGroupPersonBalance(gid, cid.personKey);
+  check('split/settle: group settle clears only the group portion (700 of 850)',
+    who('Rahul').find((p) => p.personKey === cid.personKey)?.net === 150,
+    `${JSON.stringify(who('Rahul').map((p) => [String(p.personKey), p.net]))}`);
+
+  // ── REGRESSION: untagging a MEMO must not conjure a phantom expense ──
+  const spendBefore = spend(), balBefore = bal();
+  const scooter = G().transactions.find((t) => t.merchant === 'Scooter');
+  G().untagTransactionFromGroup(scooter.id);
+  check('split/untag-memo: untagging a memo does NOT add its amount to spend',
+    spend() === spendBefore && bal() === balBefore, `spend ${spend()}/${spendBefore} bal ${bal()}/${balBefore}`);
+  const scooterAfter = G().transactions.find((t) => t.id === scooter.id);
+  check('split/untag-memo: it becomes a plain split memo, not a personal expense',
+    scooterAfter.isSplitMemo === true && !scooterAfter.groupId && scooterAfter.myShareAmount === 500,
+    JSON.stringify({ memo: scooterAfter.isSplitMemo, gid: scooterAfter.groupId, mine: scooterAfter.myShareAmount }));
+  check('split/untag-memo: the debt to the payer survives, un-scoped from the group',
+    G().lentBorrowed.some((l) => l.sourceTxnId === scooter.id && l.kind === 'borrowed'
+      && l.amount === 500 && !l.groupId));
+
+  // ── Clearing a plain split restores the full amount to spend ──
+  const dinner = G().transactions.find((t) => t.merchant === 'Dinner');
+  const preClear = spend();
+  G().setTransactionSplit(dinner.id, []);
+  check('split/clear: clearing a split returns the other shares to my spend',
+    spend() === preClear + 600, `${spend()} vs ${preClear + 600}`);
+  check('split/clear: its lent legs are gone',
+    !G().lentBorrowed.some((l) => l.sourceTxnId === dinner.id));
+
+  // ── Deleting a group expense removes its legs ──
+  const hotel = G().transactions.find((t) => t.merchant === 'Hotel');
+  G().deleteTransaction(hotel.id);
+  check('split/delete: deleting a group expense drops its LB legs',
+    !G().lentBorrowed.some((l) => l.sourceTxnId === hotel.id));
+  check('split/delete: and refunds the account', bal() === 98500, `${bal()}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

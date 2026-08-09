@@ -28,6 +28,38 @@ const COLOR_PALETTE = [
 
 const EMOJI_PALETTE = ['🍔', '✈️', '💡', '🛍️', '🥦', '🎬', '💊', '💰', '🎓', '🎁', '🐶', '🚗'];
 
+// "Own emoji" tile. The DEVICE's emoji keyboard does the picking — no emoji-picker
+// dependency to ship or keep current with new Unicode releases.
+//
+// Measured in UTF-16 units, not "characters": one emoji is often many code points —
+// a ZWJ family 👨‍👩‍👦‍👦 is 11 units and 👩🏻‍❤️‍💋‍👨🏿 is 15. Slicing to 1–2 would mangle exactly
+// the emoji people pick to be personal. (`Array.from` is no help — it splits code
+// points, so it breaks ZWJ sequences too.)
+const EMOJI_MAX_UNITS = 16;
+// Any cut can land INSIDE a surrogate pair or right after a joiner, leaving a lone
+// high surrogate (renders as �, and gets persisted) or a dangling ZWJ. Trim those
+// tails off until the string ends on a complete glyph.
+// NOT the variation selector U+FE0F: it is a legitimate ending on a COMPLETE emoji —
+// it's what forces colour presentation. Stripping it turned ✈️ into ✈ and ❤️ into ❤
+// (the monochrome text glyphs), which is why it's excluded here.
+const trimBrokenTail = (s) => {
+  let out = s;
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/[\uD800-\uDBFF]$/, '').replace(/‍+$/, '');
+  } while (out !== prev);
+  return out;
+};
+const sanitizeEmoji = (raw) =>
+  trimBrokenTail((raw || '').replace(/\s/g, '').slice(0, EMOJI_MAX_UNITS));
+// Deliberately a REJECT-list, not an emoji match: `\p{Extended_Pictographic}` needs
+// Unicode property escapes, and a wrong guess about Hermes support would throw at
+// runtime inside a modal. Blocking ASCII letters/digits is all that's needed — it
+// stops a name ("Pets") being used as the icon and breaking the row layout, while
+// letting through every emoji, old and new.
+const isEmojiOnly = (s) => !!s && !/[A-Za-z0-9]/.test(s);
+
 const CategoriesScreen = ({ navigation }) => {
   const theme = useTheme();
   const tree = useCategoryTree();
@@ -47,6 +79,9 @@ const CategoriesScreen = ({ navigation }) => {
   const [draftName, setDraftName]   = useState('');
   const [draftEmoji, setDraftEmoji] = useState(EMOJI_PALETTE[0]);
   const [draftColor, setDraftColor] = useState(COLOR_PALETTE[0]);
+  const [emojiErr,   setEmojiErr]   = useState(false);
+  // Anything not in the palette came from the user's keyboard → the custom tile owns it.
+  const usingOwnEmoji = !EMOJI_PALETTE.includes(draftEmoji);
 
   const customParentIds = new Set(customParents.map((p) => p.id));
   const customChildIds  = new Set(customChildren.map((c) => c.id));
@@ -58,6 +93,7 @@ const CategoriesScreen = ({ navigation }) => {
     setDraftName('');
     setDraftEmoji(EMOJI_PALETTE[0]);
     setDraftColor(COLOR_PALETTE[0]);
+    setEmojiErr(false);
   };
 
   const saveAdd = () => {
@@ -66,10 +102,13 @@ const CategoriesScreen = ({ navigation }) => {
       toast.warning('Invalid name', `Use ${INPUT_LIMITS.NAME_MIN}–${INPUT_LIMITS.CATEGORY_MAX} characters.`);
       return;
     }
+    // Never persist a half-typed / rejected emoji — fall back to the palette default
+    // so a category can't end up with a blank icon everywhere it's shown.
+    const emoji = isEmojiOnly(draftEmoji) ? draftEmoji : EMOJI_PALETTE[0];
     if (addTarget?.kind === 'parent') {
-      addCustomParent({ label: name, emoji: draftEmoji, color: draftColor });
+      addCustomParent({ label: name, emoji, color: draftColor });
     } else if (addTarget?.kind === 'child') {
-      addCustomChild(addTarget.parentId, { label: name, emoji: draftEmoji });
+      addCustomChild(addTarget.parentId, { label: name, emoji });
     }
     setAddTarget(null);
     toast.success('Category added', `"${name}" is ready to use everywhere.`);
@@ -218,13 +257,44 @@ const CategoriesScreen = ({ navigation }) => {
               {EMOJI_PALETTE.map((e) => (
                 <TouchableOpacity
                   key={e}
-                  onPress={() => setDraftEmoji(e)}
+                  onPress={() => { setDraftEmoji(e); setEmojiErr(false); }}
                   style={[styles.emoji, draftEmoji === e && { borderWidth: 2, borderColor: theme.primary }]}
                 >
                   <Text style={{ fontSize: 22 }}>{e}</Text>
                 </TouchableOpacity>
               ))}
+              {/* Own emoji — a normal input, so the OS emoji keyboard is the picker.
+                  It sits in the SAME row as the palette because it's one more way to
+                  answer one question; a separate section would imply a second choice. */}
+              <View
+                style={[
+                  styles.emoji,
+                  styles.emojiOwn,
+                  usingOwnEmoji && { borderWidth: 2, borderColor: theme.primary },
+                  emojiErr && { borderWidth: 2, borderColor: colors.danger },
+                ]}
+              >
+                <TextInput
+                  value={usingOwnEmoji ? draftEmoji : ''}
+                  onChangeText={(t) => {
+                    const e = sanitizeEmoji(t);
+                    if (!e) { setEmojiErr(false); setDraftEmoji(EMOJI_PALETTE[0]); return; }
+                    if (isEmojiOnly(e)) { setEmojiErr(false); setDraftEmoji(e); }
+                    else setEmojiErr(true);   // typed a letter — say so instead of silently ignoring
+                  }}
+                  placeholder="＋"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.emojiOwnInput}
+                  maxLength={EMOJI_MAX_UNITS}
+                  accessibilityLabel="Use your own emoji"
+                />
+              </View>
             </View>
+            <Text style={[styles.emojiHint, emojiErr && { color: colors.danger }]}>
+              {emojiErr
+                ? 'Emoji only — tap the 😀 key on your keyboard.'
+                : 'Tap ＋ to use any emoji from your keyboard.'}
+            </Text>
 
             {isParentAdd && (
               <>
@@ -388,6 +458,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
+  // Dashed edge marks the "own emoji" tile as an input, not one more preset.
+  emojiOwn: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.divider,
+  },
+  emojiOwnInput: {
+    width: '100%',
+    height: '100%',
+    textAlign: 'center',
+    fontSize: 22,
+    padding: 0,           // Android centres the glyph only without default padding
+    color: colors.textPrimary,
+  },
+  emojiHint: { ...typography.tiny, color: colors.textMuted, marginTop: spacing.xs },
   swatch: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   swatchSelected: {
     borderWidth: 2, borderColor: '#fff', transform: [{ scale: 1.18 }],

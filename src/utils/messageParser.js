@@ -210,6 +210,12 @@ const TRANSACTION_PHRASES = [
   'returned to your', 'credited back',
   // Bank charges / penalties (no debit verb — only "levied on" or "penalty of")
   'levied on', 'levied', 'penalty of', 'charge levied',
+  // Top-ups have no debit/credit verb at all: "Rs.2000 added to your Paytm Wallet from
+  // A/c XX4412", "Your FASTag linked to A/c XX5521 has been recharged with Rs.500".
+  // Both are real money movements that were being dropped as missing_transaction_keyword.
+  // 'added to your' is scoped (not bare 'added') so it can't fire on "added to your
+  // rewards/watchlist"; 'recharged with' likewise needs the amount-bearing form.
+  'added to your', 'recharged with', 'recharge of', 'topped up', 'top-up of',
 ];
 
 // =============================================================================
@@ -441,8 +447,36 @@ const NON_TXN_AMOUNT_HINTS = /\b(?:due|min(?:imum)?\s+due|outstanding|avl(?:\.|\
 // A CREDIT that is money back for a prior payment — refund / return / reversal /
 // cashback. Flagged as `isRefund` so the store nets it against spend (not income).
 // (Promotional cashback OFFERS are already intercepted earlier as promos.)
+// `chargeback` and the past-tense "(has been|was) reversed" split form are here for the
+// same reason they're in the failed-txn guard: money coming BACK is a refund, and
+// without them it books as Income and overstates earnings instead of reducing Spent.
 const REFUND_CREDIT_REGEX =
-  /\b(?:refund(?:ed)?|refund\s+of|reversed\s+to|reversal|credited\s+back|returned\s+to\s+your|cashback(?:\s+credited)?)\b/i;
+  /\b(?:refund(?:ed)?|refund\s+of|reversed\s+to|reversal|charge\s?back|credited\s+back|returned\s+to\s+your|(?:(?:has|have)\s+been|was|were)\s+reversed|cashback(?:\s+credited)?)\b/i;
+
+// A merchant capture that is really bank narration — a statement period, a currency
+// leg, an order ref. Nulled so the parse falls back to the bank sender name.
+// The determiner arm is deliberately followed by a NOUN LIST rather than matching any
+// "the …": real merchants do start with a determiner ("The Body Shop", "The Bombay
+// Store"), and nulling those would be a worse bug than the one being fixed.
+const JUNK_MERCHANT_REGEX = new RegExp(
+  [
+    '^\\d{4,}$',                                            // pure ref / phone number
+    '^(?:the|your|our|this|a|an)\\s+(?:quarter|statement|month|period|amount|txn|transaction|spends?|account|card|bill|cycle|year|due\\s+date|payment|purchase|withdrawal|order|ride|renewal)\\b',
+    '^(?:fy|ay)\\s*\\d',                                    // "FY 2026-27"
+    '^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-\\s]?\\d{2,4}$', // "Jul-26"
+    '^(?:usd|eur|gbp|aed|sgd|aud|cad|jpy|chf)\\s*[\\d.,]+$', // "USD 24" (the INR leg is the real amount)
+    '^order\\s+[\\w-]*\\d',                                 // "order 402-11"
+    '^(?:a|an|the)?\\s*failed\\b',                          // "a failed ATM withdrawal"
+  ].join('|'),
+  'i',
+);
+
+// Retry pattern for a discarded junk capture. MERCHANT_REGEX takes the FIRST of
+// towards|to|at|@|from|by|for, so a leading currency leg wins over the real payee:
+// "used for USD 24.99 (Rs.2,092.16) at OPENAI *CHATGPT" captured "USD 24". Re-reading
+// the "at <NAME>" clause recovers the merchant instead of falling back to the bank.
+const AT_MERCHANT_REGEX =
+  /\bat\s+([A-Za-z][A-Za-z0-9&.*'_\- ]{1,39}?)(?=\s+(?:on|via|ref|rrn|dt|dated|using)\b|\s*[.,;(]|$)/i;
 
 const STRONG_TRANSACTION_WORDS = [
   'debit',
@@ -701,7 +735,12 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // word "failed" only explains WHY money returned, so it must NOT be swallowed by the
   // failed-txn filter. Requires a completed credit-back phrase — a FUTURE/conditional
   // "amount WILL BE reversed if debited" is still a genuine decline and stays rejected.
-  const isReversalCredit = /\b(?:reversed\s+to|credited\s+back|refunded\s+to|refund\s+of|returned\s+to\s+your)\b/i.test(text);
+  // The past-tense "(has been|was) reversed" arm covers the split form banks use when
+  // the destination is attached to a SECOND verb — "…has been reversed and credited to
+  // A/c XX8891" — where `reversed to` never matches and the whole credit was dropped.
+  // Past tense ONLY: "amount will be reversed if debited" must stay a decline.
+  const isReversalCredit =
+    /\b(?:reversed\s+to|credited\s+back|refunded\s+to|refund\s+of|returned\s+to\s+your|(?:has|have)\s+been\s+reversed|(?:was|were)\s+reversed)\b/i.test(text);
   if (FAILED_TRANSACTION_REGEX.test(text) && !isReversalCredit) {
     return {
       ok: false,
@@ -1022,13 +1061,24 @@ export const parseMessageDetailed = (message, opts = {}) => {
       .replace(/^(?:order|purchase|payment|txn|transaction|shopping|disputed\s+transaction|auto[-\s]?renewal|auto[-\s]?load|renewal|recharge|ride)\s+(?:of|at|for|on|with)\s+/i, '')
       // Trailing reason clause on refunds/reversals, e.g. "AMAZON for order cancellation" → "AMAZON".
       .replace(/\s+for\s+(?:the\s+|order\s+|a\s+)?(?:cancellation|cancelled|refund|reversal|failed|declined|returned|chargeback|disputed)\b[\s\S]*$/i, '')
+      // Wallet payments narrate the SOURCE before the payee — "paid from your Paytm
+      // Wallet to BLINKIT" — so the capture keeps the wallet as a prefix.
+      .replace(/^your\s+[\w\s]*?\bwallet\s+to\s+/i, '')
       .replace(/[.,;:]+$/g, '')
+      // Dangling preposition left behind after a trailing clause was cut, e.g.
+      // "FOREX MARKUP CHARGES for" → "FOREX MARKUP CHARGES".
+      .replace(/\s+(?:for|on|at|to|from|via|towards?|against|by|of|in)$/i, '')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 40);
-    // Discard pure-numeric captures — phone / ref numbers are never a merchant
-    // (e.g. dispute footer "...SMS BLOCK 171 to 9215676766" → falls back to sender).
-    if (/^\d{4,}$/.test(merchant)) merchant = null;
+    // Discard captures that are narration, not a name, so they fall back to the bank
+    // sender below. A wrong-but-plausible merchant ("FY 2026-27", "the statement") is
+    // worse than the bank's name: it looks like a real payee, so it survives into the
+    // merchant list, subscription detection and Analytics bubbles as a fake entity.
+    if (JUNK_MERCHANT_REGEX.test(merchant)) {
+      const retry = text.match(AT_MERCHANT_REGEX)?.[1]?.trim();
+      merchant = retry && !JUNK_MERCHANT_REGEX.test(retry) ? retry.slice(0, 40) : null;
+    }
   }
 
   // Fallback merchant: cleaned-up sender ID

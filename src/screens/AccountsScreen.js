@@ -227,29 +227,34 @@ export default function AccountsScreen({ navigation }) {
         curveRadius={radius.xl}
         contentContainerStyle={styles.bodyContent}
         renderBar={(progress) => {
-          // The eye (shown expanded) cross-fades into the balance chip (collapsed)
-          // in one slot — the eye hides on scroll to free space for the amount.
-          const eyeOpacity  = progress.interpolate({ inputRange: [0, 0.55], outputRange: [1, 0], extrapolate: 'clamp' });
+          // Collapsed, the bar shows the balance chip AND keeps the eye (Aug-26 —
+          // they used to cross-fade in one slot, so the toggle disappeared exactly
+          // when the masked value was on screen and there was no way to reveal it
+          // without scrolling back up).
           const chipOpacity = progress.interpolate({ inputRange: [0.4, 1], outputRange: [0, 1], extrapolate: 'clamp' });
           const chipShift   = progress.interpolate({ inputRange: [0.4, 1], outputRange: [8, 0], extrapolate: 'clamp' });
           return (
             <View style={styles.barRow}>
-              <Text style={styles.headerTitle}>Accounts</Text>
+              <Text style={styles.headerTitle} numberOfLines={1}>Accounts</Text>
               <View style={styles.headerActions}>
-                {/* Balance control: eye ⇆ chip cross-fade. Both tap to toggle. */}
+                {/* The eye is in flow and always visible; the chip is absolutely
+                    positioned to its LEFT so it can fade in without reserving width
+                    — in flow it would leave a dead gap next to the title while
+                    expanded, and it can't animate its own width here (`progress` is
+                    native-driven, and width isn't a native-animatable prop). */}
                 <View style={styles.balSlot}>
-                  <Animated.View style={{ opacity: chipOpacity, transform: [{ translateX: chipShift }] }}>
+                  <Animated.View
+                    style={[styles.balChipFloat, { opacity: chipOpacity, transform: [{ translateX: chipShift }] }]}
+                  >
                     <TouchableOpacity style={styles.balChip} onPress={handleToggleBalances} activeOpacity={0.8}>
                       <Text style={styles.balChipText} numberOfLines={1}>
                         {balancesVisible ? formatCompact(totalBalance) : '••••'}
                       </Text>
                     </TouchableOpacity>
                   </Animated.View>
-                  <Animated.View style={[styles.balSlotEye, { opacity: eyeOpacity }]} pointerEvents="box-none">
-                    <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
-                      <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </Animated.View>
+                  <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
+                    <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
+                  </TouchableOpacity>
                 </View>
                 <TouchableOpacity style={styles.iconBtn} onPress={() => setAddAccountVisible(true)} activeOpacity={0.7}>
                   <Ionicons name="add" size={22} color="#fff" />
@@ -597,10 +602,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF22',
     alignItems: 'center', justifyContent: 'center',
   },
-  // Balance control slot: the chip sits in flow (defines the slot width) and the
-  // eye is stacked over it, so they cross-fade in place without shifting the +.
-  balSlot:    { position: 'relative', justifyContent: 'center' },
-  balSlotEye: { ...StyleSheet.absoluteFillObject, alignItems: 'flex-end', justifyContent: 'center' },
+  // Balance control slot: the EYE defines the slot (always visible, in flow); the
+  // chip floats to its left so appearing/disappearing never shifts the + button.
+  balSlot: { position: 'relative', justifyContent: 'center' },
+  balChipFloat: {
+    position: 'absolute',
+    right: 40 + spacing.sm,   // iconBtn width + the same gap headerActions uses
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
   // Compact balance chip — same 40px height as the icon buttons.
   balChip: {
     height:            40,

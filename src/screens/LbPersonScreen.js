@@ -428,11 +428,17 @@ const LbPersonScreen = ({ route, navigation }) => {
           copy that drifts. `lockedPerson` hides the name/phone/contact fields, and
           passing onKindChange is what surfaces the Lent/Borrowed selector, since
           there's no panel here to imply the direction. */}
+      {/* NO `statusBarTranslucent` — it sets FLAG_LAYOUT_NO_LIMITS on the modal's own
+          window, which disables Android's adjustResize. The window then never shrinks
+          for the keyboard, and since KeyboardAvoidingView passes `undefined` on Android
+          (it RELIES on that resize), a bottom-anchored sheet stays pinned behind the
+          keyboard. Every other input-bearing sheet — CreateGroupModal, LinkContactModal,
+          GroupExpenseSheet — omits it for the same reason. Only add it to sheets with no
+          text input. */}
       <Modal
         visible={addOpen}
         transparent
         animationType="slide"
-        statusBarTranslucent
         onRequestClose={() => setAddOpen(false)}
       >
         <KeyboardAvoidingView
@@ -443,7 +449,7 @@ const LbPersonScreen = ({ route, navigation }) => {
           <SheetCloseButton onPress={() => setAddOpen(false)} />
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle} numberOfLines={1}>
+            <Text style={[styles.sheetTitle, styles.addSheetTitle]} numberOfLines={1}>
               New entry with {firstName(person.person) || 'this person'}
             </Text>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -544,8 +550,10 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
 
   const canSave = isValidAmount(amount) && person.trim().length > 0;
 
+  // No `statusBarTranslucent` — see the add sheet above; it breaks Android keyboard
+  // avoidance for any sheet with a text input.
   return (
-    <Modal visible transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.sheetBackdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -718,13 +726,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md,
   },
   sheetTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.lg },
+  // The add sheet's form opens with its own header row (the "already settled" chip),
+  // which carries spacing.md of its own — so the full sheetTitle gap would compound
+  // into a hole above the direction chips. The edit sheet starts with a field and
+  // keeps the full gap.
+  addSheetTitle: { marginBottom: spacing.sm },
   // Matches LbEntryForm's amountRow — the amount and the date button must not read
   // as one merged field (see the note there).
   amountRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   amountInput: { flex: 1 },
   // LbEntryForm renders as a card (fill + shadow + margin). Inside this sheet the
   // sheet IS the surface, so flatten it rather than nesting a card in a card.
-  addFormInSheet: { backgroundColor: 'transparent', padding: 0, marginBottom: 0 },
+  // The shadow must be zeroed EXPLICITLY: dropping the fill doesn't drop the
+  // shadow, and `elevation` in particular still paints a hard rectangle on Android
+  // around an invisible card. shadowColor too — 'transparent' alone isn't enough on
+  // iOS once shadowOpacity is inherited.
+  addFormInSheet: {
+    backgroundColor: 'transparent',
+    padding: 0,
+    marginBottom: 0,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
   sheetActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   deleteBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,

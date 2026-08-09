@@ -7,8 +7,11 @@
 // props the premium widget needs — the consumer doesn't care which renders.
 // =============================================================================
 
-import React, { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+// RN-core Animated, aliased because `Animated` in this file is reanimated's (used by
+// the bar fill above). The classic ring deliberately uses RN core — see the note on
+// ClassicProgressRing for why reanimated is the wrong tool for an SVG geometry prop here.
+import { Animated as RNAnimated, Easing as RNEasing, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, {
   Easing,
@@ -20,9 +23,10 @@ import Animated, {
 import { useRewardStore, selectWidgetActive } from '../store/useRewardStore';
 import DailyBudgetLiquidWave from './DailyBudgetLiquidWave';
 import ConcentricSpendingRings, { type RingData } from './ConcentricSpendingRings';
+import ProgressBar from './ProgressBar';
 import StreakFlameEmitter from './StreakFlameEmitter';
 import GaugeProgress, { gaugeColorAt } from './GaugeProgress.native';
-import { colors } from '../constants/theme';
+import { colors, progressTrack } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 
 // ─── Budget widget ───────────────────────────────────────────────────────────
@@ -73,7 +77,9 @@ const FlatBudgetBar: React.FC<{ pct: number; label?: string; caption?: string }>
   return (
     <View style={flatStyles.barWrap}>
       {label ? <Text style={flatStyles.label}>{label}</Text> : null}
-      <View style={flatStyles.barTrack}>
+      {/* Animated fill → can't use <ProgressBar>, but the track still pairs with
+          the fill colour via progressTrack so it matches every other bar. */}
+      <View style={[flatStyles.barTrack, { backgroundColor: progressTrack(tone) }]}>
         <Animated.View style={[flatStyles.barFill, fillStyle, { backgroundColor: tone }]} />
       </View>
       <View style={flatStyles.barRow}>
@@ -95,6 +101,16 @@ const FlatBudgetBar: React.FC<{ pct: number; label?: string; caption?: string }>
 const HERO_RING_SIZE = 110;
 /** Classic ring stroke as a fraction of its diameter — the original 12px on a 140 box. */
 const CLASSIC_STROKE_RATIO = 12 / 140;
+
+/** Hero-ring fill duration. Matches the gauge's unhurried sweep. */
+const CLASSIC_FILL_MS = 800;
+
+// RN-core Animated (not reanimated) drives the arc. react-native-svg has supported
+// this path for years, whereas the reanimated equivalent — `useAnimatedProps` on a
+// Circle inside a transformed <G> — is exactly what left the Dashboard's BudgetSummary
+// ring rendering EMPTY while its own "%" label read the right number. Rotation stays a
+// static prop on the Circle for the same reason; nothing animated goes inside a <G>.
+const AnimatedCircle = RNAnimated.createAnimatedComponent(Circle);
 
 /**
  * True when the user owns AND has enabled the Gradient Budget Gauge.
@@ -171,7 +187,7 @@ export const BudgetRingWidget: React.FC<BudgetRingWidgetProps> = ({
   }
 
   return (
-    <ClassicProgressRing pct={pct} size={size} color={color}>
+    <ClassicProgressRing pct={pct} size={size} color={color} replayKey={replayKey}>
       {children}
     </ClassicProgressRing>
   );
@@ -186,8 +202,10 @@ const ClassicProgressRing: React.FC<{
   pct:       number;
   size:      number;
   color:     string;
+  /** Bump to replay the sweep — BudgetScreen bumps it on focus, same as the gauge. */
+  replayKey?: number | string;
   children?: React.ReactNode;
-}> = ({ pct, size, color, children }) => {
+}> = ({ pct, size, color, replayKey, children }) => {
   // Stroke scales with the ring instead of being a fixed 12. The original hardcoded it
   // against a 140 box; keeping that literal while shrinking the ring would have made it
   // proportionally chunkier, which is the opposite of the intent. 12/140 preserves the
@@ -200,6 +218,30 @@ const ClassicProgressRing: React.FC<{
   const safePct = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
   const dashOffset = c - (safePct / 100) * c;
 
+  // Sweep the arc in on mount / whenever the value changes. `settled` is the safety
+  // net: once the timing finishes we hand the Circle a PLAIN NUMBER again, so the
+  // ring's resting state doesn't depend on the animation having driven the prop at
+  // all. Worst case the value appears at the end instead of sweeping — never the
+  // empty ring that the home card was showing.
+  const anim = useRef(new RNAnimated.Value(c)).current;   // c = fully empty
+  const [settled, setSettled] = useState(false);
+
+  useEffect(() => {
+    // Reset to empty first: on a replay the value hasn't changed, so animating from
+    // the current position would be a no-op and the sweep would silently not happen.
+    // Sweeping 0 → value every time also matches GaugeProgress.
+    anim.setValue(c);
+    setSettled(false);
+    const run = RNAnimated.timing(anim, {
+      toValue: dashOffset,
+      duration: CLASSIC_FILL_MS,
+      easing: RNEasing.out(RNEasing.cubic),
+      useNativeDriver: false,   // SVG geometry props can't go through the native driver
+    });
+    run.start(({ finished }) => { if (finished) setSettled(true); });
+    return () => run.stop();
+  }, [dashOffset, c, replayKey, anim]);
+
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size}>
@@ -208,10 +250,10 @@ const ClassicProgressRing: React.FC<{
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={colors.divider}
+          stroke={progressTrack(color)}
           strokeWidth={strokeWidth}
         />
-        <Circle
+        <AnimatedCircle
           cx={size / 2}
           cy={size / 2}
           r={r}
@@ -219,7 +261,7 @@ const ClassicProgressRing: React.FC<{
           stroke={color}
           strokeWidth={strokeWidth}
           strokeDasharray={`${c} ${c}`}
-          strokeDashoffset={dashOffset}
+          strokeDashoffset={settled ? dashOffset : anim}
           strokeLinecap="round"
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
@@ -272,14 +314,7 @@ const FlatRingsList: React.FC<{ rings: RingData[]; centerLabel?: string }> = ({
                   <Text style={flatStyles.ringName}>{r.parentCategory}</Text>
                   <Text style={flatStyles.ringAmount}>{formatCurrency(r.amount)}</Text>
                 </View>
-                <View style={flatStyles.ringTrack}>
-                  <View
-                    style={[
-                      flatStyles.ringFill,
-                      { width: `${w}%`, backgroundColor: r.color },
-                    ]}
-                  />
-                </View>
+                <ProgressBar progress={w / 100} color={r.color} height={6} />
               </View>
             </View>
           );
@@ -340,8 +375,7 @@ const flatStyles = StyleSheet.create({
   barTrack: {
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#F1F5F9',
-    overflow: 'hidden',
+    overflow: 'hidden',   // backgroundColor is set inline from progressTrack(tone)
   },
   barFill: {
     height: '100%',
@@ -418,16 +452,6 @@ const flatStyles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#1C1C1E',
-  },
-  ringTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#F1F5F9',
-    overflow: 'hidden',
-  },
-  ringFill: {
-    height: '100%',
-    borderRadius: 3,
   },
 
   // Streak

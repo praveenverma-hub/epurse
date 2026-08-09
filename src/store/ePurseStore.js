@@ -1593,6 +1593,7 @@ export const useEPurseStore = create(
                     kind: 'borrowed',
                     person: paidBy.name,
                     contactId: paidBy.contactId,
+                    phone: null,
                     amount: mine,
                     note: splitNote,
                     date: newTxn.createdAt,
@@ -1606,6 +1607,14 @@ export const useEPurseStore = create(
                 id: `lb_${stamp}_${i}_${Math.random().toString(36).slice(2, 8)}`,
                 kind: 'lent',
                 person: (o.name || 'Friend').trim(),
+                // MUST carry the identity fields (see setTransactionSplit, which always
+                // did). Without them the row is name-only, and getPersonBalances only
+                // attaches a name-only row while that name maps to exactly ONE person —
+                // so the moment any other entry for the same name carries a different
+                // strong id (a phone-only manual IOU), this row DETACHES and the
+                // friend's balance retroactively splits into two people.
+                contactId: o.contactId || null,
+                phone: o.phone || null,
                 amount: Number(o.shareAmount) || 0,
                 note: splitNote,
                 date: newTxn.createdAt,
@@ -1818,9 +1827,41 @@ export const useEPurseStore = create(
           if (!txn || !txn.groupId) return s;
           const amount = Number(txn.amount) || 0;
           const groupId = txn.groupId;
+          const group = s.groups.find((g) => g.id === groupId);
+
+          // A MEMO (someone else paid) has NO accountId — no money ever left an account
+          // of mine. Simply stripping isGroupMemo would turn it into a plain debit that
+          // counts fully in spend while no balance moves: a phantom expense conjured by
+          // an untag. It converts to the plain-split memo shape instead — the app's
+          // existing vocabulary for exactly this situation — so it stays out of spend
+          // (isMemoTxn covers both flags) and I still owe the payer my share.
+          const memberOf = (memberId) =>
+            (group?.members || []).find((m) => m.memberId === memberId) || {};
+          const wasMemo = !!txn.isGroupMemo;
+          const shares = (wasMemo && txn.groupSplit?.shares) || [];
+          const memoPatch = wasMemo && shares.length
+            ? {
+                isSplit: true,
+                isSplitMemo: true,
+                myShareAmount: Number(shares.find((sh) => sh.memberId === 'me')?.shareAmount) || 0,
+                splitPaidBy: {
+                  contactId: memberOf(txn.groupSplit.paidByMemberId).contactId ?? null,
+                  name: memberOf(txn.groupSplit.paidByMemberId).name
+                    || txn.groupSplit.paidByName || 'Friend',
+                },
+                splitWith: shares
+                  .filter((sh) => sh.memberId !== 'me')
+                  .map((sh) => ({
+                    contactId: memberOf(sh.memberId).contactId ?? null,
+                    name: (memberOf(sh.memberId).name || sh.name || 'Friend').trim(),
+                    shareAmount: Number(sh.shareAmount) || 0,
+                  })),
+              }
+            : null;
+
           const updatedTxns = s.transactions.map((t) => {
             if (t.id !== txnId) return t;
-            const next = { ...t };
+            const next = { ...t, ...(memoPatch || {}) };
             delete next.groupId;
             delete next.groupSplit;
             delete next.isGroupMemo;
@@ -1831,8 +1872,16 @@ export const useEPurseStore = create(
               ? { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) - amount) }
               : g
           );
-          // Strip the debt with the tag.
-          const lentBorrowed = s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
+          // Strip the debt with the tag — EXCEPT for a converted memo, where I still owe
+          // the payer my share; those rows survive, just no longer scoped to the group
+          // (so a group-scoped settle can't claim them).
+          const lentBorrowed = memoPatch
+            ? s.lentBorrowed.map((l) => {
+                if (l.sourceTxnId !== txnId) return l;
+                const { groupId: _g, ...rest } = l;
+                return rest;
+              })
+            : s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
           return { transactions: updatedTxns, groups: updatedGroups, lentBorrowed };
         });
       },

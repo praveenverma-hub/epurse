@@ -13,6 +13,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import ProgressBar from './ProgressBar';
 import {
   Canvas,
   Group,
@@ -240,14 +241,7 @@ const DetailCard: React.FC<DetailCardProps> = ({ ring, onClose }) => {
             return (
               <View key={c.childCategory} style={styles.childRow}>
                 <Text style={styles.childLabel}>{c.childCategory}</Text>
-                <View style={styles.childBarTrack}>
-                  <View
-                    style={[
-                      styles.childBarFill,
-                      { width: `${w}%`, backgroundColor: ring.color },
-                    ]}
-                  />
-                </View>
+                <ProgressBar progress={w / 100} color={ring.color} height={5} style={styles.childBarTrack} />
                 <Text style={styles.childAmount}>{formatCurrency(c.amount)}</Text>
               </View>
             );
@@ -621,17 +615,7 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     width: 110,
   },
-  childBarTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#F1F5F9',
-    overflow: 'hidden',
-  },
-  childBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
+  childBarTrack: { flex: 1 },
   childAmount: {
     fontSize: 12,
     fontWeight: '700',

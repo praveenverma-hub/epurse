@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
-import Svg, { Circle, G } from 'react-native-svg';
-import Animated, { useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
+import Svg, { Circle } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import InfoSheet from './InfoSheet';
 import SheetCloseButton from './SheetCloseButton';
 import InfoIcon from './InfoIcon';
+import ProgressBar from './ProgressBar';
+import { progressTrack } from '../constants/theme';
 
 // Essential (survival) categories — keyed by the first-level BUDGET parent ids
 // the plan actually uses (groceries rolls into food, utilities→bills,
@@ -34,8 +35,6 @@ const ringColor = (pct: number, daysElapsedPct: number, theme: any) => {
 // ANIMATED SVG CIRCLE
 // ============================================================================
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-
 interface ProgressRingProps {
   progress: number;
   size: number;
@@ -43,43 +42,49 @@ interface ProgressRingProps {
   color: string;
 }
 
+// Built to match the app's OTHER three rings (ClassicProgressRing, AnalyticsScreen's
+// ProgressRing, MiniRing): a static dashoffset with the rotation applied to the Circle
+// itself. It previously drove `strokeDashoffset` through `useAnimatedProps` inside a
+// `<G rotation>` wrapper — the only ring built that way, and the only one that rendered
+// EMPTY on device while the "%" label beside it read the correct number. Reanimated
+// props on an SVG child nested in a transformed <G> don't reliably reach the native
+// view (the same class of problem GaugeProgress documents for <Mask>), so the arc
+// stayed at its initial 0.
+//
+// This trades the 800ms fill animation for actually showing the value. The animated
+// ring that IS reliable is GaugeProgress — its per-segment-opacity technique exists
+// precisely because the straightforward approaches don't survive contact with the
+// device. Use that if this ever needs to animate again; don't reintroduce <G> + animatedProps.
 const ProgressRing: React.FC<ProgressRingProps> = ({ progress, size, strokeWidth, color }) => {
-  const theme = useTheme();
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progressValue = useSharedValue(0);
-
-  React.useEffect(() => {
-    progressValue.value = withTiming(progress, { duration: 800 });
-  }, [progress]);
-
-  const animatedProps = useAnimatedProps(() => ({
-    strokeDashoffset: circumference * (1 - progressValue.value),
-  }));
+  // Guard non-finite input: a NaN dashoffset blanks the arc entirely rather than
+  // degrading to "empty" (the same guard ClassicProgressRing carries).
+  const safe = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
+  const dashOffset = circumference * (1 - safe);
 
   return (
     <Svg width={size} height={size}>
-      <G rotation="-90" origin={`${size / 2}, ${size / 2}`}>
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={theme.divider}
-          strokeWidth={strokeWidth}
-          fill="none"
-        />
-        <AnimatedCircle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={circumference}
-          animatedProps={animatedProps}
-          strokeLinecap="round"
-        />
-      </G>
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={progressTrack(color)}
+        strokeWidth={strokeWidth}
+        fill="none"
+      />
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={color}
+        strokeWidth={strokeWidth}
+        fill="none"
+        strokeDasharray={`${circumference} ${circumference}`}
+        strokeDashoffset={dashOffset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
     </Svg>
   );
 };
@@ -248,9 +253,7 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
                 <Text style={styles.trackEmoji}>{cat.emoji}</Text>
                 <View style={styles.trackMiddle}>
                   <Text style={[styles.trackLabel, { color: theme.textPrimary }]}>{cat.name}</Text>
-                  <View style={[styles.trackBarContainer, { backgroundColor: theme.divider }]}>
-                    <View style={[styles.trackBar, { width: `${ratio * 100}%`, backgroundColor: barColor }]} />
-                  </View>
+                  <ProgressBar progress={ratio} color={barColor} height={5} style={styles.trackBarContainer} />
                 </View>
                 {isOver ? (
                   <Text style={[styles.overageValue, { color: theme.danger }]}>+{formatCurrency(overageVal)}</Text>
@@ -467,16 +470,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 3,
   },
-  trackBarContainer: {
-    height: 5,
-    borderRadius: 2.5,
-    overflow: 'hidden',
-    marginBottom: 3,
-  },
-  trackBar: {
-    height: '100%',
-    borderRadius: 2.5,
-  },
+  // Layout only — height/radius/track colour now come from ProgressBar.
+  trackBarContainer: { marginBottom: 3 },
   percentValue: {
     fontSize: 10,
     minWidth: 32,

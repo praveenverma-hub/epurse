@@ -1322,6 +1322,204 @@ const CREDIT_DIRECTION_AUG26 = [
     expect: { accept: true, type: 'debit', amount: 667, accountMask: '9532', merchant: 'PANKAJ' } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE 23 — 50-message sweep (Aug-26): salary/interest/dividend credits, refunds &
+// reversals, bank fees, ATM/intl/contactless cards, UPI-wallet-NACH rails, and a
+// block of informational decoys. Found FOUR real bugs, all fixed and locked below:
+//
+//   1. "has been reversed AND CREDITED to A/c" was swallowed by the failed-txn
+//      filter — a real credit-back vanished. Only `reversed to` was recognised.
+//   2. bare 'returned' in CATEGORY_KEYWORDS.lent_settled put a bank NEFT return in
+//      the lend/borrow LEDGER as a phantom repayment (and out of spend totals).
+//   3. wallet top-ups and FASTag recharges were rejected missing_transaction_keyword
+//      — they carry no debit/credit verb at all.
+//   4. merchant captures that are narration ("FY 2026-27", "the statement", "USD 24",
+//      "order 402-11") looked like real payees downstream; now discarded, and an
+//      "at <NAME>" retry recovers the true merchant the currency leg had masked.
+//
+// Where a merchant asserts the BANK SENDER, that is the point: it proves the junk
+// capture was discarded. Don't "fix" those to a nicer name without re-reading §4.
+// ─────────────────────────────────────────────────────────────────────────────
+const AUG26_SWEEP = [
+  // ── money in ──
+  { name: 'Salary credit names the employer',
+    sender: 'HDFCBK', sms: 'Rs.85,000.00 credited to your A/c XX4412 on 01-Aug-26 by SALARY-ACME TECHNOLOGIES PVT LTD. Avl Bal Rs.1,02,331.20.',
+    expect: { accept: true, type: 'credit', amount: 85000, accountType: 'Bank', accountMask: '4412', categoryId: 'salary', isRefund: false } },
+  { name: 'Quarterly interest credit ("the quarter ending" is not a merchant)',
+    sender: 'SBIINB', sms: 'Dear Customer, Interest of Rs.412.00 has been credited to your A/c XX8891 for the quarter ending Jun-26.',
+    expect: { accept: true, type: 'credit', amount: 412, accountMask: '8891', merchant: 'SBIINB' } },
+  { name: 'Dividend credit → investments',
+    sender: 'KOTAKB', sms: 'Rs.1,240.00 credited to A/c XX2231 towards DIVIDEND-INFOSYS LTD on 12-Aug-26.',
+    expect: { accept: true, type: 'credit', amount: 1240, categoryId: 'investments' } },
+  { name: 'Loan disbursal credit',
+    sender: 'AXISBK', sms: 'Your loan amount of Rs.2,50,000 has been disbursed and credited to your A/c XX7781 on 03-Aug-26.',
+    expect: { accept: true, type: 'credit', amount: 250000, accountMask: '7781' } },
+  { name: 'Branch cash deposit',
+    sender: 'ICICIB', sms: 'Rs.15,000.00 deposited in your A/c XX5521 at BRANCH-ANDHERI on 04-Aug-26. Avl Bal Rs.41,220.00.',
+    expect: { accept: true, type: 'credit', amount: 15000, accountMask: '5521' } },
+  { name: 'Cheque cleared → credit',
+    sender: 'HDFCBK', sms: 'Cheque no 004421 for Rs.32,000.00 has been credited to your A/c XX4412 on 06-Aug-26.',
+    expect: { accept: true, type: 'credit', amount: 32000, accountMask: '4412' } },
+  { name: 'NEFT inward keeps the remitter name',
+    sender: 'PNBSMS', sms: 'NEFT inward of Rs.9,500.00 received in A/c XX3312 from RAJESH KUMAR SHARMA on 07-Aug-26.',
+    expect: { accept: true, type: 'credit', amount: 9500, merchant: 'RAJESH KUMAR SHARMA' } },
+  { name: 'Salary advance → salary',
+    sender: 'YESBNK', sms: 'Rs.20,000.00 credited to your account XX9012 towards SALARY ADVANCE on 09-Aug-26.',
+    expect: { accept: true, type: 'credit', amount: 20000, categoryId: 'salary' } },
+
+  // ── refunds / reversals (all must be isRefund, never income) ──
+  { name: 'Failed txn reversed to A/c → refund credit',
+    sender: 'HDFCBK', sms: 'Your transaction of Rs.2,499.00 on 02-Aug-26 has failed and the amount has been reversed to your A/c XX4412.',
+    expect: { accept: true, type: 'credit', amount: 2499, isRefund: true } },
+  { name: 'Partial refund ("order 402-11" is not a merchant)',
+    sender: 'ICICIB', sms: 'Partial refund of Rs.349.50 for order 402-11 has been credited to your ICICI Bank Credit Card XX5004 on 05-Aug-26.',
+    expect: { accept: true, type: 'credit', amount: 349.5, accountType: 'Credit Card', isRefund: true, merchant: 'ICICIB' } },
+  { name: 'BUG 1 — "reversed AND credited to" is a credit, not a failed txn',
+    sender: 'SBIINB', sms: 'Amount of Rs.5,000.00 debited on 01-Aug-26 towards a failed ATM withdrawal has been reversed and credited to A/c XX8891.',
+    expect: { accept: true, type: 'credit', amount: 5000, accountMask: '8891', isRefund: true } },
+  { name: 'Cashback credit ("your spends in Jul-26" is not a merchant)',
+    sender: 'AXISBK', sms: 'Cashback of Rs.75.00 has been credited to your Axis Bank Credit Card XX1002 for your spends in Jul-26.',
+    expect: { accept: true, type: 'credit', amount: 75, isRefund: true, merchant: 'AXISBK' } },
+  { name: 'Merchant refund keeps the merchant',
+    sender: 'HDFCBK', sms: 'Rs.1,899.00 refunded by AMAZON RETAIL to your A/c XX4412 on 08-Aug-26. Ref 55210031.',
+    expect: { accept: true, type: 'credit', amount: 1899, merchant: 'AMAZON RETAIL', categoryId: 'shopping', isRefund: true } },
+  { name: 'Chargeback credit → refund',
+    sender: 'KOTAKB', sms: 'Chargeback of Rs.4,200.00 has been credited to your Card XX2231 after dispute resolution.',
+    expect: { accept: true, type: 'credit', amount: 4200, isRefund: true } },
+
+  // ── fees / charges ──
+  { name: 'Cheque return charge',
+    sender: 'HDFCBK', sms: 'A charge of Rs.590.00 has been debited from your A/c XX4412 towards CHEQUE RETURN CHARGES on 05-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 590, merchant: 'CHEQUE RETURN CHARGES' } },
+  { name: 'Annual locker rent',
+    sender: 'SBIINB', sms: 'Rs.1,770.00 debited from A/c XX8891 towards ANNUAL LOCKER RENT on 01-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 1770, accountMask: '8891' } },
+  { name: 'CC annual membership fee',
+    sender: 'ICICIB', sms: 'Rs.500.00 has been charged on your ICICI Bank Credit Card XX5004 towards ANNUAL MEMBERSHIP FEE.',
+    expect: { accept: true, type: 'debit', amount: 500, accountType: 'Credit Card' } },
+  { name: 'Late payment fee ("the statement" is not a merchant)',
+    sender: 'AXISBK', sms: 'Late payment fee of Rs.1,180.00 has been levied on your Axis Bank Credit Card XX1002 for the statement dated 20-Jul-26.',
+    expect: { accept: true, type: 'debit', amount: 1180, merchant: 'AXISBK' } },
+  { name: 'Forex markup (dangling trailing "for" trimmed)',
+    sender: 'HDFCBK', sms: 'Rs.212.40 debited from Card XX4412 towards FOREX MARKUP CHARGES for txn dated 03-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 212.4, merchant: 'FOREX MARKUP CHARGES' } },
+  { name: 'Min-balance penalty ("Jul-26" is not a merchant)',
+    sender: 'PNBSMS', sms: 'Rs.295.00 has been debited from A/c XX3312 towards NON-MAINTENANCE OF MINIMUM BALANCE for Jul-26.',
+    expect: { accept: true, type: 'debit', amount: 295, merchant: 'PNBSMS' } },
+  { name: 'GST on service charges',
+    sender: 'HDFCBK', sms: 'GST of Rs.106.20 debited from your A/c XX4412 on 05-Aug-26 against service charges.',
+    expect: { accept: true, type: 'debit', amount: 106.2 } },
+  { name: 'TDS deduction ("FY 2026-27" is not a merchant)',
+    sender: 'SBIINB', sms: 'TDS of Rs.412.00 has been deducted from A/c XX8891 for FY 2026-27 on interest income.',
+    expect: { accept: true, type: 'debit', amount: 412, merchant: 'SBIINB' } },
+
+  // ── cards / ATM / international ──
+  { name: 'ATM withdrawal',
+    sender: 'SBIINB', sms: 'Rs.10,000.00 withdrawn from A/c XX8891 at ATM SBI-ANDHERI-W on 06-Aug-26. Avl Bal Rs.31,220.00.',
+    expect: { accept: true, type: 'debit', amount: 10000, merchantIncludes: 'ATM SBI' } },
+  { name: 'CC cash advance',
+    sender: 'ICICIB', sms: 'Cash advance of Rs.20,000.00 taken on your ICICI Bank Credit Card XX5004 on 07-Aug-26 at HDFC ATM.',
+    expect: { accept: true, type: 'debit', amount: 20000, accountType: 'Credit Card' } },
+  { name: 'BUG 4 — intl spend books the INR leg AND recovers the merchant past "USD 24.99"',
+    sender: 'HDFCBK', sms: 'Your Card XX4412 was used for USD 24.99 (Rs.2,092.16) at OPENAI *CHATGPT on 04-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 2092.16, merchant: 'OPENAI *CHATGPT' } },
+  { name: 'Contactless tap → food',
+    sender: 'AXISBK', sms: 'Rs.480.00 spent using contactless on Axis Bank Card XX1002 at STARBUCKS BKC on 08-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 480, categoryId: 'food', merchant: 'STARBUCKS BKC' } },
+  { name: 'Overdraft debit (negative balance in body must not become the amount)',
+    sender: 'KOTAKB', sms: 'Your A/c XX2231 has been debited by Rs.7,500.00. The account is now in overdraft. Avl Bal -Rs.1,200.00.',
+    expect: { accept: true, type: 'debit', amount: 7500, accountMask: '2231' } },
+
+  // ── UPI / wallet / rails ──
+  { name: 'UPI to a phone number',
+    sender: 'HDFCBK', sms: 'Rs.750.00 debited from A/c XX4412 via UPI to 9821034512 on 07-Aug-26. UPI Ref 552100314422.',
+    expect: { accept: true, type: 'debit', amount: 750 } },
+  { name: 'UPI from a person → credit',
+    sender: 'ICICIB', sms: 'Rs.1,200.00 credited to your A/c XX5521 via UPI from PRIYA MEHTA on 06-Aug-26. Ref 441220015521.',
+    expect: { accept: true, type: 'credit', amount: 1200, merchant: 'PRIYA MEHTA' } },
+  { name: 'UPI rent to a VPA → bills',
+    sender: 'AXISBK', sms: 'Rs.28,000.00 debited from A/c XX7781 via UPI to landlord@okaxis on 01-Aug-26 towards RENT.',
+    expect: { accept: true, type: 'debit', amount: 28000, categoryId: 'bills' } },
+  { name: 'BUG 3 — wallet top-up has no debit verb but is real money',
+    sender: 'PAYTMB', sms: 'Rs.2,000.00 added to your Paytm Wallet from HDFC Bank A/c XX4412 on 05-Aug-26.',
+    expect: { accept: true, amount: 2000, accountMask: '4412' } },
+  { name: 'Wallet payment strips the wallet prefix off the payee',
+    sender: 'PAYTMB', sms: 'Rs.145.00 paid from your Paytm Wallet to BLINKIT on 08-Aug-26. Wallet Bal Rs.1,855.00.',
+    expect: { accept: true, type: 'debit', amount: 145, accountType: 'Digital Wallet', merchant: 'BLINKIT' } },
+  { name: 'IMPS to a beneficiary',
+    sender: 'YESBNK', sms: 'IMPS of Rs.15,000.00 sent from A/c XX9012 to ANJALI VERMA (XX6654) on 07-Aug-26. Ref 221100.',
+    expect: { accept: true, type: 'debit', amount: 15000, merchant: 'ANJALI VERMA' } },
+  { name: 'BUG 2 — NEFT returned by the bank is NOT a lend/borrow settlement',
+    sender: 'PNBSMS', sms: 'Your NEFT of Rs.9,500.00 dated 05-Aug-26 has been returned by the beneficiary bank and credited back to A/c XX3312.',
+    expect: { accept: true, type: 'credit', amount: 9500, categoryId: 'other', isRefund: true } },
+
+  // ── bills / recurring / mandates ──
+  { name: 'NACH insurance mandate debit',
+    sender: 'HDFCBK', sms: 'Rs.4,821.00 debited from A/c XX4412 towards NACH-HDFC LIFE INSURANCE-MANDATE on 05-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 4821, categoryId: 'bills' } },
+  { name: 'UPI autopay Netflix → entertainment',
+    sender: 'ICICIB', sms: 'Rs.649.00 debited from A/c XX5521 via UPI AUTOPAY towards NETFLIX ENTERTAINMENT on 04-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 649, categoryId: 'entertainment' } },
+  { name: 'BBPS electricity bill',
+    sender: 'AXISBK', sms: 'Rs.3,412.00 paid from A/c XX7781 to ADANI ELECTRICITY MUMBAI via BBPS on 06-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 3412, categoryId: 'bills' } },
+  { name: 'Prepaid mobile recharge',
+    sender: 'HDFCBK', sms: 'Rs.399.00 debited from A/c XX4412 for JIO PREPAID RECHARGE on 03-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 399, categoryId: 'bills' } },
+  { name: 'Mutual-fund SIP debit',
+    sender: 'KOTAKB', sms: 'Rs.5,000.00 debited from A/c XX2231 towards SIP-AXIS BLUECHIP FUND on 05-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 5000, merchantIncludes: 'SIP-AXIS' } },
+  { name: 'BUG 3 — FASTag recharge has no debit verb but is real money',
+    sender: 'ICICIB', sms: 'Your FASTag linked to A/c XX5521 has been recharged with Rs.500.00 on 07-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 500, categoryId: 'travel' } },
+  { name: 'Loan EMI debit',
+    sender: 'AXISBK', sms: 'EMI of Rs.18,450.00 for Loan A/c XX7781 has been debited on 05-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 18450 } },
+
+  // ── must NOT book ──
+  { name: 'OTP quoting a purchase amount',
+    sender: 'HDFCBK', sms: 'OTP for your transaction of Rs.4,999.00 at FLIPKART is 882140. Do not share with anyone. Valid for 10 min.',
+    expect: { accept: false, code: 'otp_message' } },
+  { name: 'Declined for insufficient balance',
+    sender: 'SBIINB', sms: 'Your transaction of Rs.3,200.00 on Card XX8891 was DECLINED due to insufficient balance.',
+    expect: { accept: false, code: 'transaction_failed' } },
+  { name: 'Balance enquiry',
+    sender: 'HDFCBK', sms: 'Your A/c XX4412 balance as on 08-Aug-26 is Rs.1,02,331.20. Use HDFC Bank app for details.',
+    expect: { accept: false } },
+  { name: 'Minimum-balance warning',
+    sender: 'PNBSMS', sms: 'Your A/c XX3312 balance of Rs.780.00 is below the required minimum of Rs.1,000.00. Please maintain balance to avoid charges.',
+    expect: { accept: false } },
+  { name: 'Statement generated → cc bill reminder, not a spend',
+    sender: 'ICICIB', sms: 'Your ICICI Bank Credit Card XX5004 statement for Jul-26 is generated. Total due Rs.24,190.00, min due Rs.1,210.00, due by 18-Aug-26.',
+    expect: { accept: false, code: 'cc_bill_reminder' } },
+  { name: 'Mandate registered (first debit is in the future)',
+    sender: 'AXISBK', sms: 'A mandate of Rs.5,000.00 has been successfully registered for SIP-AXIS BLUECHIP FUND. First debit on 05-Sep-26.',
+    expect: { accept: false, code: 'mandate_setup' } },
+  { name: 'Standing instruction could not be executed',
+    sender: 'HDFCBK', sms: 'Your standing instruction of Rs.4,821.00 towards HDFC LIFE could not be executed due to insufficient funds.',
+    expect: { accept: false } },
+  { name: 'Reward points earned (points, not rupees)',
+    sender: 'ICICIB', sms: 'You have earned 1,240 reward points on your ICICI Bank Credit Card XX5004 this month. Redeem now.',
+    expect: { accept: false } },
+  { name: 'EMI conversion OFFER (nothing spent)',
+    sender: 'AXISBK', sms: 'Convert your spend of Rs.24,190.00 into easy EMIs starting at Rs.2,100/month. Reply YES to convert.',
+    expect: { accept: false, code: 'promotional_offer' } },
+  { name: 'Cheque will be presented tomorrow (future)',
+    sender: 'HDFCBK', sms: 'Cheque no 004488 for Rs.12,000.00 will be presented for clearing from your A/c XX4412 tomorrow.',
+    expect: { accept: false } },
+
+  // ── merchant-isolation guards for the junk-discard + "at <NAME>" retry ──
+  { name: 'GAP CLOSED — "used for a purchase of Rs.X at MERCHANT" recovers the merchant',
+    sender: 'HDFCBK', sms: 'Your Debit Card XX4412 has been used for a purchase of Rs.850.00 at BIG BAZAAR on 04-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 850, merchant: 'BIG BAZAAR' } },
+  { name: 'GAP CLOSED — "used for a transaction of Rs.X at MERCHANT" recovers the merchant',
+    sender: 'ICICIB', sms: 'Card XX5004 used for a transaction of Rs.620.00 at JIO MART on 05-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 620, merchant: 'JIO MART' } },
+  { name: 'GUARD — a REAL merchant starting with a determiner survives the junk filter',
+    sender: 'HDFCBK', sms: 'Rs.1,299.00 spent on Card XX4412 at The Body Shop on 04-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 1299, merchant: 'The Body Shop' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1345,6 +1543,7 @@ const SUITES = [
   ['Adversarial false-positive traps (Jul-26)', ADVERSARIAL_FP_JUL26],
   ['Refund / reversal / cashback detection (Jul-26)', REFUND_DETECTION_JUL26],
   ['Credit direction & spaced-period merchant (Aug-26)', CREDIT_DIRECTION_AUG26],
+  ['50-msg sweep: fees/reversals/rails/decoys (Aug-26)', AUG26_SWEEP],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
