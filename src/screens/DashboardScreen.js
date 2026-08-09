@@ -366,14 +366,6 @@ const DashboardScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
       >
-        {/* Monthly recap — persistent month-end card, dismissible per month */}
-        {showMonthlyRecap && latestRecapMonth && recapCardDismissed !== latestRecapMonth && (
-          <MonthlyRecapCard
-            monthKey={latestRecapMonth}
-            onDismiss={() => dismissMonthlyRecapCard(latestRecapMonth)}
-          />
-        )}
-
         {/* Lent / Borrowed */}
         <LentBorrowedWidget
           lent={lent}
@@ -381,6 +373,18 @@ const DashboardScreen = ({ navigation }) => {
           onPressLent={() => navigation.navigate('LentBorrowed', { kind: 'lent' })}
           onPressBorrowed={() => navigation.navigate('LentBorrowed', { kind: 'borrowed' })}
         />
+
+        {/* Monthly recap — persistent month-end card, dismissible per month.
+            Sits BELOW Lent/Borrowed: it's a look-back at a month that has already
+            closed, so it shouldn't outrank the live balances at the top of the
+            screen. Spacing comes from the container's `gap`, so moving it needs
+            no margin changes (ui-consistency §6). */}
+        {showMonthlyRecap && latestRecapMonth && recapCardDismissed !== latestRecapMonth && (
+          <MonthlyRecapCard
+            monthKey={latestRecapMonth}
+            onDismiss={() => dismissMonthlyRecapCard(latestRecapMonth)}
+          />
+        )}
 
         {/* Monthly budget — empty CTA or active progress */}
         <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />

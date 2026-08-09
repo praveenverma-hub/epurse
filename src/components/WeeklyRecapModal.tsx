@@ -5,65 +5,40 @@
 // store's `pendingWeeklyRecap`, set by maybeQueueWeeklyRecap). Renders the
 // WeeklySummaryCard for the just-ended week. No persistent dashboard card — the
 // weekly recap lives only here now.
+//
+// The modal shell (backdrop, dismiss, safe-area padding, scroll-when-tall) is
+// RecapModalShell, shared with MonthlyRecapModal. This file's only job is
+// deciding WHEN to show and WHAT to put inside.
 // =============================================================================
 
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { useTheme } from '../hooks/useTheme';
+import RecapModalShell from './RecapModalShell';
 import WeeklySummaryCard from './WeeklySummaryCard';
 
-interface Palette { textSecondary: string; textMuted: string; }
-
 const WeeklyRecapModal: React.FC = () => {
-  const theme = useTheme() as Palette;
-  const pendingWeeklyRecap    = useEPurseStore((s) => s.pendingWeeklyRecap);
-  const showWeeklySummary     = useEPurseStore((s) => s.showWeeklySummary);
+  const pendingWeeklyRecap      = useEPurseStore((s) => s.pendingWeeklyRecap);
+  const showWeeklySummary       = useEPurseStore((s) => s.showWeeklySummary);
   const clearPendingWeeklyRecap = useEPurseStore((s) => s.clearPendingWeeklyRecap);
 
   const visible = pendingWeeklyRecap != null && showWeeklySummary;
-  const close = () => clearPendingWeeklyRecap();
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={close}>
-      <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
-        <View style={styles.centerWrap} pointerEvents="box-none">
-          <View style={styles.sheet}>
-            {/* No separate heading here — the card's own header ("This Week" +
-                date range) already says what this is; a second title outside
-                its background just floated oddly over the backdrop. */}
-            {pendingWeeklyRecap != null && (
-              <WeeklySummaryCard anchorDate={new Date(pendingWeeklyRecap)} />
-            )}
-
-            <Pressable
-              onPress={close}
-              style={[styles.doneBtn, { backgroundColor: `${theme.textMuted}1F` }]}
-              hitSlop={8}
-            >
-              <Text style={[styles.doneText, { color: theme.textSecondary }]}>Done</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
+    <RecapModalShell
+      visible={visible}
+      onClose={clearPendingWeeklyRecap}
+      align="center"
+      dismissLabel="Done"
+    >
+      {/* No separate heading — the card's own header ("This Week" + date range)
+          already says what this is; a second title outside its background just
+          floated oddly over the backdrop. */}
+      {pendingWeeklyRecap != null && (
+        <WeeklySummaryCard anchorDate={new Date(pendingWeeklyRecap)} />
+      )}
+    </RecapModalShell>
   );
 };
 
 export default WeeklyRecapModal;
-
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(5, 8, 16, 0.6)' },
-  centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
-  sheet: { width: '100%', maxWidth: 420 },
-  doneBtn: {
-    alignSelf: 'center',
-    marginTop: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 22,
-    borderRadius: 16,   // radius.lg — pill is for chips only
-  },
-  doneText: { fontSize: 14, fontWeight: '700' },
-});
