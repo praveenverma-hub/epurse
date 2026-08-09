@@ -33,6 +33,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { NON_BUDGETABLE_PARENT_IDS } from '../constants/twoTierCategories';
 import InfoIcon from '../components/InfoIcon';
+import SectionHeader from '../components/SectionHeader';
 
 const SpendRulesScreen = ({ navigation }) => {
   const theme = useTheme();
@@ -109,14 +110,11 @@ const SpendRulesScreen = ({ navigation }) => {
 
         {/* Always-excluded, shown so their absence above isn't a mystery. */}
         <View style={styles.card}>
-          <View style={styles.sectionHead}>
-            <Ionicons name="lock-closed-outline" size={17} color={colors.textMuted} />
-            <Text style={styles.sectionTitle}>Never counted</Text>
-          </View>
-          <Text style={styles.hint}>
-            These move money between places rather than spending it, so they're excluded
-            everywhere and can't be switched on.
-          </Text>
+          <SectionHeader
+            icon="lock-closed-outline"
+            title="Never counted"
+            subtitle="These move money between places rather than spending it, so they're excluded everywhere and can't be switched on."
+          />
           {rows.filter((r) => r.fixed).map((p, i) => (
             <View key={p.id} style={[styles.row, i > 0 && styles.rowDivided]}>
               <Text style={styles.rowEmoji}>{p.emoji}</Text>
@@ -162,13 +160,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     ...shadows.card,
   },
-  sectionHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  sectionTitle: { ...typography.h3, color: colors.textPrimary },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
   hintStrong: { fontWeight: '700', color: colors.textPrimary },
 

@@ -68,6 +68,7 @@ import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
+import SectionHeader from '../components/SectionHeader';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -393,18 +394,24 @@ const DashboardScreen = ({ navigation }) => {
         {/* Period transactions — wrapped as ONE section so the row list keeps its
             own tight spacing while the parent `gap` spaces the sections evenly. */}
         <View style={styles.txnSection}>
-          <View style={styles.recentHeader}>
-            <Text style={styles.sectionTitle}>
+          <SectionHeader
+            icon="receipt-outline"
+            accentColor={theme.primary}
+            style={styles.recentHeader}
+            // A node title, not a string: the count keeps its own muted style
+            // rather than inheriting the h3 weight.
+            title={<>
               Transactions · {txnSectionLabel}
               <Text style={styles.txnCount}> ({periodStats.count})</Text>
-            </Text>
-            {/* Nothing to view when the period is empty (e.g. a freshly onboarded user). */}
-            {periodStats.recent.length > 0 ? (
+            </>}
+            a11yTitle={`Transactions, ${txnSectionLabel}`}
+            // Nothing to view when the period is empty (e.g. a freshly onboarded user).
+            right={periodStats.recent.length > 0 ? (
               <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>
                 <Text style={[styles.viewAll, { color: theme.primary }]}>View all</Text>
               </TouchableOpacity>
             ) : null}
-          </View>
+          />
 
           {periodStats.recent.length === 0 ? (
             <EmptyState
@@ -923,7 +930,6 @@ const styles = StyleSheet.create({
   // header) so the header→first-section gap equals the inter-section gap (spacing.xl).
   bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl + spacing.lg, gap: spacing.xl, flexGrow: 1 },
 
-  sectionTitle: { ...typography.h3, color: colors.textPrimary },
   txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
 
   // Recent

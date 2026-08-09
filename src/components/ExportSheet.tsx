@@ -35,6 +35,8 @@ import {
   ExportMethod,
   ExportTransaction,
 } from '../services/exportService';
+import { computeLedgerTotals } from '../utils/ledgerTotals';
+import { spendExcluded } from '../store/ePurseStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -152,16 +154,18 @@ const ExportSheet: React.FC<Props> = ({
     return parts.join(' · ');
   }, [filterCtx, accounts, categories]);
 
-  // ── Totals for the context card ───────────────────────────────────────────
-  const { totalDebit, totalCredit } = useMemo(() => {
-    let d = 0, c = 0;
-    filteredTransactions.forEach((t) => {
-      const amt = Number(t.amount || 0);
-      if (t.type === 'debit') d += amt;
-      else c += amt;
-    });
-    return { totalDebit: d, totalCredit: c };
-  }, [filteredTransactions]);
+  // ── Totals for the context card AND the exported file ─────────────────────
+  // ONE computation for both, and the same one the Activity footer uses, so a
+  // statement can never disagree with the screen it was exported from. This
+  // previously summed raw amounts by type with no exclusions at all: a
+  // self-transfer counted as spend AND income, a split counted the whole bill
+  // instead of your share, and refunds inflated income — under a PDF heading
+  // that read "Total Spent" / "Total Income".
+  const totals = useMemo(
+    () => computeLedgerTotals(filteredTransactions as any[], groups, spendExcluded),
+    [filteredTransactions, groups],
+  );
+  const { debit: totalDebit, credit: totalCredit } = totals;
 
   const fmtCompact = (n: number) => formatCurrency(isFinite(n) ? n : 0);
 
@@ -178,6 +182,7 @@ const ExportSheet: React.FC<Props> = ({
         categories,
         accounts,
         userName || undefined,
+        totals,
       );
       if (result.outcome === 'saved') {
         toast.success(

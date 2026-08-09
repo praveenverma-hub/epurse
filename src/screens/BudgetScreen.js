@@ -41,6 +41,7 @@ import InfoIcon from '../components/InfoIcon';
 import ProgressBar from '../components/ProgressBar';
 import { useToast } from '../components/Toast';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
+import SectionHeader from '../components/SectionHeader';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const computeStatus = (pct, daysElapsedPct, hasCap) => {
@@ -282,7 +283,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
         {/* ── Per-category rows ── */}
         {rows.length > 0 ? (
           <View style={styles.catSection}>
-            <Text style={styles.sectionTitle}>By category</Text>
+            <SectionHeader icon="grid-outline" title="By category" accentColor={theme.primary} />
             {rows.map((r) => {
               const cat = categoryById.get(r.catId);
               if (!cat) return null;
@@ -557,10 +558,6 @@ const styles = StyleSheet.create({
 
   // ── Category section ──
   catSection: { gap: spacing.sm, marginBottom: spacing.lg },
-  sectionTitle: {
-    ...typography.h3, color: colors.textPrimary,
-    marginBottom: spacing.xs,
-  },
   catCard: {
     backgroundColor: colors.card,
     borderRadius: radius.md,

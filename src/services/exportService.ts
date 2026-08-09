@@ -163,18 +163,26 @@ export function buildPDFHTML(
   ctx: ExportFilterContext,
   categories: ExportCategory[],
   accounts: ExportAccount[],
-  userName?: string,
+  userName: string | undefined,
+  totals: ExportTotals,
 ): string {
   const catMap  = Object.fromEntries(categories.map((c) => [c.id, c]));
   const acctMap = Object.fromEntries(accounts.map((a) => [a.id, a]));
 
   // ── Totals
-  let totalDebit = 0, totalCredit = 0;
-  txns.forEach((t) => {
-    const amt = Number(t.amount || 0);
-    if (t.type === 'debit') totalDebit += amt;
-    else totalCredit += amt;
-  });
+  // Passed IN, not computed here. This used to sum raw amounts by type while
+  // labelling the result "Total Spent" / "Total Income" — so a ₹9,000
+  // self-transfer was reported as ₹9,000 spent AND ₹9,000 earned, a split
+  // counted the full bill instead of your share, and a statement disagreed with
+  // the app that produced it. Deciding what counts needs `spendExcluded`, which
+  // needs store state, and this service is deliberately store-free (same reason
+  // the caller resolves groupName). So the caller computes it once, with
+  // computeLedgerTotals, and the PDF shows exactly what the screen showed.
+  // REQUIRED, not optional: an optional param means a caller that forgets it
+  // prints "Total Spent ₹0" as though it were a fact, and nothing catches it.
+  // Required makes that a compile error instead.
+  const totalDebit  = totals.debit;
+  const totalCredit = totals.credit;
   const net = totalCredit - totalDebit;
 
   // ── Chips HTML
@@ -235,6 +243,11 @@ export function buildPDFHTML(
         padding:3px 10px;border-radius:999px;border:1px solid #FFD8C9}
   /* ── Summary */
   .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:26px}
+  /* Footnote under the summary: what the three figures deliberately leave out.
+     A statement that quietly omits real movement is worse than a longer one.
+     Negative margin-top pulls it up into the summary's gap, so the spacing below
+     the block is the same 26px whether or not the note renders. */
+  .excl-note{font-size:10px;color:#6B7280;line-height:1.5;margin:-16px 0 22px}
   .stat{background:#F4F5F7;border-radius:10px;padding:14px 16px}
   .stat-lbl{font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;
              letter-spacing:0.8px;margin-bottom:5px}
@@ -294,6 +307,16 @@ export function buildPDFHTML(
     <div class="stat-val ${net >= 0 ? 'grn' : 'red'}">${net >= 0 ? '+' : ''}${fmtINR(net)}</div>
   </div>
 </div>
+${totals.excluded
+  ? `<div class="excl-note">Excludes ${fmtINR(totals.excluded)} of movement that is neither
+       spending nor income${totals.reasons?.length ? ` — ${totals.reasons.join(', ')}` : ''}.
+       These rows are still listed below.${totals.refund
+         ? ` ${fmtINR(totals.refund)} of refunds has been netted off Total Spent.`
+         : ''}</div>`
+  : (totals.refund
+      ? `<div class="excl-note">${fmtINR(totals.refund)} of refunds has been netted off
+           Total Spent rather than counted as income.</div>`
+      : '')}
 
 <div class="sec-lbl">Transactions (${txns.length})</div>
 <table>
@@ -319,6 +342,22 @@ export function buildPDFHTML(
 // ---------------------------------------------------------------------------
 
 /** How the compiled file should leave the app. */
+/**
+ * Spend/income for the exported set, computed by the CALLER via
+ * `computeLedgerTotals` so the statement, the export sheet's preview card and
+ * the Activity footer can never disagree. `excluded` is money that moved but
+ * isn't spend or income (self-transfers, lent/borrowed, ignored rows); it is
+ * printed as a footnote rather than dropped, because a statement that silently
+ * omits real movement is misleading.
+ */
+export interface ExportTotals {
+  debit: number;
+  credit: number;
+  refund: number;
+  excluded: number;
+  reasons: string[];
+}
+
 export type ExportMethod = 'share' | 'download';
 
 /** Outcome reported back to the UI so it can show the right confirmation. */
@@ -346,7 +385,8 @@ async function compileFile(
   ctx: ExportFilterContext,
   categories: ExportCategory[],
   accounts: ExportAccount[],
-  userName?: string,
+  userName: string | undefined,
+  totals: ExportTotals,
 ): Promise<CompiledFile> {
   const ts = Date.now();
 
@@ -367,7 +407,7 @@ async function compileFile(
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Print = require('expo-print') as typeof TPrint;
-  const html  = buildPDFHTML(txns, ctx, categories, accounts, userName);
+  const html  = buildPDFHTML(txns, ctx, categories, accounts, userName, totals);
   const { uri } = await Print.printToFileAsync({ html, base64: false });
   const base = `epurse_report_${ts}`;
   const dest = `${FS.cacheDirectory}${base}.pdf`;
@@ -393,7 +433,8 @@ export async function compileAndExport(
   ctx: ExportFilterContext,
   categories: ExportCategory[],
   accounts: ExportAccount[],
-  userName?: string,
+  userName: string | undefined,
+  totals: ExportTotals,
 ): Promise<ExportResult> {
   // Lazy requires — only evaluated here at call-time, never at module load.
   // This prevents expo-print / expo-sharing from calling requireNativeModule()
@@ -406,7 +447,7 @@ export async function compileAndExport(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Platform } = require('react-native') as typeof import('react-native');
 
-  const file = await compileFile(FS, format, txns, ctx, categories, accounts, userName);
+  const file = await compileFile(FS, format, txns, ctx, categories, accounts, userName, totals);
 
   const share = async (): Promise<ExportResult> => {
     await Sharing.shareAsync(file.path, {
@@ -452,7 +493,8 @@ export async function compileAndShare(
   ctx: ExportFilterContext,
   categories: ExportCategory[],
   accounts: ExportAccount[],
-  userName?: string,
+  userName: string | undefined,
+  totals: ExportTotals,
 ): Promise<void> {
-  await compileAndExport('share', format, txns, ctx, categories, accounts, userName);
+  await compileAndExport('share', format, txns, ctx, categories, accounts, userName, totals);
 }

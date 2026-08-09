@@ -1331,15 +1331,53 @@ export const useEPurseStore = create(
 
           const prevMonth = s.budget.monthKey;
           const prevAgg   = s.monthlyAggregates[prevMonth];
-          // Roll the finished month's by-legacy-category spend up to parent ids
-          // so the snapshot matches the parent-based budget (groceries → food).
+
+          // Roll the finished month's spend up to parent ids so the snapshot
+          // matches the parent-based budget (groceries → food).
+          //
+          // RAW FIRST. This used to read `monthlyAggregates[prevMonth]` only —
+          // but aggregates are written by compaction at RAW_RETENTION_MS (90
+          // days), and a month that ended yesterday is nowhere near that. So the
+          // lookup was always undefined at the moment of rollover and EVERY
+          // actual snapshotted as 0. Consequences, all silent:
+          //   • the month's recap/export showed caps with no spend against them
+          //   • `status` was always 'under' (0 ≤ cap), so a blown budget read as
+          //     a win, the streak INCREMENTED instead of resetting, and the
+          //     celebration claimed you saved the entire cap
+          // The aggregate stays as the fallback for the case it was actually
+          // written for: an app opened after a 90+ day gap, where the raw rows
+          // for that month are already gone.
+          //
+          // The raw branch mirrors getBudgetUsage exactly (ignored / countsForSpend
+          // / NON_SPEND / spendExcluded / budgetable-parent, refunds netting via
+          // spendContribution) so the snapshot equals what the Budget screen was
+          // showing on the last day of the month.
           const byParentPrev = {};
-          Object.entries(prevAgg?.byCategory || {}).forEach(([cid, amt]) => {
-            if (NON_SPEND_CATS.has(cid)) return;
-            const pid = CAT_MAPS.legacyToParentId[cid] || cid;
-            if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
-            byParentPrev[pid] = (byParentPrev[pid] || 0) + amt;
-          });
+          const prevRaw = s.transactions.filter(
+            (t) => monthKey(new Date(t.createdAt)) === prevMonth,
+          );
+          if (prevRaw.length > 0) {
+            prevRaw.forEach((t) => {
+              if (t.isIgnored) return;
+              if (!countsForSpend(t)) return;
+              if (NON_SPEND_CATS.has(t.categoryId)) return;
+              if (spendExcluded(t, s.groups)) return;
+              const pid = parentCatId(t);
+              if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
+              byParentPrev[pid] = (byParentPrev[pid] || 0) + spendContribution(t);
+            });
+            // A parent net-negative from refunds shouldn't read as "used".
+            Object.keys(byParentPrev).forEach((k) => {
+              if (byParentPrev[k] < 0) byParentPrev[k] = 0;
+            });
+          } else {
+            Object.entries(prevAgg?.byCategory || {}).forEach(([cid, amt]) => {
+              if (NON_SPEND_CATS.has(cid)) return;
+              const pid = CAT_MAPS.legacyToParentId[cid] || cid;
+              if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
+              byParentPrev[pid] = (byParentPrev[pid] || 0) + amt;
+            });
+          }
           const perCategorySnapshot = {};
           let totalActual = 0;
           Object.entries(s.budget.perCategory).forEach(([catId, cap]) => {
@@ -1353,8 +1391,6 @@ export const useEPurseStore = create(
             : null;
           const overshoot   = (totalCap != null && totalActual > totalCap) ? (totalActual - totalCap) : 0;
 
-          const historyEntry = { totalCap, perCategory: perCategorySnapshot, totalActual, status, overshoot };
-
           // Streak math — only meaningful when a total cap was set
           const streak = s.budgetStreak || { current: 0, best: 0, lastResetMonth: null };
           let { current, best, lastResetMonth } = streak;
@@ -1365,6 +1401,15 @@ export const useEPurseStore = create(
             current = 0;
             lastResetMonth = prevMonth;
           }
+
+          // `streakAfter` is snapshotted, not read live at render time: a recap
+          // for July exported in October must show the streak as it stood when
+          // July closed. selectMonthlyReport used `budgetStreak.current`, so a
+          // 4-month run reported as 0 the moment a later month broke it.
+          const historyEntry = {
+            totalCap, perCategory: perCategorySnapshot, totalActual, status, overshoot,
+            streakAfter: current,
+          };
 
           // Stash a celebration record so the dashboard can pop a modal on next
           // visit. We do this even on 'over' months so the user gets a gentle
@@ -3725,25 +3770,32 @@ export const useEPurseStore = create(
 
       /**
        * Average monthly spend for a FIRST-LEVEL (parent) budget category over
-       * the last N months. Rolls up child legacy ids (e.g. groceries → food)
-       * from monthlyAggregates so the figure matches the parent-based budget.
-       * Used to suggest caps in the plan form.
+       * the last N months. Rolls up child legacy ids (e.g. groceries → food) so
+       * the figure matches the parent-based budget. Suggests caps in the plan form.
+       *
+       * Goes through `getCategoryBreakdown`, which is RAW-first with the
+       * aggregate as fallback. It used to read `monthlyAggregates` directly, and
+       * since aggregates are only written at RAW_RETENTION_MS (90 days) while
+       * this only ever asks for months 1–3 back, the lookup was ALWAYS undefined:
+       * the suggestion returned 0 for every user, forever, not just in an edge
+       * case. Never read `monthlyAggregates` for a recent month — see the
+       * transaction-parser skill §4.
        */
       getParentCategoryAverage: (parentId, months = 3) => {
-        const s = get();
+        // An excluded parent has no spend by definition. Hoisted out of the loop —
+        // inside it, the check was skipped entirely for a month with no data.
+        if (excludedExpenseSet().has(parentId)) return 0;
         const now = new Date();
         let total = 0;
         let count = 0;
         for (let i = 1; i <= months; i++) {
-          const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const agg = s.monthlyAggregates[monthKey(d)];
-          if (!agg?.byCategory) continue;
-          // An excluded parent has no spend by definition — don't average history for it.
-          if (excludedExpenseSet().has(parentId)) return 0;
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
           let monthSum = 0;
           let has = false;
-          Object.entries(agg.byCategory).forEach(([cid, amt]) => {
-            if (CAT_MAPS.legacyToParentId[cid] === parentId) { monthSum += amt; has = true; }
+          get().getCategoryBreakdown(d).forEach((row) => {
+            if ((CAT_MAPS.legacyToParentId[row.id] || row.id) === parentId) {
+              monthSum += row.total; has = true;
+            }
           });
           if (has) { total += monthSum; count += 1; }
         }
@@ -3807,12 +3859,15 @@ export const useEPurseStore = create(
       },
 
       /**
-       * Average monthly spend for a category over the last N months, drawn from
-       * monthlyAggregates. Returns 0 if there's no historical data.
-       * Used to seed budget suggestions in the form.
+       * Average monthly spend for a single (legacy) category over the last N
+       * months. Returns 0 if there's no history.
+       *
+       * NOTE: currently has NO callers — kept because it's the sibling of
+       * getParentCategoryAverage and was carrying the identical
+       * aggregate-only bug (always 0, see that function). Fixed rather than left
+       * as a correct-looking trap for the next caller. Delete if it stays unused.
        */
       getCategoryAverage: (categoryId, months = 3) => {
-        const s = get();
         // A category whose parent the user excluded from expenses has no spend by
         // definition — averaging its history would resurrect it in comparisons.
         const exParents = excludedExpenseSet();
@@ -3822,34 +3877,28 @@ export const useEPurseStore = create(
         let count = 0;
         for (let i = 1; i <= months; i++) {
           const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const key = monthKey(d);
-          const agg = s.monthlyAggregates[key];
-          if (agg && agg.byCategory && agg.byCategory[categoryId] != null) {
-            total += agg.byCategory[categoryId];
-            count += 1;
-          }
+          const row = get().getCategoryBreakdown(d).find((r) => r.id === categoryId);
+          if (row) { total += row.total; count += 1; }
         }
         return count > 0 ? Math.round(total / count) : 0;
       },
 
-      /** Top N categories by historical avg spend — used to seed empty-form suggestions. */
+      /**
+       * Top N categories by historical avg spend — meant to seed empty-form
+       * suggestions. Also currently has NO callers; fixed alongside its two
+       * siblings rather than left holding the same always-zero bug.
+       * `getCategoryBreakdown` already drops NON_SPEND and user-excluded parents
+       * in both its raw and aggregate branches, so no re-filtering here.
+       */
       getTopCategoriesByAverage: (limit = 6) => {
-        const s = get();
-        const exParents = excludedExpenseSet();
         const now = new Date();
         const totals = {};
         const counts = {};
         for (let i = 1; i <= 3; i++) {
-          const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const agg = s.monthlyAggregates[monthKey(d)];
-          if (!agg?.byCategory) continue;
-          Object.entries(agg.byCategory).forEach(([catId, amt]) => {
-            if (NON_SPEND_CATS.has(catId)) return;
-            // …and skip user-excluded parents, or an "off" category still shows up in
-            // Top categories.
-            if (exParents.size && exParents.has(CAT_MAPS.legacyToParentId[catId] || catId)) return;
-            totals[catId] = (totals[catId] || 0) + amt;
-            counts[catId] = (counts[catId] || 0) + 1;
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          get().getCategoryBreakdown(d).forEach((row) => {
+            totals[row.id] = (totals[row.id] || 0) + row.total;
+            counts[row.id] = (counts[row.id] || 0) + 1;
           });
         }
         return Object.entries(totals)
@@ -4902,7 +4951,10 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
       status: bh.status || null,
       overshoot: bh.overshoot || 0,
       saved: (bh.totalCap != null && bh.totalActual <= bh.totalCap) ? bh.totalCap - bh.totalActual : 0,
-      streak: state.budgetStreak?.current || 0,
+      // Snapshotted value first — the live streak is TODAY's, which is wrong for
+      // any month but the most recent. `?? ` not `||`: a legitimate streak of 0
+      // (the month you went over) must not fall through to the live number.
+      streak: bh.streakAfter ?? state.budgetStreak?.current ?? 0,
       rows,
     };
   }

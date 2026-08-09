@@ -26,6 +26,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
 import { TwoTierCategorySheet } from './TwoTierCategorySheet';
 import { SmartRuleModal, SmartRuleState } from './SmartRuleModal';
+import SectionHeader from './SectionHeader';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -424,14 +425,16 @@ export const DailyQueueSection: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Daily Queue</Text>
-        {visibleQueue.length > 0 && (
+      <SectionHeader
+        icon="layers-outline"
+        title="Daily Queue"
+        style={styles.sectionHeader}
+        right={visibleQueue.length > 0 ? (
           <View style={styles.countBadge}>
             <Text style={styles.countBadgeText}>{visibleQueue.length}</Text>
           </View>
-        )}
-      </View>
+        ) : null}
+      />
 
       {showInboxZero ? (
         <InboxZeroView onCollapsed={() => setShowInboxZero(false)} />
@@ -487,18 +490,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 8,
   },
+  // Only outer spacing now — SectionHeader owns the row layout and the type.
+  // This was a 13px uppercase eyebrow, which put a different heading tier
+  // directly above Dashboard's h3 section titles on the same screen.
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     marginBottom: 14,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
   },
   countBadge: {
     backgroundColor: '#FF5A1F',

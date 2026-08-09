@@ -33,27 +33,50 @@ const typography = typographyBase as unknown as Record<string, TextStyle>;
 type Props = {
   /** Ionicons name. Reuse the type's canonical icon (ui-consistency §5). */
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  title: string;
+  /**
+   * Usually a string. A ReactNode is allowed for the one real case in the app —
+   * a title carrying a differently-styled inline count ("Transactions (12)") —
+   * so that screen can share this component instead of keeping its own copy.
+   * Pass `a11yTitle` alongside it when `onInfo` is set.
+   */
+  title: React.ReactNode;
+  /** Plain-text title for accessibility when `title` is a node. */
+  a11yTitle?: string;
   /** What question this card answers. Every card should be able to state one. */
   subtitle?: string;
   /** Tint for the icon. Pass `theme.primary` on themed screens. */
   accentColor?: string;
   /** Renders the shared InfoIcon on the right when provided. */
   onInfo?: () => void;
+  /**
+   * Trailing slot on the header row — a "View all" link, a count badge, a
+   * filter control. The component owns the LAYOUT of a section header; it does
+   * not try to know every possible action, which is what kept five screens
+   * hand-rolling their own row before this existed.
+   */
+  right?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 };
 
-const SectionHeader = ({ icon, title, subtitle, accentColor, onInfo, style }: Props) => (
+const SectionHeader = ({
+  icon, title, a11yTitle, subtitle, accentColor, onInfo, right, style,
+}: Props) => (
   <View style={style}>
     <View style={styles.row}>
       <Ionicons name={icon} size={17} color={accentColor || colors.textSecondary} style={styles.icon} />
-      {/* flex + numberOfLines so a long title can't push the info icon off-row. */}
+      {/* flex + numberOfLines so a long title can't push the trailing slot off-row. */}
       <Text style={styles.title} numberOfLines={1}>{title}</Text>
       {onInfo ? (
-        <TouchableOpacity onPress={onInfo} hitSlop={10} accessibilityRole="button" accessibilityLabel={`About ${title}`}>
+        <TouchableOpacity
+          onPress={onInfo}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`About ${a11yTitle ?? (typeof title === 'string' ? title : 'this section')}`}
+        >
           <InfoIcon size={18} color={colors.textMuted} />
         </TouchableOpacity>
       ) : null}
+      {right}
     </View>
     {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
   </View>

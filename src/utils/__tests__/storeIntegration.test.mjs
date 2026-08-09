@@ -1231,5 +1231,302 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('split/delete: and refunds the account', bal() === 98500, `${bal()}`);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Activity footer totals — must EQUAL the store selectors for the same data
+// -----------------------------------------------------------------------------
+// The footer once applied only `spendExcluded`, so a self-transfer counted as
+// money out AND in, lent/repaid read as spend + income, refunds counted as
+// income, and rows surfaced by the Ignored chip were summed. It contradicted
+// Home for the very same transactions. These tests pin them together: any future
+// divergence between computeLedgerTotals and getMonthlySpend fails here.
+// ═════════════════════════════════════════════════════════════════════════════
+{
+  reset();
+  const { computeLedgerTotals } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/ledgerTotals.js');
+  const { spendExcluded } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+
+  useStore.getState().addAccount({ name: 'HDFC', type: 'Bank', mask: '1111', balance: 100000 });
+  const acc = useStore.getState().accounts[0].id;
+  const add = (o) => useStore.getState().addTransaction({
+    accountId: acc, createdAt: new Date().toISOString(), ...o,
+  });
+
+  add({ amount: 2000,  type: 'debit',  merchant: 'Swiggy',      categoryId: 'food' });
+  add({ amount: 50000, type: 'credit', merchant: 'Salary',      categoryId: 'income' });
+  add({ amount: 9000,  type: 'debit',  merchant: 'To my ICICI', categoryId: 'self' });
+  add({ amount: 9000,  type: 'credit', merchant: 'From HDFC',   categoryId: 'self' });
+  add({ amount: 1500,  type: 'debit',  merchant: 'Rahul',       categoryId: 'lent' });
+  add({ amount: 1500,  type: 'credit', merchant: 'Rahul',       categoryId: 'lent_settled' });
+  add({ amount: 300,   type: 'credit', merchant: 'Amazon',      categoryId: 'shopping', isRefund: true });
+
+  const G2 = () => useStore.getState();
+  const visible = () => G2().transactions.filter((t) => !t.isIgnored);
+  const totals  = (list) => computeLedgerTotals(list, G2().groups, spendExcluded);
+
+  const t1 = totals(visible());
+  check('footer: "out" equals getMonthlySpend',   t1.debit  === G2().getMonthlySpend(),   `${t1.debit} vs ${G2().getMonthlySpend()}`);
+  check('footer: "in" equals getMonthlyIncome',   t1.credit === G2().getMonthlyIncome(),  `${t1.credit} vs ${G2().getMonthlyIncome()}`);
+  check('footer: refunds equal getMonthlyRefunds', t1.refund === G2().getMonthlyRefunds(), `${t1.refund} vs ${G2().getMonthlyRefunds()}`);
+
+  // The specific bugs, named so a regression says WHICH one came back.
+  check('footer: a self-transfer is not counted as spend', t1.debit === 1700, `${t1.debit}`);
+  check('footer: a self-transfer is not counted as income', t1.credit === 50000, `${t1.credit}`);
+  check('footer: lending money is not spend',   !(t1.debit  > 1700));
+  check('footer: being repaid is not income',   !(t1.credit > 50000));
+  check('footer: a refund is not income',       t1.credit === 50000);
+  check('footer: a refund nets DOWN spend (2000 - 300)', t1.debit === 1700, `${t1.debit}`);
+  check('footer: excluded movement is reported, not dropped silently', t1.excluded === 21000, `${t1.excluded}`);
+  check('footer: reasons name the categories', t1.reasons.includes('self-transfers') && t1.reasons.includes('lent'),
+    t1.reasons.join(','));
+
+  // The Ignored chip surfaces ignored rows into the list — they must still not count.
+  const junk = add({ amount: 777, type: 'debit', merchant: 'Junk', categoryId: 'other' });
+  useStore.getState().ignoreTransaction(G2().transactions.find((t) => t.merchant === 'Junk').id);
+  const t2 = totals(G2().transactions);   // as if the Ignored chip were selected
+  check('footer: an ignored row surfaced by its chip does not change spend', t2.debit === t1.debit, `${t2.debit}`);
+  check('footer: but it IS reported as not counted', t2.excluded === t1.excluded + 777, `${t2.excluded}`);
+  check('footer: and says so', t2.reasons.includes('ignored'));
+
+  // ── Export: the sheet's card and the PDF use the SAME totals as the footer ──
+  // The export path was worse than the footer — it applied NO exclusions at all
+  // while the PDF labelled the result "Total Spent" / "Total Income".
+  {
+    const { buildPDFHTML } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/services/exportService.ts');
+
+    // A split you paid (your share is a fraction of the bill) and a group expense
+    // someone ELSE paid (a memo — never your money).
+    // Via the real API — hand-setting isSplit/myShareAmount on addTransaction does
+    // NOT stick (the store derives the shares), which would have made this test
+    // assert against a shape the app never produces.
+    add({ amount: 4000, type: 'debit', merchant: 'Dinner', categoryId: 'food' });
+    const dinner = G2().transactions.find((t) => t.merchant === 'Dinner');
+    G2().setTransactionSplit(dinner.id, [{ name: 'Neha' }, { name: 'Amit' }], { mode: 'equal' });
+    const gid = G2().createGroup({ name: 'Goa', type: 'shared', emoji: 'G',
+      members: [{ memberId: 'm2', name: 'Neha' }] });
+    G2().addGroupExpense(gid, { amount: 6000, merchant: 'Hotel', categoryId: 'travel',
+      accountId: acc, paidByMemberId: 'm2',
+      shares: [{ memberId: 'me', name: 'You', shareAmount: 3000 },
+               { memberId: 'm2', name: 'Neha', shareAmount: 3000 }] });
+
+    const list = visible();
+    const t3 = totals(list);
+    check('export: totals still equal getMonthlySpend with a split + a memo present',
+      t3.debit === G2().getMonthlySpend(), `${t3.debit} vs ${G2().getMonthlySpend()}`);
+    // ₹4,000 split three ways → your share ₹1,333.33, not the ₹4,000 the old
+    // export summed. Base spend before this block is ₹1,700.
+    const myDinnerShare = G2().transactions.find((t) => t.merchant === 'Dinner').myShareAmount;
+    check('export: a split counts YOUR share, not the whole bill',
+      Math.round(t3.debit) === Math.round(1700 + myDinnerShare) && myDinnerShare < 4000,
+      `${t3.debit} (share ${myDinnerShare})`);
+    check('export: a memo (someone else paid) is excluded and named as such',
+      t3.reasons.includes('paid by someone else'), t3.reasons.join(','));
+
+    const ctx = { timeframe: 'month', catIds: [], acctIds: [], showHidden: false,
+      showIgnored: false, showSplit: false,
+      advanced: { minAmount: '', maxAmount: '', query: '' }, searchQuery: '' };
+    const html = buildPDFHTML(list, ctx, G2().categories, G2().accounts, 'Test', t3);
+    const flat = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const shown = new Intl.NumberFormat('en-IN',
+      { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(t3.debit);
+    check('export: the PDF prints the corrected Total Spent (not the raw sum)',
+      flat.includes(`Total Spent ${shown}`) && !flat.includes('Total Spent \u20b921,000'),
+      flat.slice(flat.indexOf('Total Spent'), flat.indexOf('Total Spent') + 60));
+    check('export: the PDF footnotes what it excluded, rather than dropping it silently',
+      /Excludes .*of movement that is neither spending nor income/.test(flat));
+    check('export: the footnote names the reasons',
+      flat.includes('paid by someone else') && flat.includes('self-transfers'));
+    check('export: the footnote declares the netted refund',
+      /refunds has been netted off/.test(flat));
+
+    // `totals` is a REQUIRED parameter, so a caller that forgets it is a compile
+    // error rather than a statement quietly reporting "Total Spent ₹0". tsc is
+    // the guard; this asserts the runtime is loud too, since the .mjs runner
+    // strips types and would otherwise sail past a missing argument.
+    let threw = false;
+    try { buildPDFHTML(list, ctx, G2().categories, G2().accounts, 'Test'); }
+    catch { threw = true; }
+    check('export: building a PDF without totals throws, never prints a fake ₹0', threw);
+  }
+
+  // Filtering to only non-spend rows: 0/0 is correct, and the secondary line is
+  // what stops that reading as a bug.
+  const selfOnly = totals(visible().filter((t) => t.categoryId === 'self'));
+  check('footer: filtering to Self Transfer gives 0/0 with the movement explained',
+    selfOnly.debit === 0 && selfOnly.credit === 0 && selfOnly.excluded === 18000,
+    `${selfOnly.debit}/${selfOnly.credit}/${selfOnly.excluded}`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Month rollover — the budget snapshot must capture the month's REAL spend
+// -----------------------------------------------------------------------------
+// `rolloverBudgetIfNeeded` read `monthlyAggregates[prevMonth]`, which compaction
+// only writes at RAW_RETENTION_MS (90 days). A month that ended yesterday has no
+// aggregate, so every `actual` snapshotted as 0 — the recap/export showed caps
+// with no spend, status was always 'under', the streak incremented on a blown
+// budget, and the celebration claimed the whole cap was saved.
+// ═════════════════════════════════════════════════════════════════════════════
+{
+  const { selectMonthlyReport } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+  const MK = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const lastMonth = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 15, 12, 0, 0);
+  const PREV = MK(lastMonth);
+
+  const seed = (perCategory, totalCap, streak) => {
+    reset();
+    useStore.setState({ budgetStreak: streak, budgetHistory: {}, budget: null });
+    useStore.getState().addAccount({ name: 'HDFC', type: 'Bank', mask: '1111', balance: 100000 });
+    const a = useStore.getState().accounts[0].id;
+    return {
+      acc: a,
+      spend: (amount, categoryId) => useStore.getState().addTransaction({
+        accountId: a, createdAt: lastMonth.toISOString(), amount, type: 'debit',
+        merchant: 'X', categoryId,
+      }),
+      plan: () => useStore.setState({ budget: { monthKey: PREV, totalCap, perCategory } }),
+    };
+  };
+
+  // ── An OVER month ──
+  {
+    const h = seed({ food: 10000, travel: 5000 }, 15000, { current: 3, best: 3, lastResetMonth: null });
+    h.spend(12000, 'groceries');   // child → rolls up to food
+    h.spend(6000, 'travel');
+    h.plan();
+    check('rollover: no aggregate exists for a month that just ended (the trap)',
+      !useStore.getState().monthlyAggregates[PREV]);
+
+    useStore.getState().rolloverBudgetIfNeeded();
+    const bh = useStore.getState().budgetHistory[PREV];
+
+    check('rollover: snapshots the REAL total spend, not 0', bh.totalActual === 18000, `${bh.totalActual}`);
+    check('rollover: a child category rolls up to its budgeted parent',
+      bh.perCategory.food.actual === 12000, JSON.stringify(bh.perCategory));
+    check('rollover: an over-budget month is recorded as over', bh.status === 'over', `${bh.status}`);
+    check('rollover: overshoot is the real amount', bh.overshoot === 3000, `${bh.overshoot}`);
+    check('rollover: an over month RESETS the streak', useStore.getState().budgetStreak.current === 0,
+      JSON.stringify(useStore.getState().budgetStreak));
+    check('rollover: best streak is preserved', useStore.getState().budgetStreak.best === 3);
+    check('rollover: the celebration does not claim a saving that never happened',
+      useStore.getState().pendingCelebration.savedAmount === 0);
+
+    // What the user actually exports.
+    const rep = selectMonthlyReport(PREV)(useStore.getState());
+    check('export: the recap prints the month\'s budget, not an empty block',
+      rep.budget && rep.budget.totalActual === 18000 && rep.budget.rows.length === 2,
+      JSON.stringify(rep.budget && { a: rep.budget.totalActual, n: rep.budget.rows.length }));
+    check('export: the recap streak is the SNAPSHOT (0 after an over month), not today\'s',
+      rep.budget.streak === 0);
+  }
+
+  // ── An UNDER month: the streak must survive into a later export ──
+  {
+    const h = seed({ food: 10000 }, 10000, { current: 3, best: 4, lastResetMonth: null });
+    h.spend(4000, 'groceries');
+    h.plan();
+    useStore.getState().rolloverBudgetIfNeeded();
+
+    check('rollover: an under month extends the streak', useStore.getState().budgetStreak.current === 4);
+    const bh = useStore.getState().budgetHistory[PREV];
+    check('rollover: the snapshot records the streak as it stood that month', bh.streakAfter === 4, `${bh.streakAfter}`);
+    check('rollover: under-budget saving is real', bh.totalActual === 4000 && bh.status === 'under');
+
+    // Break the streak later — the older month's export must NOT change.
+    useStore.setState({ budgetStreak: { current: 0, best: 4, lastResetMonth: 'later' } });
+    const rep = selectMonthlyReport(PREV)(useStore.getState());
+    check('export: an old recap keeps its own streak after a later month breaks it',
+      rep.budget.streak === 4, `${rep.budget.streak}`);
+  }
+
+  // ── Refunds and excluded rows behave as they do on the Budget screen ──
+  {
+    const h = seed({ food: 10000 }, 10000, { current: 0, best: 0, lastResetMonth: null });
+    h.spend(5000, 'groceries');
+    useStore.getState().addTransaction({ accountId: h.acc, createdAt: lastMonth.toISOString(),
+      amount: 1000, type: 'credit', merchant: 'Refund', categoryId: 'groceries', isRefund: true });
+    useStore.getState().addTransaction({ accountId: h.acc, createdAt: lastMonth.toISOString(),
+      amount: 7000, type: 'debit', merchant: 'To ICICI', categoryId: 'self' });
+    h.plan();
+    useStore.getState().rolloverBudgetIfNeeded();
+    const bh = useStore.getState().budgetHistory[PREV];
+    check('rollover: a refund nets down the snapshotted actual', bh.perCategory.food.actual === 4000, `${bh.perCategory.food.actual}`);
+    check('rollover: a self-transfer never lands in the budget snapshot', bh.totalActual === 4000, `${bh.totalActual}`);
+  }
+
+  // ── The aggregate fallback still works for a genuinely old month ──
+  {
+    reset();
+    useStore.setState({
+      budget: { monthKey: PREV, totalCap: 5000, perCategory: { food: 5000 } },
+      budgetHistory: {}, budgetStreak: { current: 0, best: 0, lastResetMonth: null },
+      monthlyAggregates: { [PREV]: { totalSpend: 3000, totalIncome: 0, byCategory: { groceries: 3000 }, byAccount: {} } },
+    });
+    useStore.getState().rolloverBudgetIfNeeded();
+    check('rollover: falls back to the aggregate when the raw rows are gone (90+ day gap)',
+      useStore.getState().budgetHistory[PREV].totalActual === 3000,
+      `${useStore.getState().budgetHistory[PREV].totalActual}`);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Budget cap suggestions — the same 90-day aggregate trap, three more times
+// -----------------------------------------------------------------------------
+// getParentCategoryAverage / getCategoryAverage / getTopCategoriesByAverage read
+// `monthlyAggregates` directly while only ever asking for months 1–3 back. Those
+// months are ALWAYS inside the raw window, so the lookup was always undefined and
+// every suggestion was 0 — for every user, permanently, not as an edge case.
+// They now go through getCategoryBreakdown (raw first, aggregate as fallback).
+// ═════════════════════════════════════════════════════════════════════════════
+{
+  reset();
+  useStore.getState().addAccount({ name: 'HDFC', type: 'Bank', mask: '1111', balance: 200000 });
+  const a = useStore.getState().accounts[0].id;
+  const now = new Date();
+  for (const back of [1, 2, 3]) {
+    const d = new Date(now.getFullYear(), now.getMonth() - back, 12, 12, 0, 0);
+    useStore.getState().addTransaction({ accountId: a, createdAt: d.toISOString(),
+      amount: 9000, type: 'debit', merchant: 'Big Bazaar', categoryId: 'groceries' });
+    useStore.getState().addTransaction({ accountId: a, createdAt: d.toISOString(),
+      amount: 3000, type: 'debit', merchant: 'Uber', categoryId: 'travel' });
+  }
+  const S = () => useStore.getState();
+
+  check('suggestions: the recent months genuinely have no aggregates (the trap)',
+    Object.keys(S().monthlyAggregates).length === 0);
+  check('suggestions: parent average rolls children up (groceries → food)',
+    S().getParentCategoryAverage('food', 3) === 9000, `${S().getParentCategoryAverage('food', 3)}`);
+  check('suggestions: category average reads raw history',
+    S().getCategoryAverage('groceries', 3) === 9000, `${S().getCategoryAverage('groceries', 3)}`);
+  const top = S().getTopCategoriesByAverage();
+  check('suggestions: top categories are ranked, not empty',
+    top.length === 2 && top[0].categoryId === 'groceries' && top[0].average === 9000,
+    JSON.stringify(top));
+
+  // A month with no spend must not drag the average down — it isn't a ₹0 month,
+  // it's a month with no data.
+  reset();
+  useStore.getState().addAccount({ name: 'HDFC', type: 'Bank', mask: '1111', balance: 200000 });
+  const a2 = useStore.getState().accounts[0].id;
+  const d1 = new Date(now.getFullYear(), now.getMonth() - 1, 12, 12, 0, 0);
+  useStore.getState().addTransaction({ accountId: a2, createdAt: d1.toISOString(),
+    amount: 6000, type: 'debit', merchant: 'Big Bazaar', categoryId: 'groceries' });
+  check('suggestions: months with no data are not averaged in as zeros',
+    S().getParentCategoryAverage('food', 3) === 6000, `${S().getParentCategoryAverage('food', 3)}`);
+
+  // Spend Rules must win over history.
+  S().setExpenseParentCounted('food', false);
+  check('suggestions: a parent excluded in Spend Rules averages 0',
+    S().getParentCategoryAverage('food', 3) === 0, `${S().getParentCategoryAverage('food', 3)}`);
+  S().setExpenseParentCounted('food', true);
+
+  // The aggregate path still works for genuinely old months.
+  reset();
+  const oldKey = (() => { const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
+  useStore.setState({ monthlyAggregates: { [oldKey]: {
+    totalSpend: 5000, totalIncome: 0, byCategory: { groceries: 5000 }, byAccount: {} } } });
+  check('suggestions: falls back to aggregates when raw is gone',
+    S().getParentCategoryAverage('food', 3) === 5000, `${S().getParentCategoryAverage('food', 3)}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

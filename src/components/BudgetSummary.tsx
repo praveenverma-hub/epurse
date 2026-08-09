@@ -97,11 +97,22 @@ interface BudgetSummaryProps {
   onPress?: () => void;
 }
 
+/** One row of `getBudgetUsage().perCategory`. */
+type BudgetCatUsage = {
+  cap: number; actual: number; pct: number; remaining: number; over: boolean;
+};
+/** The fields this component reads off a store category. */
+type CategoryMeta = { id: string; name?: string; emoji?: string; color?: string };
+
 export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const budget = useEPurseStore((s) => s.budget);
   const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
   const updateBudgetCategory = useEPurseStore((s) => s.updateBudgetCategory);
-  const allCategories = useEPurseStore((s) => s.categories);
+  // Typed at the boundary: the store is untyped JS, so without these the entries
+  // below come through as `unknown` and `find`'s parameter as implicit `any` —
+  // the three long-standing tsc errors in this file. Every check in this session
+  // had to filter them out, which is exactly how a NEW type error would slip by.
+  const allCategories = useEPurseStore((s) => s.categories) as CategoryMeta[];
   const theme = useTheme();
   
   const [showInfo, setShowInfo] = useState(false);
@@ -140,7 +151,8 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
     const days = Math.ceil((lastDay.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
     // Build category list from budget plan
-    const cats = Object.entries(usage.perCategory).map(([catId, data]) => {
+    const perCategory = usage.perCategory as Record<string, BudgetCatUsage>;
+    const cats = Object.entries(perCategory).map(([catId, data]) => {
       const meta = allCategories.find((c) => c.id === catId);
       return {
         id: catId,

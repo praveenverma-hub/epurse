@@ -64,7 +64,8 @@ import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
-import { canSplitTransaction, debitDisplayAmount } from '../utils/split';
+import { canSplitTransaction } from '../utils/split';
+import { computeLedgerTotals } from '../utils/ledgerTotals';
 import { spendExcluded } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
@@ -508,23 +509,18 @@ const TransactionsScreen = ({ navigation, route }) => {
     return out;
   }, [filtered]);
 
-  // Debit (spend) + credit (inflow) totals across the filtered list — shown
-  // alongside the count. Debit uses the user's share (split-aware), like each row.
-  const filteredTotals = useMemo(() => {
-    let debit = 0;
-    let credit = 0;
-    for (const t of filtered) {
-      // Memos (someone else paid → you owe) and "excluded from totals" group rows
-      // aren't your own money movement — keep them out of the spend/inflow figures
-      // (matches Home's selectExpenseStats). They still appear in the list.
-      if (spendExcluded(t, groups)) continue;
-      if (t.type === 'credit') credit += t.amount || 0;
-      else debit += debitDisplayAmount(t);
-    }
-    return { debit, credit };
+  // Spent / received across the filtered list, shown alongside the count.
+  // Deliberately NOT inline: this must agree with getMonthlySpend /
+  // getMonthlyIncome / getMonthlyRefunds, and while it lived here it drifted
+  // from them (see ledgerTotals.js). Keeping it in a util is what lets a test
+  // assert the two produce identical numbers for the same data.
+  //
   // excludedExpenseParents is a RE-RENDER dep: spendExcluded reads a module-level
   // mirror, so a rule change wouldn't otherwise invalidate this memo.
-  }, [filtered, groups, excludedExpenseParents]);
+  const filteredTotals = useMemo(
+    () => computeLedgerTotals(filtered, groups, spendExcluded),
+    [filtered, groups, excludedExpenseParents],
+  );
 
   const activeFilterCount = useMemo(
     () => Object.values(applied).reduce((n, s) => n + s.size, 0),
@@ -866,14 +862,33 @@ const TransactionsScreen = ({ navigation, route }) => {
             )}
 
             {filtered.length > 0 && (
-              <View style={styles.listCountRow}>
-                <Text style={styles.listCountTxt}>
-                  {filtered.length} transaction{filtered.length !== 1 ? 's' : ''}
-                </Text>
-                <Text style={styles.listCountTxt}>
-                  {formatCurrency(filteredTotals.debit)} out · {formatCurrency(filteredTotals.credit)} in
-                </Text>
-              </View>
+              <>
+                <View style={styles.listCountRow}>
+                  <Text style={styles.listCountTxt}>
+                    {filtered.length} transaction{filtered.length !== 1 ? 's' : ''}
+                  </Text>
+                  <Text style={styles.listCountTxt}>
+                    {formatCurrency(filteredTotals.debit)} out · {formatCurrency(filteredTotals.credit)} in
+                  </Text>
+                </View>
+
+                {/* Only when the filtered set actually contains uncounted rows.
+                    Without it, filtering to Self Transfer or Lent reads "₹0 out ·
+                    ₹0 in" over a screenful of transactions and looks broken. */}
+                {filteredTotals.excluded > 0 && (
+                  <Text style={styles.listNotCountedTxt}>
+                    {formatCurrency(filteredTotals.excluded)} not counted
+                    {filteredTotals.reasons.length ? ` · ${filteredTotals.reasons.join(', ')}` : ''}
+                  </Text>
+                )}
+                {/* Refunds net down "out" (a refund isn't income) — say so, or the
+                    number looks wrong against the rows above it. */}
+                {filteredTotals.refund > 0 && (
+                  <Text style={styles.listNotCountedTxt}>
+                    includes {formatCurrency(filteredTotals.refund)} refunded, netted off spend
+                  </Text>
+                )}
+              </>
             )}
           </>
         }
@@ -1434,6 +1449,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     fontWeight: '600',
+  },
+  // Quieter than the totals row — an explanation, not a figure to read first.
+  listNotCountedTxt: {
+    fontSize: 11,
+    color: colors.textMuted,
+    textAlign: 'right',
+    marginTop: 2,
   },
 
   // ── Sheet overlay ──────────────────────────────────────────────────────────

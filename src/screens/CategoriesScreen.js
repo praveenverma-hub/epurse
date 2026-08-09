@@ -20,6 +20,7 @@ import GradientButton from '../components/GradientButton';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
+import SectionHeader from '../components/SectionHeader';
 
 const COLOR_PALETTE = [
   '#FF5A1F', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981',
@@ -140,11 +141,12 @@ const CategoriesScreen = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Category tree ───────────────────────────────────────────── */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Categories</Text>
-          <Text style={styles.hint}>
-            Tap a category to see its sub-categories. Add your own sub-categories or a
-            whole new parent — they work everywhere and stay saved across updates.
-          </Text>
+          <SectionHeader
+            icon="grid-outline"
+            title="Categories"
+            accentColor={theme.primary}
+            subtitle="Tap a category to see its sub-categories. Add your own sub-categories or a whole new parent — they work everywhere and stay saved across updates."
+          />
 
           {tree.map((parent) => {
             const isOpen = !!expanded[parent.id];
@@ -368,7 +370,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     ...shadows.card,
   },
-  sectionTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.xs },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
   sub: { ...typography.small, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs, fontWeight: '600' },
 

@@ -51,6 +51,7 @@ import MonthDivider from '../components/MonthDivider';
 import { monthKey } from '../utils/format';
 import { useAnchorToast, BalanceAnchorModal } from './OnboardingExperience';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
+import SectionHeader from '../components/SectionHeader';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -437,7 +438,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           <EditIcon size={20} color="#94A3B8" style={{ marginLeft: 8 }} />
         </View>
       </TouchableOpacity>
-      <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Transactions</Text>
+      <SectionHeader icon="receipt-outline" title="Transactions" accentColor={theme.primary} />
     </View>
   );
 
@@ -703,10 +704,6 @@ const styles = StyleSheet.create({
     fontWeight:  '800',
     color:       '#0F172A',
     fontVariant: ['tabular-nums'],
-  },
-  sectionTitle: {
-    ...typography.h3,   // standard section heading; colour applied inline (theme-aware)
-    marginBottom: 12,
   },
 
   listContent: { paddingBottom: spacing.xxl * 2, flexGrow: 1 },

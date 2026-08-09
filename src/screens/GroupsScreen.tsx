@@ -45,6 +45,7 @@ import EditIcon from '../components/EditIcon';
 import MonthDivider from '../components/MonthDivider';
 import { useToast } from '../components/Toast';
 import type { Group, GroupExpenseData } from '../types/group';
+import SectionHeader from '../components/SectionHeader';
 
 /** Mix a hex colour toward white by `amt` (0..1) — used for the soft "glow" on the active tile. */
 function lightenHex(hex: string, amt = 0.4): string {
@@ -459,7 +460,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
 
         {/* Transactions sub-header */}
         <View style={styles.txnHeader}>
-          <Text style={styles.sectionTitle}>Transactions ({groupTxns.length})</Text>
+          <SectionHeader icon="receipt-outline" title={`Transactions (${groupTxns.length})`} accentColor={theme.primary} />
         </View>
       </View>
     );
@@ -848,7 +849,6 @@ const styles = StyleSheet.create({
 
   // Transactions list
   txnHeader: { marginTop: spacing.md, marginBottom: spacing.md },
-  sectionTitle: { ...typography.h3, color: colors.textPrimary },
   // Plain (no card) — just centred text + emoji.
   emptyTxn: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },
 

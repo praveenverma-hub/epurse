@@ -27,6 +27,7 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../components/Toast';
 import CenterModal from '../components/CenterModal';
+import SectionHeader from '../components/SectionHeader';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
 import GradientButton from '../components/GradientButton';
@@ -253,10 +254,7 @@ const BackupScreen = ({ navigation, route }) => {
         {/* ── Not configured in this build ────────────────────────────────── */}
         {!configured ? (
           <View style={styles.card}>
-            <View style={styles.sectionHead}>
-              <Ionicons name="construct-outline" size={17} color={colors.warning} />
-              <Text style={styles.sectionTitle}>Not set up yet</Text>
-            </View>
+            <SectionHeader icon="construct-outline" title="Not set up yet" accentColor={colors.warning} />
             <Text style={styles.hint}>
               This build has no Google client ID, so backup is unavailable. Nothing is wrong with your data.
             </Text>
@@ -265,10 +263,7 @@ const BackupScreen = ({ navigation, route }) => {
           <>
             {/* ── Google account ───────────────────────────────────────────── */}
             <View style={styles.card}>
-              <View style={styles.sectionHead}>
-                <Ionicons name="cloud-outline" size={17} color={theme.primary} />
-                <Text style={styles.sectionTitle}>Google Drive</Text>
-              </View>
+              <SectionHeader icon="cloud-outline" title="Google Drive" accentColor={theme.primary} />
               <Text style={styles.hint}>
                 {fromOnboarding
                   ? 'Sign in with the Google account you backed up to, and pick a backup to restore.'
@@ -295,10 +290,7 @@ const BackupScreen = ({ navigation, route }) => {
             {/* ── Back up now — pointless on a fresh device ────────────────── */}
             {signedIn && !fromOnboarding ? (
               <View style={styles.card}>
-                <View style={styles.sectionHead}>
-                  <Ionicons name="shield-checkmark-outline" size={17} color={theme.primary} />
-                  <Text style={styles.sectionTitle}>Your backup</Text>
-                </View>
+                <SectionHeader icon="shield-checkmark-outline" title="Your backup" accentColor={theme.primary} />
                 <Text style={styles.hint}>
                   {latest
                     ? `Last backed up ${formatDateLabel(latest.modifiedTime)} · ${prettySize(latest.size)}`
@@ -319,10 +311,7 @@ const BackupScreen = ({ navigation, route }) => {
             {/* ── Restore ──────────────────────────────────────────────────── */}
             {signedIn ? (
               <View style={styles.card}>
-                <View style={styles.sectionHead}>
-                  <Ionicons name="cloud-download-outline" size={17} color={theme.primary} />
-                  <Text style={styles.sectionTitle}>Restore</Text>
-                </View>
+                <SectionHeader icon="cloud-download-outline" title="Restore" accentColor={theme.primary} />
 
                 {loadingList ? (
                   <ActivityIndicator style={{ marginVertical: spacing.lg }} color={theme.primary} />
@@ -498,8 +487,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg,
     marginBottom: spacing.md, ...shadows.card,
   },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
-  sectionTitle: { ...typography.h3, color: colors.textPrimary },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
 
   noteRow: {

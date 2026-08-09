@@ -27,6 +27,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { THEMES } from '../constants/themes';
 import { useTheme } from '../hooks/useTheme';
+import SectionHeader from '../components/SectionHeader';
 
 const RECAP_INCLUDES = [
   { key: 'includePrivate', label: 'Private transactions' },
@@ -74,10 +75,7 @@ const SettingsScreen = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Appearance ─────────────────────────────────────────────────── */}
         <View style={styles.card}>
-          <View style={styles.sectionHead}>
-            <Ionicons name="color-palette-outline" size={17} color={theme.primary} />
-            <Text style={styles.sectionTitle}>Appearance</Text>
-          </View>
+          <SectionHeader icon="color-palette-outline" title="Appearance" accentColor={theme.primary} />
           <Text style={styles.hint}>
             Pick an accent — gradients, buttons and highlights update across the app.
           </Text>
@@ -116,10 +114,7 @@ const SettingsScreen = ({ navigation }) => {
 
         {/* ── Monthly recap ──────────────────────────────────────────────── */}
         <View style={styles.card}>
-          <View style={styles.sectionHead}>
-            <Ionicons name="document-text-outline" size={17} color={theme.primary} />
-            <Text style={styles.sectionTitle}>Monthly recap</Text>
-          </View>
+          <SectionHeader icon="document-text-outline" title="Monthly recap" accentColor={theme.primary} />
           <Text style={styles.hint}>
             A month-end summary card, modal and downloadable PDF.
           </Text>
@@ -158,10 +153,7 @@ const SettingsScreen = ({ navigation }) => {
 
         {/* ── Backup ─────────────────────────────────────────────────────── */}
         <View style={styles.card}>
-          <View style={styles.sectionHead}>
-            <Ionicons name="cloud-outline" size={17} color={theme.primary} />
-            <Text style={styles.sectionTitle}>Backup</Text>
-          </View>
+          <SectionHeader icon="cloud-outline" title="Backup" accentColor={theme.primary} />
           <Text style={styles.hint}>
             Keep an encrypted copy in your own Google Drive, so a new phone starts where this one left off.
           </Text>
@@ -182,10 +174,7 @@ const SettingsScreen = ({ navigation }) => {
 
         {/* ── Manage ─────────────────────────────────────────────────────── */}
         <View style={styles.card}>
-          <View style={styles.sectionHead}>
-            <Ionicons name="options-outline" size={17} color={theme.primary} />
-            <Text style={styles.sectionTitle}>Manage</Text>
-          </View>
+          <SectionHeader icon="options-outline" title="Manage" accentColor={theme.primary} />
           {MANAGE_ROWS.map(({ icon, label, hint, route }, i) => (
             <TouchableOpacity
               key={route}
@@ -241,14 +230,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     ...shadows.card,
   },
-  sectionHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
   // marginBottom lives on sectionHead now — the heading itself carries no layout.
-  sectionTitle: { ...typography.h3, color: colors.textPrimary },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
   sub: {
     ...typography.small,
