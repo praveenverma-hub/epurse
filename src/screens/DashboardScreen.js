@@ -5,10 +5,13 @@
 //   1. Gradient header — greeting + total ePurse balance
 //   2. D / W / M / Y period toggle  →  spend & income refresh accordingly
 //   3. Account chips  — horizontal scroller
-//   4. Lent / Borrowed widgets
-//   5. Quick actions
-//   6. Recent transactions for selected period
-//   7. FAB
+//   4. Feature carousel — swipeable "what this app does" banners
+//   5. Lent / Borrowed widgets
+//   6. Monthly recap card (month-end look-back; below the live balances)
+//   7. Budget summary
+//   8. Daily review queue
+//   9. Recent transactions for selected period
+//  10. FAB
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -26,7 +29,7 @@ import {
 } from '../store/useRewardStore';
 const selectPendingSavings = (s) => s.pendingSavingsReward;
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
@@ -69,6 +72,7 @@ import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import SectionHeader from '../components/SectionHeader';
+import FeatureCarousel from '../components/FeatureCarousel';
 // ── Period config ─────────────────────────────────────────────────────────────
 const PERIODS = [
   { key: 'D', label: 'D', title: 'today' },
@@ -80,6 +84,7 @@ const PERIODS = [
 // ── Main screen ───────────────────────────────────────────────────────────────
 const DashboardScreen = ({ navigation }) => {
   const theme           = useTheme();
+  const gradient = useGradient();
   const toast           = useToast();
   const transactions    = useEPurseStore((s) => s.transactions);
   const categories      = useEPurseStore((s) => s.categories);
@@ -260,14 +265,14 @@ const DashboardScreen = ({ navigation }) => {
       {/* ───── Gradient header ───── */}
       <CollapsingHeaderScreen
         collapsible={false}
-        gradientColors={[theme.gradientStart, theme.gradientEnd]}
+        gradientColors={gradient}
         renderBar={() => (
           /* Top row */
           <View style={styles.headerRow}>
             <View style={styles.headerGreetWrap}>
               <Text style={styles.greeting} numberOfLines={1}>{greeting}</Text>
               <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
-                {userName ? `Hi, ${userName} 👋` : 'ePurse 👋'}
+                {userName ? `Hi, ${userName}` : 'ePurse'}
               </Text>
             </View>
             <View style={styles.headerRight}>
@@ -366,6 +371,11 @@ const DashboardScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
       >
+        {/* Feature banners — what the app can do, above the fold. Drawn with the
+            theme gradient rather than shipped as images so they repaint when the
+            accent changes (see the note in FeatureCarousel). */}
+        <FeatureCarousel onNavigate={(route, params) => navigation.navigate(route, params)} />
+
         {/* Lent / Borrowed */}
         <LentBorrowedWidget
           lent={lent}

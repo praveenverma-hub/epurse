@@ -26,7 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useLbGradients } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName } from '../utils/format';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
@@ -50,6 +50,7 @@ const LOCK_REASON = {
 
 const LbPersonScreen = ({ route, navigation }) => {
   const theme = useTheme();
+  const lbGradients = useLbGradients();
   const toast = useToast();
   const personKey = route.params?.personKey;
 
@@ -463,11 +464,7 @@ const LbPersonScreen = ({ route, navigation }) => {
                 }}
                 onSubmit={handleAddEntry}
                 theme={theme}
-                submitColors={
-                  addKind === 'lent'
-                    ? [colors.gradientGreenStart, colors.gradientGreenEnd]
-                    : [colors.gradientPurpleStart, colors.gradientPurpleEnd]
-                }
+                submitColors={addKind === 'lent' ? lbGradients.lent : lbGradients.borrowed}
                 submitLabel="Add entry"
                 hideHeading
                 // The sheet already provides the card surface + padding.

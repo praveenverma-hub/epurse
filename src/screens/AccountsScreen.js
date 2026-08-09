@@ -23,7 +23,7 @@ import {
   selectAccountLinkSuggestions,
 } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency, formatCompact } from '../utils/format';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
@@ -85,6 +85,7 @@ const HEADER_HERO_H = 84;
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
+  const gradient = useGradient();
   const tabBarScroll = useTabBarScroll();
   const isFocused    = useIsFocused();
   const accounts     = useEPurseStore((s) => s.accounts);
@@ -221,7 +222,7 @@ export default function AccountsScreen({ navigation }) {
         // Hide-on-scroll for the tab bar, same as every other tab (Aug-26).
         // CollapsingHeaderScreen chains this into its own Animated.event listener.
         onScroll={tabBarScroll.onScroll}
-        gradientColors={[theme.gradientStart, theme.gradientEnd]}
+        gradientColors={gradient}
         barHeight={HEADER_BAR_H}
         heroHeight={HEADER_HERO_H}
         curveRadius={radius.xl}

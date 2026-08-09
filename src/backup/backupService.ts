@@ -24,8 +24,15 @@ import {
 } from './driveClient';
 
 const APP_VERSION = '1.5.0';
-/** zustand persist version — must match the store, so a restore can refuse a future backup. */
-const STORE_VERSION = 23;
+/**
+ * zustand persist version — must match the store, so a restore can refuse a
+ * backup written by a NEWER app than this one.
+ *
+ * Nothing enforced that by hand, so `backupDrive.test.mjs` now asserts this
+ * constant equals the store's `version:` — the same source-of-truth check that
+ * suite already does for the OAuth scheme in app.json.
+ */
+const STORE_VERSION = 24;
 
 /** Local rollback copy, written immediately before a restore replaces state. */
 const SNAPSHOT_KEY = '@ePurse:preRestoreSnapshot';

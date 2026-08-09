@@ -12,7 +12,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { TabView } from 'react-native-tab-view';
 
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useGradient } from '../hooks/useTheme';
 import { spacing, radius, typography } from '../constants/theme';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import BudgetScreen    from './BudgetScreen';
@@ -32,6 +32,7 @@ const initialLayout = { width: Dimensions.get('window').width };
 
 export default function InsightsScreen({ navigation, route }) {
   const theme = useTheme();
+  const gradient = useGradient();
   const [index, setIndex] = useState(() => keyToIndex(route.params?.defaultTab));
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function InsightsScreen({ navigation, route }) {
   const renderTabBar = () => (
     <CollapsingHeaderScreen
       collapsible={false}
-      gradientColors={[theme.gradientStart, theme.gradientEnd]}
+      gradientColors={gradient}
       title="Insights"
       renderHero={() => (
         <View style={styles.switcher}>

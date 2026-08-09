@@ -354,7 +354,7 @@ const ExportSheet: React.FC<Props> = ({
               <LinearGradient
                 colors={
                   canExport
-                    ? ([theme.gradientStart, theme.gradientEnd] as [string, string])
+                    ? (theme.gradientStops as unknown as [string, string])
                     : (['#C8C8C8', '#ADADAD'] as [string, string])
                 }
                 start={{ x: 0, y: 0 }}

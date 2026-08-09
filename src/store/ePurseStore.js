@@ -40,7 +40,7 @@ import {
   LB_ALL_CATS,
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
 } from '../constants/twoTierCategories';
-import { DEFAULT_THEME_ID } from '../constants/themes';
+import { DEFAULT_THEME_ID, THEMES } from '../constants/themes';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { cleanMerchantName, detectIsSubscription } from '../utils/merchantEnricher';
@@ -768,7 +768,7 @@ export const useEPurseStore = create(
       anchorNudgeDismissed: false,
 
       // Theme preferences
-      themeId: DEFAULT_THEME_ID,   // one of THEMES keys: 'orange' | 'blue' | 'amber' | 'sky'
+      themeId: DEFAULT_THEME_ID,   // THEMES keys: 'orange'|'blue'|'amber'|'indigo'|'platinum'
       darkMode: false,             // reserved for future dark-theme rollout
 
       // Dashboard preference: show the weekly spend recap. On by default; toggled
@@ -4112,7 +4112,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 23,
+      version: 24,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -4503,6 +4503,20 @@ export const useEPurseStore = create(
             transactions: (state.transactions || []).map(splitNote),
             archivedTransactions: (state.archivedTransactions || []).map(splitNote),
           };
+        }
+
+        if (version < 24) {
+          // The 'sky' accent was removed (too close to 'blue', now the default).
+          // `buildPalette` already falls back for the COLOURS, so the app looked
+          // fine — but SettingsScreen renders the picker from Object.values(THEMES)
+          // and compares against the stored id, so a 'sky' user would have seen a
+          // themed app with NO swatch selected and no way to tell why.
+          //
+          // Written against THEMES rather than the literal 'sky' so removing any
+          // future accent is covered by the same line.
+          if (!THEMES[state.themeId]) {
+            state = { ...state, themeId: DEFAULT_THEME_ID };
+          }
         }
 
         return state;

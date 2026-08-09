@@ -17,7 +17,7 @@ import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, useLbGradients } from '../hooks/useTheme';
 import { formatCurrency, formatOutstanding, firstName } from '../utils/format';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
@@ -184,12 +184,11 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   }, [getPersonBalances, all]);
   const total = totalByKind[kind];
 
+  // Theme-derived, shared with the Dashboard widget and LbPersonScreen.
+  const lbGradients = useLbGradients();
   const gradFor = useCallback(
-    (k) =>
-      k === 'lent'
-        ? [colors.gradientGreenStart, colors.gradientGreenEnd]
-        : [colors.gradientPurpleStart, colors.gradientPurpleEnd],
-    []
+    (k) => (k === 'lent' ? lbGradients.lent : lbGradients.borrowed),
+    [lbGradients]
   );
   const grad = gradFor(kind);
 

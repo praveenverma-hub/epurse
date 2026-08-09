@@ -26,6 +26,7 @@ import {
 } from '../services/smsService';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { useGradient } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 import CenterModal from '../components/CenterModal';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
@@ -33,6 +34,8 @@ import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 const STATUS = { idle: 'idle', running: 'running', done: 'done', error: 'error' };
 
 export default function SmsDiagnosticScreen({ navigation }) {
+  // Was the STATIC orange constant, so this screen ignored the theme entirely.
+  const gradient = useGradient();
   const ingestMessage           = useEPurseStore((s) => s.ingestMessage);
   const setSmsPermissionGranted = useEPurseStore((s) => s.setSmsPermissionGranted);
   const setLastSmsSync          = useEPurseStore((s) => s.setLastSmsSync);
@@ -190,7 +193,7 @@ export default function SmsDiagnosticScreen({ navigation }) {
     <View style={styles.root}>
       <CollapsingHeaderScreen
         collapsible={false}
-        gradientColors={[colors.gradientStart, colors.gradientEnd]}
+        gradientColors={gradient}
         onBack={() => navigation.goBack()}
         title="SMS Diagnostic"
       >

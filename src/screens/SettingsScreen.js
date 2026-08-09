@@ -93,7 +93,8 @@ const SettingsScreen = ({ navigation }) => {
                   accessibilityLabel={`${t.label} theme`}
                 >
                   <LinearGradient
-                    colors={[t.gradientStart, t.gradientEnd]}
+                    // `gradientStops` so Platinum's swatch shows its sheen, not a flat pair.
+                    colors={t.gradientStops || [t.gradientStart, t.gradientEnd]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.themeSwatch}

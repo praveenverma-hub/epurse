@@ -41,6 +41,19 @@ const expectCode = async (fn, code) => {
   const appJson = JSON.parse(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/app.json', 'utf8'));
   const schemes = [].concat(appJson.expo.scheme || []);
 
+  // backupService mirrors the store's persist version by hand so a restore can
+  // refuse a backup from a NEWER app. Nothing checked they agreed, and they
+  // silently drifted the first time the store version was bumped — a stale
+  // constant here means a future backup restores instead of being refused.
+  {
+    const svc   = readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/backupService.ts', 'utf8');
+    const store = readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js', 'utf8');
+    const svcV   = Number((svc.match(/const STORE_VERSION = (\d+)/) || [])[1]);
+    const storeV = Number((store.match(/\n\s*version:\s*(\d+),/) || [])[1]);
+    check('config: backupService STORE_VERSION matches the store persist version',
+      Number.isFinite(svcV) && svcV === storeV, `backupService ${svcV} vs store ${storeV}`);
+  }
+
   check('config: a real client id is set (not the placeholder)', cfg.isBackupConfigured());
   check('config: client id has the expected Google shape',
     /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(cfg.GOOGLE_ANDROID_CLIENT_ID),
