@@ -27,6 +27,8 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>epurse</string>
+          <string>com.googleusercontent.apps.32024277404-2b3d0i62i3er57out9qah6n15g3deggt</string>
           <string>com.epurse.app</string>
         </array>
       </dict>

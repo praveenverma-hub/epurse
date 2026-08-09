@@ -500,8 +500,26 @@ export default function OnboardingDeck({
                 )}
               </Pressable>
 
+              {/* Restore path for a NEW phone. Placed under Get Started, not beside
+                  it: setting up fresh is the common case, and a returning user is
+                  actively looking for this. Reuses BackupScreen so there is only
+                  one restore flow to keep correct. */}
+              <Pressable
+                style={styles.restoreLink}
+                onPress={() => navigation?.navigate?.('Backup', { fromOnboarding: true })}
+                accessibilityRole="button"
+                accessibilityLabel="Restore from a Google Drive backup"
+              >
+                <Text style={[styles.restoreLinkText, { color: theme.primary }]}>
+                  Already use ePurse?  Restore a backup
+                </Text>
+              </Pressable>
+
+              {/* Was "Nothing leaves your phone." — no longer true once Drive backup
+                  exists, so it now says what is actually guaranteed. */}
               <Text style={styles.regFinePrint}>
-                We&apos;ll request SMS access to read bank alerts on-device. Nothing leaves your phone.
+                We&apos;ll request SMS access to read bank alerts on-device. Nothing is uploaded
+                anywhere unless you turn on backup.
               </Text>
             </ScrollView>
           </View>
@@ -1053,6 +1071,16 @@ const deckStyles = (t: Theme) =>
     skipBtn: { position: 'absolute', top: spacing.md, right: spacing.xl, zIndex: 10, padding: spacing.sm },
     skipText: { fontSize: 14, fontWeight: '600', color: t.textSecondary },
     page: { flex: 1 },
+    restoreLink: {
+      alignSelf: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+    },
+    restoreLinkText: {
+      fontSize: 14,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
     slideInner: {
       flex: 1,
       paddingHorizontal: 24,

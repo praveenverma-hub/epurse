@@ -465,6 +465,9 @@ const styles = StyleSheet.create({
   // square trailing buttons and any mismatch reads as a misalignment.
   contactPickBtn: {
     minWidth: 48,
+    // Matches iconBtn's alignSelf so both trailing buttons take their height from
+    // the input they sit beside, rather than from their own (differing) content.
+    alignSelf: 'stretch',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     borderRadius: radius.md,

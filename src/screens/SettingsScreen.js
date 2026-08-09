@@ -156,6 +156,30 @@ const SettingsScreen = ({ navigation }) => {
           ) : null}
         </View>
 
+        {/* ── Backup ─────────────────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <View style={styles.sectionHead}>
+            <Ionicons name="cloud-outline" size={17} color={theme.primary} />
+            <Text style={styles.sectionTitle}>Backup</Text>
+          </View>
+          <Text style={styles.hint}>
+            Keep an encrypted copy in your own Google Drive, so a new phone starts where this one left off.
+          </Text>
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate('Backup')}
+            accessibilityRole="button"
+          >
+            <Ionicons name="shield-checkmark-outline" size={18} color={theme.primary} style={styles.rowIcon} />
+            <View style={styles.rowTextWrap}>
+              <Text style={styles.rowLabel} numberOfLines={1}>Backup &amp; restore</Text>
+              <Text style={styles.rowHint} numberOfLines={1}>End-to-end encrypted · Google Drive</Text>
+            </View>
+            <Text style={styles.rowChevron}>›</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* ── Manage ─────────────────────────────────────────────────────── */}
         <View style={styles.card}>
           <View style={styles.sectionHead}>

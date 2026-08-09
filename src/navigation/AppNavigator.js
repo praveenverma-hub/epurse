@@ -11,6 +11,7 @@ import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
 import SpendRulesScreen    from '../screens/SpendRulesScreen';
+import BackupScreen        from '../screens/BackupScreen';
 import AccountDetailsScreen from '../screens/AccountDetailsScreen';
 import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import BudgetPlanScreen    from '../screens/BudgetPlanScreen';
@@ -57,6 +58,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="Settings"       component={SettingsScreen} />
         <Stack.Screen name="SpendRules"     component={SpendRulesScreen} />
+        <Stack.Screen name="Backup"         component={BackupScreen} />
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />
         <Stack.Screen name="LentBorrowed"   component={LentBorrowedScreen} />
         <Stack.Screen name="BudgetPlan"     component={BudgetPlanScreen} />

@@ -29,7 +29,8 @@
         {
           "locationWhenInUsePermission": "ePurse tags your transactions with where you made them, so you can see your spending on a map."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "ios": {
       "supportsTablet": true,
@@ -66,6 +67,10 @@
         "projectId": "aa096ea5-1aae-4d07-aa45-f17b9f52ef42"
       }
     },
-    "owner": "13pvn"
+    "owner": "13pvn",
+    "scheme": [
+      "epurse",
+      "com.googleusercontent.apps.32024277404-2b3d0i62i3er57out9qah6n15g3deggt"
+    ]
   }
 }

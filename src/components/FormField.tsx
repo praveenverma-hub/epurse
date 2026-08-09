@@ -53,17 +53,31 @@ export const FormTextInput: React.FC<TextInputProps> = ({ style, multiline, ...r
   />
 );
 
-/** The big amount input — same surface as FormTextInput, larger type. */
-export const FormAmountInput: React.FC<TextInputProps & { locked?: boolean }> = ({
+/**
+ * The amount input — same surface as FormTextInput, larger type.
+ *
+ * `compact` drops 28px → 20px. Use it in a SHEET, where the amount is one field
+ * among several rather than the screen's subject: at 28px the row stands a head
+ * taller than every other field and the form reads as ragged. A full add SCREEN
+ * keeps the hero size. Sized here, not overridden at the call site, so the two
+ * sizes stay deliberate — see ui-consistency §3b.
+ */
+export const FormAmountInput: React.FC<TextInputProps & { locked?: boolean; compact?: boolean }> = ({
   style,
   locked,
+  compact,
   ...rest
 }) => (
   <TextInput
     placeholderTextColor={colors.textMuted}
     keyboardType="decimal-pad"
     editable={!locked}
-    style={[styles.input, styles.amountInput, locked && styles.inputLocked, style]}
+    style={[
+      styles.input,
+      compact ? styles.amountInputCompact : styles.amountInput,
+      locked && styles.inputLocked,
+      style,
+    ]}
     {...rest}
   />
 );
@@ -208,6 +222,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   amountInput: { fontSize: 28, fontWeight: '800' },
+  // Still the most prominent field in the sheet, without towering over the rest.
+  amountInputCompact: { fontSize: 20, fontWeight: '800' },
 
   selectRow: {
     flexDirection: 'row',

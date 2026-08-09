@@ -58,6 +58,7 @@ import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
 import SplitConfigModal from '../components/SplitConfigModal';
 import CenterModal from '../components/CenterModal';
+import DateField from '../components/DateField';
 import { useToast } from '../components/Toast';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
@@ -69,6 +70,9 @@ import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { formatCurrency, monthKey } from '../utils/format';
+// Calendar-month + custom range logic lives in a pure util so it can be tested
+// headlessly — see dateRange.test.mjs.
+import { buildDateRangeOptions, monthStart, resolveRange, inRange } from '../utils/dateRange';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -118,13 +122,7 @@ const STATIC_OPTIONS = {
     { id: 'ignored',       label: 'Ignored',       sublabel: 'Excluded from all totals'  },
   ],
   // `groups` is dynamic — built from the store, see groupOptions.
-  dateRange: [
-    { id: 'week',   label: 'Last Week',     sublabel: 'Past 7 days'   },
-    { id: 'month1', label: 'Last 1 Month',  sublabel: 'Past 30 days'  },
-    { id: 'month3', label: 'Last 3 Months', sublabel: 'Past 90 days'  },
-    { id: 'month6', label: 'Last 6 Months', sublabel: 'Past 180 days' },
-    { id: 'year1',  label: 'Last 1 Year',   sublabel: 'Past 365 days' },
-  ],
+  // `dateRange` is dynamic too (month names depend on today) — see buildDateRangeOptions.
 };
 
 // ---------------------------------------------------------------------------
@@ -140,18 +138,6 @@ function emptyDraft() {
     groups:     new Set(),
     dateRange:  new Set(),
   };
-}
-
-function pastDate(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d;
-}
-
-function resolveRangeCutoff(rangeId) {
-  const map = { week: 7, month1: 30, month3: 90, month6: 180, year1: 365 };
-  const days = map[rangeId];
-  return days ? pastDate(days) : null;
 }
 
 /** True if a txn matches ANY selected status chip (union). Mirrors getStatusChip + tags. */
@@ -233,6 +219,13 @@ const TransactionsScreen = ({ navigation, route }) => {
   // Draft (in-sheet, not committed until Apply)
   const [draft,         setDraft]         = useState(emptyDraft);
   const [activePanelId, setActivePanelId] = useState('method');
+
+  // Custom date range, held OUTSIDE the draft/applied objects on purpose: every
+  // value in those is a Set, and `activeFilterCount` sums `.size` across them —
+  // a `{from,to}` key in there would make the badge NaN. The `custom` id in the
+  // dateRange Set is what counts it as one active filter.
+  const [appliedCustom, setAppliedCustom] = useState({ from: null, to: null });
+  const [draftCustom,   setDraftCustom]   = useState({ from: null, to: null });
 
   // Transaction interaction modals
   const [activeTxn,       setActiveTxn]       = useState(null);
@@ -350,13 +343,14 @@ const TransactionsScreen = ({ navigation, route }) => {
       groups:     new Set(applied.groups),
       dateRange:  new Set(applied.dateRange),
     });
+    setDraftCustom(appliedCustom);
     setActivePanelId('method');
     setSheetVisible(true);
     sheetY.value      = SHEET_H;
     backdropOpa.value = 0;
     sheetY.value      = withSpring(0, SPRING_CFG);
     backdropOpa.value = withTiming(0.52, { duration: 280 });
-  }, [applied, sheetY, backdropOpa]);
+  }, [applied, appliedCustom, sheetY, backdropOpa]);
 
   const closeSheet = useCallback(() => {
     sheetY.value = withTiming(
@@ -412,12 +406,17 @@ const TransactionsScreen = ({ navigation, route }) => {
     [groups],
   );
 
+  // Rebuilt from `draftCustom` so the "Custom range…" row shows the dates as you
+  // pick them, and from today so the month names are never stale.
+  const dateRangeOptions = useMemo(() => buildDateRangeOptions(draftCustom), [draftCustom]);
+
   const panelOptions = useMemo(() => {
     if (activePanelId === 'method')     return methodOptions;
     if (activePanelId === 'categories') return categoryOptions;
     if (activePanelId === 'groups')     return groupOptions;
+    if (activePanelId === 'dateRange')  return dateRangeOptions;
     return STATIC_OPTIONS[activePanelId] ?? [];
-  }, [activePanelId, methodOptions, categoryOptions, groupOptions]);
+  }, [activePanelId, methodOptions, categoryOptions, groupOptions, dateRangeOptions]);
 
   // ── Filtered transaction list ──────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -482,14 +481,14 @@ const TransactionsScreen = ({ navigation, route }) => {
     if (statusActive) list = list.filter((t) => matchesStatus(t, statusSet, isNotCounted));
 
     if (applied.dateRange.size > 0) {
-      const cutoff = resolveRangeCutoff([...applied.dateRange][0]);
-      if (cutoff) list = list.filter((t) => new Date(t.createdAt) >= cutoff);
+      const range = resolveRange([...applied.dateRange][0], appliedCustom);
+      if (range) list = list.filter((t) => inRange(t.createdAt, range));
     }
 
     return list.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-  }, [transactions, quickChip, search, applied, isNotCounted]);
+  }, [transactions, quickChip, search, applied, appliedCustom, isNotCounted]);
 
   // Interleave month dividers into the (date-desc) list. A divider is inserted
   // only at a month BOUNDARY — never above the first group, and never at all when
@@ -545,6 +544,12 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   // ── Draft helpers ─────────────────────────────────────────────────────────
   const toggleDraft = useCallback((panelId, id) => {
+    // Seed an unset custom range to "this month so far" rather than leaving the
+    // pickers on a null they'd render as today: two "Today" rows read as a chosen
+    // range that returns almost nothing.
+    if (panelId === 'dateRange' && id === 'custom') {
+      setDraftCustom((c) => (c.from && c.to ? c : { from: monthStart(0), to: new Date() }));
+    }
     setDraft((prev) => {
       const next = new Set(prev[panelId]);
       if (panelId === 'dateRange') {
@@ -565,11 +570,20 @@ const TransactionsScreen = ({ navigation, route }) => {
       groups:     new Set(draft.groups),
       dateRange:  new Set(draft.dateRange),
     });
+    // Only commit dates if "Custom range…" is actually the selection — otherwise
+    // a half-picked range would sit in state and reappear the next time it's chosen.
+    setAppliedCustom(draft.dateRange.has('custom') ? draftCustom : { from: null, to: null });
     closeSheet();
-  }, [draft, closeSheet]);
+  }, [draft, draftCustom, closeSheet]);
 
-  const clearAllDraft   = useCallback(() => setDraft(emptyDraft()), []);
-  const clearAllApplied = useCallback(() => setApplied(emptyDraft()), []);
+  const clearAllDraft = useCallback(() => {
+    setDraft(emptyDraft());
+    setDraftCustom({ from: null, to: null });
+  }, []);
+  const clearAllApplied = useCallback(() => {
+    setApplied(emptyDraft());
+    setAppliedCustom({ from: null, to: null });
+  }, []);
 
   // ── Transaction interaction handlers ──────────────────────────────────────
   const handleSelectTwoTier = (parentCategory, childCategory) => {
@@ -974,8 +988,8 @@ const TransactionsScreen = ({ navigation, route }) => {
                           const checked = draft[activePanelId].has(opt.id);
                           const isRadio = activePanelId === 'dateRange';
                           return (
+                            <React.Fragment key={opt.id}>
                             <Pressable
-                              key={opt.id}
                               onPress={() => toggleDraft(activePanelId, opt.id)}
                               style={[styles.rightItem, checked && styles.rightItemChecked]}
                               android_ripple={{ color: theme.primary + '18' }}
@@ -1008,6 +1022,29 @@ const TransactionsScreen = ({ navigation, route }) => {
                                 </View>
                               )}
                             </Pressable>
+
+                            {/* The two pickers live INSIDE the option list, revealed under
+                                the row that switched them on — a separate section would
+                                leave "Custom range…" selected with its dates elsewhere. */}
+                            {opt.id === 'custom' && checked ? (
+                              <View style={styles.customRange}>
+                                <Text style={styles.customRangeLabel}>From</Text>
+                                <DateField
+                                  value={draftCustom.from || new Date()}
+                                  onChange={(d) => setDraftCustom((c) => ({ ...c, from: d }))}
+                                  maximumDate={new Date()}
+                                  accentColor={theme.primary}
+                                />
+                                <Text style={styles.customRangeLabel}>To</Text>
+                                <DateField
+                                  value={draftCustom.to || new Date()}
+                                  onChange={(d) => setDraftCustom((c) => ({ ...c, to: d }))}
+                                  maximumDate={new Date()}
+                                  accentColor={theme.primary}
+                                />
+                              </View>
+                            ) : null}
+                            </React.Fragment>
                           );
                         })}
                       </ScrollView>
@@ -1460,6 +1497,20 @@ const styles = StyleSheet.create({
   rightItemText:    { flex: 1 },
   rightItemLabel:   { fontSize: 13, color: colors.textPrimary, fontWeight: '500' },
   rightItemSub:     { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  // Indented so the two pickers read as belonging to the "Custom range…" row
+  // above them rather than as two more options in the list.
+  customRange: {
+    paddingLeft: spacing.md,
+    paddingRight: spacing.sm,
+    paddingBottom: spacing.sm,
+    gap: 6,
+  },
+  customRangeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginTop: 6,
+  },
   checkbox: {
     width: 20, height: 20, borderRadius: 5,
     borderWidth: 1.5, borderColor: colors.divider,

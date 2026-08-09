@@ -37,6 +37,16 @@ interface DateFieldProps {
    *   "Today" / "Yesterday" for the two recent days, else the real date.
    */
   variant?: 'row' | 'icon';
+  /**
+   * `icon` only. Which surface the surrounding form uses, so the button matches
+   * its neighbours (ui-consistency §3b: anything beside an outlined field is
+   * outlined too, and the LB *add* form is the deliberate filled exception).
+   *   `filled`   — gray fill, borderless. The LB add form.
+   *   `outlined` — transparent + 1px border. Any form built on FormField.
+   * Getting this wrong is visible: a gray box beside a bordered input reads as
+   * a different KIND of control, not as the same field.
+   */
+  surface?: 'filled' | 'outlined';
 }
 
 export default function DateField({
@@ -46,6 +56,7 @@ export default function DateField({
   disabled,
   accentColor = colors.primary,
   variant = 'row',
+  surface = 'filled',
 }: DateFieldProps) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -63,7 +74,7 @@ export default function DateField({
         // No accent wash for a backdated date: the fill is what makes this read as
         // one of the form's inputs, and recolouring it made the field look like a
         // warning rather than a filled-in value.
-        style={styles.iconBtn}
+        style={[styles.iconBtn, surface === 'outlined' && styles.iconBtnOutlined]}
         onPress={openPicker}
         disabled={disabled}
         activeOpacity={0.75}
@@ -151,8 +162,18 @@ export default function DateField({
 
 const styles = StyleSheet.create({
   // Square-ish trigger sized to sit flush beside a text input in a flex row.
+  //
+  // `alignSelf: 'stretch'` is what keeps it the SAME HEIGHT as that input, and it
+  // has to be here rather than `alignItems` on each row: the two controls carry
+  // the same paddingVertical but different font sizes (the edit sheet's amount is
+  // 28px, this label is ~13px), so equal padding does NOT mean equal height —
+  // which is exactly how the edit sheet ended up with a short date button beside a
+  // tall amount box. Stretching matches whatever the sibling turns out to be, so
+  // it can't drift again when a font size or padding changes. alignSelf beats the
+  // parent's alignItems, so no call site has to opt in.
   iconBtn: {
     flexDirection: 'row',
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
@@ -164,6 +185,13 @@ const styles = StyleSheet.create({
     // FormField treatment (`variant="row"` does, via FormSelectRow).
     backgroundColor: colors.background,
     borderRadius: radius.md,
+  },
+  // Matches FormField's `input`: transparent + 1px inputBorder, for forms built on
+  // the shared primitives (the LB EDIT sheet). Overrides the fill above.
+  iconBtnOutlined: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
   },
   // Same colour as the form's own input text — this is a value, not an accent.
   iconBtnTxt: { ...typography.small, fontWeight: '700', color: colors.textPrimary },

@@ -571,6 +571,9 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
             <FormField label="Amount">
               <View style={styles.amountRow}>
                 <FormAmountInput
+                  // Sheet, not a full add screen: the hero 28px made this row a
+                  // head taller than Person/Note and the form read as ragged.
+                  compact
                   value={amount}
                   onChangeText={(t) => setAmount(sanitizeAmount(t))}
                   placeholder="0"
@@ -582,6 +585,10 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
                   onChange={setDate}
                   maximumDate={new Date()}
                   variant="icon"
+                  // This sheet is built on the outlined FormField primitives, so
+                  // the date button is outlined too — the filled default belongs
+                  // to the LB *add* form (ui-consistency §3b).
+                  surface="outlined"
                   accentColor={theme.primary}
                 />
               </View>
