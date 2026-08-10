@@ -48,6 +48,11 @@ const BLANK = {
   budget: null, budgetHistory: {}, customParents: [], customChildren: [], manualTxnSeq: 0,
   userName: null, userPhones: [], lastSmsDate: null, lastCompactedAt: 0, userOnboardedAt: 0,
   activeGroupZoneId: null, declinedAccountLinks: [],
+  // Anything asserted after the "wipe" MUST be listed here, or the restore check
+  // passes on state that was never actually cleared. Dropping `ccBills` from
+  // STORE_KEYS used to leave the CC-bill assertion below green for exactly that
+  // reason — the test was reading the pre-wipe value.
+  ccBills: {},
 };
 
 console.log(`\n${C.bold}══════ Encrypted Backup — payload & restore fidelity ══════${C.reset}\n`);
@@ -77,6 +82,15 @@ S().addLentBorrowed({ kind: 'lent', person: 'Neha', contactId: 'c-neha', amount:
 useStore.setState({ budget: { perCategory: { food: 8000, shopping: 5000 } } });
 S().addCustomParent?.({ label: 'Pets', emoji: '🐶', color: '#F59E0B' });
 useStore.setState({ excludedExpenseParents: ['shopping'], userName: 'Praveen', themeId: 'ocean' });
+
+// An outstanding CC bill — a FUTURE obligation, so losing it in a restore means the
+// new device silently stops warning about a payment that's still due. Nothing reads
+// it in a selector, so the fidelity assertions below can't catch its absence; it
+// gets an explicit round-trip check instead.
+useStore.setState({ ccBills: { 4021: {
+  amount: 16748.65, cardLast4: '4021', bankName: 'HDFC', dueDate: '07-Jun-26',
+  seenAt: '2026-05-21T00:00:00.000Z',
+} } });
 
 check('seed: the store actually has data', S().transactions.length >= 5, `${S().transactions.length} txns`);
 
@@ -158,6 +172,13 @@ const envelope = sealBackup(payload, 'a-good-password', {
   check('restore: every transaction is present', J(after.txnIds) === J(before.txnIds));
   check('restore: GROUPS and their totals are identical', J(after.groups) === J(before.groups));
   check('restore: the LB ledger is identical', J(after.lb) === J(before.lb));
+  // Not covered by any selector snapshot above — asserted directly, because a
+  // dropped STORE_KEYS entry fails silently (the informational list in §2 prints
+  // it but nothing enforces it).
+  check('restore: an outstanding CC BILL survives (amount + due date)',
+    S().ccBills?.['4021']?.dueDate === '07-Jun-26'
+    && Math.round((S().ccBills?.['4021']?.amount ?? 0) * 100) === 1674865,
+    J(S().ccBills));
   check('restore: historical AGGREGATES are identical', J(after.aggregates) === J(before.aggregates));
   check('restore: spend-rule exclusions survive', J(S().excludedExpenseParents) === J(['shopping']));
   check('restore: profile + theme survive', S().userName === 'Praveen' && S().themeId === 'ocean');

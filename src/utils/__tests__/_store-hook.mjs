@@ -33,6 +33,25 @@ const STUBS = {
   notifStore:
     'export const useNotificationStore={getState:()=>new Proxy({},{get:()=>()=>{}}),setState:()=>{},subscribe:()=>()=>{}};',
   buildVariant: 'export const IS_PREVIEW_BUILD=false;',
+  // ── SMS-sync leaves (used by smsSync.test.mjs) ────────────────────────────
+  // Every one reads `globalThis.__smsStub` at CALL time, not at module load, so a
+  // test can change the device's answers between cases. `Platform` is a shared
+  // object so `Platform.OS = 'ios'` from a test is visible here too.
+  // Inert for the store suite: ePurseStore imports none of these.
+  reactNative:
+    'export const Platform={OS:"android"};' +
+    'export const AppState={addEventListener:()=>({remove(){}})};',
+  smsService:
+    'const S=()=>globalThis.__smsStub||{};' +
+    'export let smsSupported=true;' +
+    'export const __setSupported=(v)=>{smsSupported=v;};' +
+    'export const hasSmsPermission=async()=>S().osPermission!==false;' +
+    'export const readInbox=async(since)=>{const s=S();' +
+    'if(s.throwOnRead)throw new Error("readInbox timed out");' +
+    's.readCount=(s.readCount||0)+1;s.lastSince=since;' +
+    'return s.inbox||[];};' +
+    'export const subscribeToIncomingSms=(cb)=>{S().liveCb=cb;return ()=>{S().liveCb=null;};};',
+  locationService: 'export const getLocationIfGranted=async()=>null;',
 };
 
 function stubFor(specifier) {
@@ -40,6 +59,9 @@ function stubFor(specifier) {
   if (/(^|\/)utils\/notifications$/.test(specifier) || specifier.endsWith('/notifications')) return STUBS.notifications;
   if (specifier.includes('useNotificationStore')) return STUBS.notifStore;
   if (specifier.includes('constants/buildVariant') || specifier.endsWith('/buildVariant')) return STUBS.buildVariant;
+  if (specifier === 'react-native') return STUBS.reactNative;
+  if (/services\/smsService$/.test(specifier)) return STUBS.smsService;
+  if (/services\/locationService$/.test(specifier)) return STUBS.locationService;
   return null;
 }
 

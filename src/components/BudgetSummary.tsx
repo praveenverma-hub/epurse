@@ -8,7 +8,7 @@ import InfoSheet from './InfoSheet';
 import SheetCloseButton from './SheetCloseButton';
 import InfoIcon from './InfoIcon';
 import ProgressBar from './ProgressBar';
-import { progressTrack } from '../constants/theme';
+import { progressTrack, radius, shadows } from '../constants/theme';
 
 // Essential (survival) categories — keyed by the first-level BUDGET parent ids
 // the plan actually uses (groceries rolls into food, utilities→bills,
@@ -366,16 +366,12 @@ const styles = StyleSheet.create({
   emptyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     padding: 16,
     gap: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    ...shadows.card,
   },
   emptyLeft: {
     width: 48,
@@ -398,15 +394,17 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '300',
   },
+  // `shadows.card`, not a hand-rolled shadow. This card used to carry
+  // 0.08/r12/e3 — a THIRD elevation that existed nowhere else in the app, sitting
+  // between `shadows.card` (0.06/r8/e2) and `shadows.elevated` (0.12/r16/e6). With
+  // four different depths across six Dashboard sections, elevation encoded nothing.
+  // Now: every top-level section sits at `card`; `elevated` is reserved for a
+  // surface that is deliberately lifted (the Lent/Borrowed pair, the queue deck).
   card: {
-    borderRadius: 16,
+    borderRadius: radius.lg,
     padding: 16,
     paddingBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    ...shadows.card,
   },
   header: {
     flexDirection: 'row',

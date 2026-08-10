@@ -99,6 +99,13 @@ export const STORE_KEYS = [
   // re-import or re-prompt for SMS it has already handled.
   'lastSmsSync', 'lastSmsDate', 'suppressedSmsIds', 'ccHandledSmsIds', 'manualTxnSeq',
   'lastCompactedAt',
+  // Outstanding CC bills (amount + due date per card). Restored because a bill is
+  // a future obligation — losing it means the new device silently stops warning
+  // about a payment that's still due. Contains nothing that isn't already in the
+  // backed-up accounts and transactions (mask, bank, amount).
+  // NOTE `ccDueReminderIds` is deliberately NOT here: those are OS notification
+  // ids, meaningless on another device.
+  'ccBills',
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
   'welcomeReviewSeen', 'planBannerDismissed', 'anchorNudgeDismissed',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',

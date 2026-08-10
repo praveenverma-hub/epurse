@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import Svg, { Circle, G, Rect } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
+import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -69,6 +71,7 @@ const SECTION_INFO = {
 
 const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const tabBarScroll = useTabBarScroll();
   const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
   const [infoKey, setInfoKey] = useState(null); // which section explainer is open
@@ -273,7 +276,13 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       )}
 
       <ScrollView
-        contentContainerStyle={[styles.body, headerless && { marginTop: 0, paddingTop: spacing.md }]}
+        contentContainerStyle={[
+          styles.body,
+          // `body` pays only `padding: spacing.lg`, which is 16 — nowhere near the
+          // bar's real height, so the last section rendered UNDER it.
+          { paddingBottom: tabBarClearance(insets.bottom) },
+          headerless && { marginTop: 0, paddingTop: spacing.md },
+        ]}
         showsVerticalScrollIndicator={false}
         // Hide-on-scroll for the tab bar — Analytics + Budget are the Insights tab's
         // scenes, so the hook belongs here, not on InsightsScreen (which doesn't scroll).

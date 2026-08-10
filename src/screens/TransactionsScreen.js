@@ -30,7 +30,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   Easing,
@@ -69,6 +69,7 @@ import { computeLedgerTotals } from '../utils/ledgerTotals';
 import { spendExcluded } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
+import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { formatCurrency, monthKey } from '../utils/format';
 // Calendar-month + custom range logic lives in a pure util so it can be tested
@@ -163,6 +164,7 @@ function matchesStatus(t, statusSet, isNotCounted) {
 
 const TransactionsScreen = ({ navigation, route }) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const toast = useToast();
 
   // ── Store ──────────────────────────────────────────────────────────────────
@@ -787,7 +789,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         data={listData}
         keyExtractor={(item) => item.id}
         style={styles.body}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: tabBarClearance(insets.bottom) }]}
         renderItem={({ item }) =>
           item._divider ? (
             <MonthDivider monthKey={item.monthKey} />
@@ -1429,7 +1431,9 @@ const styles = StyleSheet.create({
 
   // ── List ───────────────────────────────────────────────────────────────────
   // flexGrow lets ListEmptyComponent stretch to fill the viewport so it can centre.
-  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2, flexGrow: 1 },
+  // paddingBottom comes from `tabBarClearance` at the call site — it depends on
+  // the safe-area inset, which a static style can't see.
+  list: { paddingHorizontal: spacing.lg, flexGrow: 1 },
   listCount: {
     fontSize: 12,
     color: colors.textMuted,

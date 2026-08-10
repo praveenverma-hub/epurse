@@ -1,12 +1,18 @@
 // =============================================================================
 // BellIcon.tsx — notification bell for the dashboard header.
 // White line-art bell, always. Adds a small color dot badge when hasUnread.
-// 42×42 hit area to mirror avatarBtn / vaultBtn footprint.
+//
+// The chip itself is `HeaderChip` (Aug-26): this file used to own a copy of the
+// 42pt circle + fill + border, and its comment said the numbers existed "to
+// mirror avatarBtn / vaultBtn" — which is the tell that three files were keeping
+// one look in sync by hand. The dot stays here; it's this control's own state.
 // =============================================================================
 
 import React from 'react';
-import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+
+import HeaderChip from './HeaderChip';
 
 export interface BellIconProps {
   hasUnread:           boolean;
@@ -33,39 +39,22 @@ const BellIcon: React.FC<BellIconProps> = ({
   containerStyle,
   accessibilityLabel = 'Notifications',
 }) => (
-  <Pressable
+  <HeaderChip
     onPress={onPress}
-    hitSlop={8}
-    accessibilityRole="button"
-    accessibilityLabel={accessibilityLabel}
-    style={({ pressed }) => [
-      styles.btn,
-      containerStyle,
-      pressed && styles.btnPressed,
-    ]}
-  >
-    <Ionicons name="notifications-outline" size={size} color={iconColor} />
-    {hasUnread && (
+    accessibilityLabel={hasUnread ? `${accessibilityLabel}, unread` : accessibilityLabel}
+    style={containerStyle}
+    overlay={hasUnread ? (
       <View
         style={[styles.dot, { backgroundColor: dotColor }]}
         accessibilityElementsHidden
       />
-    )}
-  </Pressable>
+    ) : null}
+  >
+    <Ionicons name="notifications-outline" size={size} color={iconColor} />
+  </HeaderChip>
 );
 
 const styles = StyleSheet.create({
-  btn: {
-    width:           42,
-    height:          42,
-    borderRadius:    21,
-    alignItems:      'center',
-    justifyContent:  'center',
-    backgroundColor: '#FFFFFF14',
-    borderWidth:     1,
-    borderColor:     '#FFFFFF22',
-  },
-  btnPressed: { opacity: 0.7 },
   dot: {
     position:     'absolute',
     top:          8,

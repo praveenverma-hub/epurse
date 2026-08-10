@@ -43,6 +43,7 @@ import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, typography as typographyBase } from '../constants/theme';
+import { carouselMetrics } from '../constants/carousel';
 import { formatCurrency, formatCompact, isSameMonth } from '../utils/format';
 import { countsForSpend, spendContribution } from '../utils/split';
 
@@ -256,8 +257,10 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
   // Measured width → card sizing (fits whatever card/padding hosts it).
   const [boxW, setBoxW] = useState(FALLBACK_W);
   const cardW   = Math.min(300, Math.max(180, boxW - GUTTER * 5)); // leave neighbour peek
-  const snap    = cardW + GUTTER;
-  const sidePad = Math.max(0, (boxW - cardW) / 2 - GUTTER / 2);    // centres the snapped card
+  // Shared with HomeCarousel so the two carousels centre identically. This used
+  // to subtract GUTTER / 2, which left the LAST card ~4pt short of centre with no
+  // way to nudge it — max scroll offset no longer matched the final snap point.
+  const { snap, sidePad } = carouselMetrics(boxW, cardW, GUTTER);
   const onBoxLayout = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
     if (w > 0 && Math.abs(w - boxW) > 1) setBoxW(w);

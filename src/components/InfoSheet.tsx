@@ -32,7 +32,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
+import { readableOn } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
 import SheetCloseButton from './SheetCloseButton';
 
@@ -43,7 +45,13 @@ export interface InfoSheetBullet {
   label: string;
   /** Detail line beside the label. */
   value: string;
-  /** Optional leading emoji — renders a badge instead of the accent dot. */
+  /**
+   * Leading Ionicon — renders a badge tile instead of the accent dot. PREFER this
+   * over `emoji`: chrome is vector icons, and only an entity's OWN emoji (a
+   * category, a group) is data worth rendering as an emoji (ui-consistency §5).
+   */
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
+  /** Legacy leading emoji. Use `icon` for anything new. */
   emoji?: string;
 }
 
@@ -76,6 +84,9 @@ export interface InfoSheetProps {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
+/** Bullet badge tile fill. Named so the ink can be measured against it. */
+const BADGE_BG = '#F1F3F5';
+
 const SCREEN_H = Dimensions.get('window').height;
 const ENTER_MS = 320;
 const EXIT_MS  = 240;
@@ -101,7 +112,11 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   // CTA follows the active accent (gradient pill), so the sheet matches the
   // theme the user picked instead of a hardcoded orange.
   const gradient = useGradient();
-  const { textOnGradient } = useTheme();
+  const { textOnGradient, primary } = useTheme() as any;
+  // The badge tile is a fixed light grey, so a raw accent can be far too pale on
+  // it (Gold measures ~1.5:1). An icon is a graphical element, so 3:1 is the bar,
+  // and `readableOn` darkens only as far as it must.
+  const badgeInk = readableOn(BADGE_BG, primary, 3);
 
   useEffect(() => {
     progress.value = withTiming(visible ? 1 : 0, {
@@ -155,7 +170,11 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
             <View style={styles.bulletWrap}>
               {bullets.map((b, i) => (
                 <View key={`${b.label}-${i}`} style={styles.bulletRow}>
-                  {b.emoji ? (
+                  {b.icon ? (
+                    <View style={styles.bulletBadge}>
+                      <Ionicons name={b.icon} size={17} color={badgeInk} />
+                    </View>
+                  ) : b.emoji ? (
                     <View style={styles.bulletBadge}>
                       <Text style={styles.bulletBadgeText}>{b.emoji}</Text>
                     </View>
@@ -277,7 +296,7 @@ const styles = StyleSheet.create({
     width:           32,
     height:          32,
     borderRadius:    9,
-    backgroundColor: '#F1F3F5',
+    backgroundColor: BADGE_BG,
     alignItems:      'center',
     justifyContent:  'center',
   },

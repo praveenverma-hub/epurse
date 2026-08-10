@@ -1520,6 +1520,46 @@ const AUG26_SWEEP = [
     expect: { accept: true, type: 'debit', amount: 1299, merchant: 'The Body Shop' } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CC bill DUE DATE extraction (Aug-26)
+// -----------------------------------------------------------------------------
+// The due date used to be required to follow "due date" with only whitespace
+// between, so the single most common real phrasing — "Payment due date: 07-Jun-26"
+// — yielded null. It failed silently: the notification degraded to "Pay before the
+// due date" and no OS reminder was scheduled. It only surfaced when the date had to
+// be persisted (store `ccBills`) and shown on the Dashboard.
+//
+// The interception itself was always fine; these assert the PAYLOAD.
+// ─────────────────────────────────────────────────────────────────────────────
+const CC_DUE_DATE_AUG26 = [
+  { name: 'SBI: "Payment due date: 07-Jun-26" (colon — the regression)',
+    sender: 'SBICRD',
+    sms: 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-May-26 is ₹16,748.65. Min Amount Due: ₹837.00. Payment due date: 07-Jun-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65 } },
+  { name: 'No colon still works (the shape that always passed)',
+    sender: 'SBICRD',
+    sms: 'Total Amount Due on your SBI Credit Card ending 1234 is ₹9,100.00. Payment due date 07-Jul-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jul-26' } },
+  { name: '"due date :- 09-Jul-26" (spaced colon-dash)',
+    sender: 'HDFCBK',
+    sms: 'Your HDFC Credit Card ending 9876 total amount due is Rs.4,000.00. Min due date :- 09-Jul-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '09-Jul-26' } },
+  { name: 'Numeric DD/MM/YYYY after a colon',
+    sender: 'ICICIB',
+    sms: 'Total amount due on your ICICI Bank Credit Card XX5004 is Rs.7,200.00. Due date: 12/08/2026.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '12/08/2026' } },
+  { name: '"Total due by: 5 Aug 2026" (spaced month name)',
+    sender: 'AXISBK',
+    sms: 'Statement generated for Axis Bank Credit Card XX1002. Total Amount Due Rs.3,150.00. Total due by: 5 Aug 2026.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '5 Aug 2026' } },
+  // A reminder with no parseable date must still intercept — it just carries null,
+  // and the Dashboard card declines to render rather than saying something vague.
+  { name: 'No date in the body → intercepted with a null due date',
+    sender: 'SBICRD',
+    sms: 'Total Amount Due on your SBI Credit Card ending 1234 is ₹5,000.00. Please pay before the due date to avoid charges.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: null } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1544,6 +1584,7 @@ const SUITES = [
   ['Refund / reversal / cashback detection (Jul-26)', REFUND_DETECTION_JUL26],
   ['Credit direction & spaced-period merchant (Aug-26)', CREDIT_DIRECTION_AUG26],
   ['50-msg sweep: fees/reversals/rails/decoys (Aug-26)', AUG26_SWEEP],
+  ['CC bill DUE DATE extraction (Aug-26)', CC_DUE_DATE_AUG26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1554,11 +1595,13 @@ const C = { red: '\x1b[31m', green: '\x1b[32m', dim: '\x1b[2m', yellow: '\x1b[33
 function checkCase({ sender, sms, expect }) {
   const r = parseMessageDetailed(sms, { sender });
   const fails = [];
+  // Hoisted out of the accept branch: the REJECT branch asserts side-effect
+  // payloads too (a CC bill's due date), and both want the same comparator.
+  const cmp = (key, actual, want) => { if (want !== undefined && actual !== want) fails.push(`${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(actual)}`); };
 
   if (expect.accept === true) {
     if (!r.ok) return [`expected ACCEPT but got REJECT [${r.error.code}]`];
     const t = r.transaction;
-    const cmp = (key, actual, want) => { if (want !== undefined && actual !== want) fails.push(`${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(actual)}`); };
     cmp('type', t.type, expect.type);
     cmp('isRefund', !!t.isRefund, expect.isRefund);
     cmp('accountType', t.accountType, expect.accountType);
@@ -1579,6 +1622,14 @@ function checkCase({ sender, sms, expect }) {
     if (r.ok) return [`expected REJECT but got ACCEPT (type=${r.transaction.type}, ${r.transaction.amount})`];
     if (expect.code !== undefined && r.error.code !== expect.code)
       fails.push(`code: expected ${JSON.stringify(expect.code)}, got ${JSON.stringify(r.error.code)}`);
+    // An intercepted message carries a side-effect payload, and for a CC bill that
+    // payload is now STORED and shown on the Dashboard (store `ccBills`), so the
+    // due date is worth asserting — it used to fail silently into a vague
+    // "pay before the due date" notification.
+    if (expect.ccDueDate !== undefined)
+      cmp('ccDue.dueDate', r.ccDue?.dueDate ?? null, expect.ccDueDate);
+    if (expect.ccDueAmount !== undefined)
+      cmp('ccDue.amount', r.ccDue?.amount ?? null, expect.ccDueAmount);
   }
   return fails;
 }

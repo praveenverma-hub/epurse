@@ -18,7 +18,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,7 +40,7 @@ import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
 import ProgressBar from '../components/ProgressBar';
 import { useToast } from '../components/Toast';
-import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
+import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import SectionHeader from '../components/SectionHeader';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -82,6 +82,7 @@ const BUDGET_INFO = {
 // ── Screen ────────────────────────────────────────────────────────────────────
 const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const theme    = useTheme();
+  const insets   = useSafeAreaInsets();
   const gradient = useGradient();
   const tabBarScroll = useTabBarScroll();
   const toast    = useToast();
@@ -406,7 +407,11 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
         )}
 
         <ScrollView
-          contentContainerStyle={[styles.scroll, headerless && { paddingBottom: TAB_BAR_HEIGHT + 24, paddingTop: spacing.lg }]}
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingBottom: tabBarClearance(insets.bottom) },
+            headerless && { paddingTop: spacing.lg },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           // Hide-on-scroll for the tab bar — Analytics + Budget are the Insights tab's

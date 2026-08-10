@@ -18,7 +18,7 @@
 import { register } from 'node:module';
 register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
 
-const { mix, luminance, contrastRatio, readableOn, colors, LB_BASE, gradientTextPlan } =
+const { mix, luminance, contrastRatio, readableOn, colors, LB_BASE, gradientTextPlan, badgeOnGradient } =
   await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/theme.js');
 const { THEMES, DEFAULT_THEME_ID, buildPalette } =
   await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
@@ -55,6 +55,46 @@ console.log(`\n${C.bold}══════ Theme contrast ══════${C.
   // below while destroying the design.
   check('readableOn: does NOT just return black',
     readableOn('#FFFFFF', '#FFD600') !== '#000000');
+
+  // ── the LIGHTEN pass (dark surfaces) ──────────────────────────────────────
+  // Darkening can't fix a dark accent on a dark surface. This used to return
+  // '#000000' and hand back 1.25:1 — worse than the input.
+  {
+    const DARK_CARD = '#1A1D24';
+    for (const accent of ['#33383F', '#6366F1', '#1C1C1E']) {
+      const ink = readableOn(DARK_CARD, accent);
+      const ratio = contrastRatio(ink, DARK_CARD);
+      check(`readableOn lightens ${accent} on a dark card (${ratio.toFixed(2)}:1)`,
+        ratio >= AA_TEXT, `${ink} → ${ratio.toFixed(2)}`);
+    }
+    check('readableOn: pure black on a dark card does not stay black',
+      readableOn(DARK_CARD, '#000000') !== '#000000');
+    // The darken pass must run FIRST and be untouched, or every existing
+    // light-surface caller silently shifts colour. Rather than pin hexes (which
+    // only re-states whatever the code currently does), re-implement the
+    // PRE-CHANGE function and diff the two across every light surface × accent ×
+    // bar the app actually uses.
+    const before = (bg, color, min = 4.5) => {
+      for (let d = 0; d <= 0.9; d += 0.05) {
+        const c = d === 0 ? color : mix(color, 1 - d, '#000000');
+        if (contrastRatio(c, bg) >= min) return c;
+      }
+      return '#000000';
+    };
+    const LIGHT_SURFACES = ['#FFFFFF', '#F4F5F7', '#FAFAFB', '#F1F3F5', '#EBEEF2', '#EAECEE'];
+    const drift = [];
+    for (const bg of LIGHT_SURFACES) {
+      for (const t of Object.values(THEMES)) {
+        for (const c of [t.primary, t.primaryDark, t.primaryLight, colors.textSecondary, colors.textMuted, colors.textPrimary]) {
+          for (const min of [AA_UI, AA_TEXT]) {
+            if (before(bg, c, min) !== readableOn(bg, c, min)) drift.push(`${bg}/${c}@${min}`);
+          }
+        }
+      }
+    }
+    check(`readableOn: no light-surface result changed (${LIGHT_SURFACES.length * Object.keys(THEMES).length * 12} pairs)`,
+      drift.length === 0, drift.slice(0, 5).join(', '));
+  }
 }
 
 // ── the default is the one the user actually sees ──
@@ -72,27 +112,37 @@ check("removed themes are gone ('sky')", !THEMES.sky);
     Math.max(...ch) - Math.min(...ch) <= 20, `spread ${Math.max(...ch) - Math.min(...ch)}`);
 }
 
-// ── every accent × every banner treatment ──
+// ── every accent × every banner treatment × every card TONE ──
+// A HomeCarousel card is drawn in one of three base colours, not just the accent:
+// `tone: 'danger'` (urgent cards) and `'success'` swap the base that the wash,
+// the bubbles and every ink derive from. Sweeping only `primary` would leave the
+// urgent cards — the ones that matter most — unmeasured.
 {
   let worstText = Infinity, worstIcon = Infinity, worstWhere = '';
   for (const [id, t] of Object.entries(THEMES)) {
-    for (const v of BANNER_STYLES) {
-      const wash = mix(t.primary, v.tint, '#FFFFFF');
+    // Keys match HomeCarousel's tone → colour mapping. `danger`/`success` are
+    // fixed status colours, so they don't vary per theme, but they still have to
+    // clear the bar against a wash mixed from themselves.
+    const bases = { accent: t.primary, danger: colors.danger, success: colors.success };
+    for (const [tone, base] of Object.entries(bases)) {
+      for (const v of BANNER_STYLES) {
+        const wash = mix(base, v.tint, '#FFFFFF');
 
-      const title  = contrastRatio(colors.textPrimary, wash);
-      const body   = contrastRatio(readableOn(wash, colors.textSecondary), wash);
-      const accent = contrastRatio(readableOn(wash, t.primary), wash);
-      const iconBg = mix(t.primary, 0.16, '#FFFFFF');
-      const icon   = contrastRatio(readableOn(iconBg, t.primary, AA_UI), iconBg);
+        const title  = contrastRatio(colors.textPrimary, wash);
+        const body   = contrastRatio(readableOn(wash, colors.textSecondary), wash);
+        const accent = contrastRatio(readableOn(wash, base), wash);
+        const iconBg = mix(base, 0.16, '#FFFFFF');
+        const icon   = contrastRatio(readableOn(iconBg, base, AA_UI), iconBg);
 
-      const lowText = Math.min(title, body, accent);
-      if (lowText < worstText) { worstText = lowText; worstWhere = `${id} @ tint ${v.tint}`; }
-      worstIcon = Math.min(worstIcon, icon);
+        const lowText = Math.min(title, body, accent);
+        if (lowText < worstText) { worstText = lowText; worstWhere = `${id}/${tone} @ tint ${v.tint}`; }
+        worstIcon = Math.min(worstIcon, icon);
+      }
     }
   }
-  check(`banner text clears AA on every theme (worst ${worstText.toFixed(2)}:1, ${worstWhere})`,
+  check(`card text clears AA on every theme × tone (worst ${worstText.toFixed(2)}:1, ${worstWhere})`,
     worstText >= AA_TEXT, `${worstText.toFixed(2)}`);
-  check(`banner icon clears the graphics bar (worst ${worstIcon.toFixed(2)}:1)`,
+  check(`card icon clears the graphics bar (worst ${worstIcon.toFixed(2)}:1)`,
     worstIcon >= AA_UI, `${worstIcon.toFixed(2)}`);
 }
 
@@ -103,9 +153,13 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 {
   let worst = Infinity, where = '';
   for (const [id, t] of Object.entries(THEMES)) {
-    for (const v of BANNER_STYLES) {
-      const gap = Math.abs(luminance(mix(t.primary, v.tint, '#FFFFFF')) - luminance(colors.background));
-      if (gap < worst) { worst = gap; where = `${id} @ tint ${v.tint}`; }
+    // Same three tone bases as the ink sweep above — a danger-toned card has its
+    // own wash and can vanish into the page independently of the accent.
+    for (const [tone, base] of Object.entries({ accent: t.primary, danger: colors.danger, success: colors.success })) {
+      for (const v of BANNER_STYLES) {
+        const gap = Math.abs(luminance(mix(base, v.tint, '#FFFFFF')) - luminance(colors.background));
+        if (gap < worst) { worst = gap; where = `${id}/${tone} @ tint ${v.tint}`; }
+      }
     }
   }
   check(`wash stays distinct from the page background (worst gap ${worst.toFixed(3)}, ${where})`,
@@ -200,6 +254,211 @@ check("removed themes are gone ('sky')", !THEMES.sky);
       : mix(LB_BASE.lent[1], 1 - plan.scrim, plan.scrimColor)) >= AA_TEXT);
 }
 
+// ── InfoSheet bullet icons sit on a fixed light tile ───────────────────────
+// The badge tile is #F1F3F5 regardless of theme, so a raw accent can be far too
+// pale on it — Gold measures ~1.5:1. Icons are graphical elements (3:1 bar), and
+// `readableOn(bg, accent, 3)` is what the component uses.
+{
+  const BADGE_BG = '#F1F3F5';
+  let worst = Infinity, where = '';
+  for (const [id, t] of Object.entries(THEMES)) {
+    const ink = readableOn(BADGE_BG, t.primary, AA_UI);
+    const ratio = contrastRatio(ink, BADGE_BG);
+    if (ratio < worst) { worst = ratio; where = id; }
+  }
+  check(`InfoSheet bullet icons clear the graphics bar on the badge tile (worst ${worst.toFixed(2)}:1, ${where})`,
+    worst >= AA_UI, `${worst.toFixed(2)}`);
+  const rawWorst = Math.min(...Object.values(THEMES).map((t) => contrastRatio(t.primary, BADGE_BG)));
+  check(`the raw accent would still fail on that tile (${rawWorst.toFixed(2)}:1) — keep readableOn`,
+    rawWorst < AA_UI, `${rawWorst.toFixed(2)}`);
+}
+
+// ── the ACTIVE segment of the period selector ──────────────────────────────
+// The selected D/W/M/Y cell is a solid WHITE pill on the gradient, so its label
+// is accent-on-white. Using `theme.primary` raw — which is what the old circular
+// pills did — measures 3.12:1 on Sunset and **1.41:1 on Gold**: it failed on four
+// of the five accents, at 13px bold. `readableOn` is the fix, and this bounds it.
+{
+  let worst = Infinity, where = '';
+  for (const [id, t] of Object.entries(THEMES)) {
+    const ink = readableOn('#FFFFFF', t.primary);
+    const ratio = contrastRatio(ink, '#FFFFFF');
+    if (ratio < worst) { worst = ratio; where = id; }
+    check(`${id}: active segment label is readable on its white cell (${ratio.toFixed(2)}:1)`,
+      ratio >= AA_TEXT, `${ratio.toFixed(2)}`);
+  }
+  check(`worst accent clears AA for the active segment (${worst.toFixed(2)}:1, ${where})`,
+    worst >= AA_TEXT, `${worst.toFixed(2)}`);
+  // The raw accent must remain a FAILING option, or this test stops meaning
+  // anything the day someone "simplifies" readableOn back out of the call site.
+  const rawWorst = Math.min(...Object.values(THEMES).map((t) => contrastRatio(t.primary, '#FFFFFF')));
+  check(`the raw accent would still fail (${rawWorst.toFixed(2)}:1) — keep readableOn`,
+    rawWorst < AA_TEXT, `${rawWorst.toFixed(2)}`);
+}
+
+// ── the bottom tab bar's ACTIVE tab ────────────────────────────────────────
+// The selected tab painted itself with the raw accent on the bar's own surface,
+// which measures 3.12:1 on Sunset and **1.41:1 on Gold** — so on four of five
+// accents the SELECTED tab was harder to read than the unselected ones
+// (`textSecondary` is 4.83:1 there). The label is 10px, so it takes the strict
+// AA bar and the icon shares its ink.
+{
+  const LIGHT_BAR = buildPalette(DEFAULT_THEME_ID, false).card;
+  check('the bar paints on the theme surface, which is white in light mode',
+    LIGHT_BAR === '#FFFFFF', LIGHT_BAR);
+
+  const inactive = contrastRatio(buildPalette(DEFAULT_THEME_ID, false).textSecondary, LIGHT_BAR);
+  check(`an INACTIVE tab already clears AA (${inactive.toFixed(2)}:1)`, inactive >= AA_TEXT);
+
+  // Both modes: the bar follows the theme now, so dark mode must hold too — it's
+  // unreachable in the UI today (`darkMode` is reserved), which is exactly why a
+  // test is the only thing that will notice if it breaks.
+  for (const dark of [false, true]) {
+    for (const id of Object.keys(THEMES)) {
+      const p = buildPalette(id, dark);
+      const ratio = contrastRatio(readableOn(p.card, p.primary), p.card);
+      check(`${id}${dark ? ' (dark)' : ''}: active tab ink readable on the bar (${ratio.toFixed(2)}:1)`,
+        ratio >= AA_TEXT, `${ratio.toFixed(2)}`);
+    }
+  }
+
+  const rawWorst = Math.min(
+    ...Object.keys(THEMES).map((id) => {
+      const p = buildPalette(id, false);
+      return contrastRatio(p.primary, p.card);
+    }),
+  );
+  check(`the raw accent would still fail on the bar (${rawWorst.toFixed(2)}:1) — keep readableOn`,
+    rawWorst < AA_TEXT, `${rawWorst.toFixed(2)}`);
+
+  // The derived hairline has to separate the bar from a card scrolling UNDER it,
+  // and both are the same colour in light mode. It only needs to be visible, not
+  // to pass a text bar — but it must not be a no-op.
+  for (const dark of [false, true]) {
+    const p = buildPalette(DEFAULT_THEME_ID, dark);
+    const hair = mix(p.textPrimary, 0.1, p.card);
+    check(`the top hairline is distinguishable from the bar${dark ? ' (dark)' : ''}`,
+      hair !== p.card && contrastRatio(hair, p.card) > 1.05, `${hair} vs ${p.card}`);
+  }
+}
+
+// ── the tab bar's month-pace line ───────────────────────────────────────────
+// A 3pt graphic at the bottom of every screen, so it takes the 3:1 bar. The
+// accent raw is 1.41:1 on Gold — a line nobody can see — and the OVER tone has
+// to be visible in dark mode too, where a mid red loses against a dark card.
+{
+  for (const dark of [false, true]) {
+    for (const id of Object.keys(THEMES)) {
+      const p = buildPalette(id, dark);
+      const normal = contrastRatio(readableOn(p.card, p.primary, AA_UI), p.card);
+      const over   = contrastRatio(readableOn(p.card, colors.danger, AA_UI), p.card);
+      check(`${id}${dark ? ' (dark)' : ''}: pace fill visible on the bar (${normal.toFixed(2)}:1)`,
+        normal >= AA_UI, `${normal.toFixed(2)}`);
+      check(`${id}${dark ? ' (dark)' : ''}: over-budget fill visible (${over.toFixed(2)}:1)`,
+        over >= AA_UI, `${over.toFixed(2)}`);
+    }
+  }
+  // The month NOTCH is a cut painted in the bar's own colour, which works only
+  // because the fill is already measured against that same colour — so the notch
+  // inherits the fill's ratio and needs no separate tone. This asserts the
+  // property the design leans on: a coloured tick would need to beat BOTH the
+  // fill and the track, and no single colour does on all five accents.
+  for (const id of Object.keys(THEMES)) {
+    const p = buildPalette(id, false);
+    const fill = readableOn(p.card, p.primary, AA_UI);
+    check(`${id}: the notch (bar colour) reads against the fill (${contrastRatio(fill, p.card).toFixed(2)}:1)`,
+      contrastRatio(fill, p.card) >= AA_UI);
+  }
+}
+
+// ── the brand footer's accent-wash band ─────────────────────────────────────
+// The band was a flat `#EBEEF2` at 1.07:1 against the page — invisible — with a
+// hairline at 1.02:1 on itself. It's now a 10% accent wash, and the measurements
+// below are why it ALSO keeps a derived hairline: at that tint the wash is
+// hue-distinct but barely luminance-distinct, and on Gold it is FLATTER than the
+// grey it replaced. The wash carries identity; the hairline carries the boundary.
+{
+  const BAND_TINT = 0.1;
+  const EDGE_MIN = 1.8;
+  const OLD_BAND = '#EBEEF2';
+  const OLD_EDGE = contrastRatio(colors.divider, OLD_BAND);
+  check(`the OLD flat band was invisible against the page (${contrastRatio(OLD_BAND, colors.background).toFixed(3)}:1)`,
+    contrastRatio(OLD_BAND, colors.background) < 1.1);
+  check(`the OLD hairline was invisible on it (${OLD_EDGE.toFixed(2)}:1)`, OLD_EDGE < 1.1);
+
+  let worstEdge = Infinity, worstName = Infinity, worstTag = Infinity;
+  for (const dark of [false, true]) {
+    for (const [id, t] of Object.entries(THEMES)) {
+      const p = buildPalette(id, dark);
+      const band = mix(p.primary, BAND_TINT, p.background);
+      const edge = contrastRatio(readableOn(band, p.primary, EDGE_MIN), band);
+      // 42px/900 — large text, so the 3:1 bar. Gold's primaryDark is the only
+      // accent that fails raw (1.69:1), which is why it is derived.
+      const nameInk = contrastRatio(readableOn(band, p.primaryDark, AA_UI), band);
+      const tagInk = contrastRatio(readableOn(band, p.textSecondary), band);
+      worstEdge = Math.min(worstEdge, edge);
+      worstName = Math.min(worstName, nameInk);
+      worstTag = Math.min(worstTag, tagInk);
+      check(`${id}${dark ? ' (dark)' : ''}: band edge is visible (${edge.toFixed(2)}:1)`,
+        edge >= EDGE_MIN - 0.01, `${edge.toFixed(2)}`);
+      check(`${id}${dark ? ' (dark)' : ''}: wordmark clears the large-text bar (${nameInk.toFixed(2)}:1)`,
+        nameInk >= AA_UI, `${nameInk.toFixed(2)}`);
+      check(`${id}${dark ? ' (dark)' : ''}: tagline clears AA (${tagInk.toFixed(2)}:1)`,
+        tagInk >= AA_TEXT, `${tagInk.toFixed(2)}`);
+    }
+  }
+  check(`the derived edge beats the old hairline everywhere (${worstEdge.toFixed(2)}:1 vs ${OLD_EDGE.toFixed(2)}:1)`,
+    worstEdge > OLD_EDGE * 1.5);
+
+  // The reason the hairline can't be dropped: prove the wash alone does NOT make
+  // the band visible. If someone later raises the tint and deletes the edge, this
+  // is what tells them it doesn't work — Gold is the case that breaks.
+  const amberBand = mix(THEMES.amber.primary, BAND_TINT, colors.background);
+  check(`Gold's wash alone is flatter than the old grey (${contrastRatio(amberBand, colors.background).toFixed(3)}:1) — keep the edge`,
+    contrastRatio(amberBand, colors.background) < contrastRatio(OLD_BAND, colors.background),
+    `${contrastRatio(amberBand, colors.background).toFixed(3)}`);
+
+  // The tint must stay well clear of the point where a wash's luminance equals
+  // the page background and the surface reads as transparent (§7).
+  check(`the band tint (${BAND_TINT}) is far below the ~0.22 transparency point`, BAND_TINT < 0.15);
+  const rawTag = contrastRatio(colors.textMuted, OLD_BAND);
+  check(`textMuted — the old tagline colour — would still fail (${rawTag.toFixed(2)}:1)`,
+    rawTag < AA_TEXT, `${rawTag.toFixed(2)}`);
+}
+
+// ── the header badge must be VISIBLE on every accent ───────────────────────
+// A badge is an opaque graphical element (3:1 bar). No flat colour clears it on
+// all five gradients — white bottoms out at 1.41:1 on Amber, near-black at
+// 1.03:1 on Platinum. The level badge shipped as a hardcoded violet `#7C3AED`,
+// the worst of the three at **1.02:1 on Platinum**: a badge nobody could see.
+// `badgeOnGradient` picks per theme instead.
+{
+  let worst = Infinity, where = '';
+  for (const [id, t] of Object.entries(THEMES)) {
+    const stops = buildPalette(id).gradientStops;
+    const { fill, ink, ratio } = badgeOnGradient(stops);
+    // The reported ratio must match an independent re-measure — never trust the
+    // value the function under test hands back about itself.
+    const measured = Math.min(...stops.map((s2) => contrastRatio(fill, s2)));
+    check(`${id}: badge fill is legible on the gradient (${measured.toFixed(2)}:1)`,
+      measured >= AA_UI && Math.abs(measured - ratio) < 0.01,
+      `reported ${ratio.toFixed(2)}, measured ${measured.toFixed(2)}`);
+    // And its own number must be readable ON the badge.
+    check(`${id}: the badge number is readable on the badge`,
+      contrastRatio(ink, fill) >= AA_TEXT, `${contrastRatio(ink, fill).toFixed(2)}`);
+    if (measured < worst) { worst = measured; where = id; }
+    void t;
+  }
+  check(`the worst accent still clears the graphics bar (${worst.toFixed(2)}:1, ${where})`,
+    worst >= AA_UI, `${worst.toFixed(2)}`);
+  // The colour it replaced, for the record — this must stay a failing option.
+  const violetWorst = Math.min(
+    ...Object.keys(THEMES).flatMap((id) => buildPalette(id).gradientStops.map((s2) => contrastRatio('#7C3AED', s2))),
+  );
+  check(`the old hardcoded violet would still fail (${violetWorst.toFixed(2)}:1)`,
+    violetWorst < AA_UI, `${violetWorst.toFixed(2)}`);
+}
+
 // ── nobody hand-builds the pair ─────────────────────────────────────────────
 // A screen that writes [theme.gradientStart, theme.gradientEnd] silently drops
 // the extra stops, so Platinum renders FLAT on that screen only — invisible
@@ -245,6 +504,117 @@ check("removed themes are gone ('sky')", !THEMES.sky);
     offenders.length === 0, offenders.join(', '));
   check('no screen hard-codes the fixed LB green/purple — use useLbGradients()',
     lbOffenders.length === 0, lbOffenders.join(', '));
+
+  // ── Dashboard elevation language (Aug-26) ────────────────────────────────
+  // Home's six top-level sections had FOUR different depths, one of them
+  // (BudgetSummary's 0.08/r12/e3) a value that existed nowhere else — so
+  // elevation encoded nothing. The rule now: every top-level section sits at
+  // `shadows.card`, and `shadows.elevated` is reserved for a surface that is
+  // deliberately lifted (the Lent/Borrowed hero pair, the queue deck).
+  //
+  // Scoped to the HOME sections on purpose. 22 files across the app hand-roll a
+  // shadow and many are legitimate (coloured glows on RewardShop widgets,
+  // dark-mode-aware surfaces); linting all of them would be a sweep, not a
+  // guard, and pretending otherwise would make this test a chore to satisfy.
+  const HOME_SECTIONS = [
+    'components/HomeCarousel.tsx',
+    'components/LentBorrowedWidget.js',
+    'components/MonthlyRecapCard.tsx',
+    'components/BudgetSummary.tsx',
+    'components/DailyQueueStack.js',
+    'components/TransactionItem.js',
+  ];
+  const rawShadows = [];
+  for (const rel of HOME_SECTIONS) {
+    const full = `${ROOT}/${rel}`;
+    readFileSync(full, 'utf8').split('\n').forEach((line, i) => {
+      const code = line.trim();
+      if (code.startsWith('//') || code.startsWith('*') || code.startsWith('/*')) return;
+      // `shadowOpacity: 0` is a deliberate FLATTEN, not a new depth —
+      // TransactionItem's `cardMuted` uses it for archived rows, because dimming a
+      // real elevation via container opacity draws a grey box on Android.
+      if (/shadowOpacity:\s*0\s*,?\s*$/.test(code)) return;
+      if (/shadowOpacity\s*:/.test(code)) rawShadows.push(`${rel}:${i + 1}`);
+    });
+  }
+  check('Home sections use the shadow TOKENS, never a hand-rolled depth',
+    rawShadows.length === 0, rawShadows.join(', '));
+
+  // ── The active segment's ink must be DERIVED, at the call site ────────────
+  // The block above proves `readableOn('#FFFFFF', primary)` produces a passing
+  // colour — but it says nothing about whether the screen actually calls it. A
+  // mutation replacing `periodActiveInk` with a raw `theme.primary` left every
+  // contrast assertion green while putting 1.41:1 text back on Gold. Testing the
+  // helper is not testing the caller, so grep the caller.
+  const dash = readFileSync(`${ROOT}/screens/DashboardScreen.js`, 'utf8');
+  const dashLines = dash.split('\n');
+  const inkAt = dashLines.findIndex((l) => l.includes('const periodActiveInk'));
+  // The whole DECLARATION, not just its first line: this started as a one-liner
+  // and became a multi-line ternary when the third selector variant landed, at
+  // which point a line-scoped grep failed on formatting rather than on substance.
+  const inkDecl = inkAt >= 0 ? dashLines.slice(inkAt, inkAt + 6).join(' ') : '';
+  check('the active-segment ink is derived through readableOn at the call site',
+    inkAt >= 0 && inkDecl.includes('readableOn'),
+    inkAt >= 0 ? inkDecl.trim().slice(0, 120) : 'periodActiveInk not found — did it get renamed?');
+
+  // ── Same lint for the tab bar, for the same reason ────────────────────────
+  const bar = readFileSync(`${ROOT}/components/AnimatedTabBar.js`, 'utf8');
+  const barLines = bar.split('\n');
+  const barInkAt = barLines.findIndex((l) => l.includes('const activeColor'));
+  const barInkDecl = barInkAt >= 0 ? barLines.slice(barInkAt, barInkAt + 4).join(' ') : '';
+  check('the active TAB ink is derived through readableOn at the call site',
+    barInkAt >= 0 && barInkDecl.includes('readableOn'),
+    barInkAt >= 0 ? barInkDecl.trim().slice(0, 120) : 'activeColor not found — did it get renamed?');
+  // The surface must come from the theme, or the bar is the one piece of chrome
+  // left white when dark mode ships — and every ratio above is measured against
+  // `theme.card`, so a hardcoded hex would make them measure the wrong thing.
+  check('the tab bar takes its surface from the theme, not a hardcoded hex',
+    !/backgroundColor:\s*'#/.test(bar) && bar.includes('backgroundColor: theme.card'),
+    (bar.match(/backgroundColor:.*/g) || []).join(' | '));
+
+  // ── The brand footer must DERIVE its band and every ink on it ─────────────
+  // A mutation putting `colors.divider` back as the band's edge left all 138
+  // assertions green: the suite proved a derived edge is visible, not that the
+  // component derives one. The whole point of the accent wash is that nothing on
+  // it can be a fixed colour, because the band itself moves with the theme.
+  const footer = readFileSync(`${ROOT}/components/AppBrandFooter.tsx`, 'utf8');
+  check('the footer band is an accent wash, not a hardcoded surface',
+    /mix\(primary,\s*BAND_TINT/.test(footer) && !/backgroundColor:\s*'#/.test(footer),
+    (footer.match(/backgroundColor:.*/g) || []).join(' | '));
+  for (const [what, re] of [
+    ['edge', /edge:\s*readableOn\(band, primary, EDGE_MIN\)/],
+    ['wordmark', /name:\s*readableOn\(band, primaryDark, 3\)/],
+    ['tagline', /tagline:\s*readableOn\(band, colors\.textSecondary\)/],
+  ]) {
+    check(`the footer's ${what} ink is derived from the band at the call site`, re.test(footer),
+      `no match for ${re}`);
+  }
+  check('no fixed divider/muted colour survives on the footer band',
+    !/borderColor:\s*colors\.divider/.test(footer) && !/colors\.textMuted/.test(footer),
+    'a fixed grey on a themed wash cannot be measured');
+
+  // ── The tab bar's top edge must be the pace line, in BOTH states ──────────
+  check('the tab bar renders the pace line rather than a bare border',
+    bar.includes('<PaceLine') && bar.includes('monthPace')
+    && !/borderTopWidth/.test(bar),
+    'PaceLine owns that edge so the hairline and the track cannot drift apart');
+  check('the pace fill and over-tone are measured against the bar surface',
+    /readableOn\(bar, colors\.danger, 3\)/.test(bar),
+    'the over-budget tone needs lifting on a dark card');
+
+  // ── Nobody may hand-pick the tab-bar clearance again ──────────────────────
+  // AnalyticsScreen paid `spacing.lg` (16) against a bar that occupies 62 + the
+  // safe-area inset, so its last section rendered behind the bar. Three other
+  // screens each guessed a different number. The inset is only knowable at
+  // runtime, so the helper is the only correct answer.
+  const CLEARANCE_SCREENS = [
+    'screens/AnalyticsScreen.js', 'screens/BudgetScreen.js',
+    'screens/TransactionsScreen.js', 'screens/AccountsScreen.js',
+    'screens/DashboardScreen.js',
+  ];
+  const missing = CLEARANCE_SCREENS.filter((rel) => !readFileSync(`${ROOT}/${rel}`, 'utf8').includes('tabBarClearance'));
+  check('every tab screen pays its bottom clearance through the shared helper',
+    missing.length === 0, missing.join(', '));
 }
 
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);

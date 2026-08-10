@@ -1,7 +1,7 @@
 // =============================================================================
 // Feature-banner treatments (Dashboard carousel).
 //
-// Pure data, deliberately NOT inside FeatureCarousel: that component imports
+// Pure data, deliberately NOT inside HomeCarousel: that component imports
 // react-native, so it can't be loaded by the headless test runner — and the one
 // thing here that must be verified is a colour invariant across every theme
 // (see themeContrast.test.mjs).

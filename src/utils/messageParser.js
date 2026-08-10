@@ -336,8 +336,15 @@ const CC_CARD_LAST4_REGEX =
   /\bcredit\s+card\b[^0-9]{0,30}(\d{4})\b|\bcard\s+(?:ending|no\.?)?\s*[xX*•·]*(\d{4})\b/i;
 
 // Pull the "pay by <date>" date string from a CC reminder body.
+// The separator is `\s*:?\s*-?\s*`, not `\s+`: banks write "Payment due date:
+// 07-Jun-26" and "Min due date :- 09-Jul-26" far more often than the bare
+// "due date 07-Jun-26" this used to require, so the date was being dropped on the
+// most common phrasing of all. That failed SILENTLY — the CC-due notification just
+// fell back to "Pay before the due date" and no reminder was scheduled, which is
+// why it went unnoticed until the date had to be stored and shown. A dateless
+// "due date soon" still matches nothing.
 const CC_DUE_DATE_REGEX =
-  /\b(?:pay\s+(?:instantly\s+)?by|due\s+(?:date|on|by))\s+(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
+  /\b(?:pay\s+(?:instantly\s+)?by|due\s+(?:date|on|by))\s*:?\s*-?\s*(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
 
 // Outgoing CC bill payment from source bank account (not an expense — it's a
 // liability settlement). Patterns: "towards [bank] credit card", "credit card

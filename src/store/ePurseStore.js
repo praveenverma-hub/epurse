@@ -112,6 +112,39 @@ const CC_PROMPT_MAX_AGE_MS = 5 * DAY_MS;
 // TODO: remove RAW_SMS_RETENTION_MS + rawSms/rawSender fields before production — preview-only debug data
 const RAW_SMS_RETENTION_MS = 3 * DAY_MS;
 
+/**
+ * Key for the `ccBills` map — one outstanding bill per card.
+ *
+ * The SAME expression the CC-due reminder scheduling uses for its dedupe key, so
+ * the two can't disagree about what "this card" means. `cardLast4` first because
+ * a user can hold two cards from one bank; `bankName` is the fallback for issuers
+ * whose reminder SMS omits the mask, and 'unknown' keeps a bill visible rather
+ * than dropping it when neither is present.
+ */
+const ccBillKey = ({ cardLast4, bankName }) => String(cardLast4 || bankName || 'unknown');
+
+/**
+ * Remove any stored bill belonging to the card a payment just landed on.
+ *
+ * Reuses `maskMatch` (shared suffix of ≥3 digits) rather than comparing strings:
+ * the same card is reported as `1234` in one SMS and `XX001234` in another, which
+ * is the whole reason that helper exists for account matching. Bank name is a
+ * fallback for bills that carried no mask at all.
+ */
+const clearCcBill = (bills, { cardLast4, bankName }) => {
+  const entries = Object.entries(bills || {});
+  if (entries.length === 0) return bills || {};
+  const bank = (bankName || '').trim().toLowerCase();
+  const kept = entries.filter(([, b]) => {
+    if (cardLast4 && b.cardLast4 && maskMatch(b.cardLast4, cardLast4)) return false;
+    // Only fall back to the bank name when the bill has no mask of its own —
+    // otherwise one bank's payment would clear a DIFFERENT card's bill.
+    if (bank && !b.cardLast4 && (b.bankName || '').trim().toLowerCase() === bank) return false;
+    return true;
+  });
+  return kept.length === entries.length ? bills : Object.fromEntries(kept);
+};
+
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
 const SUPPRESS_SMS_CAP = 2500;
 
@@ -800,6 +833,11 @@ export const useEPurseStore = create(
       // CC bill-due OS reminders: `${cardLast4||bankName}:${dueDate}` → scheduled id, so a
       // resent bill (same card+date) doesn't double-schedule and a NEW bill can cancel the stale one.
       ccDueReminderIds: {},
+      // Outstanding credit-card bills, keyed by card (`ccBillKey`). Written from
+      // ingestMessage's cc_bill_reminder branch, cleared when a payment for that
+      // card arrives. One entry per card — a new bill is a new CYCLE and replaces
+      // the old one, so this never grows past the number of cards.
+      ccBills: {},
       // Subscription price-hike alerts already sent: keys `${merchantKey}:${hikeTo}`.
       subscriptionHikesNotified: [],
 
@@ -2194,6 +2232,16 @@ export const useEPurseStore = create(
         set({
           accounts: accountsWithMatch,
           pendingCCPaymentQueue: [...queue, newEntry],
+          // A payment landed for this card, so its outstanding bill is settled —
+          // drop it rather than keep nagging from the Dashboard. Matched on mask
+          // OR bank name because the bill and the payment SMS don't always carry
+          // the same identifier. If a match is missed the bill isn't stranded: it
+          // stops showing once its due date passes, and the next cycle's bill
+          // replaces it outright.
+          ccBills: clearCcBill(state.ccBills, {
+            cardLast4: account.mask || accountMask || null,
+            bankName:  account.bankName || bankName || null,
+          }),
         });
         fireCCPaymentNotification({
           amount,
@@ -2339,6 +2387,25 @@ export const useEPurseStore = create(
             const cardLabel = cardLast4
               ? `${bankName || 'Credit Card'} •• ${cardLast4}`
               : (bankName || 'Credit Card');
+
+            // ── Persist the bill ─────────────────────────────────────────
+            // Until Aug-26 this was read, turned into a notification, and then
+            // DROPPED — so nothing in the app could ever answer "what do I owe
+            // and when". Kept as a map keyed by card, not a list: a new bill for
+            // the same card is a new CYCLE and must REPLACE the old one rather
+            // than pile up (the reminder scheduling below already works that
+            // way). One entry per card, so it's bounded by how many cards the
+            // user has and needs no pruning.
+            set((s) => ({
+              ccBills: {
+                ...(s.ccBills || {}),
+                [ccBillKey({ cardLast4, bankName })]: {
+                  amount, cardLast4: cardLast4 || null, bankName: bankName || null,
+                  dueDate: dueDate || null,
+                  seenAt: opts.receivedAt || new Date().toISOString(),
+                },
+              },
+            }));
             useNotificationStore.getState().add({
               kind:      'cc_due',
               title:     `₹${Math.round(amount).toLocaleString('en-IN')} due on ${cardLabel}`,
@@ -4078,6 +4145,7 @@ export const useEPurseStore = create(
           lastCompactedAt: null,
           suppressedSmsIds: [],
           ccHandledSmsIds: [],
+          ccBills: {},
           manualTxnSeq: 0,
           userName: '',
           userPhones: [],
@@ -4096,6 +4164,7 @@ export const useEPurseStore = create(
           recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
           notificationIds: {},
           ccDueReminderIds: {},
+          ccBills: {},
           subscriptionHikesNotified: [],
           budget: null,
           budgetHistory: {},
@@ -4129,6 +4198,7 @@ export const useEPurseStore = create(
             lastCompactedAt: null,
             suppressedSmsIds: [],
             ccHandledSmsIds: [],
+            ccBills: {},
             manualTxnSeq: 0,
             // Keep userName/hasOnboarded/smsPermissionGranted if present so
             // the user isn't bounced back into onboarding after the wipe.
@@ -4553,6 +4623,7 @@ export const useEPurseStore = create(
         recapOptions: state.recapOptions ?? { includePrivate: true, includeGroups: true, includeTxnList: false },
         notificationIds: state.notificationIds,
         ccDueReminderIds: state.ccDueReminderIds ?? {},
+        ccBills: state.ccBills ?? {},
         subscriptionHikesNotified: state.subscriptionHikesNotified ?? [],
         budget: state.budget,
         lastBudgetPlan: state.lastBudgetPlan,
@@ -4678,6 +4749,12 @@ export const selectGapTransactionCount = (s, lastCheckedInDate) => {
 // Dashboard header/chip exclusions use the same imported NON_SPEND_CATEGORY_IDS
 // (LB ledger, self transfers, CC-bill payments) — one source, no drift.
 
+/**
+ * How many transaction rows the Dashboard renders. Home is a recency check, not
+ * a second Activity tab — see the note at the `recent` slice below.
+ */
+const HOME_RECENT_LIMIT = 10;
+
 const periodStartMs = (key) => {
   const now = new Date();
   if (key === 'D') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -4693,8 +4770,9 @@ const periodStartMs = (key) => {
  *   • debits  — sum of debit display amounts (your share when split)
  *   • credits — sum of credit amounts
  *   • net     — debits − credits  (positive = you spent more than you earned)
- *   • count   — visible transactions in the period (for the section header)
- *   • recent  — newest-first slice of up to 20 visible transactions
+ *   • count   — visible transactions in the period (for the section header).
+ *               The TRUE total, deliberately NOT capped by `recent`'s limit.
+ *   • recent  — newest-first slice, capped at HOME_RECENT_LIMIT (10)
  *
  * Excludes ignored, private (isHidden), and Lent/Borrowed transactions.
  * For Year periods, also folds in monthlyAggregates beyond the raw-retention
@@ -4747,9 +4825,16 @@ export const selectExpenseStats = (period) => (state) => {
 
   // The visible list (transaction cards) follows the same eligibility rules
   // as the chips — private and LB items are hidden from the default home view.
+  //
+  // Capped at 10 (was 20, Aug-26). Home's list answers "is my spending being
+  // captured correctly?", which needs recency, not depth — the Activity tab owns
+  // the full history and the section's "View all" goes straight there. At 20 the
+  // landing screen was several screens tall and largely a copy of that tab.
+  // `count` above is the TRUE period total and is unaffected by this cap, so the
+  // header still reads "Transactions · August (137)".
   const recent = [...eligible]
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 20);
+    .slice(0, HOME_RECENT_LIMIT);
 
   return {
     spent,               // net expense = expenses − refunds (≥ 0)

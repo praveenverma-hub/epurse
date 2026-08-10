@@ -17,9 +17,18 @@
 //     regardless of timing.
 //
 //   sync lock
-//     A ref flag (`syncingRef`) prevents concurrent `start()` invocations.
-//     Without this, useEffect's initial call and an AppState 'active' event
-//     that fires simultaneously would both sweep the same date range.
+//     A MODULE-level flag (`sweeping`) prevents concurrent sweeps. Without this,
+//     useEffect's initial call and an AppState 'active' event that fires
+//     simultaneously would both sweep the same date range. It lives on the module
+//     rather than in a ref so it also covers callers outside this hook — see below.
+//
+//   two entry points, one sweep
+//     `syncNow()` is a plain exported function (not a hook) because the sweep is
+//     needed from two unrelated places: this hook's mount/foreground lifecycle,
+//     and the Dashboard's pull-to-refresh, which has no access to the hook
+//     instance mounted in App.js. Both call the SAME function, so the dedup
+//     rules, cursor advance and compaction can't drift apart. Only the live
+//     listener stays inside the hook — it owns an unsubscribe lifecycle.
 // =============================================================================
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -34,19 +43,115 @@ import {
 } from '../services/smsService';
 import { getLocationIfGranted } from '../services/locationService';
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+// Mutex shared by EVERY caller of syncNow() — the hook's mount/foreground path
+// and the Dashboard's pull-to-refresh. A per-hook ref wouldn't cover both.
+let sweeping = false;
+
+/**
+ * Sweep the SMS inbox once, from the persisted date cursor forward.
+ *
+ * Reads the store through `getState()` rather than taking hook-bound actions so
+ * non-React callers (pull-to-refresh) can reuse it without rebuilding the same
+ * bundle of store actions — one sweep implementation, no drift.
+ *
+ * Never throws. Resolves to `{ status, scanned, added }`:
+ *   status  'ok' | 'unsupported' | 'no-permission' | 'busy' | 'error'
+ *   scanned messages read from the inbox this pass (includes duplicates)
+ *   added   NEW rows in the active ledger — what the user actually gained.
+ *           Counted from the transaction-list length, not from ingestMessage's
+ *           return value: one SMS can book several transactions, and it returns
+ *           only the first.
+ */
+export async function syncNow() {
+  if (Platform.OS !== 'android' || !smsSupported) return { status: 'unsupported', scanned: 0, added: 0 };
+
+  const st = useEPurseStore.getState();
+  if (!st.smsPermissionGranted && !st.smsAutoImport) {
+    return { status: 'no-permission', scanned: 0, added: 0 };
+  }
+
+  // ── Sync lock: bail if a sweep is already running ───────────────────────
+  if (sweeping) return { status: 'busy', scanned: 0, added: 0 };
+  sweeping = true;
+
+  try {
+    // Double-check OS permission — user may have revoked it in settings
+    const ok = await hasSmsPermission();
+    if (!ok) return { status: 'no-permission', scanned: 0, added: 0 };
+
+    // ── Inbox sweep ────────────────────────────────────────────────────────
+    //
+    // `since` uses the highest SMS date we've seen (not +1 ms). This keeps
+    // same-timestamp messages eligible on the next sweep — some banks emit
+    // multiple SMS rows with identical `date` values.
+    //
+    // If we have a cursor, resume from that timestamp (inclusive).
+    // On first run (no cursor yet) go back 3 full months — the same window
+    // that raw retention keeps — so the background sync covers the same
+    // history as the onboarding sweep.
+    const lastSmsDate = st.lastSmsDate;
+    const now2 = new Date();
+    const since = lastSmsDate
+      ? lastSmsDate
+      : new Date(now2.getFullYear(), now2.getMonth() - 3, 1).getTime();
+
+    const inbox = await readInbox(since); // has 15 s hard timeout
+
+    // Count the ledger before ingesting so we can report what actually landed.
+    const before = useEPurseStore.getState().transactions.length;
+    let added = 0;
+
+    if (inbox.length > 0) {
+      // Sort oldest → newest so account balances accumulate correctly
+      const sorted = [...inbox].sort((a, b) => (a.date || 0) - (b.date || 0));
+
+      let maxDate = lastSmsDate || 0;
+
+      sorted.forEach((m) => {
+        useEPurseStore.getState().ingestMessage(m.body, {
+          sender:     m.address,
+          receivedAt: new Date(m.date).toISOString(),
+          smsId:      String(m._id), // Android content-provider unique ID
+        });
+        // Advance the date cursor past this message regardless of whether
+        // it was new or a duplicate — we never want to re-fetch it.
+        if ((m.date || 0) > maxDate) maxDate = m.date;
+      });
+
+      // Persist the cursor so the next sweep starts from here
+      useEPurseStore.getState().setLastSmsDate(maxDate);
+
+      // Counted BEFORE compaction, deliberately. Compaction drops rows past the
+      // 90-day window, so measuring after it would net the two together and
+      // under-report: a sweep that booked 5 new transactions while compacting 3
+      // old ones would announce "2 new transactions".
+      added = Math.max(0, useEPurseStore.getState().transactions.length - before);
+
+      // Move any newly-ingested messages that are older than 90 days
+      // straight into monthly aggregates — keeps raw[] lean immediately
+      // instead of waiting for the next CompactionBoot foreground trigger.
+      useEPurseStore.getState().compactTransactions();
+    }
+
+    useEPurseStore.getState().setLastSmsSync(Date.now());
+    return { status: 'ok', scanned: inbox.length, added };
+  } catch (e) {
+    console.warn('[useSmsSync] syncNow() error', e?.message);
+    return { status: 'error', scanned: 0, added: 0 };
+  } finally {
+    // Always release the lock so future sweeps can run
+    sweeping = false;
+  }
+}
 
 export function useSmsSync() {
   const permissionGranted = useEPurseStore((s) => s.smsPermissionGranted);
   const enabled           = useEPurseStore((s) => s.smsAutoImport);
-  const lastSmsDate       = useEPurseStore((s) => s.lastSmsDate);    // SMS date cursor
   const ingestMessage     = useEPurseStore((s) => s.ingestMessage);
   const setLastSmsSync      = useEPurseStore((s) => s.setLastSmsSync);
   const setLastSmsDate      = useEPurseStore((s) => s.setLastSmsDate);
-  const compactTransactions = useEPurseStore((s) => s.compactTransactions);
 
   const unsubRef  = useRef(null);   // live-listener unsubscribe fn
-  const syncingRef = useRef(false); // mutex: true while a sweep is in-flight
 
   // ── Stop the live listener ────────────────────────────────────────────────
   const stop = useCallback(() => {
@@ -58,64 +163,19 @@ export function useSmsSync() {
 
   // ── Full start: sweep inbox + attach live listener ────────────────────────
   const start = useCallback(async () => {
-    if (Platform.OS !== 'android' || !smsSupported) return;
-    if (!permissionGranted && !enabled) return;
+    const { status } = await syncNow();
+    // 'busy' means another sweep is mid-flight and will attach the listener
+    // itself; the other two mean we have nothing to listen with. Matches the
+    // previous behaviour, where each of these returned before the attach.
+    if (status === 'busy' || status === 'unsupported' || status === 'no-permission') return;
 
-    // ── Sync lock: bail if a sweep is already running ─────────────────────
-    if (syncingRef.current) return;
-    syncingRef.current = true;
+    // NOTE a deliberate change: 'error' still falls through to the attach. The
+    // old code wrapped sweep + attach in one try, so a thrown readInbox (its 15s
+    // timeout, most likely) also silently skipped the listener — the backfill
+    // failed AND live capture never started, on a device whose permission we had
+    // just confirmed. A failed backfill shouldn't cost the user live capture.
 
     try {
-      // Double-check OS permission — user may have revoked it in settings
-      const ok = await hasSmsPermission();
-      if (!ok) return;
-
-      // ── Inbox sweep ──────────────────────────────────────────────────────
-      //
-      // `since` uses the highest SMS date we've seen (not +1 ms). This keeps
-      // same-timestamp messages eligible on the next sweep — some banks emit
-      // multiple SMS rows with identical `date` values.
-      //
-      // On first run (lastSmsDate === null) we fall back to 30 days ago.
-      // If we have a cursor, resume from that timestamp (inclusive).
-      // On first run (no cursor yet) go back 3 full months — the same window
-      // that raw retention keeps — so the background sync covers the same
-      // history as the onboarding sweep.
-      const now2 = new Date();
-      const since = lastSmsDate
-        ? lastSmsDate
-        : new Date(now2.getFullYear(), now2.getMonth() - 3, 1).getTime();
-
-      const inbox = await readInbox(since); // has 15 s hard timeout
-
-      if (inbox.length > 0) {
-        // Sort oldest → newest so account balances accumulate correctly
-        const sorted = [...inbox].sort((a, b) => (a.date || 0) - (b.date || 0));
-
-        let maxDate = lastSmsDate || 0;
-
-        sorted.forEach((m) => {
-          ingestMessage(m.body, {
-            sender:     m.address,
-            receivedAt: new Date(m.date).toISOString(),
-            smsId:      String(m._id), // Android content-provider unique ID
-          });
-          // Advance the date cursor past this message regardless of whether
-          // it was new or a duplicate — we never want to re-fetch it.
-          if ((m.date || 0) > maxDate) maxDate = m.date;
-        });
-
-        // Persist the cursor so the next sweep starts from here
-        setLastSmsDate(maxDate);
-
-        // Move any newly-ingested messages that are older than 90 days
-        // straight into monthly aggregates — keeps raw[] lean immediately
-        // instead of waiting for the next CompactionBoot foreground trigger.
-        compactTransactions();
-      }
-
-      setLastSmsSync(Date.now());
-
       // ── Live listener ─────────────────────────────────────────────────────
       // Re-attach every time to avoid stale closures after a sweep.
       stop();
@@ -137,12 +197,11 @@ export function useSmsSync() {
       });
 
     } catch (e) {
-      console.warn('[useSmsSync] start() error', e?.message);
-    } finally {
-      // Always release the lock so future sweeps can run
-      syncingRef.current = false;
+      console.warn('[useSmsSync] listener attach failed', e?.message);
     }
-  }, [permissionGranted, enabled, lastSmsDate, ingestMessage, setLastSmsSync, setLastSmsDate, compactTransactions, stop]);
+    // No `finally` unlocking here any more — syncNow() owns the mutex and has
+    // already released it by the time we reach the attach.
+  }, [ingestMessage, setLastSmsSync, setLastSmsDate, stop]);
 
   // ── Mount / permission change ─────────────────────────────────────────────
   useEffect(() => {

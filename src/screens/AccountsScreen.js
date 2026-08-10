@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useEPurseStore,
@@ -26,7 +27,7 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency, formatCompact } from '../utils/format';
 import { ACCOUNT_TYPES } from '../constants/categories';
-import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
+import { tabBarClearance } from '../context/TabBarVisibilityContext';
 
 import AccountCard    from '../components/AccountCard';
 import SheetCloseButton from '../components/SheetCloseButton';
@@ -85,6 +86,7 @@ const HEADER_HERO_H = 84;
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
+  const insets       = useSafeAreaInsets();
   const gradient = useGradient();
   const tabBarScroll = useTabBarScroll();
   const isFocused    = useIsFocused();
@@ -504,7 +506,7 @@ export default function AccountsScreen({ navigation }) {
           </View>
         </View>
 
-        <View style={{ height: TAB_BAR_HEIGHT + 40 }} />
+        <View style={{ height: tabBarClearance(insets.bottom) }} />
       </CollapsingHeaderScreen>
 
       <AddAccountModal

@@ -183,11 +183,21 @@ export const contrastRatio = (a, b) => {
 };
 
 /**
- * `color`, darkened just enough to reach `min` contrast against `bg`.
+ * `color`, pushed just far enough to reach `min` contrast against `bg`.
  *
  * Returns `color` untouched when it already passes, so a colour that's fine on
  * white isn't needlessly muddied. `min` defaults to 4.5 (WCAG AA for normal
  * text); pass 3 for large text or a graphical element like an icon.
+ *
+ * Tries DARKENING first, then LIGHTENING. The second pass exists because
+ * darkening is the wrong move on a dark surface: this returned `#000000` on any
+ * background it couldn't beat, so on the dark-mode card (`#1A1D24`) the Platinum
+ * and Indigo accents came back as near-black at **1.25:1** — worse than the
+ * colour it was handed. Caught by the contrast suite the day the tab bar started
+ * painting from the theme, which is what first routed dark mode through here.
+ *
+ * The darken pass is untouched, so every light-surface result is byte-identical
+ * to before; only the give-up value changes, from black to something legible.
  */
 export const readableOn = (bg, color, min = 4.5) => {
   if (!toRgb(color) || !toRgb(bg)) return color;
@@ -195,7 +205,11 @@ export const readableOn = (bg, color, min = 4.5) => {
     const candidate = d === 0 ? color : mix(color, 1 - d, '#000000');
     if (contrastRatio(candidate, bg) >= min) return candidate;
   }
-  return '#000000';
+  for (let l = 0.05; l <= 1; l += 0.05) {
+    const candidate = mix('#FFFFFF', l, color);
+    if (contrastRatio(candidate, bg) >= min) return candidate;
+  }
+  return contrastRatio('#FFFFFF', bg) >= contrastRatio('#000000', bg) ? '#FFFFFF' : '#000000';
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,6 +231,32 @@ export const readableOn = (bg, color, min = 4.5) => {
 export const LB_BASE = {
   lent:     ['#059669', '#10B981'],   // emerald — money coming to you
   borrowed: ['#6D28D9', '#8B5CF6'],   // violet  — money you owe
+};
+
+/**
+ * Fill + ink for a small opaque BADGE sitting on a themed gradient.
+ *
+ * A badge is a graphical element (3:1 bar), and no single flat colour clears it
+ * on every accent — measured against each theme's full `gradientStops`, white
+ * bottoms out at 1.41:1 on Amber and near-black at 1.03:1 on Platinum. The level
+ * badge was a hardcoded violet `#7C3AED`, which is the worst of the three at
+ * **1.02:1 on Platinum** — a badge you simply cannot see.
+ *
+ * So pick per theme: whichever of white / near-black has the better WORST case
+ * against the stops, with the opposite colour as its text. That lifts the worst
+ * case across all five accents to 3.68:1, clearing the bar.
+ *
+ * @param {string[]} stops the active theme's gradientStops
+ * @returns {{ fill: string, ink: string, ratio: number }}
+ */
+export const badgeOnGradient = (stops) => {
+  const list = Array.isArray(stops) && stops.length ? stops : ['#000000'];
+  const worstAgainst = (c) => Math.min(...list.map((s) => contrastRatio(c, s)));
+  const white = worstAgainst('#FFFFFF');
+  const dark  = worstAgainst(colors.textPrimary);
+  return white >= dark
+    ? { fill: '#FFFFFF', ink: colors.textPrimary, ratio: white }
+    : { fill: colors.textPrimary, ink: '#FFFFFF', ratio: dark };
 };
 
 /**

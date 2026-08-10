@@ -1528,5 +1528,47 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     S().getParentCategoryAverage('food', 3) === 5000, `${S().getParentCategoryAverage('food', 3)}`);
 }
 
+// ─── CC BILL DUE — the parsed bill is now KEPT, not just notified ─────────────
+// Before Aug-26 a cc_bill_reminder SMS fired a notification and the amount/date
+// were dropped, so nothing in the app could answer "what do I owe and when".
+// These cover the store side; the card's own window logic is in homeCards.test.mjs.
+{
+  reset();
+  const bills = () => useStore.getState().ccBills || {};
+
+  ingest('SBICRD', 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-May-26 is Rs.16,748.65. Min Amount Due: Rs.837.00. Payment due date: 07-Jun-26.',
+    { smsId: 'bill-1' });
+  const keys = Object.keys(bills());
+  check('a CC bill reminder is persisted', keys.length === 1, JSON.stringify(bills()));
+  const b = bills()[keys[0]];
+  check('the bill keeps its amount', b && b.amount > 0, JSON.stringify(b));
+  check('the bill keeps its due date', !!(b && b.dueDate), JSON.stringify(b));
+  check('a bill reminder does NOT become a transaction',
+    txns().length === 0, `${txns().length}`);
+
+  // A later statement for the SAME card is a new CYCLE — it must replace, not add.
+  ingest('SBICRD', 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-Jun-26 is Rs.9,100.00. Min Amount Due: Rs.455.00. Payment due date: 07-Jul-26.',
+    { smsId: 'bill-2' });
+  check('a new statement for the same card REPLACES the old bill',
+    Object.keys(bills()).length === 1, JSON.stringify(bills()));
+  check('and it holds the newer amount',
+    Math.round(Object.values(bills())[0].amount) === 9100,
+    `${Object.values(bills())[0].amount}`);
+
+  // A different card gets its own entry.
+  ingest('HDFCBK', 'Total Amount Due on your HDFC Credit Card ending 9876 for statement dt 20-Jun-26 is Rs.4,000.00. Payment due date: 09-Jul-26.',
+    { smsId: 'bill-3' });
+  check('a different card gets its own bill', Object.keys(bills()).length === 2,
+    JSON.stringify(Object.keys(bills())));
+
+  // Paying a card clears THAT card's bill and leaves the other alone. The payment
+  // must be recent — applyCCPayment drops anything older than CC_PROMPT_MAX_AGE_MS.
+  ingest('SBICRD', 'Payment of Rs.9,100.00 received towards your SBI Credit Card ending 1234. Thank you.',
+    { smsId: 'pay-1', receivedAt: Date.now() });
+  const after = Object.keys(bills());
+  check('paying a card clears that card\'s bill', !after.includes('1234'), JSON.stringify(after));
+  check('and leaves the OTHER card\'s bill alone', after.includes('9876'), JSON.stringify(after));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);
