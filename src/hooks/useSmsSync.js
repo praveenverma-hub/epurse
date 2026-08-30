@@ -62,11 +62,43 @@ let sweeping = false;
  *           return value: one SMS can book several transactions, and it returns
  *           only the first.
  */
+/**
+ * Resolves once the FIRST inbox sweep of this app session has settled — however it
+ * settled, including "this device will never sweep" (iOS, no permission).
+ *
+ * Anything that reasons about the ABSENCE of transactions has to wait for this.
+ * Yesterday's bank SMS only enter the store when the sweep imports them, so a
+ * question like "did I spend anything yesterday?" asked before the sweep gets the
+ * answer "no" for every user who didn't open the app yesterday — which is exactly
+ * the population that question is asked about. That misfired the Aware Run's
+ * Zero-Transaction bonus (see DashboardScreen's check-in).
+ *
+ * Resolves rather than rejects on error: a device whose inbox we cannot read is
+ * still finished trying, and blocking a daily check-in for ever is worse than
+ * acting on what we have. `syncNow` never throws, so this always settles.
+ */
+let firstSweepSettled = false;
+const sweepWaiters = [];
+const settleFirstSweep = () => {
+  if (firstSweepSettled) return;
+  firstSweepSettled = true;
+  while (sweepWaiters.length) sweepWaiters.shift()();
+};
+export const whenFirstSweepSettled = () =>
+  (firstSweepSettled ? Promise.resolve() : new Promise((resolve) => { sweepWaiters.push(resolve); }));
+
+/** Test seam: forget that a sweep ever ran. */
+export const __resetSweepSignalForTests = () => { firstSweepSettled = false; sweepWaiters.length = 0; };
+
 export async function syncNow() {
-  if (Platform.OS !== 'android' || !smsSupported) return { status: 'unsupported', scanned: 0, added: 0 };
+  if (Platform.OS !== 'android' || !smsSupported) {
+    settleFirstSweep();
+    return { status: 'unsupported', scanned: 0, added: 0 };
+  }
 
   const st = useEPurseStore.getState();
   if (!st.smsPermissionGranted && !st.smsAutoImport) {
+    settleFirstSweep();
     return { status: 'no-permission', scanned: 0, added: 0 };
   }
 
@@ -77,7 +109,7 @@ export async function syncNow() {
   try {
     // Double-check OS permission — user may have revoked it in settings
     const ok = await hasSmsPermission();
-    if (!ok) return { status: 'no-permission', scanned: 0, added: 0 };
+    if (!ok) { settleFirstSweep(); return { status: 'no-permission', scanned: 0, added: 0 }; }
 
     // ── Inbox sweep ────────────────────────────────────────────────────────
     //
@@ -139,8 +171,12 @@ export async function syncNow() {
     console.warn('[useSmsSync] syncNow() error', e?.message);
     return { status: 'error', scanned: 0, added: 0 };
   } finally {
-    // Always release the lock so future sweeps can run
+    // Always release the lock so future sweeps can run. Settling here rather than
+    // on the success path covers the error case too — a sweep that failed has
+    // still finished. 'busy' is the one status that must NOT settle: the sweep
+    // already in flight is the first one, and it will settle on its own.
     sweeping = false;
+    settleFirstSweep();
   }
 }
 

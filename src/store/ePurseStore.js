@@ -51,6 +51,11 @@ import {
   onlyDigits,
   SELF_TXN_FIELDS,
 } from '../utils/selfTransfer';
+// `matchAccount`/`banksAgree` used to live in this file. They moved to
+// utils/accountMatch so the SCREENS can share the same definition of "same
+// account" — analytics and the account ledger each had their own weaker rule and
+// disagreed with this one, which is how spend went missing from a card's ledger.
+import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
 import { isSameMonth, monthKey } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification } from '../utils/notifications';
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
@@ -176,50 +181,6 @@ const maxManualIdSuffixFromTransactions = (transactions = []) => {
 // =============================================================================
 
 /** Two bank labels are compatible if either is missing or one contains the other. */
-const banksAgree = (a, b) => {
-  if (!a || !b) return true; // unknown on either side → don't block a match
-  const na = String(a).toLowerCase().replace(/[^a-z0-9]/g, '');
-  const nb = String(b).toLowerCase().replace(/[^a-z0-9]/g, '');
-  return !na || !nb || na.includes(nb) || nb.includes(na);
-};
-
-/**
- * Best-fit account for a parsed transaction.
- * 1. EXACT mask (or aliasMask) match
- * 2. SUFFIX match — the SAME account shown with different mask lengths across banks'
- *    SMS (last-4 "XX9532" vs last-6 "XX119532"). Guarded by same account-type + a
- *    compatible bank name so two unrelated accounts sharing trailing digits (or a card
- *    vs a bank) are never merged by digits alone. Prefer the most-specific (longest) mask.
- * 3. no mask → fall back to account-type match
- */
-const matchAccount = (accounts, parsed) => {
-  if (!parsed) return null;
-  if (parsed.accountMask) {
-    // 1. exact — a debit card's mask may live in a bank's aliasMasks (unified account).
-    //    Bank-guarded so two DIFFERENT named banks that happen to share a last-4 aren't
-    //    merged (only blocks when both bank names are present and disagree).
-    const exact = accounts.find(
-      (a) =>
-        (a.mask === parsed.accountMask ||
-          (a.aliasMasks || []).includes(parsed.accountMask)) &&
-        banksAgree(a.bankName, parsed.bankName),
-    );
-    if (exact) return exact;
-    // 2. suffix (last-4 ↔ last-6 of one account), bank- and type-guarded.
-    const suffix = accounts
-      .filter(
-        (a) =>
-          a.type === parsed.accountType &&
-          banksAgree(a.bankName, parsed.bankName) &&
-          (maskMatch(a.mask, parsed.accountMask) ||
-            (a.aliasMasks || []).some((m) => maskMatch(m, parsed.accountMask))),
-      )
-      .sort((a, b) => onlyDigits(b.mask).length - onlyDigits(a.mask).length);
-    return suffix[0] || null;
-  }
-  return accounts.find((a) => a.type === parsed.accountType) || null;
-};
-
 /** Auto-create an account when an SMS references a mask we haven't seen. */
 const ensureAccountForParsed = (accounts, parsed) => {
   if (!parsed) return { accounts, account: null };
@@ -293,6 +254,25 @@ const ensureAccountForParsed = (accounts, parsed) => {
 
 const applyDelta = (accounts, accountId, parsed) => {
   if (!accountId) return accounts;
+  const target = (accounts || []).find((a) => a.id === accountId);
+  if (!target) return accounts;
+
+  // ── The anchor is ground truth, in BOTH directions ────────────────────────
+  // When the user corrects a balance we stamp `anchoredAt`, and ingest skips the
+  // delta for anything dated before it — the figure they typed already includes
+  // that spend. That guard used to live at the ingest CALL SITE only, so the four
+  // reversal paths (delete / ignore / unignore / edit) backed out deltas that had
+  // never been applied: ignoring one ₹700 pre-anchor debit moved the balance to
+  // ₹10,700 against a true ₹10,000, permanently. Since the anchor is stamped
+  // `Date.now()`, every transaction already in the app is pre-anchor the moment
+  // it's set — so this was reachable by ignoring almost any row.
+  //
+  // Putting it here rather than at ~20 call sites means a new path cannot
+  // reintroduce the asymmetry by omission. A transaction with no date is treated
+  // as current (apply): failing to record real money is worse than the reverse.
+  const at = parsed?.createdAt ? new Date(parsed.createdAt).getTime() : NaN;
+  if (target.anchoredAt && Number.isFinite(at) && at < target.anchoredAt) return accounts;
+
   const sign = parsed.type === TRANSACTION_TYPES.DEBIT ? -1 : 1;
   return accounts.map((a) =>
     a.id === accountId ? { ...a, balance: a.balance + sign * parsed.amount } : a
@@ -707,8 +687,12 @@ const sumCaps = (perCategory) =>
  * vanished after 90 days and long-run "spend by place" analytics were impossible.
  * Additive + backward compatible: older aggregates simply have no `byLocation`.
  */
-const aggregate = (transactions, groups = []) => {
+const aggregate = (transactions, groups = [], accounts = []) => {
   const out = {};
+  // Bucket by the SAME rule the screens use, not by a bare `accountId`: a row with
+  // a dangling id (its account deleted or merged) still moved real money, and
+  // dropping it here made a historical month disagree with the live ledger.
+  const acctKey = (t) => resolveTxnAccount(t, accounts)?.id || t.accountId || null;
   transactions.forEach((t) => {
     if (t.isIgnored) return;
     // Group memos AND txns in an excluded personal group stay out of historical totals,
@@ -729,7 +713,8 @@ const aggregate = (transactions, groups = []) => {
       if (place && !NON_SPEND_CATS.has(t.categoryId)) {
         a.byLocation[place] = (a.byLocation[place] || 0) + spend;
       }
-      if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) - t.amount;
+      const ak1 = acctKey(t);
+      if (ak1) a.byAccount[ak1] = (a.byAccount[ak1] || 0) - t.amount;
     } else if (isRefundCredit(t)) {
       // Refund/cashback: money back for a prior payment. Nets DOWN spend and its
       // own category (not income). Balance-wise it's still a credit (byAccount +).
@@ -738,11 +723,13 @@ const aggregate = (transactions, groups = []) => {
         a.totalSpend -= t.amount;
         if (place) a.byLocation[place] = (a.byLocation[place] || 0) - t.amount;
       }
-      if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) + t.amount;
+      const ak2 = acctKey(t);
+      if (ak2) a.byAccount[ak2] = (a.byAccount[ak2] || 0) + t.amount;
     } else if (t.type === TRANSACTION_TYPES.CREDIT) {
       a.byCategory[t.categoryId] = (a.byCategory[t.categoryId] || 0) + t.amount;
       if (!NON_SPEND_CATS.has(t.categoryId)) a.totalIncome += t.amount;
-      if (t.accountId) a.byAccount[t.accountId] = (a.byAccount[t.accountId] || 0) + t.amount;
+      const ak3 = acctKey(t);
+      if (ak3) a.byAccount[ak3] = (a.byAccount[ak3] || 0) + t.amount;
     }
   });
   return out;
@@ -2607,12 +2594,9 @@ export const useEPurseStore = create(
             return;
           }
 
-          // Skip balance delta for transactions older than a manual anchor — the
-          // anchor already reflects the correct balance up to that point.
-          const anchoredAt = account?.anchoredAt ?? 0;
-          nextAccounts = (anchoredAt && txnTime < anchoredAt)
-            ? accountsWithMatch
-            : applyDelta(accountsWithMatch, account?.id, candidate);
+          // The pre-anchor skip lives inside applyDelta now, so ingest and every
+          // reversal path share one rule (see the comment there).
+          nextAccounts = applyDelta(accountsWithMatch, account?.id, candidate);
           nextTransactions = [candidate, ...nextTransactions];
           added.push(candidate);
         });
@@ -3534,7 +3518,7 @@ export const useEPurseStore = create(
           });
 
           // Merge new aggregates into the existing map.
-          const newAggs = aggregate(toAggregate, s.groups);
+          const newAggs = aggregate(toAggregate, s.groups, s.accounts);
           const merged = { ...s.monthlyAggregates };
           Object.entries(newAggs).forEach(([k, v]) => {
             if (!merged[k]) {
@@ -4181,7 +4165,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 24,
+      version: 25,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -4586,6 +4570,107 @@ export const useEPurseStore = create(
           // future accent is covered by the same line.
           if (!THEMES[state.themeId]) {
             state = { ...state, themeId: DEFAULT_THEME_ID };
+          }
+        }
+
+        if (version < 25) {
+          // ── Repair budget history snapshotted with ZERO spend ──────────────
+          // Until Aug-9-26, `rolloverBudgetIfNeeded` built the finished month's
+          // `actual` figures from `monthlyAggregates[prevMonth]` — but aggregates
+          // are only written by compaction at 90 days, so a month that ended
+          // yesterday had none and EVERY actual snapshotted as 0.
+          //
+          // The rollover was fixed, but nothing repaired the entries already
+          // written. Anyone whose month rolled over before that build still sees a
+          // recap claiming they spent nothing, saved their entire cap, and kept a
+          // budget streak they actually broke — permanently, because the snapshot
+          // is what every later render reads.
+          //
+          // Recompute from raw transactions where they survive (the 90-day window
+          // covers the recent months that matter), falling back to the aggregate
+          // for older ones — the same raw-first order the fixed rollover uses. A
+          // month with NEITHER is left untouched rather than zeroed: no evidence is
+          // not the same as no spend.
+          const history = state.budgetHistory || {};
+          const keys = Object.keys(history).sort();
+          if (keys.length > 0) {
+            const groups = state.groups || [];
+            const txns = state.transactions || [];
+            const repaired = {};
+
+            for (const mk of keys) {
+              const entry = history[mk];
+              if (!entry || !entry.perCategory) { repaired[mk] = entry; continue; }
+
+              const byParent = {};
+              const raw = txns.filter((t) => monthKey(new Date(t.createdAt)) === mk);
+              const agg = state.monthlyAggregates?.[mk];
+              if (raw.length > 0) {
+                raw.forEach((t) => {
+                  if (t.isIgnored) return;
+                  if (!countsForSpend(t)) return;
+                  if (NON_SPEND_CATS.has(t.categoryId)) return;
+                  if (spendExcluded(t, groups)) return;
+                  const pid = parentCatId(t);
+                  if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
+                  byParent[pid] = (byParent[pid] || 0) + spendContribution(t);
+                });
+                Object.keys(byParent).forEach((k) => { if (byParent[k] < 0) byParent[k] = 0; });
+              } else if (agg?.byCategory) {
+                Object.entries(agg.byCategory).forEach(([cid, amt]) => {
+                  if (NON_SPEND_CATS.has(cid)) return;
+                  const pid = CAT_MAPS.legacyToParentId[cid] || cid;
+                  if (!BUDGETABLE_PARENT_IDS.has(pid)) return;
+                  byParent[pid] = (byParent[pid] || 0) + amt;
+                });
+              } else {
+                // No raw rows and no aggregate — nothing to recompute FROM.
+                repaired[mk] = entry;
+                continue;
+              }
+
+              const perCategory = {};
+              let totalActual = 0;
+              Object.entries(entry.perCategory).forEach(([pid, v]) => {
+                const cap = v?.cap ?? 0;
+                const actual = byParent[pid] || 0;
+                perCategory[pid] = { cap, actual };
+                totalActual += actual;
+              });
+              const totalCap = entry.totalCap ?? null;
+              repaired[mk] = {
+                ...entry,
+                perCategory,
+                totalActual,
+                status: totalCap != null ? (totalActual <= totalCap ? 'under' : 'over') : null,
+                overshoot: (totalCap != null && totalActual > totalCap) ? totalActual - totalCap : 0,
+              };
+            }
+
+            // The streak was derived from those zeroes, so it is wrong too: a blown
+            // month recorded as 'under' INCREMENTED the run instead of resetting it.
+            // Replay the chain in month order over the repaired statuses.
+            let current = 0;
+            let lastResetMonth = state.budgetStreak?.lastResetMonth ?? null;
+            let best = 0;
+            for (const mk of keys) {
+              const st = repaired[mk]?.status;
+              if (st === 'under') { current += 1; if (current > best) best = current; }
+              else if (st === 'over') { current = 0; lastResetMonth = mk; }
+              if (repaired[mk]) repaired[mk] = { ...repaired[mk], streakAfter: current };
+            }
+            state = {
+              ...state,
+              budgetHistory: repaired,
+              budgetStreak: {
+                current,
+                // Never DEMOTE a best the user really earned: history can be partial
+                // (old months are pruned), so a replay over what survives can only
+                // ever be a lower bound on their all-time best.
+                best: Math.max(best, state.budgetStreak?.best ?? 0),
+                lastResetMonth,
+              },
+            };
           }
         }
 

@@ -59,6 +59,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
+import CardSkeleton from './CardSkeleton';
 import {
   colors, mix, radius, readableOn, shadows, spacing,
   typography as typographyBase, withAlpha,
@@ -77,6 +78,13 @@ import type { TextStyle } from 'react-native';
 
 // The JS theme widens fontWeight to `string` (ui-consistency §1).
 const typography = typographyBase as unknown as Record<string, TextStyle>;
+
+/**
+ * Height the loading skeleton reserves — the card's own `minHeight`, so the strip
+ * does not resize when real cards replace it. Kept next to that style; if the
+ * card's minimum changes, this has to move with it (a test asserts they match).
+ */
+const SKELETON_H = 138;
 
 /**
  * One card. Built by `buildHomeCards()`; this component never constructs one.
@@ -226,9 +234,37 @@ CarouselCard.displayName = 'CarouselCard';
 type Props = {
   cards: HomeCard[];
   onNavigate: (route: string, params?: object) => void;
+  /**
+   * The data behind these cards isn't ready yet (the persisted store is still
+   * rehydrating). Shows a skeleton INSTEAD of cards.
+   *
+   * Not cosmetic: with an empty store every live builder returns null and
+   * `buildHomeCards` falls back to the promo banners, so a mid-month user saw
+   * five feature ads flash past before their real cards arrived — and since the
+   * two sets share no ids, the list unmounted and remounted every item under the
+   * scroll position. Waiting is the honest thing to render.
+   */
+  loading?: boolean;
+  /**
+   * Horizontal padding of the host to break OUT of, so the strip spans the full
+   * screen. Pass the host's gutter (Dashboard: `spacing.lg`).
+   *
+   * Without it the active card is DOUBLE-inset — the host's 16pt gutter plus the
+   * 28pt side peek — so it started 44pt from the screen edge while every other
+   * Home card starts at 16pt, and read as a narrow strip floating inside the page
+   * rather than as the page's own content. Bleeding the container gives that 32pt
+   * straight back to the card (272 → 304pt on a 360pt screen) without touching the
+   * peek.
+   *
+   * Note the card still cannot reach the 16pt gutter: at that inset the neighbour
+   * sliver computes NEGATIVE (the gap plus the 0.94 scale swallow it), so the peek
+   * and the alignment spine are mutually exclusive. 26pt is the floor for a
+   * readable peek; 28 is where it sits.
+   */
+  bleed?: number;
 };
 
-const HomeCarousel: React.FC<Props> = ({ cards, onNavigate }) => {
+const HomeCarousel: React.FC<Props> = ({ cards, onNavigate, loading = false, bleed = 0 }) => {
   const theme = useTheme() as any;
   const isFocused = useIsFocused();
   const [width, setWidth] = useState(0);
@@ -397,14 +433,33 @@ const HomeCarousel: React.FC<Props> = ({ cards, onNavigate }) => {
   // animation itself never touches JS).
 
   // No cards at all means no data AND no promos — render nothing rather than an
-  // empty bordered box.
-  if (count === 0) return null;
+  // empty bordered box. Not the same as `loading`, which has content coming.
+  if (count === 0 && !loading) return null;
+
+  // The width is measured, so the FIRST frame can never draw a card. That frame
+  // used to render nothing at all — a zero-height view that still took a slot in
+  // the Dashboard's section `gap`, i.e. the blank band on startup. The skeleton
+  // reserves the real height instead, so the layout is right before the data is.
+  const showSkeleton = loading || width === 0;
 
   return (
-    <View onLayout={onLayout}>
-      {/* Nothing renders until the width is known — at width 0 every card would
-          collapse and the snap interval would be meaningless. */}
-      {width > 0 && (
+    <View onLayout={onLayout} style={bleed ? { marginHorizontal: -bleed } : undefined}>
+      {showSkeleton && (
+        <View>
+          <CardSkeleton
+            height={SKELETON_H}
+            style={{ marginHorizontal: SIDE_PEEK }}
+            label="Loading your dashboard cards"
+          />
+          {/* Placeholder dots, so the strip doesn't grow taller when they appear. */}
+          <View style={styles.dots} pointerEvents="none">
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={[styles.dot, { backgroundColor: theme.divider }]} />
+            ))}
+          </View>
+        </View>
+      )}
+      {!showSkeleton && (
         <>
           <Animated.FlatList
             data={loopData}

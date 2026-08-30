@@ -33,9 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTabBarVisibility, TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import { useTheme } from '../hooks/useTheme';
-import { colors, mix, progressTrack, readableOn } from '../constants/theme';
-import { useEPurseStore } from '../store/ePurseStore';
-import { monthPace, PACE_HAIRLINE_H, PACE_NOTCH_W, PACE_STRIP_H } from '../analytics/monthPace';
+import { mix, readableOn } from '../constants/theme';
 
 /**
  * Was 18, which is undersized next to a 10px label in a 62pt bar — the platform
@@ -96,90 +94,45 @@ export default function AnimatedTabBar({ state, navigation }) {
         styles.container,
         {
           backgroundColor: theme.card,
+          borderTopColor: hairline,
           paddingBottom: bottomPad,
           height: TAB_BAR_HEIGHT + bottomPad,
           transform: [{ translateY }],
         },
       ]}
     >
-      <PaceLine bar={theme.card} accent={activeColor} hairline={hairline} />
-      <View style={styles.row}>
-        {state.routes.map((route, index) => {
-          const isFocused = state.index === index;
-          const cfg = TAB_CONFIG.find((t) => t.name === route.name);
-          if (!cfg) return null;
+      {state.routes.map((route, index) => {
+        const isFocused = state.index === index;
+        const cfg = TAB_CONFIG.find((t) => t.name === route.name);
+        if (!cfg) return null;
 
-          const onPress = () => {
-            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
-          };
+        const onPress = () => {
+          const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+          if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+        };
 
-          const ink = isFocused ? activeColor : theme.textSecondary;
+        const ink = isFocused ? activeColor : theme.textSecondary;
 
-          return (
-            <TouchableOpacity key={route.key} onPress={onPress} activeOpacity={0.7} style={styles.tab}>
-              <Ionicons name={isFocused ? cfg.icon : cfg.iconOutline} size={ICON_SIZE} color={ink} />
-              <Text style={[styles.label, { color: ink }]}>{cfg.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+        return (
+          <TouchableOpacity key={route.key} onPress={onPress} activeOpacity={0.7} style={styles.tab}>
+            <Ionicons name={isFocused ? cfg.icon : cfg.iconOutline} size={ICON_SIZE} color={ink} />
+            <Text style={[styles.label, { color: ink }]}>{cfg.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
     </Animated.View>
   );
 }
 
-/**
- * The bar's top edge: a plain hairline until there's a budget, then a 3pt track
- * of budget-used with a notch at where the month has got to (see
- * `analytics/monthPace.js` for the reasoning and the restraint decisions).
- *
- * Split out so `AnimatedTabBar` stays about navigation, and because this is the
- * only part of the bar that subscribes to transactions.
- */
-const PaceLine = ({ bar, accent, hairline }) => {
-  const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
-  const budget = useEPurseStore((s) => s.budget);
-  const transactions = useEPurseStore((s) => s.transactions);
-
-  // `getBudgetUsage` scans the month's transactions, and this component is
-  // mounted on every tab — so it must recompute only when its inputs move, not
-  // on every tab change or theme read.
-  const pace = useMemo(
-    () => monthPace(getBudgetUsage(), Date.now()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getBudgetUsage, budget, transactions],
-  );
-
-  if (!pace) return <View style={{ height: PACE_HAIRLINE_H, backgroundColor: hairline }} />;
-
-  // Over the cap recolours; being merely AHEAD of the month does not (see the
-  // module comment). `danger` is measured against the bar like any other graphic:
-  // it's 3.76:1 on white but would need lifting on a dark card.
-  const fillColor = pace.over ? readableOn(bar, colors.danger, 3) : accent;
-
-  return (
-    <View style={[styles.paceTrack, { backgroundColor: progressTrack(fillColor) }]}>
-      <View style={[styles.paceFill, { width: `${pace.fill * 100}%`, backgroundColor: fillColor }]} />
-      {/* The month marker is a CUT in the track, painted in the bar's own colour,
-          rather than a coloured tick. A tick has to contrast with the track AND
-          the fill, and no single colour does that across five accents — Platinum's
-          fill is near-black, Gold's is near-white. A gap reads on both, because
-          the fill is already measured to 3:1 against this very colour. */}
-      <View style={[styles.paceNotch, { left: `${pace.elapsed * 100}%`, backgroundColor: bar }]} />
-    </View>
-  );
-};
-
 const styles = StyleSheet.create({
-  // A COLUMN now — the pace line owns the top edge, above the row of tabs. The
-  // top border moved into `PaceLine` so one element owns that edge in both of its
-  // states (hairline / track) and they can't drift apart.
   container: {
+    flexDirection: 'row',
+    borderTopWidth: 0.5,
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    // Edge AND shadow, deliberately: content scrolls UNDER the bar, and a white
+    // Hairline AND shadow, deliberately: content scrolls UNDER the bar, and a white
     // card passing beneath a white bar is separated by nothing else. The
     // elevation was 16 — Android's depth for a dialog — brought to the 8 the
     // platform specs for a bottom bar.
@@ -189,16 +142,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  row: { flexDirection: 'row', flex: 1 },
-  paceTrack: {
-    height: PACE_STRIP_H,
-    // The notch is absolutely positioned against this, and a track at 100% must
-    // clip its own fill rather than paint over the tabs.
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  paceFill: { position: 'absolute', left: 0, top: 0, bottom: 0 },
-  paceNotch: { position: 'absolute', top: 0, bottom: 0, width: PACE_NOTCH_W },
   tab: {
     flex: 1,
     alignItems: 'center',

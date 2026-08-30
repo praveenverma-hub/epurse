@@ -49,6 +49,7 @@ import InfoIcon from '../components/InfoIcon';
 import EditIcon from '../components/EditIcon';
 import MonthDivider from '../components/MonthDivider';
 import { monthKey } from '../utils/format';
+import { txnBelongsToAccount } from '../utils/accountMatch';
 import { useAnchorToast, BalanceAnchorModal } from './OnboardingExperience';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import SectionHeader from '../components/SectionHeader';
@@ -266,23 +267,18 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => sub.remove();
   }, [isSensitive, authenticate]);
 
-  // Transactions for this account only. Prefer direct accountId link; fall back
-  // to type + mask for legacy rows that predate stable account ids.
+  // Transactions for this account only.
+  //
+  // This used to hand-roll its own rule — `accountId` with NO fallback when that
+  // id had gone stale, plus an `accountType` equality test on the mask path. Both
+  // dropped real rows: a transaction the parser typed as a Debit Card (a known
+  // parser gap) on a Bank account vanished from that account's ledger while
+  // analytics still counted it, so a card read ~14k in analytics and ~11k here.
+  // `resolveTxnAccount` is the store's OWN matcher — the one that assigned
+  // `accountId` at ingest — so the ledger can no longer contradict it.
   const belongsToAccount = useCallback(
-    (t: Txn) => {
-      if (!account) return false;
-      if (t.isIgnored) return false;
-      if (t.accountId) return t.accountId === account.id;
-      if (account.mask && t.accountMask) {
-        if (t.accountMask === account.mask && t.accountType === account.type) return true;
-        // A debit card merged into this bank keeps its own (card) mask + type, so
-        // match the bank's linked card masks too (mirrors matchAccount in the store).
-        if ((account.aliasMasks || []).includes(t.accountMask)) return true;
-        return false;
-      }
-      return false;
-    },
-    [account],
+    (t: Txn) => !t.isIgnored && txnBelongsToAccount(t, account, accounts),
+    [account, accounts],
   );
 
   const ledger = useMemo(() => {

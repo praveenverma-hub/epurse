@@ -118,6 +118,42 @@ console.log('\n── loop index mapping ──');
     [0, N + 1].every((at) => { const t = wrapTarget(at, N, true); return t >= 1 && t <= N; }));
 }
 
+console.log('\n── the strip must span the SCREEN, not the page gutter ──');
+// The active card was inset TWICE: the Dashboard's 16pt body gutter plus the 28pt
+// side peek, so it began 44pt from the screen edge while every other Home card
+// begins at 16pt. It read as a narrow strip floating inside the page. HomeCarousel
+// takes a `bleed` prop (the host's gutter) and cancels it with a negative margin.
+{
+  const GUTTER = 16;   // Dashboard bodyContent paddingHorizontal (spacing.lg)
+  for (const screen of [360, 390, 412]) {
+    const inset = fullBleedCardW(screen - 2 * GUTTER);   // what it used to be
+    const bled  = fullBleedCardW(screen);                // what it is now
+    check(`screen ${screen}: bleeding the gutter widens the card by exactly 2×${GUTTER}`,
+      bled - inset === 2 * GUTTER, `${inset} → ${bled}`);
+    check(`screen ${screen}: the card's edge moves from ${GUTTER + SIDE_PEEK}pt to ${SIDE_PEEK}pt`,
+      carouselMetrics(screen, bled).sidePad === SIDE_PEEK);
+    // Still comfortably the dominant thing on screen, but not edge-to-edge —
+    // a full-width card with no inset would collide with the peek entirely.
+    const pct = (100 * bled) / screen;
+    check(`screen ${screen}: the card takes ${pct.toFixed(0)}% of the width`, pct > 80 && pct < 92,
+      `${pct.toFixed(1)}%`);
+  }
+
+  // Why the card CANNOT simply align with the 16pt gutter: at that inset the
+  // neighbour sliver goes negative — the gap plus the 0.94 scale swallow it —
+  // so a visible peek and the page's alignment spine are mutually exclusive.
+  const sliverAt = (peek, screen = 360) => {
+    const cw = screen - 2 * peek;
+    return peek - CARD_GAP - (1 - NEIGHBOUR_SCALE) * cw / 2;
+  };
+  check(`aligning to the ${GUTTER}pt gutter would erase the peek (${sliverAt(GUTTER).toFixed(1)}pt)`,
+    sliverAt(GUTTER) < 0, `${sliverAt(GUTTER).toFixed(1)}`);
+  check(`SIDE_PEEK ${SIDE_PEEK} is at or above the floor for a readable peek`,
+    sliverAt(SIDE_PEEK) >= 8, `${sliverAt(SIDE_PEEK).toFixed(1)}pt`);
+  // Don't shrink it "to gain width" without re-checking this: 26 is the floor.
+  check('one point below the floor would fail', sliverAt(24) < 8, `${sliverAt(24).toFixed(1)}`);
+}
+
 console.log(`\n${'─'.repeat(34)}`);
 console.log(`  ${fail === 0 ? C.green : C.red}${pass}/${pass + fail} passed${C.reset}`);
 process.exit(fail === 0 ? 0 : 1);

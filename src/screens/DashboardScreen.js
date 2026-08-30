@@ -46,7 +46,7 @@ import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
-import { syncNow } from '../hooks/useSmsSync';
+import { syncNow, whenFirstSweepSettled } from '../hooks/useSmsSync';
 import { TAB_BAR_HEIGHT, tabBarClearance } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
@@ -90,6 +90,7 @@ import SectionHeader from '../components/SectionHeader';
 import HeaderChip from '../components/HeaderChip';
 import HomeCarousel from '../components/HomeCarousel';
 import { buildHomeCards, PROMO_CARDS } from '../analytics/homeCards';
+import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { detectSubscriptions } from '../analytics/behavioralSelectors';
 // ── Period config ─────────────────────────────────────────────────────────────
 // `a11y` spells out what the single letter means — "D" alone is read aloud as
@@ -184,6 +185,9 @@ const DashboardScreen = ({ navigation }) => {
   const theme           = useTheme();
   const gradient = useGradient();
   const toast           = useToast();
+  const hydrated        = useStoreHydrated();
+  // The reward store persists separately and hydrates FIRST — see the check-in effect.
+  const rewardsHydrated = useStoreHydrated(useRewardStore);
   const transactions    = useEPurseStore((s) => s.transactions);
   const categories      = useEPurseStore((s) => s.categories);
   const monthlyAggs     = useEPurseStore((s) => s.monthlyAggregates);
@@ -284,8 +288,29 @@ const DashboardScreen = ({ navigation }) => {
   // (ignored / NON_SPEND / refund netting / spendExcluded) and the raw-first,
   // aggregate-as-fallback rule — a hand-rolled loop here would drift from the
   // rest of the app, which is exactly the bug this codebase keeps re-finding.
-  const budgetUsage = useEPurseStore((s) => (s.budget ? s.getBudgetUsage() : null));
-  const topCategory = useEPurseStore((s) => s.getCategoryBreakdown()[0] || null);
+  // These two are computed in a useMemo rather than inside the zustand selector.
+  // A selector runs on EVERY store write and its result is compared by identity —
+  // and both getters build a fresh object each call, so they never compared equal
+  // and this screen re-rendered (and rebuilt every Home card) on every single
+  // store update. That is worst exactly at launch, when the SMS sweep writes
+  // repeatedly, which is the moment the carousel was visibly struggling.
+  // `budget` is already subscribed above (line ~214) — don't re-declare it.
+  // Subscribed for RE-RENDER, not because it's read directly: `spendExcluded`
+  // consults a module-level mirror, so without this dep a spend-rule change
+  // wouldn't invalidate the memos below (same pattern as AnalyticsScreen).
+  const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
+  const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
+  const getCategoryBreakdown = useEPurseStore((s) => s.getCategoryBreakdown);
+  const budgetUsage = useMemo(
+    () => (budget ? getBudgetUsage() : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [budget, transactions, groups, excludedExpenseParents, getBudgetUsage],
+  );
+  const topCategory = useMemo(
+    () => getCategoryBreakdown()[0] || null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [transactions, groups, excludedExpenseParents, getCategoryBreakdown],
+  );
   const weekSummary = useEPurseStore(selectWeeklySummary);
   const ccBills     = useEPurseStore((s) => s.ccBills);
 
@@ -421,11 +446,35 @@ const DashboardScreen = ({ navigation }) => {
   // store can correctly evaluate Zero-Transaction Day eligibility. The
   // current queue is always empty at morning open — using it caused a false
   // SAVINGS bonus every single day.
+  //
+  // ⚠ It must NOT run until the app actually knows what happened yesterday. Both
+  // preconditions below caused a real bug — a Zero-Transaction bonus awarded to a
+  // user who HAD spent the day before:
+  //
+  //   1. BOTH stores must be rehydrated. They persist separately and race: the
+  //      reward store is a handful of counters and lands first, while the finance
+  //      store carries every transaction and lands later. In that window
+  //      `lastCheckedInDate` is already yesterday (so this is not treated as a
+  //      first check-in) while `transactions` is still empty — so yesterday's
+  //      count reads 0 and the bonus fires.
+  //   2. The first SMS sweep must have settled. Yesterday's bank messages only
+  //      enter the store when the sweep imports them, and someone who did not open
+  //      the app yesterday has none of them at mount — which is exactly the person
+  //      this question is asked about.
+  //
+  // And it is not self-correcting: `checkIn` is idempotent per calendar day
+  // (gap === 0 → SAME_DAY no-op), so the first answer of the day is the final one.
   useEffect(() => {
+    if (!hydrated || !rewardsHydrated) return undefined;
+    let cancelled = false;
+
     // Pass yesterday's count (Zero-Transaction Day / SAVINGS eligibility) AND the
     // missed-days count so a skipped app-open on a no-transaction day doesn't break
     // the Aware Run (selectGapTransactionCount → forgivenGap in the reward store).
-    const runCheckIn = () => {
+    const runCheckIn = async () => {
+      await whenFirstSweepSettled();
+      if (cancelled) return;
+      // Read AFTER the await, never before: the sweep is the whole point.
       const st = useEPurseStore.getState();
       const yesterdayCount = selectYesterdayTransactionCount(st);
       const gapCount = selectGapTransactionCount(st, useRewardStore.getState().lastCheckedInDate);
@@ -435,8 +484,8 @@ const DashboardScreen = ({ navigation }) => {
     // Fire once on initial mount as well (focus listener doesn't fire on the
     // first render because the screen is already focused).
     runCheckIn();
-    return sub;
-  }, [navigation, checkIn]);
+    return () => { cancelled = true; sub(); };
+  }, [navigation, checkIn, hydrated, rewardsHydrated]);
 
 
   // Recomputed on every focus, not memoized once at mount: this screen is the
@@ -705,6 +754,15 @@ const DashboardScreen = ({ navigation }) => {
             theme and the numbers (see the note in HomeCarousel). */}
         <HomeCarousel
           cards={homeCards}
+          // An empty store is not a user with no data. Until AsyncStorage returns,
+          // every live card builder sees nothing and the promo banners fill in —
+          // so without this a mid-month user watched five feature ads flash past
+          // before their real cards arrived. See useStoreHydrated.
+          loading={!hydrated}
+          // Break out of `bodyContent`'s gutter so the strip is full-screen. The
+          // card was inset twice — 16pt gutter + 28pt peek = 44pt from the edge,
+          // against 16pt for every other card on the page.
+          bleed={spacing.lg}
           onNavigate={(route, params) => navigation.navigate(route, params)}
         />
 

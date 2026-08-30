@@ -1570,5 +1570,585 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('and leaves the OTHER card\'s bill alone', after.includes('9876'), JSON.stringify(after));
 }
 
+// ── Account bucketing: the two surfaces MUST agree ───────────────────────────
+// Reported bug: a card showed ~14k of spend in the analytics "Spend by account"
+// bar and ~11k in the account section. Cause: three hand-rolled rules for "which
+// account is this transaction on" — the ingest matcher, an exact-mask Map in
+// AnalyticsScreen, and an accountId-with-no-fallback + accountType-equality test
+// in AccountDetailsScreen. Rows the parser typed differently, or whose account id
+// had gone stale, showed in one and not the other.
+//
+// This asserts the INVARIANT rather than either number: every spend-counting
+// transaction lands on exactly the same account in both surfaces, and none is
+// stranded in "Unknown" while a real account claims it.
+{
+  const { resolveTxnAccount, txnBelongsToAccount } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountMatch.js');
+  const { countsForSpend, spendContribution } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
+  const { NON_SPEND_CATEGORY_IDS } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+  const { spendExcluded } = mod;
+
+  reset();
+  // A normal month on one bank, reported the way real banks actually vary it:
+  // last-4 in some messages, last-6 in others, sometimes card-flavoured wording.
+  ingest('HDFCBK', 'Rs.4,000 debited from A/c XX4021 at BIGBAZAAR on 02-08-26.', { receivedAt: T0, smsId: 'x1' });
+  ingest('HDFCBK', 'Rs.3,000 debited from A/c XX114021 at SWIGGY on 03-08-26.',  { receivedAt: T0, smsId: 'x2' });
+  ingest('HDFCBK', 'Rs.2,500 spent on your HDFC Card xx4021 at AMAZON on 04-08-26.', { receivedAt: T0, smsId: 'x3' });
+  ingest('ICICIB', 'Rs.1,200 debited from A/c XX7788 at UBER on 05-08-26.', { receivedAt: T0, smsId: 'x4' });
+
+  const state = () => useStore.getState();
+  const spendRows = () => state().transactions.filter(
+    (t) => countsForSpend(t)
+      && !NON_SPEND_CATEGORY_IDS.has(t.categoryId)
+      && !spendExcluded(t, state().groups),
+  );
+
+  // What "Spend by account" bars, keyed the way AnalyticsScreen keys them.
+  const analyticsTotals = () => {
+    const out = {};
+    spendRows().forEach((t) => {
+      const acct = resolveTxnAccount(t, state().accounts);
+      const key = acct ? acct.id : (t.accountType || 'Unknown');
+      out[key] = (out[key] || 0) + spendContribution(t);
+    });
+    return out;
+  };
+  // What each account's own ledger would total, over the same rows.
+  const ledgerTotals = () => {
+    const out = {};
+    state().accounts.forEach((a) => {
+      const sum = spendRows()
+        .filter((t) => txnBelongsToAccount(t, a, state().accounts))
+        .reduce((n, t) => n + spendContribution(t), 0);
+      if (sum) out[a.id] = sum;
+    });
+    return out;
+  };
+
+  // Compare as SORTED (key, rounded amount) pairs: bucket insertion order differs
+  // between the two surfaces by construction (one walks transactions, the other
+  // walks accounts), and a JSON compare would fail on that alone.
+  const norm = (o) => Object.entries(o)
+    .map(([k, v]) => `${k}=${Math.round(v)}`).sort().join(',');
+
+  const A = analyticsTotals(), L = ledgerTotals();
+  check('every account totals the SAME in analytics and in its own ledger',
+    norm(A) === norm(L), `analytics ${norm(A)} vs ledger ${norm(L)}`);
+  check('no spend is stranded in an "Unknown" bucket',
+    !Object.keys(A).some((k) => !state().accounts.some((a) => a.id === k)),
+    JSON.stringify(Object.keys(A)));
+  check('and the money is all still there',
+    Math.round(Object.values(A).reduce((a, b) => a + b, 0)) === 10700,
+    `${Object.values(A).reduce((a, b) => a + b, 0)}`);
+
+  // A DANGLING account id — the account was deleted or merged away, but the mask
+  // still says where the money moved. The old ledger rule hard-stopped on the id
+  // and dropped the row; analytics fell back to the mask and kept it. That single
+  // asymmetry is enough to explain a multi-thousand-rupee gap.
+  const bank = state().accounts.find((a) => a.mask && a.mask.endsWith('4021'));
+  useStore.setState({
+    transactions: state().transactions.map((t) =>
+      t.smsId === 'x1' ? { ...t, accountId: 'acc_deleted_ages_ago' } : t),
+  });
+  const A2 = analyticsTotals(), L2 = ledgerTotals();
+  check('a dangling accountId still resolves by mask — in BOTH surfaces',
+    norm(A2) === norm(L2), `analytics ${norm(A2)} vs ledger ${norm(L2)}`);
+  check('…and it lands back on the right account, not in "Unknown"',
+    Math.round(A2[bank.id]) === 9500, `${A2[bank.id]}`);
+}
+
+// ── The anchor is ground truth in BOTH directions ────────────────────────────
+// `ingestMessage` skipped the balance delta for a transaction dated before a
+// manual anchor, but delete/ignore/unignore/edit reversed deltas unconditionally
+// — backing out money that was never applied. The anchor is stamped Date.now(),
+// so every existing transaction is pre-anchor the moment one is set.
+{
+  const DAY = 86400000;
+  for (const [label, act] of [
+    ['ignore', (id) => useStore.getState().ignoreTransaction(id)],
+    ['delete', (id) => useStore.getState().deleteTransaction(id)],
+  ]) {
+    reset();
+    ingest('HDFCBK', 'Rs.500 debited from A/c XX4021 at STORE on 01-08-26.',
+      { receivedAt: T0 - 3 * DAY, smsId: `an-${label}-1` });
+    const acct = useStore.getState().accounts[0];
+    useStore.setState({
+      accounts: useStore.getState().accounts.map((a) =>
+        a.id === acct.id ? { ...a, balance: 10000, anchoredAt: Date.now() } : a),
+    });
+    ingest('HDFCBK', 'Rs.700 debited from A/c XX4021 at CAFE on 02-08-26.',
+      { receivedAt: T0 - 2 * DAY, smsId: `an-${label}-2` });
+    check(`${label}: a pre-anchor txn does not move the balance on the way IN`,
+      useStore.getState().accounts[0].balance === 10000,
+      `${useStore.getState().accounts[0].balance}`);
+    const t = useStore.getState().transactions.find((x) => x.amount === 700);
+    act(t.id);
+    check(`${label}: …and does not move it on the way OUT either`,
+      useStore.getState().accounts[0].balance === 10000,
+      `got ${useStore.getState().accounts[0].balance}, expected 10000 — a delta that was never applied must never be reversed`);
+  }
+
+  // The guard must not swallow ordinary post-anchor activity.
+  reset();
+  ingest('HDFCBK', 'Rs.900 debited from A/c XX4021 at STORE on 01-08-26.', { receivedAt: T0, smsId: 'post-1' });
+  const a0 = useStore.getState().accounts[0];
+  useStore.setState({
+    accounts: useStore.getState().accounts.map((a) =>
+      a.id === a0.id ? { ...a, balance: 5000, anchoredAt: Date.now() - 60_000 } : a),
+  });
+  ingest('HDFCBK', 'Rs.200 debited from A/c XX4021 at CAFE on 09-08-26.',
+    { receivedAt: Date.now(), smsId: 'post-2' });
+  check('a POST-anchor txn still moves the balance',
+    useStore.getState().accounts[0].balance === 4800, `${useStore.getState().accounts[0].balance}`);
+  const t2 = useStore.getState().transactions.find((x) => x.amount === 200);
+  useStore.getState().ignoreTransaction(t2.id);
+  check('…and ignoring it correctly gives the money back',
+    useStore.getState().accounts[0].balance === 5000, `${useStore.getState().accounts[0].balance}`);
+}
+
+// ── A credit card's OUTSTANDING vs its month spend ───────────────────────────
+// Asked directly: "for cc balances they should be same for month I guess". They
+// are — but only while the card starts the month at zero and nothing is paid off
+// during it. Outstanding answers "what do I still owe", month spend answers "what
+// did I spend in this month"; a payment moves the first and not the second, and a
+// carried balance moves the first and not the second either.
+//
+// The identity that DOES always hold is pinned here, because it's the one a
+// future change could break silently:
+//     outstanding  ==  Σ spend on the card (all months)  −  Σ payments applied
+{
+  const { resolveTxnAccount } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountMatch.js');
+  const { countsForSpend, spendContribution } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
+  const { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+  const { isSameMonth } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+  const { spendExcluded } = mod;
+
+  const st = () => useStore.getState();
+  const card = () => st().accounts.find((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD);
+  const outstanding = () => Math.abs(card().balance);
+  const spendIn = (when) => st().transactions
+    .filter((t) => countsForSpend(t) && isSameMonth(t.createdAt, when)
+      && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !spendExcluded(t, st().groups)
+      && resolveTxnAccount(t, st().accounts)?.id === card().id)
+    .reduce((n, t) => n + spendContribution(t), 0);
+
+  // 1. Nothing paid → they match exactly.
+  reset();
+  ingest('HDFCBK', 'Rs.2,000 spent on your HDFC Credit Card XX1234 at AMAZON on 01-08-26.',
+    { smsId: 'cc-a1', receivedAt: Date.now() });
+  ingest('HDFCBK', 'Rs.3,000 spent on your HDFC Credit Card XX1234 at SWIGGY on 05-08-26.',
+    { smsId: 'cc-a2', receivedAt: Date.now() });
+  check('CC: unpaid card — outstanding EQUALS this month\'s spend',
+    outstanding() === Math.round(spendIn(new Date())) && outstanding() === 5000,
+    `${outstanding()} vs ${Math.round(spendIn(new Date()))}`);
+
+  // 2. A refund nets BOTH sides down — it must not drift them apart.
+  ingest('HDFCBK', 'Rs.1,000 credited to your HDFC Credit Card XX1234 as refund from AMAZON on 06-08-26.',
+    { smsId: 'cc-a3', receivedAt: Date.now() });
+  check('CC: a refund reduces outstanding and spend by the SAME amount',
+    outstanding() === Math.round(spendIn(new Date())) && outstanding() === 4000,
+    `${outstanding()} vs ${Math.round(spendIn(new Date()))}`);
+
+  // 3. Carry-over: last month unpaid. Outstanding is all-time, spend is per-month,
+  //    so they MUST differ — and must reconcile exactly.
+  reset();
+  const lastMonth = new Date(); lastMonth.setMonth(lastMonth.getMonth() - 1);
+  ingest('HDFCBK', 'Rs.8,000 spent on your HDFC Credit Card XX1234 at AMAZON on 05-07-26.',
+    { smsId: 'cc-b1', receivedAt: lastMonth.getTime() });
+  ingest('HDFCBK', 'Rs.2,500 spent on your HDFC Credit Card XX1234 at SWIGGY on 03-08-26.',
+    { smsId: 'cc-b2', receivedAt: Date.now() });
+  check('CC: a carried balance reconciles as last month + this month',
+    outstanding() === Math.round(spendIn(lastMonth)) + Math.round(spendIn(new Date()))
+    && outstanding() === 10500,
+    `${outstanding()} vs ${Math.round(spendIn(lastMonth))}+${Math.round(spendIn(new Date()))}`);
+  check('CC: …and this month alone is only the newer spend',
+    Math.round(spendIn(new Date())) === 2500, `${Math.round(spendIn(new Date()))}`);
+
+  // 4. True-up to Zero, then fresh spend. The card is declared paid off, so
+  //    outstanding restarts from 0 while the month's spend keeps its history —
+  //    they differ by exactly what was paid off, which is correct, not a drift.
+  reset();
+  ingest('HDFCBK', 'Rs.5,000 spent on your HDFC Credit Card XX1234 at AMAZON on 01-08-26.',
+    { smsId: 'cc-c1', receivedAt: Date.now() });
+  ingest('HDFCBK', 'Payment of Rs.5,000.00 received towards your HDFC Credit Card ending 1234. Thank you.',
+    { smsId: 'cc-c2', receivedAt: Date.now() });
+  check('CC: a recent payment queues a prompt', st().pendingCCPaymentQueue.length === 1,
+    `${st().pendingCCPaymentQueue.length}`);
+  useStore.getState().confirmCCTrueUp(null);
+  check('CC: True-up zeroes the outstanding', outstanding() === 0, `${outstanding()}`);
+  ingest('HDFCBK', 'Rs.1,500 spent on your HDFC Credit Card XX1234 at UBER on 09-08-26.',
+    { smsId: 'cc-c3', receivedAt: Date.now() });
+  check('CC: spend AFTER a true-up still moves the outstanding',
+    outstanding() === 1500, `${outstanding()} — the true-up anchor must not swallow later spend`);
+  check('CC: …and the month still remembers the paid-off spend',
+    Math.round(spendIn(new Date())) === 6500, `${Math.round(spendIn(new Date()))}`);
+}
+
+// ── Two cards, different banks, SAME last-4 ──────────────────────────────────
+// Real and common: an HDFC ··1234 and an ICICI ··1234. The bank name plus the
+// ending digits together are the card's identity, and that has to hold at ingest,
+// in the ledger, in analytics AND in every filter — a filter that leaks the other
+// card's spend is just as wrong as a balance that does.
+{
+  const { resolveTxnAccount, accountCandidates, isAmbiguousMatch, matchAccount } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountMatch.js');
+
+  reset();
+  ingest('HDFCBK', 'Rs.1,000 spent on your HDFC Credit Card XX1234 at AMAZON on 01-08-26.', { smsId: 'dup-h1' });
+  ingest('ICICIB', 'Rs.2,000 spent on your ICICI Credit Card XX1234 at SWIGGY on 02-08-26.', { smsId: 'dup-i1' });
+  ingest('HDFCBK', 'Rs.500 spent on your HDFC Credit Card XX1234 at UBER on 03-08-26.', { smsId: 'dup-h2' });
+
+  const st = () => useStore.getState();
+  const hdfc  = st().accounts.find((a) => (a.bankName || '').includes('HDFC'));
+  const icici = st().accounts.find((a) => (a.bankName || '').includes('ICICI'));
+
+  check('two same-last-4 cards from different banks stay SEPARATE accounts',
+    !!hdfc && !!icici && hdfc.id !== icici.id, JSON.stringify(st().accounts.map((a) => a.name)));
+  check('each card carries its own balance',
+    Math.abs(hdfc.balance) === 1500 && Math.abs(icici.balance) === 2000,
+    `hdfc ${hdfc.balance}, icici ${icici.balance}`);
+  check('the account NAME distinguishes them for the user',
+    hdfc.name !== icici.name && hdfc.name.includes('1234') && icici.name.includes('1234'),
+    `${hdfc.name} / ${icici.name}`);
+
+  // Resolution — the one rule every surface now shares.
+  const onHdfc  = st().transactions.filter((t) => resolveTxnAccount(t, st().accounts)?.id === hdfc.id);
+  const onIcici = st().transactions.filter((t) => resolveTxnAccount(t, st().accounts)?.id === icici.id);
+  check('transactions resolve to the RIGHT card, not the first one listed',
+    onHdfc.length === 2 && onIcici.length === 1,
+    `hdfc ${onHdfc.map((t) => t.amount)}, icici ${onIcici.map((t) => t.amount)}`);
+  check('…and no transaction resolves to both',
+    onHdfc.every((t) => !onIcici.includes(t)));
+
+  // The Activity filter (TransactionsScreen) uses exactly this predicate. It used
+  // to test a bare Set of masks, so selecting one card returned both cards' rows.
+  const activityFilter = (selectedIds) => st().transactions.filter((t) => {
+    const acct = resolveTxnAccount(t, st().accounts);
+    return !!acct && selectedIds.has(acct.id);
+  });
+  const justHdfc = activityFilter(new Set([hdfc.id]));
+  check('filtering to ONE card does not leak the other bank\'s spend',
+    justHdfc.length === 2 && justHdfc.every((t) => t.bankName.includes('HDFC')),
+    justHdfc.map((t) => `${t.amount}/${t.bankName}`).join(', '));
+  check('filtering to the other card returns only its own',
+    activityFilter(new Set([icici.id])).map((t) => t.amount).join() === '2000',
+    activityFilter(new Set([icici.id])).map((t) => t.amount).join());
+  check('selecting BOTH returns everything exactly once',
+    activityFilter(new Set([hdfc.id, icici.id])).length === 3);
+
+  // Ranking, not array order. A bank-confirmed match must beat an unconfirmed one,
+  // and an unknown-bank transaction must resolve the SAME way whichever order the
+  // accounts happen to sit in — it used to flip with the array.
+  const twoCards = [
+    { id: 'A_hdfc',  bankName: 'HDFC Bank',  mask: '1234', type: 'Credit Card', aliasMasks: [] },
+    { id: 'B_icici', bankName: 'ICICI Bank', mask: '1234', type: 'Credit Card', aliasMasks: [] },
+  ];
+  const probe = (bank) => ({ accountMask: '1234', accountType: 'Credit Card', bankName: bank });
+  check('a named bank picks its OWN card even when listed second',
+    matchAccount(twoCards, probe('ICICI Bank')).id === 'B_icici');
+  check('…and the reverse', matchAccount(twoCards, probe('HDFC Bank')).id === 'A_hdfc');
+  check('an unknown-bank txn resolves identically whichever order the accounts are in',
+    matchAccount(twoCards, probe(null))?.id === matchAccount([...twoCards].reverse(), probe(null))?.id,
+    `${matchAccount(twoCards, probe(null))?.id} vs ${matchAccount([...twoCards].reverse(), probe(null))?.id}`);
+  // The ids are chosen so the ALPHABETICAL tie-break would pick the WRONG one:
+  // without the bank-confirmed bonus this silently passes on id order alone, which
+  // is exactly how a mutation removing that bonus survived the first version.
+  check('a bank-CONFIRMED candidate outranks an unconfirmed one',
+    accountCandidates(
+      [{ id: 'a_unconfirmed', bankName: null, mask: '1234', type: 'Credit Card', aliasMasks: [] },
+       { id: 'z_hdfc',        bankName: 'HDFC Bank', mask: '1234', type: 'Credit Card', aliasMasks: [] }],
+      probe('HDFC Bank'),
+    )[0].account.id === 'z_hdfc');
+  check('…and that holds for a SUFFIX match too',
+    accountCandidates(
+      [{ id: 'a_unconfirmed', bankName: null, mask: '001234', type: 'Credit Card', aliasMasks: [] },
+       { id: 'z_hdfc',        bankName: 'HDFC Bank', mask: '001234', type: 'Credit Card', aliasMasks: [] }],
+      probe('HDFC Bank'),
+    )[0].account.id === 'z_hdfc');
+
+  // An EXACT mask must beat a suffix one. The suffix candidate is deliberately
+  // LONGER here, because the "prefer the most specific mask" tie-break would
+  // otherwise hand it the win — which is what let a mutation flattening the two
+  // scores survive.
+  const exactVsSuffix = [
+    { id: 'a_suffix', bankName: 'HDFC Bank', mask: '001234', type: 'Bank', aliasMasks: [] },
+    { id: 'z_exact',  bankName: 'HDFC Bank', mask: '1234',   type: 'Bank', aliasMasks: [] },
+  ];
+  check('an EXACT mask beats a longer suffix match',
+    matchAccount(exactVsSuffix, { accountMask: '1234', accountType: 'Bank', bankName: 'HDFC Bank' })?.id === 'z_exact',
+    matchAccount(exactVsSuffix, { accountMask: '1234', accountType: 'Bank', bankName: 'HDFC Bank' })?.id);
+
+  // A suffix match must stay TYPE-guarded: a credit card and a bank account that
+  // happen to share trailing digits are different money, and merging them would
+  // move one's spend onto the other's balance.
+  const cardAndBank = [
+    { id: 'a_bank', bankName: 'HDFC Bank', mask: '001234', type: 'Bank', aliasMasks: [] },
+  ];
+  check('a suffix match never crosses account TYPE',
+    matchAccount(cardAndBank, { accountMask: '1234', accountType: 'Credit Card', bankName: 'HDFC Bank' }) === null,
+    'a Credit Card ··1234 must not land on a Bank ··001234');
+  check('…but the same TYPE with a shared suffix still merges',
+    matchAccount(cardAndBank, { accountMask: '1234', accountType: 'Bank', bankName: 'HDFC Bank' })?.id === 'a_bank');
+  check('an unknown-bank collision is reported as AMBIGUOUS',
+    isAmbiguousMatch(twoCards, probe(null)) === true);
+  check('…and a named one is not',
+    isAmbiguousMatch(twoCards, probe('HDFC Bank')) === false);
+  check('one card alone is never ambiguous',
+    isAmbiguousMatch([twoCards[0]], probe(null)) === false);
+
+  // The guard must not break the ordinary case it was always meant to allow: the
+  // SAME account reported with different mask lengths still merges.
+  reset();
+  ingest('HDFCBK', 'Rs.4,000 debited from A/c XX4021 at BIGBAZAAR on 02-08-26.', { smsId: 'len-1' });
+  ingest('HDFCBK', 'Rs.3,000 debited from A/c XX114021 at SWIGGY on 03-08-26.', { smsId: 'len-2' });
+  check('last-4 ↔ last-6 of one account still merges (bank agrees)',
+    useStore.getState().accounts.length === 1,
+    JSON.stringify(useStore.getState().accounts.map((a) => a.mask)));
+}
+
+// ── Repairing budget history that was snapshotted with ZERO spend ────────────
+// Until Aug-9-26 the rollover read `monthlyAggregates[prevMonth]`, which does not
+// exist for a month that ended yesterday, so every `actual` snapshotted as 0. The
+// rollover was fixed — but the entries already written were not, and the snapshot
+// is what every later render reads. So last month's summary kept reporting ₹0
+// spent, "under", the entire cap saved, and a streak the user had actually broken.
+// Migration v25 recomputes them. This drives the REAL migrate function.
+{
+  const { monthKey } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+  const migrate = useStore.persist.getOptions().migrate;
+  const version = useStore.persist.getOptions().version;
+  check('store version is 25 (the repair migration)', version === 25, `${version}`);
+
+  // Build real transactions for last month: 18,000 of Food spend.
+  reset();
+  const prevDate = new Date();
+  prevDate.setMonth(prevDate.getMonth() - 1);
+  prevDate.setDate(15);
+  const PK = monthKey(prevDate);
+  // SWIGGY, not an unrecognised merchant: the enricher has to resolve it to the
+  // Food parent or the migration correctly ignores it as unbudgetable, and the
+  // test would be asserting nothing. (It caught exactly that on the first run.)
+  ingest('HDFCBK', 'Rs.18,000 debited from A/c XX4021 at SWIGGY on 15-07-26.',
+    { smsId: 'bh-1', receivedAt: prevDate.getTime() });
+  const realTxns = useStore.getState().transactions;
+  check('the fixture transaction landed in a BUDGETABLE parent',
+    realTxns.length === 1 && realTxns[0].amount === 18000
+    && (realTxns[0].parentCategory === 'Food & Dining' || realTxns[0].categoryId === 'food'),
+    JSON.stringify(realTxns.map((t) => `${t.amount}/${t.categoryId}/${t.parentCategory}`)));
+
+  // Exactly what the OLD rollover wrote: caps preserved, every actual zeroed,
+  // status 'under' because 0 <= cap, and a streak incremented on a blown month.
+  const corrupted = {
+    transactions: realTxns,
+    groups: [],
+    monthlyAggregates: {},
+    budgetHistory: {
+      [PK]: {
+        totalCap: 15000,
+        perCategory: { food: { cap: 10000, actual: 0 }, shopping: { cap: 5000, actual: 0 } },
+        totalActual: 0, status: 'under', overshoot: 0, streakAfter: 4,
+      },
+    },
+    budgetStreak: { current: 4, best: 4, lastResetMonth: null },
+  };
+
+  const fixed = migrate(corrupted, 24);
+  const e = fixed.budgetHistory[PK];
+  check('repair: the month\'s real spend is restored', e.totalActual === 18000, `${e.totalActual}`);
+  check('repair: the per-category row carries it', e.perCategory.food.actual === 18000,
+    JSON.stringify(e.perCategory));
+  check('repair: a category with no spend stays at 0', e.perCategory.shopping.actual === 0);
+  check('repair: caps are preserved untouched',
+    e.perCategory.food.cap === 10000 && e.totalCap === 15000);
+  check('repair: status flips to OVER', e.status === 'over', e.status);
+  check('repair: overshoot is the real 3000', e.overshoot === 3000, `${e.overshoot}`);
+  check('repair: the streak RESETS — it was incremented on a blown month',
+    fixed.budgetStreak.current === 0, `${fixed.budgetStreak.current}`);
+  check('repair: streakAfter on the entry matches', e.streakAfter === 0, `${e.streakAfter}`);
+  check('repair: a legitimately earned BEST is never demoted',
+    fixed.budgetStreak.best === 4, `${fixed.budgetStreak.best}`);
+  check('repair: lastResetMonth records the month that broke it',
+    fixed.budgetStreak.lastResetMonth === PK, fixed.budgetStreak.lastResetMonth);
+
+  // And the summary the user actually looks at now reads correctly.
+  useStore.setState({ ...corrupted, ...fixed });
+  const rep = mod.selectMonthlyReport(PK)(useStore.getState());
+  check('the monthly summary now shows the real spend, not 0',
+    rep.budget.totalActual === 18000 && rep.budget.status === 'over', JSON.stringify(rep.budget?.totalActual));
+  check('…and no longer claims the whole cap was saved',
+    rep.budget.saved === 0, `${rep.budget.saved}`);
+  check('…and reports the broken streak', rep.budget.streak === 0, `${rep.budget.streak}`);
+
+  // Idempotent: running it over ALREADY-correct data must not change anything.
+  const twice = migrate({ ...corrupted, ...fixed }, 24);
+  check('repair is idempotent', JSON.stringify(twice.budgetHistory) === JSON.stringify(fixed.budgetHistory),
+    'a second run must be a no-op');
+
+  // A month with NO evidence left (raw pruned, no aggregate) must be left ALONE,
+  // not zeroed — "no evidence" is not "no spend", and overwriting would destroy a
+  // correct snapshot the fixed rollover had written.
+  const ancient = {
+    transactions: [], groups: [], monthlyAggregates: {},
+    budgetHistory: { '2024-01': { totalCap: 9000, perCategory: { food: { cap: 9000, actual: 7000 } },
+      totalActual: 7000, status: 'under', overshoot: 0, streakAfter: 2 } },
+    budgetStreak: { current: 2, best: 5, lastResetMonth: null },
+  };
+  const kept = migrate(ancient, 24);
+  check('a month with no raw rows AND no aggregate is left untouched',
+    kept.budgetHistory['2024-01'].totalActual === 7000,
+    `${kept.budgetHistory['2024-01'].totalActual}`);
+
+  // The aggregate fallback still works for a genuinely old month.
+  const viaAgg = migrate({
+    transactions: [], groups: [],
+    monthlyAggregates: { '2024-02': { totalSpend: 4000, totalIncome: 0, byCategory: { food: 4000 }, byAccount: {} } },
+    budgetHistory: { '2024-02': { totalCap: 3000, perCategory: { food: { cap: 3000, actual: 0 } },
+      totalActual: 0, status: 'under', overshoot: 0, streakAfter: 1 } },
+    budgetStreak: { current: 1, best: 1, lastResetMonth: null },
+  }, 24);
+  check('an old month falls back to the aggregate and is repaired too',
+    viaAgg.budgetHistory['2024-02'].totalActual === 4000
+    && viaAgg.budgetHistory['2024-02'].status === 'over',
+    `${viaAgg.budgetHistory['2024-02'].totalActual}`);
+
+  // Multi-month streak replay: under, under, over, under -> current 1, best 2.
+  const chain = migrate({
+    transactions: [], groups: [],
+    monthlyAggregates: {
+      '2025-01': { byCategory: { food: 500 } }, '2025-02': { byCategory: { food: 500 } },
+      '2025-03': { byCategory: { food: 5000 } }, '2025-04': { byCategory: { food: 500 } },
+    },
+    budgetHistory: {
+      '2025-01': { totalCap: 1000, perCategory: { food: { cap: 1000, actual: 0 } }, totalActual: 0, status: 'under', streakAfter: 1 },
+      '2025-02': { totalCap: 1000, perCategory: { food: { cap: 1000, actual: 0 } }, totalActual: 0, status: 'under', streakAfter: 2 },
+      '2025-03': { totalCap: 1000, perCategory: { food: { cap: 1000, actual: 0 } }, totalActual: 0, status: 'under', streakAfter: 3 },
+      '2025-04': { totalCap: 1000, perCategory: { food: { cap: 1000, actual: 0 } }, totalActual: 0, status: 'under', streakAfter: 4 },
+    },
+    budgetStreak: { current: 4, best: 4, lastResetMonth: null },
+  }, 24);
+  check('the streak is REPLAYED month by month, not just reset',
+    chain.budgetStreak.current === 1
+    && chain.budgetHistory['2025-02'].streakAfter === 2
+    && chain.budgetHistory['2025-03'].streakAfter === 0
+    && chain.budgetHistory['2025-04'].streakAfter === 1,
+    JSON.stringify(Object.entries(chain.budgetHistory).map(([k, v]) => `${k}:${v.status}/${v.streakAfter}`)));
+  check('…and lastResetMonth is the month that actually broke it',
+    chain.budgetStreak.lastResetMonth === '2025-03', chain.budgetStreak.lastResetMonth);
+}
+
+// ── The Zero-Transaction bonus must not fire on a day you SPENT ──────────────
+// Reported: "I made some transactions the previous day, didn't review them, and
+// today saw 'no expense yesterday' and the bonus was given."
+//
+// The selector was never the problem — it counts SMS transactions dated
+// yesterday and does not look at `isReviewed` at all. The bug was WHEN it was
+// asked. `checkIn` is idempotent per calendar day (gap === 0 → SAME_DAY), so the
+// first answer of the day is the final one, and at mount the app can be in two
+// states where the honest answer is "I don't know yet" but the code answers "no".
+{
+  const { selectYesterdayTransactionCount, selectGapTransactionCount } = mod;
+  const rw = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/useRewardStore.ts');
+  const useReward = rw.useRewardStore || rw.default;
+  const { readFileSync } = await import('node:fs');
+  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+
+  const DAY = 86_400_000;
+  const cal = (ms) => {
+    const x = new Date(ms);
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  };
+  const yNoon = new Date(); yNoon.setDate(yNoon.getDate() - 1); yNoon.setHours(12, 0, 0, 0);
+  const spentYesterday = {
+    id: 'ci1', source: 'sms', amount: 1200, type: 'debit', categoryId: 'food',
+    createdAt: yNoon.getTime(), isIgnored: false, isReviewed: false, accountId: 'a1',
+  };
+
+  const armReward = () => useReward.setState({
+    awareStreak: 5, lastCheckedInDate: cal(Date.now() - DAY), lastClaimedBonusDate: null,
+    pendingSavingsReward: null, totalRP: 0, epcBalance: 0, isFirstLaunch: false,
+    dailyReviewedCount: 0, lastCapResetDate: cal(Date.now()),
+  });
+  // Exactly what the screen does.
+  const doCheckIn = () => {
+    const st2 = useStore.getState();
+    return useReward.getState().checkIn(
+      selectYesterdayTransactionCount(st2),
+      selectGapTransactionCount(st2, useReward.getState().lastCheckedInDate),
+    );
+  };
+
+  reset();
+  useStore.setState({ transactions: [spentYesterday] });
+  armReward();
+  const spent = doCheckIn();
+  check('spent yesterday → NO savings bonus', spent.type === 'NEW_DAY'
+    && useReward.getState().pendingSavingsReward === null, spent.type);
+  check('…and the Aware Run still advances', useReward.getState().awareStreak === 6,
+    String(useReward.getState().awareStreak));
+
+  // An UNREVIEWED transaction still counts — reviewing is a separate reward, and
+  // conflating the two is what the report sounded like at first glance.
+  reset();
+  useStore.setState({ transactions: [{ ...spentYesterday, isReviewed: false }] });
+  check('an unreviewed transaction still counts as spend yesterday',
+    selectYesterdayTransactionCount(useStore.getState()) === 1);
+  useStore.setState({ transactions: [{ ...spentYesterday, isReviewed: true }] });
+  check('…and so does a reviewed one — review state is irrelevant here',
+    selectYesterdayTransactionCount(useStore.getState()) === 1);
+  // An IGNORED one does not: the user said it wasn't real spend.
+  useStore.setState({ transactions: [{ ...spentYesterday, isIgnored: true }] });
+  check('an ignored transaction does not count',
+    selectYesterdayTransactionCount(useStore.getState()) === 0);
+
+  // A genuinely quiet day still earns it — the guard must not kill the feature.
+  reset();
+  useStore.setState({ transactions: [] });
+  armReward();
+  const quiet = doCheckIn();
+  check('a genuinely zero-spend yesterday DOES award the bonus',
+    quiet.type === 'SAVINGS' && useReward.getState().pendingSavingsReward?.rpAmount > 0,
+    quiet.type);
+
+  // THE BUG: the finance store hadn't rehydrated yet, so `transactions` was empty
+  // while the reward store — a handful of counters, so it lands first — already
+  // knew it checked in yesterday. Yesterday's count read 0 and the bonus fired.
+  reset();
+  useStore.setState({ transactions: [] });   // not hydrated yet
+  armReward();                                // rewards already hydrated
+  const race = doCheckIn();
+  check('an EMPTY (unhydrated) store would award a false bonus — hence the gate',
+    race.type === 'SAVINGS',
+    'if this ever stops being true the screen gate may no longer be needed');
+  check('…which is why DashboardScreen waits for BOTH stores and the first sweep',
+    (() => {
+      const dash = readFileSync(`${SRC}/screens/DashboardScreen.js`, 'utf8');
+      // The AWAIT must come before the store is READ. Checking the position of
+      // `yesterdayCount` alone was not enough: moving just the `getState()` call
+      // above the await restores the bug (a stale snapshot) while leaving that
+      // ordering intact — a mutation did exactly that and survived.
+      const awaitAt = dash.indexOf('await whenFirstSweepSettled();');
+      const readAt = dash.indexOf('const st = useEPurseStore.getState();', dash.indexOf('const runCheckIn'));
+      return /if \(!hydrated \|\| !rewardsHydrated\) return undefined;/.test(dash)
+        && awaitAt > 0 && readAt > 0 && awaitAt < readAt
+        && awaitAt < dash.indexOf('const yesterdayCount = selectYesterdayTransactionCount');
+    })(),
+    'the store must be READ after the await, not before');
+
+  // Idempotency is why this cannot self-correct later in the day.
+  reset();
+  useStore.setState({ transactions: [spentYesterday] });
+  armReward();
+  doCheckIn();
+  const before = JSON.stringify(useReward.getState().pendingSavingsReward);
+  const second = doCheckIn();
+  check('a second check-in the same day is a no-op', second.type === 'SAME_DAY'
+    && JSON.stringify(useReward.getState().pendingSavingsReward) === before, second.type);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

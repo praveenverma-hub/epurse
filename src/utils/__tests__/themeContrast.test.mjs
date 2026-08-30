@@ -342,35 +342,6 @@ check("removed themes are gone ('sky')", !THEMES.sky);
   }
 }
 
-// ── the tab bar's month-pace line ───────────────────────────────────────────
-// A 3pt graphic at the bottom of every screen, so it takes the 3:1 bar. The
-// accent raw is 1.41:1 on Gold — a line nobody can see — and the OVER tone has
-// to be visible in dark mode too, where a mid red loses against a dark card.
-{
-  for (const dark of [false, true]) {
-    for (const id of Object.keys(THEMES)) {
-      const p = buildPalette(id, dark);
-      const normal = contrastRatio(readableOn(p.card, p.primary, AA_UI), p.card);
-      const over   = contrastRatio(readableOn(p.card, colors.danger, AA_UI), p.card);
-      check(`${id}${dark ? ' (dark)' : ''}: pace fill visible on the bar (${normal.toFixed(2)}:1)`,
-        normal >= AA_UI, `${normal.toFixed(2)}`);
-      check(`${id}${dark ? ' (dark)' : ''}: over-budget fill visible (${over.toFixed(2)}:1)`,
-        over >= AA_UI, `${over.toFixed(2)}`);
-    }
-  }
-  // The month NOTCH is a cut painted in the bar's own colour, which works only
-  // because the fill is already measured against that same colour — so the notch
-  // inherits the fill's ratio and needs no separate tone. This asserts the
-  // property the design leans on: a coloured tick would need to beat BOTH the
-  // fill and the track, and no single colour does on all five accents.
-  for (const id of Object.keys(THEMES)) {
-    const p = buildPalette(id, false);
-    const fill = readableOn(p.card, p.primary, AA_UI);
-    check(`${id}: the notch (bar colour) reads against the fill (${contrastRatio(fill, p.card).toFixed(2)}:1)`,
-      contrastRatio(fill, p.card) >= AA_UI);
-  }
-}
-
 // ── the brand footer's accent-wash band ─────────────────────────────────────
 // The band was a flat `#EBEEF2` at 1.07:1 against the page — invisible — with a
 // hairline at 1.02:1 on itself. It's now a 10% accent wash, and the measurements
@@ -593,14 +564,60 @@ check("removed themes are gone ('sky')", !THEMES.sky);
     !/borderColor:\s*colors\.divider/.test(footer) && !/colors\.textMuted/.test(footer),
     'a fixed grey on a themed wash cannot be measured');
 
-  // ── The tab bar's top edge must be the pace line, in BOTH states ──────────
-  check('the tab bar renders the pace line rather than a bare border',
-    bar.includes('<PaceLine') && bar.includes('monthPace')
-    && !/borderTopWidth/.test(bar),
-    'PaceLine owns that edge so the hairline and the track cannot drift apart');
-  check('the pace fill and over-tone are measured against the bar surface',
-    /readableOn\(bar, colors\.danger, 3\)/.test(bar),
-    'the over-budget tone needs lifting on a dark card');
+  // ── The startup skeleton must reserve the REAL card height ────────────────
+  // The carousel is self-measuring, so its first frame can never draw a card. It
+  // used to render nothing at all — a zero-height view that still took a slot in
+  // the Dashboard's section `gap`, which is the blank band users saw on startup.
+  // A skeleton only fixes that while its height MATCHES the card's minimum; drift
+  // and the strip jumps when real cards land, which is the thing being fixed.
+  const carousel = readFileSync(`${ROOT}/components/HomeCarousel.tsx`, 'utf8');
+  const skelH = carousel.match(/const SKELETON_H = (\d+);/)?.[1];
+  const cardMinH = carousel.match(/minHeight:\s*(\d+)/)?.[1];
+  check(`the skeleton reserves exactly the card's minHeight (${skelH} vs ${cardMinH})`,
+    !!skelH && skelH === cardMinH, `SKELETON_H ${skelH}, card minHeight ${cardMinH}`);
+  check('the carousel renders a skeleton rather than nothing while unmeasured',
+    /const showSkeleton = loading \|\| width === 0;/.test(carousel)
+    && carousel.includes('<CardSkeleton'),
+    'width === 0 must render a placeholder, not collapse');
+
+  // The skeleton's bars are drawn on the CARD surface, so a fixed grey would glow
+  // on the dark palette instead of reading as an absence of content.
+  const skeleton = readFileSync(`${ROOT}/components/CardSkeleton.tsx`, 'utf8');
+  check('the skeleton derives its bar colour from the theme, not a fixed grey',
+    /mix\(theme\.textPrimary,/.test(skeleton) && !/backgroundColor:\s*'#/.test(skeleton),
+    (skeleton.match(/backgroundColor:.*/g) || []).join(' | '));
+  for (const dark of [false, true]) {
+    const pal = buildPalette(DEFAULT_THEME_ID, dark);
+    const bar = mix(pal.textPrimary, 0.09, pal.card);
+    const r = contrastRatio(bar, pal.card);
+    // Visible as a shape, but quieter than real content — it is a placeholder,
+    // not something to read.
+    check(`skeleton bars are visible but subdued${dark ? ' (dark)' : ''} (${r.toFixed(2)}:1)`,
+      r > 1.05 && r < 2, `${r.toFixed(2)}`);
+  }
+
+  // The Dashboard must not compute Home-card facts inside a zustand selector:
+  // those run on EVERY store write and both getters return a fresh object, so
+  // the screen re-rendered and rebuilt every card on every update — worst during
+  // the launch SMS sweep, exactly when the carousel was struggling.
+  check('Home card facts are memoised, not computed inside a store selector',
+    !/useEPurseStore\(\(s\) => s\.getCategoryBreakdown\(\)/.test(dash)
+    && !/useEPurseStore\(\(s\) => \(s\.budget \? s\.getBudgetUsage\(\)/.test(dash),
+    'wrap these in useMemo — a selector returning a new object never compares equal');
+  // The bleed is a CALL-SITE decision — the component defaults to 0, so the
+  // geometry suite proving the maths says nothing about whether Dashboard asks
+  // for it. Without this, dropping the prop silently restores the double inset.
+  check('the Home carousel breaks out of the page gutter at the call site',
+    /bleed=\{spacing\.lg\}/.test(dash),
+    'HomeCarousel defaults to bleed=0; the host must pass its own gutter');
+  // …and that the component USES it. A prop that is declared, passed and then
+  // ignored is not a type error, so nothing else would notice.
+  check('…and the component actually applies it as a negative margin',
+    /marginHorizontal: -bleed/.test(carousel),
+    'the bleed prop is accepted but never reaches a style');
+  check('the carousel waits for the persisted store before drawing cards',
+    dash.includes('useStoreHydrated') && /loading=\{!hydrated\}/.test(dash),
+    'an empty store is not a user with no data');
 
   // ── Nobody may hand-pick the tab-bar clearance again ──────────────────────
   // AnalyticsScreen paid `spacing.lg` (16) against a bar that occupies 62 + the

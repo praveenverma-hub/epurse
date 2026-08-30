@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
+import { resolveTxnAccount } from '../utils/accountMatch';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -166,22 +167,18 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
     [visibleTxns, date], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const accountBreakdown = useMemo(() => {
-    const byId = new Map(accounts.map((a) => [a.id, a]));
-    const byMask = new Map();
-    accounts.forEach((a) => {
-      if (a.mask) byMask.set(a.mask, a);
-      (a.aliasMasks || []).forEach((m) => byMask.set(m, a));
-    });
+    // Bucketing goes through `resolveTxnAccount` — the store's own matcher, shared
+    // with the account ledger. This used to be a local exact-mask Map with no
+    // suffix match and no bank guard, so a card reported as last-6 in one SMS and
+    // last-4 in another (which the store MERGES at ingest) landed in "Unknown"
+    // here while sitting correctly on the account elsewhere.
     const buckets = {};
     transactions.forEach((t) => {
       if (!countsForSpend(t)) return;               // expense debit or refund credit
       if (!isSameMonth(t.createdAt, date)) return;
       if (NON_SPEND.has(t.categoryId)) return;
       if (spendExcluded(t, groups)) return;
-      const acct =
-        (t.accountId && byId.get(t.accountId)) ||
-        (t.accountMask && byMask.get(t.accountMask)) ||
-        null;
+      const acct = resolveTxnAccount(t, accounts);
       const key  = acct ? acct.id : (t.accountType || 'Unknown');
       const acctType = acct ? acct.type : (t.accountType || null);
       if (!buckets[key]) {

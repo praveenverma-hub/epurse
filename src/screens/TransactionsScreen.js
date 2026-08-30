@@ -70,6 +70,7 @@ import { spendExcluded } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
+import { resolveTxnAccount } from '../utils/accountMatch';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { formatCurrency, monthKey } from '../utils/format';
 // Calendar-month + custom range logic lives in a pure util so it can be tested
@@ -460,20 +461,18 @@ const TransactionsScreen = ({ navigation, route }) => {
     }
 
     // Applied sheet filters
-    // Primary match: accountId (UUID). Fallback for transactions that were ingested
-    // from SMS without a 4-digit mask (accountId stays null): try mask match, then
-    // accountType match so those transactions still surface under the right account.
+    //
+    // Account matching goes through `resolveTxnAccount` — the SAME rule the store
+    // uses at ingest and the account ledger and analytics use for display. This was
+    // three hand-rolled tests, and the middle one was a bare Set of masks with no
+    // bank and no type check: with an HDFC ··1234 and an ICICI ··1234, filtering to
+    // one card returned BOTH cards' transactions. The third was looser still —
+    // any mask-less transaction of a matching TYPE surfaced under every account of
+    // that type. A transaction now appears under exactly the account it belongs to.
     if (applied.method.size > 0) {
-      const selAccts  = accounts.filter((a) => applied.method.has(a.id));
-      // Include linked debit-card masks (aliasMasks) so filtering a bank also
-      // surfaces its merged card's transactions (mirrors matchAccount).
-      const selMasks  = new Set(selAccts.flatMap((a) => [a.mask, ...(a.aliasMasks || [])]).filter(Boolean));
-      const selTypes  = new Set(selAccts.map((a) => a.type));
       list = list.filter((t) => {
-        if (t.accountId && applied.method.has(t.accountId))   return true;
-        if (t.accountMask && selMasks.has(t.accountMask))      return true;
-        if (!t.accountId && selTypes.has(t.accountType))       return true;
-        return false;
+        const acct = resolveTxnAccount(t, accounts);
+        return !!acct && applied.method.has(acct.id);
       });
     }
     if (applied.type.size > 0)       list = list.filter((t) => applied.type.has(t.type));

@@ -48,6 +48,10 @@ const STUBS = {
     'export const hasSmsPermission=async()=>S().osPermission!==false;' +
     'export const readInbox=async(since)=>{const s=S();' +
     'if(s.throwOnRead)throw new Error("readInbox timed out");' +
+    // `readDelayMs` holds the sweep open, so a test can observe the state while
+    // one is genuinely IN FLIGHT — the only way to prove that a concurrent
+    // 'busy' caller does not settle the first-sweep signal early.
+    'if(s.readDelayMs)await new Promise((r)=>setTimeout(r,s.readDelayMs));' +
     's.readCount=(s.readCount||0)+1;s.lastSince=since;' +
     'return s.inbox||[];};' +
     'export const subscribeToIncomingSms=(cb)=>{S().liveCb=cb;return ()=>{S().liveCb=null;};};',

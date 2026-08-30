@@ -17,7 +17,8 @@ import { register } from 'node:module';
 register('./_store-hook.mjs', import.meta.url);
 
 const ROOT = new URL('../../../', import.meta.url).pathname;
-const { syncNow } = await import(`${ROOT}src/hooks/useSmsSync.js`);
+const { syncNow, whenFirstSweepSettled, __resetSweepSignalForTests } =
+  await import(`${ROOT}src/hooks/useSmsSync.js`);
 const { useEPurseStore } = await import(`${ROOT}src/store/ePurseStore.js`);
 const { Platform } = await import('react-native');
 
@@ -146,6 +147,79 @@ globalThis.__smsStub.throwOnRead = false;
 globalThis.__smsStub.inbox = [msg('after', 300, now - DAY)];
 r = await syncNow();
 check('the lock is released after an error (next sweep still works)', r.status === 'ok' && r.added === 1, JSON.stringify(r));
+
+// ── "The first sweep has settled" signal ─────────────────────────────────────
+// Anything reasoning about the ABSENCE of transactions has to wait for this.
+// Yesterday's bank SMS only enter the store when the sweep imports them, so
+// "did I spend anything yesterday?" asked at mount answers "no" for everyone who
+// didn't open the app yesterday — which is precisely the population it's asked
+// about. That handed the Aware Run's Zero-Transaction bonus to users who HAD
+// spent (see the check-in effect in DashboardScreen).
+{
+  const settled = async (p) => {
+    let done = false;
+    p.then(() => { done = true; });
+    await new Promise((r) => setImmediate(r));
+    return done;
+  };
+
+  __resetSweepSignalForTests();
+  reset({ inbox: [msg('sig1', 500, now - DAY)] });
+  const waiter = whenFirstSweepSettled();
+  check('the signal does NOT resolve before a sweep runs', !(await settled(waiter)));
+  await syncNow();
+  check('a completed sweep settles it', await settled(waiter));
+  check('and the data is actually there by then', st().transactions.length === 1,
+    String(st().transactions.length));
+  check('asking again afterwards resolves immediately',
+    await settled(whenFirstSweepSettled()));
+
+  // A device that will never sweep must still settle it, or the daily check-in
+  // waits for ever and the user silently loses their Aware Run.
+  __resetSweepSignalForTests();
+  reset({ inbox: [] });
+  useEPurseStore.setState({ smsPermissionGranted: false, smsAutoImport: false });
+  const noPerm = whenFirstSweepSettled();
+  await syncNow();
+  check('no permission still settles the signal', await settled(noPerm));
+
+  __resetSweepSignalForTests();
+  Platform.OS = 'ios';
+  reset({ inbox: [] });
+  const unsupported = whenFirstSweepSettled();
+  await syncNow();
+  check('an unsupported platform still settles the signal', await settled(unsupported));
+  Platform.OS = 'android';
+
+  // A sweep that threw has still finished trying.
+  __resetSweepSignalForTests();
+  reset({ throwOnRead: true });
+  const errored = whenFirstSweepSettled();
+  await syncNow();
+  check('a FAILED sweep settles it too', await settled(errored));
+
+  // 'busy' must NOT settle on its own — the sweep already in flight is the first
+  // one, and if the loser settled early a caller would read the store MID-IMPORT
+  // and see a partial ledger. Checking after both had finished proved nothing
+  // (a mutation settling on 'busy' passed), so the real sweep is held open with
+  // `readDelayMs` and the signal is inspected while it is genuinely in flight.
+  __resetSweepSignalForTests();
+  reset({ inbox: [msg('sig2', 700, now - DAY)] });
+  globalThis.__smsStub.readDelayMs = 40;
+  const both = whenFirstSweepSettled();
+  const slow = syncNow();                       // holds the lock for ~40ms
+  await new Promise((r) => setTimeout(r, 5));   // let it take the lock
+  const busy = await syncNow();
+  check("the concurrent call really is 'busy'", busy.status === 'busy', busy.status);
+  check('a busy caller does NOT settle the signal while the sweep is in flight',
+    !(await settled(both)), 'settling here exposes a half-imported ledger');
+  const real = await slow;
+  globalThis.__smsStub.readDelayMs = 0;
+  check('…and the real sweep settles it when it finishes',
+    real.status === 'ok' && await settled(both), JSON.stringify(real));
+  check('the data is complete by the time it settles', st().transactions.length === 1,
+    String(st().transactions.length));
+}
 
 console.log(`\n${'─'.repeat(34)}`);
 console.log(`  ${fail === 0 ? C.green : C.red}${pass}/${pass + fail} passed${C.reset}`);
