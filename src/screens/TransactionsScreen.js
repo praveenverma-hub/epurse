@@ -50,6 +50,11 @@ import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState from '../components/EmptyState';
 import TransactionItem from '../components/TransactionItem';
 import MonthDivider from '../components/MonthDivider';
+import InlineDropdown from '../components/InlineDropdown';
+import {
+  SORTS, GROUPS, DEFAULT_SORT, DEFAULT_GROUP,
+  buildListRows, makeGrouper,
+} from '../utils/txnArrange';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
 import CategoryPickerModal from '../components/CategoryPickerModal';
@@ -72,7 +77,7 @@ import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import { resolveTxnAccount } from '../utils/accountMatch';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
-import { formatCurrency, monthKey } from '../utils/format';
+import { formatCurrency } from '../utils/format';
 // Calendar-month + custom range logic lives in a pure util so it can be tested
 // headlessly — see dateRange.test.mjs.
 import { buildDateRangeOptions, monthStart, resolveRange, inRange } from '../utils/dateRange';
@@ -91,11 +96,26 @@ const DISMISS_DIST = 130;
 // Map Dashboard D/W/M/Y keys → quick chip
 const PERIOD_TO_CHIP = { D: 'all', W: 'all', M: 'month', Y: 'all' };
 
+/**
+ * One-tap presets, shown ONLY while the filter sheet has nothing applied — and
+ * the chip resets to `all` the moment a sheet filter lands, so it can never
+ * survive as a filter the user can no longer see.
+ *
+ * "Bank Accounts" and "Credit Cards" were REMOVED (Aug-31). They duplicated the
+ * sheet's Method panel at a coarser grain, and because the two rows ANDed
+ * together, `Credit Cards` + Method `HDFC Savings` returned an empty list with
+ * both controls showing a selection. `Group → Account type` now covers "show me
+ * my cards together" without being a second filter, and the Method panel covers
+ * picking specific accounts.
+ *
+ * Side effect worth keeping: `exportFilterCtx.timeframe` is this id, and
+ * `exportService`'s type is `week | month | year | all`. `bank` / `cc` fell
+ * through to the "All Time" caption, so an export of a card-filtered list was
+ * labelled as everything. Every id left here is a real timeframe.
+ */
 const QUICK_CHIPS = [
-  { id: 'all',   label: 'All',              icon: 'list-outline'     },
-  { id: 'month', label: 'This Month',       icon: 'calendar-outline' },
-  { id: 'bank',  label: 'Bank Accounts',    icon: 'business-outline' },
-  { id: 'cc',    label: 'Credit Cards',     icon: 'card-outline'     },
+  { id: 'all',   label: 'All',        icon: 'list-outline'     },
+  { id: 'month', label: 'This Month', icon: 'calendar-outline' },
 ];
 
 const FILTER_PANELS = [
@@ -210,6 +230,13 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [quickChip,     setQuickChip]     = useState(
     routePeriod ? (PERIOD_TO_CHIP[routePeriod] ?? 'all') : 'all',
   );
+
+  // ── Arrangement: orthogonal to filtering ──────────────────────────────────
+  // Sort and Group say how the SAME rows are ordered and sectioned, so unlike the
+  // quick chips they stay available whether or not a filter is applied — a list
+  // you sorted by amount is exactly as useful filtered as not.
+  const [sortId,  setSortId]  = useState(DEFAULT_SORT);
+  const [groupId, setGroupId] = useState(DEFAULT_GROUP);
   const [sheetVisible,  setSheetVisible]  = useState(false);
   const [exportVisible, setExportVisible] = useState(false);
 
@@ -248,6 +275,9 @@ const TransactionsScreen = ({ navigation, route }) => {
   useEffect(() => {
     const id = route?.params?.accountId;
     if (id) {
+      // The chip reset was already here and is now load-bearing for a second
+      // reason: this applies a sheet filter, so the quick chips are about to
+      // hide and must not be left holding one.
       setApplied((prev) => ({ ...prev, method: new Set([id]) }));
       setQuickChip('all');
     }
@@ -439,11 +469,9 @@ const TransactionsScreen = ({ navigation, route }) => {
       return true;
     });
 
-    // Quick chip pre-filter. NOTE: accountType values come from ACCOUNT_TYPES —
-    // the bank type is 'Bank' (NOT 'Bank Account'); the old string matched nothing.
-    // A debit card draws from a bank, so it counts under "Bank" too.
-    if (quickChip === 'bank')  list = list.filter((t) => t.accountType === 'Bank' || t.accountType === 'Debit Card');
-    if (quickChip === 'cc')    list = list.filter((t) => t.accountType === 'Credit Card');
+    // Quick chip pre-filter — a timeframe only now. With the account chips gone,
+    // this screen has exactly ONE account rule left: the Method filter's
+    // `resolveTxnAccount` below.
     if (quickChip === 'month') list = list.filter((t) => new Date(t.createdAt) >= startOfMonth);
 
     // Inline search
@@ -490,25 +518,40 @@ const TransactionsScreen = ({ navigation, route }) => {
     return list.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-  }, [transactions, quickChip, search, applied, appliedCustom, isNotCounted]);
+  }, [transactions, accounts, quickChip, search, applied, appliedCustom, isNotCounted]);
 
-  // Interleave month dividers into the (date-desc) list. A divider is inserted
-  // only at a month BOUNDARY — never above the first group, and never at all when
-  // every transaction is in one month. It labels the older month starting below it
-  // (i.e. it appears right after the previous month ends).
-  const listData = useMemo(() => {
-    const out = [];
-    let lastMonth = null;
-    for (const t of filtered) {
-      const mk = monthKey(t.createdAt);
-      if (lastMonth !== null && mk !== lastMonth) {
-        out.push({ _divider: true, id: `div-${mk}`, monthKey: mk });
-      }
-      lastMonth = mk;
-      out.push(t);
-    }
-    return out;
-  }, [filtered]);
+  // Ordering + sectioning live in `utils/txnArrange` — see that file for why a
+  // month divider and a group header are NOT the same object, and why an
+  // amount-sorted list gets no month dividers at all.
+  const grouper = useMemo(
+    () => makeGrouper({
+      accounts,
+      categoryLabel: (t) => categories.find((c) => c.id === t.categoryId)?.name,
+    }),
+    [accounts, categories],
+  );
+  /**
+   * A group header's amount, from the SAME helper as the footer's totals — so a
+   * group's number and the list's number can never be two different opinions
+   * about what a transaction is worth (refund-netted, your share only, ignored
+   * rows and non-spend categories out). A local `reduce` over `t.amount` is
+   * exactly the drift `ledgerTotals` was extracted to stop.
+   *
+   * Spend is what a group normally holds, so `debit` leads. A group with no spend
+   * but real income (a salary, a refund-only category) shows its income with a
+   * `+` rather than a misleading ₹0.
+   */
+  const groupTotal = useCallback((rows) => {
+    const { debit, credit } = computeLedgerTotals(rows, groups, spendExcluded);
+    if (debit) return { value: debit, income: false };
+    if (credit) return { value: credit, income: true };
+    return null;
+  }, [groups, excludedExpenseParents]);
+
+  const listData = useMemo(
+    () => buildListRows(filtered, { sortId, groupId, grouper, groupTotal }),
+    [filtered, sortId, groupId, grouper, groupTotal],
+  );
 
   // Spent / received across the filtered list, shown alongside the count.
   // Deliberately NOT inline: this must agree with getMonthlySpend /
@@ -538,6 +581,83 @@ const TransactionsScreen = ({ navigation, route }) => {
     searchQuery: search,
     advanced:    {},
   }), [quickChip, applied, search]);
+
+  // ── The control row, rendered TWICE (sticky overlay + list header) ────────
+  // It was two copies of the same JSX kept in sync by hand; adding Sort/Group
+  // would have made that three things to keep aligned. One function now, so the
+  // sticky ribbon and the inline one cannot disagree about what the row contains.
+  //
+  // Order: FILTER presets first, then ARRANGE controls, separated by a rule. The
+  // presets lead because they are the coarse choice — you pick the slice of the
+  // ledger, then how to read it — and because they are the pair that disappears,
+  // so the row shortens from the left and Sort/Group never move.
+  //
+  // The QUICK CHIPS disappear once the sheet has a filter applied. They are
+  // presets for an unfiltered list, and while a sheet filter was live they were a
+  // second filter ANDed with it — two controls each showing "active" and jointly
+  // returning nothing. SORT and GROUP stay: they arrange the same rows either way.
+  const renderControlRow = useCallback(() => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.chipRow}
+      bounces={false}
+      // The dropdown menus are Modals, so they escape this clip — but the
+      // triggers themselves must stay tappable while the row is scrolled.
+      keyboardShouldPersistTaps="handled"
+    >
+      {activeFilterCount === 0 && (
+        <>
+          {QUICK_CHIPS.map((chip) => {
+            const active = quickChip === chip.id;
+            return (
+              <Pressable
+                key={chip.id}
+                onPress={() => setQuickChip(chip.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[
+                  styles.chip,
+                  active && { backgroundColor: theme.primary, borderColor: theme.primary },
+                ]}
+              >
+                <Ionicons
+                  name={chip.icon}
+                  size={13}
+                  color={active ? '#fff' : colors.textSecondary}
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {chip.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {/* Trails the chips rather than leading the dropdowns, so it vanishes
+              WITH them — a leading separator on a row that starts with Sort
+              would look like something was cut off. */}
+          <View style={styles.controlRowSep} />
+        </>
+      )}
+
+      <InlineDropdown
+        label="Sort"
+        icon="swap-vertical-outline"
+        value={sortId}
+        options={SORTS}
+        defaultValue={DEFAULT_SORT}
+        onChange={setSortId}
+      />
+      <InlineDropdown
+        label="Group"
+        icon="layers-outline"
+        value={groupId}
+        options={GROUPS}
+        defaultValue={DEFAULT_GROUP}
+        onChange={setGroupId}
+      />
+    </ScrollView>
+  ), [sortId, groupId, activeFilterCount, quickChip, theme.primary]);
 
   // ── Draft helpers ─────────────────────────────────────────────────────────
   const toggleDraft = useCallback((panelId, id) => {
@@ -570,6 +690,11 @@ const TransactionsScreen = ({ navigation, route }) => {
     // Only commit dates if "Custom range…" is actually the selection — otherwise
     // a half-picked range would sit in state and reappear the next time it's chosen.
     setAppliedCustom(draft.dateRange.has('custom') ? draftCustom : { from: null, to: null });
+    // The quick chips HIDE while a sheet filter is applied, so a chip left set
+    // would keep filtering from a control the user can no longer see — an
+    // invisible constraint, and the harder half of the contradiction these two
+    // rows used to create. Reset it as the sheet takes over.
+    if (Object.values(draft).some((set) => set.size > 0)) setQuickChip('all');
     closeSheet();
   }, [draft, draftCustom, closeSheet]);
 
@@ -751,36 +876,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         style={[styles.stickyChipRibbon, stickyChipStyle]}
         pointerEvents={stickyActive ? 'auto' : 'none'}
       >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-          bounces={false}
-        >
-          {QUICK_CHIPS.map((chip) => {
-            const active = quickChip === chip.id;
-            return (
-              <Pressable
-                key={chip.id}
-                onPress={() => setQuickChip(chip.id)}
-                style={[
-                  styles.chip,
-                  active && { backgroundColor: theme.primary, borderColor: theme.primary },
-                ]}
-              >
-                <Ionicons
-                  name={chip.icon}
-                  size={13}
-                  color={active ? '#fff' : colors.textSecondary}
-                  style={{ marginRight: 4 }}
-                />
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                  {chip.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        {renderControlRow()}
       </Animated.View>
 
       {/* ── Transaction list ────────────────────────────────────────────── */}
@@ -791,7 +887,15 @@ const TransactionsScreen = ({ navigation, route }) => {
         contentContainerStyle={[styles.list, { paddingBottom: tabBarClearance(insets.bottom) }]}
         renderItem={({ item }) =>
           item._divider ? (
-            <MonthDivider monthKey={item.monthKey} />
+            <MonthDivider
+              monthKey={item.monthKey}
+              label={item.label}
+              total={item.total}
+              income={item.income}
+              // Quiet on purpose: in a group header you are scanning for the
+              // group, and the money is context.
+              muted
+            />
           ) : (
             <TransactionItem
               txn={item}
@@ -816,39 +920,8 @@ const TransactionsScreen = ({ navigation, route }) => {
         }
         ListHeaderComponent={
           <>
-            {/* Inline chip ribbon — scrolls away with the list */}
-            <View style={styles.chipRibbon}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-                bounces={false}
-              >
-                {QUICK_CHIPS.map((chip) => {
-                  const active = quickChip === chip.id;
-                  return (
-                    <Pressable
-                      key={chip.id}
-                      onPress={() => setQuickChip(chip.id)}
-                      style={[
-                        styles.chip,
-                        active && { backgroundColor: theme.primary, borderColor: theme.primary },
-                      ]}
-                    >
-                      <Ionicons
-                        name={chip.icon}
-                        size={13}
-                        color={active ? '#fff' : colors.textSecondary}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                        {chip.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
+            {/* Inline control ribbon — scrolls away with the list */}
+            <View style={styles.chipRibbon}>{renderControlRow()}</View>
 
             {/* Active filter summary */}
             {activeFilterCount > 0 && (
@@ -1412,6 +1485,23 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   chipText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
+  /**
+   * Divides ARRANGE from FILTER in the row — they do different jobs, and the row
+   * is the only place that distinction is visible.
+   *
+   * NEGATIVE horizontal margin, because `chipRow` spaces its children with
+   * `gap: spacing.sm`. A rule between two chips gets that gap on BOTH sides, so
+   * chip → Sort measured 8 + 1 + 8 = 17pt against 8pt between chips, and read as
+   * a gap in the row rather than a divider in it. Pulling 4 back per side lands
+   * at 9pt — the same rhythm as everything else, with a visible rule in it.
+   */
+  controlRowSep: {
+    width: 1,
+    alignSelf: 'stretch',
+    marginHorizontal: -spacing.xs,
+    marginVertical: 4,
+    backgroundColor: colors.divider,
+  },
   chipTextActive: { color: '#fff', fontWeight: '700' },
 
   // ── Active filter bar ──────────────────────────────────────────────────────

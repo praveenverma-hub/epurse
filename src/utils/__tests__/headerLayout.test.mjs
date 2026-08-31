@@ -296,6 +296,102 @@ console.log('\n── the pinned bar is a SECOND bar, cross-faded on opacity ─
       (headerTotal + callerPad - heroH) - pinnedTotal === callerPad);
   }
 
+  // ── `barHeight` is the bar's CONTENT, never its content plus padding ───────
+  // Accounts used 68 "so the collapsed header keeps comfortable padding below the
+  // heading" — its own words. Once HEADER_PAD_B started padding BOTH modes, that
+  // 28pt of slack was paid a second time and its collapsed bar sat 28pt deeper
+  // than Home's. Reported as "bottom padding in accounts tab header is more than
+  // usual when collapsed".
+  {
+    const num = (src, name) => Number(new RegExp(`const ${name}\\s*=\\s*(\\d+)`).exec(src)?.[1]);
+    const padB = spacing[collapsingPadB];
+    // Each screen's bar content, derived from what actually sits in the row.
+    const CHIP = Number(/export const CHIP_SIZE = (\d+);/.exec(read('components/HeaderChip.tsx'))?.[1]);
+    const dashRowTop = Number(/headerRow: \{[\s\S]*?marginTop: spacing\.(\w+),/.exec(dash)?.[1]
+      ? spacing[/headerRow: \{[\s\S]*?marginTop: spacing\.(\w+),/.exec(dash)[1]] : NaN);
+    const screens = [
+      { name: 'Home',     bar: num(dash, 'HEADER_BAR_H'),     content: dashRowTop + CHIP },
+      // Accounts' tallest row item is its 40pt icon button.
+      { name: 'Accounts', bar: num(accounts, 'HEADER_BAR_H'), content: 40 },
+    ];
+    for (const sc of screens) {
+      check(`${sc.name}: barHeight ${sc.bar} is exactly its bar content (${sc.content})`,
+        sc.bar === sc.content,
+        'slack here becomes padding the component then pays again');
+      check(`${sc.name}: the collapsed bar therefore pads ${padB}pt below its row`,
+        (sc.bar - sc.content) + padB === padB);
+    }
+    check('the two collapsing headers pad their collapsed bar IDENTICALLY',
+      (screens[0].bar - screens[0].content) === (screens[1].bar - screens[1].content),
+      'one screen looking deeper than the other is the whole bug');
+
+    // ── The bar → hero gap ────────────────────────────────────────────────
+    // It measured 43pt on Accounts against Home's 16, from TWO stacked sources,
+    // and only one of them was visible in any constant:
+    //   • 28pt of slack inside the old HEADER_BAR_H (fixed above), and
+    //   • 15pt of centring slack, because a PINNED 84pt hero box held ~54pt of
+    //     text and the component centres the hero in its box.
+    // A self-measuring hero removes the second: with no fixed height there is no
+    // slack to centre in, so the gap is exactly the hero's own paddingTop.
+    // Measure it the way the eye does: from the bottom of the BAR'S CONTENT to the
+    // top of the hero's. Both boxes centre their content, so `barHeight` is not
+    // where the bar visibly ends and `heroTop` is not where the hero visibly
+    // starts — and measuring from the box edges is what let the previous change
+    // look neutral when it was not.
+    const BAR_CONTENT = 40;                             // the 40pt icon buttons
+    const CHILD = 54;                                   // label + figure, roughly
+    // `content` is the bar row's own height, which is NOT `bar` unless the screen
+    // sized it correctly — that difference is the slack the eye reads as gap.
+    const barBottom = ({ bar, content }) => content + (bar - content) / 2;
+    const heroTop = ({ bar, box, child, pad }) => bar + (box == null ? 0 : (box - child) / 2) + pad;
+    const gapOf = (g) => heroTop(g) - barBottom(g);
+
+    const before        = { bar: 68, content: BAR_CONTENT, box: 84,      child: CHILD,      pad: 0 };
+    const pinnedWithPad = { bar: 40, content: BAR_CONTENT, box: 84 + 28, child: CHILD + 28, pad: 28 };
+    const now           = { bar: 40, content: BAR_CONTENT, box: null,    child: CHILD + spacing.lg, pad: spacing.lg };
+
+    check(`the gap started at ${gapOf(before)}pt`, gapOf(before) === 29);
+    // The correction: holding the hero CONTENT still while moving the bar content
+    // up by 14 (its own centring slack, removed with the slack in barHeight) made
+    // the visible gap WORSE, from 29 to 43. "Total unchanged" and "hero content
+    // unchanged" were both true and both the wrong invariant.
+    check(`the previous fix pushed it to ${gapOf(pinnedWithPad)}pt, not neutral`,
+      gapOf(pinnedWithPad) === 43 && gapOf(pinnedWithPad) > gapOf(before),
+      'the bar content moved up 14 while the hero content was held still');
+    check(`it is now ${gapOf(now)}pt — the hero's padding and nothing else`,
+      gapOf(now) === spacing.lg);
+    check('a self-measuring hero has NO box slack to add to it',
+      now.box === null && heroTop(now) === now.bar + now.pad);
+    // Home, which is the comparison being made: its bar content fills barHeight
+    // (54 = 12pt row margin + the 42pt chip), its hero measures itself, so the gap
+    // is its own marginTop and nothing else. The two screens now agree.
+    const home = { bar: 54, content: 54, box: null, child: CHILD + spacing.lg, pad: spacing.lg };
+    check(`Home's gap is ${gapOf(home)}pt`, gapOf(home) === spacing.lg);
+    check('…and Accounts now matches it exactly', gapOf(now) === gapOf(home),
+      `${gapOf(now)} vs ${gapOf(home)}`);
+    check('…which it did not before, by 13pt', gapOf(before) - gapOf(home) === 13);
+
+    // Home's hero starts with `balanceBlock: { marginTop: spacing.lg }`, so the
+    // two screens now open the same distance below their title rows.
+    const homeGap = /balanceBlock: \{ marginTop: spacing\.(\w+) \}/.exec(dash)?.[1];
+    const acctGap = /heroBlock: {5}\{ paddingTop: spacing\.(\w+) \}/.exec(accounts)?.[1];
+    check(`both screens gap their hero by spacing.${homeGap}`,
+      !!homeGap && homeGap === acctGap, `Home ${homeGap} vs Accounts ${acctGap}`);
+
+    // The rule this all comes from: never pin a height around TEXT. It varies
+    // with the font and the OS font-scale setting, so no constant is right
+    // everywhere — and a too-large one shows up as exactly this gap.
+    check('NEITHER collapsing screen pins a heroHeight any more',
+      !/heroHeight=\{/.test(dash) && !/heroHeight=\{/.test(accounts),
+      'a pinned box around text either clips it or pads it, and no test can catch which');
+    check('…and both pass a first-frame estimate instead',
+      /estimatedHeroHeight=\{/.test(dash) && /estimatedHeroHeight=\{/.test(accounts),
+      'without one the body starts too high for a frame before the measurement lands');
+    check('Accounts keeps its gap as PADDING, not a margin',
+      /paddingTop: spacing\.lg/.test(accounts),
+      'a margin inside a centred box is centred with it instead of offsetting content');
+  }
+
   check('it takes elevation for z-order but not for a shadow',
     /elevation: 7,\s*\n(?:\s*\/\/.*\n)*\s*shadowColor: 'transparent',/.test(header),
     "elevation draws a shadow on Android, and this view's bounds end mid-gradient");

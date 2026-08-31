@@ -84,11 +84,35 @@ const CARD_W    = Math.min(300, SCREEN_W - 88);
 const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
 const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
 
-// Collapsing-header geometry: the pinned title bar (taller so the collapsed header
-// keeps comfortable padding below the heading), and the "Net Worth" hero that
-// fades/collapses on scroll (both exclude the top safe-area inset).
-const HEADER_BAR_H  = 68;
-const HEADER_HERO_H = 84;
+// ── Collapsing-header geometry (excluding the top safe-area inset) ───────────
+//
+// Both numbers here were wrong in the same way: they were HEIGHTS carrying space
+// that belonged to something else, and the space was then paid a second time.
+//
+// `HEADER_BAR_H` was 68 "so the collapsed header keeps comfortable padding below
+// the heading" — hand-rolled padding from before `CollapsingHeaderScreen` supplied
+// any. Its bar content is 40, so 28 of that was slack; once the component padded
+// BOTH modes with `HEADER_PAD_B` (Aug-30) the collapsed bar sat 28pt deeper than
+// Home's. `barHeight` is the bar's CONTENT — nothing else.
+//
+// `HEADER_HERO_H` was a pinned 84 around ~54pt of TEXT, so the component centred
+// the hero in its box and left 15pt above it. Added to the 28 above, the gap from
+// the title row to "Net Worth" measured **43pt** where Home's is 16. Pinning a
+// height around text is what the component's own docs warn against: it varies with
+// the font and the OS font-scale setting, so no constant is right on every device.
+//
+// So the hero MEASURES itself and the gap is stated once, as the same
+// `spacing.lg` Home uses. No box slack, and the gap is exactly `heroBlock`'s
+// padding. Derived in `headerLayout.test.mjs`.
+const HEADER_BAR_H = 40;   // the row's own content: two 40pt icon buttons
+
+/**
+ * First frame only — the real height is measured. Roughly the gap (16) + the 13pt
+ * label's line box (~18) + the 30pt figure's (~36). Being a few points out is
+ * invisible because the measurement corrects it on the next frame; do NOT promote
+ * this to `heroHeight`.
+ */
+const HEADER_HERO_EST = 70;
 
 export default function AccountsScreen({ navigation }) {
   const theme        = useTheme();
@@ -285,14 +309,14 @@ export default function AccountsScreen({ navigation }) {
         onScroll={tabBarScroll.onScroll}
         gradientColors={gradient}
         barHeight={HEADER_BAR_H}
-        heroHeight={HEADER_HERO_H}
+        estimatedHeroHeight={HEADER_HERO_EST}
         curveRadius={radius.xl}
         contentContainerStyle={styles.bodyContent}
         onCollapseChange={setHeaderPinned}
         renderCollapsedBar={() => accountsBar(true)}
         renderBar={() => accountsBar(false)}
         renderHero={() => (
-          <View>
+          <View style={styles.heroBlock}>
             <Text style={styles.headerLabel}>Net Worth</Text>
             <Text style={styles.headerBalance}>
               {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
@@ -624,6 +648,10 @@ const styles = StyleSheet.create({
   // Ink is applied at the call site: this row renders on the gradient AND on
   // the light pinned bar (`accountsBar`).
   headerTitle:    { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  /** The ONLY thing between the title row and "Net Worth" — matching Home's own
+   *  `balanceBlock` gap. With a self-measuring hero there is no box slack to add
+   *  to it, so this number is the gap. */
+  heroBlock:     { paddingTop: spacing.lg },
   headerLabel:   { color: '#FFFFFFCC', ...typography.small },
   headerBalance: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

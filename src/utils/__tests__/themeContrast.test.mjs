@@ -795,6 +795,25 @@ console.log(`\n${C.bold}══════ Pinned header chrome ═════�
       scaled <= onGradient + 0.01, `${scaled.toFixed(3)} vs ${onGradient.toFixed(3)}`);
   }
 
+  // ── A "quiet" number must still be readable ───────────────────────────────
+  // Activity's group headers show the group's money in a deliberately
+  // de-emphasised style. The obvious way to do that is `textMuted`, which on the
+  // divider pill measures under AA for small text — so the WEIGHT drops instead
+  // and the colour stays. This is the assertion that keeps that trade honest.
+  {
+    const PILL = colors.card;                    // MonthDivider's pill fill
+    const muted = contrastRatio(colors.textMuted, PILL);
+    const chosen = contrastRatio(colors.textSecondary, PILL);
+    check(`textMuted on the divider pill would be ${muted.toFixed(2)}:1 — under AA`,
+      muted < AA_TEXT, 'if this ever passes, the quieter colour becomes available');
+    check(`the quiet total uses textSecondary instead (${chosen.toFixed(2)}:1)`,
+      chosen >= AA_TEXT);
+    const dividerSrc = readFileSync(`${SRC}/components/MonthDivider.tsx`, 'utf8');
+    check('…and the de-emphasis is carried by font WEIGHT, not colour',
+      /totalMuted: \{ color: colors\.textSecondary, fontWeight: '600' \}/.test(dividerSrc)
+      && !/totalMuted:[^}]*textMuted/.test(dividerSrc));
+  }
+
   // ── The chip variant must actually derive, not re-pick ────────────────────
   // HeaderChip's `onLight` is where every collapsing bar gets its light-surface
   // fill, border and badge. If it hardcoded them, the same wrong numbers would
