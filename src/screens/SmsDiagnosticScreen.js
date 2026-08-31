@@ -25,7 +25,7 @@ import {
   smsSupported, hasSmsPermission, requestSmsPermission, readInbox,
 } from '../services/smsService';
 import { parseMessageDetailed } from '../utils/messageParser';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { useGradient } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 import CenterModal from '../components/CenterModal';
@@ -348,10 +348,11 @@ const styles = StyleSheet.create({
   runBtn: { borderRadius: radius.lg, overflow: 'hidden', ...shadows.card },
   runBtnDisabled: { opacity: 0.6 },
   runBtnGradient: {
-    paddingVertical: spacing.md + 4,
+    // Was its own `minHeight: 52` — one of three button heights in the app.
+    paddingVertical: spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
+    minHeight: BUTTON_H,
   },
   runBtnText: { color: '#fff', ...typography.body, fontWeight: '800', fontSize: 16 },
 

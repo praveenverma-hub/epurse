@@ -20,12 +20,12 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, BUTTON_H, chromeHairline } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { INPUT_LIMITS } from '../utils/validation';
 import { BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
@@ -40,6 +40,9 @@ const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
 const BudgetPlanScreen = ({ navigation }) => {
   const theme = useTheme();
   const toast = useToast();
+  // The SafeAreaView only takes the TOP edge (its white fill has to match the
+  // header bar), so the pinned footer pays the bottom inset itself.
+  const insets = useSafeAreaInsets();
 
   const budget                  = useEPurseStore((s) => s.budget);
   const lastBudgetPlan          = useEPurseStore((s) => s.lastBudgetPlan);
@@ -240,7 +243,17 @@ const BudgetPlanScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Action row — Reset (narrow) + Save Plan (wide) */}
+        </ScrollView>
+
+        {/* ── Pinned action footer — Reset (narrow) + Save Plan (wide) ───────
+            Outside the ScrollView on purpose. Save is the whole point of the
+            screen, and a long category list pushed it off-screen: you edited a
+            cap, then had to scroll to the bottom to commit it. In flow rather
+            than absolutely positioned, so the list simply gets a shorter
+            viewport and needs no matching bottom padding to clear it.
+            KeyboardAvoidingView lifts it with the keyboard, which is what you
+            want while typing a cap. */}
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={styles.resetBtn}
@@ -251,9 +264,7 @@ const BudgetPlanScreen = ({ navigation }) => {
             </TouchableOpacity>
             <GradientButton title="Save Plan" onPress={savePlan} style={styles.saveBtn} />
           </View>
-
-          <View style={{ height: 40 }} />
-        </ScrollView>
+        </View>
       </SafeAreaView>
 
       {/* Category picker bottom sheet */}
@@ -393,18 +404,34 @@ const styles = StyleSheet.create({
   },
   addCatBtnText: { ...typography.bodyBold, fontWeight: '700' },
 
+  /** The bar the action row sits on. Card over the page's grey, plus the same
+   *  derived hairline the tab bar and the pinned header use. */
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    backgroundColor: colors.card,
+    borderTopWidth: 0.5,
+    borderTopColor: chromeHairline(colors.card),
+  },
   actionRow: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.sm,
   },
   // Reset/Save share `radius.lg` (ui-consistency §3d) — a footer pair must
   // agree on radius, and this is the shared full-width-button tier.
+  //
+  // …and on HEIGHT, via `BUTTON_H`. This used to set `paddingVertical:
+  // spacing.md + 4`, which with its 1.5pt border either side came out ~7pt
+  // TALLER than the GradientButton beside it. Matching paddings would not have
+  // fixed it: the border and the font size move the total independently, which
+  // is why the height itself is the shared number.
   resetBtn: {
-    paddingVertical: spacing.md + 4,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.lg,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: colors.danger + '66',
     backgroundColor: colors.danger + '0D',

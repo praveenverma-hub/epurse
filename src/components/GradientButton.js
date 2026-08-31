@@ -2,7 +2,7 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { radius, spacing, typography, shadows } from '../constants/theme';
+import { radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
 
 const GradientButton = ({
@@ -51,7 +51,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md + 2,
+    // The app's ONE button height. Padding stays small and `minHeight` does the
+    // work, so this cannot drift from a hand-rolled button beside it — matching
+    // paddings does not match heights once a border or a font size differs.
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xl,
     borderRadius: radius.lg,
     gap: spacing.sm,

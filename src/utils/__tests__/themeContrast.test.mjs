@@ -663,6 +663,62 @@ check("removed themes are gone ('sky')", !THEMES.sky);
     /const FULL = Math\.max\(1, heroH \/ P\);/.test(header),
     'heroH is 0 on the first frame when no estimate is given');
 
+  // ── One button height, applied as a minimum ───────────────────────────────
+  // The app had three in the full-width action tier: GradientButton came out ~46
+  // (14pt padding + a 15pt line), BudgetPlan's Reset ~53 (16pt padding + a 1.5pt
+  // border either side) and SmsDiagnostic pinned 52. Reported as "the height of
+  // reset is more than the other" — a footer pair 7pt apart reads as a rendering
+  // fault, not a hierarchy.
+  {
+    const { BUTTON_H } = await import(`${ROOT}/constants/theme.js`);
+    check(`BUTTON_H is ${BUTTON_H}, over the 44pt tap minimum`,
+      typeof BUTTON_H === 'number' && BUTTON_H >= 44);
+
+    const themeSrc = readFileSync(`${ROOT}/constants/theme.js`, 'utf8');
+    check('it is documented as a minHeight, never a height',
+      /Applied as \*\*`minHeight`\*\*, never `height`/.test(themeSrc),
+      'a fixed height clips the label at a large OS font-scale setting');
+
+    // Every button in the tier takes the height from the constant, and none keeps
+    // a number of its own. Matching PADDING is not enough: a border or a
+    // different font size moves the total independently, which is the whole
+    // reason the height itself is what is shared.
+    const TIER = [
+      ['components/GradientButton.js', 'btn'],
+      ['screens/BudgetPlanScreen.js', 'resetBtn'],
+      ['screens/SmsDiagnosticScreen.js', 'runBtnGradient'],
+    ];
+    for (const [rel, name] of TIER) {
+      const src = readFileSync(`${ROOT}/${rel}`, 'utf8');
+      const block = new RegExp(`${name}: \\{([\\s\\S]*?)\\n  \\}`).exec(src)?.[1] ?? '';
+      check(`${rel.split('/')[1]} · ${name} takes its height from BUTTON_H`,
+        /minHeight: BUTTON_H,/.test(block), block.slice(0, 80));
+      check(`${rel.split('/')[1]} · ${name} keeps no height of its own`,
+        !/(?:^|\n)\s*(?:minHeight|height): \d/.test(block),
+        'a literal here is how the tier drifted into three heights');
+    }
+
+    // The pair the user was looking at must agree, and it is the pair a lint can
+    // actually check: they sit in one row.
+    const plan = readFileSync(`${ROOT}/screens/BudgetPlanScreen.js`, 'utf8');
+    check('BudgetPlan\'s Reset and Save are in one row and share the height',
+      /<View style=\{styles\.actionRow\}>[\s\S]*?styles\.resetBtn[\s\S]*?<GradientButton/.test(plan)
+      && /resetBtn: \{\s*\n\s*minHeight: BUTTON_H,/.test(plan));
+
+    // And the footer that row lives in must be OUTSIDE the scroll view — Save is
+    // the point of the screen and a long category list pushed it off-screen.
+    const scrollEnd = plan.indexOf('</ScrollView>');
+    check('the action footer is pinned below the ScrollView, not inside it',
+      scrollEnd >= 0 && plan.indexOf('styles.footer') > scrollEnd,
+      'you edited a cap, then had to scroll to the bottom to commit it');
+    check('…and it pays the bottom safe-area inset itself',
+      /paddingBottom: Math\.max\(insets\.bottom, spacing\.lg\)/.test(plan),
+      "the SafeAreaView only takes edges={['top']}");
+    check('the dead 40pt scroll spacer is gone',
+      !/<View style=\{\{ height: 40 \}\} \/>/.test(plan),
+      'it existed to clear a button that now has its own bar');
+  }
+
   // ── Nobody may hand-pick the tab-bar clearance again ──────────────────────
   // AnalyticsScreen paid `spacing.lg` (16) against a bar that occupies 62 + the
   // safe-area inset, so its last section rendered behind the bar. Three other
