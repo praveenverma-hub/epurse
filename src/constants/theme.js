@@ -1,4 +1,21 @@
 // Premium Swiggy-inspired theme
+/**
+ * ⚠ THIS PALETTE IS FROZEN LIGHT — and it is the one thing blocking dark mode.
+ *
+ * `StyleSheet.create` captures these values at module load, so nothing that
+ * happens later — a theme switch, the `darkMode` flag, a canvas theme — can
+ * reach a style built from them. **972 references across 50 files** still do,
+ * which is why `STATIC_CONFIG.theme.canvasThemes` is off: turning it on today
+ * paints the themed surfaces slate and leaves these white.
+ *
+ * NEW CODE SHOULD NOT IMPORT THIS. Use `useTheme()` and build styles with
+ * `makeStyles(theme)` + `useMemo` (see `ProfileScreen.tsx`). `theme.*` is a
+ * strict SUPERSET of these keys — a test asserts it — so a file migrates by
+ * renaming `colors.` to `t.`.
+ *
+ * The full plan, the measured slate palette and the file-by-file inventory:
+ * **`docs/DARK_MODE.md`**. Read it before touching colour here.
+ */
 export const colors = {
   // Primary palette (Swiggy-style warm orange)
   primary: '#FF5A1F',
@@ -153,7 +170,7 @@ export const progressTrack = (color) => withAlpha(color, PROGRESS_TRACK_ALPHA);
 // feature banners' own wash: `textSecondary` lands at 4.2–4.4:1 (it is only
 // 4.83:1 on plain white, so ANY tint pushes it under 4.5), and using
 // `theme.primary` as text on a tint OF THAT SAME primary is far worse —
-// 3.1:1 on Ocean and 1.3:1 on Gold, i.e. invisible.
+// 3.2:1 on Ocean and 1.2:1 on Carbon, i.e. invisible.
 //
 // So don't hand-pick colours for tinted surfaces: state the colour you want and
 // let `readableOn` darken it only as far as it must.
@@ -319,7 +336,7 @@ export const pinnedHeaderChrome = (surface, palette = colors) => {
  *
  * A badge is a graphical element (3:1 bar), and no single flat colour clears it
  * on every accent — measured against each theme's full `gradientStops`, white
- * bottoms out at 1.41:1 on Amber and near-black at 1.03:1 on Platinum. The level
+ * bottoms out at 2.55:1 on Sunset and near-black at 1.03:1 on Platinum. The level
  * badge was a hardcoded violet `#7C3AED`, which is the worst of the three at
  * **1.02:1 on Platinum** — a badge you simply cannot see.
  *

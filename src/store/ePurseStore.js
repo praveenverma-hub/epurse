@@ -788,7 +788,7 @@ export const useEPurseStore = create(
       anchorNudgeDismissed: false,
 
       // Theme preferences
-      themeId: DEFAULT_THEME_ID,   // THEMES keys: 'orange'|'blue'|'amber'|'indigo'|'platinum'
+      themeId: DEFAULT_THEME_ID,   // THEMES keys: 'orange'|'blue'|'carbon'|'indigo'|'platinum'
       darkMode: false,             // reserved for future dark-theme rollout
 
       // Dashboard preference: show the weekly spend recap. On by default; toggled
@@ -4165,7 +4165,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 25,
+      version: 26,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -4671,6 +4671,20 @@ export const useEPurseStore = create(
                 lastResetMonth,
               },
             };
+          }
+        }
+
+        if (version < 26) {
+          // 'amber' ("Gold", #FFD600) was REPLACED by 'carbon' (deep slate +
+          // carbon mint). Remapped rather than reset: the user picked that slot,
+          // and the new theme is what now occupies it — dropping them back to the
+          // default would be a second unasked-for change on top of the first.
+          //
+          // The generic `!THEMES[themeId] → DEFAULT` line in v24 does NOT cover
+          // this: it only runs for stores below 24, so an amber user already at 25
+          // would have kept a dead id and seen the picker with nothing selected.
+          if (state.themeId === 'amber') {
+            state = { ...state, themeId: 'carbon' };
           }
         }
 

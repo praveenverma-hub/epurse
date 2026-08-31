@@ -200,12 +200,12 @@ const DashboardScreen = ({ navigation }) => {
 
   // Ink for the ACTIVE segment, which sits on a solid white cell. Measured, not
   // picked: the old active pill used `theme.primary` directly, which is 3.12:1 on
-  // Sunset and **1.41:1 on Gold** against white — it failed on four of the five
+  // Sunset and **1.31:1 on Carbon** against white — it fails on four of the five
   // accents. `readableOn` darkens only as far as it must (worst case now 4.66:1)
   // and leaves Platinum's near-black untouched.
   // 'segmented' and 'original' both put the active label on a SOLID WHITE
   // surface, so the ink has to be derived: `theme.primary` raw is 3.12:1 on
-  // Sunset and 1.41:1 on Gold against white — it failed on four of the five
+  // Sunset and 1.31:1 on Carbon against white — it fails on four of the five
   // accents in the old pills. 'underline' has no filled surface; its label sits
   // on the gradient and stays white.
   const periodActiveInk = useMemo(
@@ -1437,11 +1437,14 @@ const styles = StyleSheet.create({
   periodRuleActive: { borderBottomColor: '#FFFFFF' },
 
   // The synced-range label — the header's trust signal ("is this current?"), and
-  // previously its least legible text: 10px at #FFFFFF66 measures 1.13–2.29:1
+  // previously its least legible text: 10px at #FFFFFF66 measures 1.44–2.29:1
   // across the five accents. Full white at the shared tiny size takes that to
-  // 1.41–5.81:1, which is the ceiling available here: the gradient itself caps
-  // white text below AA on four of five accents (amber 1.41 even at full
-  // opacity), which is the app-wide gap recorded in ui-consistency §7. So this
+  // 2.55–5.81:1, which is the ceiling available here: the gradient itself caps
+  // white text below AA on three of five accents (Sunset 2.55 is the floor and
+  // the only one still under even the lenient 3:1 bar) — the app-wide gap
+  // recorded in ui-consistency §7. Carbon replacing Gold on Aug-31 lifted the
+  // worst case from 1.41 to 2.55 (a dark slate gradient where Gold's was
+  // near-yellow), but did not close the gap. So this
   // is now exactly as readable as the rest of the header, and no further fix is
   // possible without settling that decision. Don't reintroduce an alpha.
   dataInfo: { color: '#FFFFFF', ...typography.tiny },

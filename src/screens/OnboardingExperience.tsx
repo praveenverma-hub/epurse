@@ -1324,7 +1324,7 @@ const toastStyles = (t: Theme) =>
     // action link must contrast THAT. `background` is the pill's body-text colour
     // — guaranteed readable across all 4 accents and light/dark. Bold + underline
     // signals it's pressable without relying on an accent hue that may wash out
-    // (e.g. the amber theme's pale primaryLight on a near-white dark-mode pill).
+    // (e.g. Carbon's pale mint primaryLight on a near-white dark-mode pill).
     toastAction: { fontWeight: '800', color: t.background, textDecorationLine: 'underline' },
     toastClose: { color: t.background, opacity: 0.7, fontSize: 14, marginLeft: spacing.md },
   });

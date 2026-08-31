@@ -45,7 +45,27 @@ const check = (name, cond, detail = '') => {
 // Anchored to real "now" (not a fixed calendar date) so this suite never goes
 // stale — CC true-up tests are dropped by applyCCPayment's 5-day age guard
 // (CC_PROMPT_MAX_AGE_MS) once a hardcoded past date falls outside that window.
-const T0 = Date.now() - 2 * 24 * 60 * 60 * 1000;
+//
+// …but CLAMPED INSIDE THE CURRENT CALENDAR MONTH. A flat "now − 2 days" put
+// every fixture in the PREVIOUS month on the 1st and 2nd, and `getMonthlySpend`
+// counts this month — so "CC pay: re-tag moves it out of spend" read 0 before
+// and 0 after and failed, two days out of every month, for reasons that had
+// nothing to do with the code under test. (Found on 2026-09-01, the 1st.)
+//
+// Both bounds matter: the max keeps it in this month, and the min keeps it in
+// the PAST — on the 1st, the month start is later than "two days ago" but must
+// still not be a future timestamp.
+const MONTH_START = (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+const T0 = Math.min(Date.now() - 1000, Math.max(Date.now() - 2 * 24 * 60 * 60 * 1000, MONTH_START));
+
+// Guard the anchor itself: every fixture below inherits it, so a T0 that drifts
+// out of the month (or into the future) fails dozens of tests for one reason.
+{
+  const t0 = new Date(T0), now = new Date();
+  check('T0 sits inside the current calendar month, in the past',
+    t0.getMonth() === now.getMonth() && t0.getFullYear() === now.getFullYear() && T0 < Date.now(),
+    `${t0.toISOString()} vs now ${now.toISOString()}`);
+}
 
 // ── Dedup ────────────────────────────────────────────────────────────────────
 reset();
@@ -1922,7 +1942,12 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   const { monthKey } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
   const migrate = useStore.persist.getOptions().migrate;
   const version = useStore.persist.getOptions().version;
-  check('store version is 25 (the repair migration)', version === 25, `${version}`);
+  // `>=`, not `===`. Pinning the exact number means every future migration has
+  // to edit an assertion that isn't about it — and the one thing this block
+  // actually needs is that the v25 repair is IN the chain, which later versions
+  // don't undo. (It was `=== 25` and failed the moment v26 landed.)
+  check(`store version is at least 25 — the repair migration is in the chain (${version})`,
+    version >= 25, `${version}`);
 
   // Build real transactions for last month: 18,000 of Food spend.
   reset();
@@ -2039,6 +2064,42 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     JSON.stringify(Object.entries(chain.budgetHistory).map(([k, v]) => `${k}:${v.status}/${v.streakAfter}`)));
   check('…and lastResetMonth is the month that actually broke it',
     chain.budgetStreak.lastResetMonth === '2025-03', chain.budgetStreak.lastResetMonth);
+}
+
+// ── v26: the Gold accent was replaced, not just deleted ─────────────────────
+// 'amber' ("Gold", #FFD600) became 'carbon' (deep slate + carbon mint). The
+// colours would have fallen back on their own — `buildPalette` handles an
+// unknown id — so nothing would have LOOKED broken. What breaks is the picker:
+// SettingsScreen renders `Object.values(THEMES)` and compares each against the
+// stored id, so a Gold user would open Appearance and find a themed app with no
+// swatch selected and no way to tell why. Exactly the 'sky' bug v24 fixed, which
+// is why v24's generic line doesn't help here: it only runs below version 24.
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const { THEMES, DEFAULT_THEME_ID } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+
+  check('the Gold accent is really gone', !THEMES.amber);
+  check('…and Carbon took its slot', !!THEMES.carbon && THEMES.carbon.label === 'Carbon');
+
+  const gold = migrate({ themeId: 'amber' }, 25);
+  check('a Gold user is moved onto Carbon, not reset to the default',
+    gold.themeId === 'carbon', `${gold.themeId}`);
+  check('…which is a real theme the picker can select',
+    !!THEMES[gold.themeId], `${gold.themeId}`);
+
+  // Everyone else is untouched — a migration that rewrites a valid choice is a
+  // worse bug than the one it fixes.
+  for (const id of Object.keys(THEMES)) {
+    const kept = migrate({ themeId: id }, 25);
+    check(`'${id}' is left alone`, kept.themeId === id, `${kept.themeId}`);
+  }
+  const fresh = migrate({ themeId: DEFAULT_THEME_ID }, 25);
+  check('the default survives the migration', fresh.themeId === DEFAULT_THEME_ID);
+
+  // Idempotent: a store already at 26 must not be touched again.
+  const twice = migrate(migrate({ themeId: 'amber' }, 25), 26);
+  check('running it twice is a no-op', twice.themeId === 'carbon', `${twice.themeId}`);
 }
 
 // ── The Zero-Transaction bonus must not fire on a day you SPENT ──────────────

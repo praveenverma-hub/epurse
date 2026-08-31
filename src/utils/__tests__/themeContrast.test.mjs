@@ -11,7 +11,7 @@
 //   • `textSecondary` is 4.83:1 on plain white, so ANY accent wash pushes body
 //     copy under the 4.5:1 minimum.
 //   • Using `theme.primary` as TEXT on a tint of that same primary measured
-//     3.1:1 on Ocean and 1.3:1 on Gold — effectively invisible.
+//     3.2:1 on Ocean and 1.2:1 on Carbon — effectively invisible.
 // `readableOn` fixes both by darkening only as far as it must; this suite
 // proves it does so for every theme, including any theme added later.
 // =============================================================================
@@ -257,7 +257,7 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 
 // ── InfoSheet bullet icons sit on a fixed light tile ───────────────────────
 // The badge tile is #F1F3F5 regardless of theme, so a raw accent can be far too
-// pale on it — Gold measures ~1.5:1. Icons are graphical elements (3:1 bar), and
+// pale on it — Carbon measures 1.17:1. Icons are graphical elements (3:1 bar), and
 // `readableOn(bg, accent, 3)` is what the component uses.
 {
   const BADGE_BG = '#F1F3F5';
@@ -277,8 +277,8 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 // ── the ACTIVE segment of the period selector ──────────────────────────────
 // The selected D/W/M/Y cell is a solid WHITE pill on the gradient, so its label
 // is accent-on-white. Using `theme.primary` raw — which is what the old circular
-// pills did — measures 3.12:1 on Sunset and **1.41:1 on Gold**: it failed on four
-// of the five accents, at 13px bold. `readableOn` is the fix, and this bounds it.
+// pills did — measures 3.12:1 on Sunset and **1.31:1 on Carbon**: it fails on four
+// of the five accents (Indigo's 4.47 is under the bar too), at 13px bold. `readableOn` is the fix, and this bounds it.
 {
   let worst = Infinity, where = '';
   for (const [id, t] of Object.entries(THEMES)) {
@@ -299,7 +299,7 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 
 // ── the bottom tab bar's ACTIVE tab ────────────────────────────────────────
 // The selected tab painted itself with the raw accent on the bar's own surface,
-// which measures 3.12:1 on Sunset and **1.41:1 on Gold** — so on four of five
+// which measures 3.12:1 on Sunset and **1.31:1 on Carbon** — so on four of five
 // accents the SELECTED tab was harder to read than the unselected ones
 // (`textSecondary` is 4.83:1 there). The label is 10px, so it takes the strict
 // AA bar and the icon shares its ink.
@@ -347,7 +347,7 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 // The band was a flat `#EBEEF2` at 1.07:1 against the page — invisible — with a
 // hairline at 1.02:1 on itself. It's now a 10% accent wash, and the measurements
 // below are why it ALSO keeps a derived hairline: at that tint the wash is
-// hue-distinct but barely luminance-distinct, and on Gold it is FLATTER than the
+// hue-distinct but barely luminance-distinct, and on Carbon it is FLATTER than the
 // grey it replaced. The wash carries identity; the hairline carries the boundary.
 {
   const BAND_TINT = 0.1;
@@ -364,8 +364,9 @@ check("removed themes are gone ('sky')", !THEMES.sky);
       const p = buildPalette(id, dark);
       const band = mix(p.primary, BAND_TINT, p.background);
       const edge = contrastRatio(readableOn(band, p.primary, EDGE_MIN), band);
-      // 42px/900 — large text, so the 3:1 bar. Gold's primaryDark is the only
-      // accent that fails raw (1.69:1), which is why it is derived.
+      // 42px/900 — large text, so the 3:1 bar. THREE cases fail raw — Carbon
+      // (1.92:1), and Platinum (1.12:1) and Indigo (2.74:1) in dark mode — which
+      // is why the ink is derived instead of taken from primaryDark.
       const nameInk = contrastRatio(readableOn(band, p.primaryDark, AA_UI), band);
       const tagInk = contrastRatio(readableOn(band, p.textSecondary), band);
       worstEdge = Math.min(worstEdge, edge);
@@ -384,11 +385,21 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 
   // The reason the hairline can't be dropped: prove the wash alone does NOT make
   // the band visible. If someone later raises the tint and deletes the edge, this
-  // is what tells them it doesn't work — Gold is the case that breaks.
-  const amberBand = mix(THEMES.amber.primary, BAND_TINT, colors.background);
-  check(`Gold's wash alone is flatter than the old grey (${contrastRatio(amberBand, colors.background).toFixed(3)}:1) — keep the edge`,
-    contrastRatio(amberBand, colors.background) < contrastRatio(OLD_BAND, colors.background),
-    `${contrastRatio(amberBand, colors.background).toFixed(3)}`);
+  // is what tells them it doesn't work.
+  //
+  // The worst theme is COMPUTED, not named. This line used to read
+  // `THEMES.amber.primary` — and when 'amber' (Gold) was replaced by 'carbon' on
+  // Aug-31 the suite crashed with a TypeError instead of re-measuring. A test
+  // that hardcodes the case it is making stops making it the moment the case
+  // moves.
+  const flattest = Object.values(THEMES)
+    .map((t) => ({ t, ratio: contrastRatio(mix(t.primary, BAND_TINT, colors.background), colors.background) }))
+    .sort((a, b) => a.ratio - b.ratio)[0];
+  check(`the flattest wash (${flattest.t.label}, ${flattest.ratio.toFixed(3)}:1) is still flatter than the old grey — keep the edge`,
+    flattest.ratio < contrastRatio(OLD_BAND, colors.background),
+    `${flattest.ratio.toFixed(3)} vs ${contrastRatio(OLD_BAND, colors.background).toFixed(3)} — if this now PASSES, `
+    + 'every accent wash has become visible on its own; that is a good outcome, so '
+    + 're-evaluate whether the derived edge is still needed rather than "fixing" the test');
 
   // The tint must stay well clear of the point where a wash's luminance equals
   // the page background and the surface reads as transparent (§7).
@@ -398,9 +409,234 @@ check("removed themes are gone ('sky')", !THEMES.sky);
     rawTag < AA_TEXT, `${rawTag.toFixed(2)}`);
 }
 
+// ── recap popups: one dismiss, and it belongs to the sheet ─────────────────
+// The monthly recap is a BOTTOM SHEET, and its "Maybe later" button rendered
+// below the card, on the backdrop — reading as a stray control floating under
+// the modal rather than as part of it. `SheetCloseButton`'s own doc is explicit:
+// "a sheet needs NO bottom 'Close' button — drop those" (ui-consistency §3bb).
+//
+// The risk in removing it is removing the ONLY visible way out, so the shell
+// swaps affordances rather than dropping one: no label → the floating ✕.
+console.log('\n── recap modal dismiss ──');
+{
+  const SRC4 = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const shell   = strip(readFileSync(`${SRC4}/components/RecapModalShell.tsx`, 'utf8'));
+  const monthly = strip(readFileSync(`${SRC4}/components/MonthlyRecapModal.tsx`, 'utf8'));
+  const weekly  = strip(readFileSync(`${SRC4}/components/WeeklyRecapModal.tsx`, 'utf8'));
+
+  check('the monthly recap no longer renders a button under the sheet',
+    !/dismissLabel/.test(monthly));
+  check('…and the weekly card keeps its acknowledgement button',
+    /dismissLabel="Done"/.test(weekly),
+    'a centred card is a moment you acknowledge — that button is the acknowledgement');
+
+  check('the shell only renders the labelled button when a label is given',
+    /const dismiss = dismissLabel \? \(/.test(shell) && /\) : null;/.test(shell));
+
+  // The safety property: no combination of props yields a modal with no exit.
+  const closeUses = (shell.match(/<SheetCloseButton/g) || []).length;
+  check(`both branches fall back to the shared ✕ (${closeUses} call sites)`, closeUses === 2,
+    'bottom uses the flow variant, centre the absolute one');
+  check('…and each is gated on the label being absent',
+    (shell.match(/\{!dismissLabel \? <SheetCloseButton/g) || []).length === 2);
+  // Both fallbacks are FLOW. `absolute` hangs the ✕ on a negative offset, which
+  // a ScrollView clips on Android and which collides with the centred branch's
+  // top padding on a device with a short status-bar inset.
+  check('neither fallback uses the absolute variant',
+    !/variant="absolute"/.test(shell));
+  check('the centre fallback aligns with the card edge (gutter 0)',
+    /<SheetCloseButton onPress=\{onClose\} gutter=\{0\} \/>/.test(shell),
+    'the centred sheet has no horizontal padding of its own to match');
+  check('both recaps are centred on screen',
+    /align="center"/.test(monthly) && /align="center"/.test(weekly));
+
+  // Layout invariant: the flow ✕ only lands beside the sheet if the BACKDROP
+  // does the bottom-alignment. With `marginTop: 'auto'` on the sheet, the free
+  // space collapses between the two and pins the ✕ to the top of the screen.
+  check('the backdrop bottom-aligns, and the sheet does not', 
+    /backdrop: \{ flex: 1, justifyContent: 'flex-end'/.test(shell)
+    && !/bottomSheet: \{ marginTop: 'auto'/.test(shell));
+}
+
+// ── a theme may own its CANVAS ─────────────────────────────────────────────
+// Carbon is deep slate + mint, and the slate is not "dark mode applied to
+// Carbon" — it IS Carbon. So the theme carries `alwaysDark` + its own
+// `neutrals`, which `buildPalette` merges over the base set.
+//
+// Gated by STATIC_CONFIG.theme.canvasThemes, OFF until the surface migration
+// lands: 972 `colors.*` references across 50 files are captured by
+// `StyleSheet.create` at module load and no palette change can reach them, so
+// turning it on early paints a half-lit app. The COLOURS below are asserted
+// either way — they are data, and they have to be right before the flip, not
+// after it.
+console.log('\n── Carbon canvas (deep slate) ──');
+{
+  const { CARBON_NEUTRALS, LIGHT_NEUTRALS } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+  const { STATIC_CONFIG } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/config/staticConfig.ts');
+  const ON = STATIC_CONFIG.theme.canvasThemes;
+  console.log(`     canvasThemes = ${ON}`);
+
+  const K = CARBON_NEUTRALS;
+  check('the canvas is the slate the user asked for', K.background === '#0F172A');
+
+  // Every step keeps the JOB it has in the light palette, so measure the pairs
+  // that matter against the light palette rather than against an abstract bar.
+  const pairs = [
+    ['body copy on a card',   K.textSecondary, K.card,       LIGHT_NEUTRALS.textSecondary, LIGHT_NEUTRALS.card, AA_TEXT],
+    ['primary text on a card', K.textPrimary,  K.card,       LIGHT_NEUTRALS.textPrimary,   LIGHT_NEUTRALS.card, 7],
+    ['the mint accent on a card', '#00FFC2',   K.card,       '#00FFC2',                    LIGHT_NEUTRALS.card, AA_TEXT],
+  ];
+  for (const [what, ink, bg, lightInk, lightBg, bar] of pairs) {
+    const r = contrastRatio(ink, bg);
+    check(`${what}: ${r.toFixed(2)}:1 (light palette ${contrastRatio(lightInk, lightBg).toFixed(2)})`,
+      r >= bar, `${ink} on ${bg}`);
+  }
+
+  // The two surfaces that must merely be DISTINGUISHABLE, not readable. Held to
+  // the light palette's own numbers so the slate ramp can't be flatter than the
+  // one it mirrors.
+  for (const [what, a, b, la, lb] of [
+    ['a card lifts off the background', K.card, K.background, LIGHT_NEUTRALS.card, LIGHT_NEUTRALS.background],
+    ['a divider separates rows in a card', K.divider, K.card, LIGHT_NEUTRALS.divider, LIGHT_NEUTRALS.card],
+    ['an input border is stronger than a divider', K.inputBorder, K.card, LIGHT_NEUTRALS.inputBorder, LIGHT_NEUTRALS.card],
+  ]) {
+    const r = contrastRatio(a, b), lr = contrastRatio(la, lb);
+    check(`${what}: ${r.toFixed(3)} (light ${lr.toFixed(3)})`, r >= lr, `${a} on ${b}`);
+  }
+
+  // textMuted is a KNOWN gap on white (2.54:1) that the app has carried for a
+  // long time. A new canvas is the one chance not to inherit it.
+  const mutedDark = contrastRatio(K.textMuted, K.card);
+  check(`textMuted stops being a gap on slate (${mutedDark.toFixed(2)}:1 vs 2.54 on white)`,
+    mutedDark >= AA_TEXT);
+  // …and is still the QUIETEST of the three, or it isn't muted any more.
+  check('…while staying quieter than textSecondary',
+    mutedDark < contrastRatio(K.textSecondary, K.card)
+    && contrastRatio(K.textSecondary, K.card) < contrastRatio(K.textPrimary, K.card),
+    'the three text weights must stay ordered');
+
+  // Status colours are theme-agnostic, so they land on this canvas unchanged.
+  for (const key of ['success', 'danger', 'warning', 'info']) {
+    const dark = contrastRatio(colors[key], K.card);
+    const light = contrastRatio(colors[key], LIGHT_NEUTRALS.card);
+    check(`${key} is no worse on slate than on white (${dark.toFixed(2)} vs ${light.toFixed(2)})`,
+      dark >= light, `${colors[key]}`);
+  }
+
+  // ── the merge itself ──
+  const carbon = buildPalette('carbon', false);
+  const ocean  = buildPalette('blue', false);
+  if (ON) {
+    check('canvas ON: Carbon paints slate even with darkMode off',
+      carbon.background === '#0F172A' && carbon.card === K.card, carbon.background);
+    check('canvas ON: …and reports darkMode TRUE, because that is what is painted',
+      carbon.darkMode === true,
+      'anything branching on darkMode must follow the canvas, not the flag');
+    check('canvas ON: a theme WITHOUT a canvas is untouched',
+      ocean.background === LIGHT_NEUTRALS.background && ocean.darkMode === false);
+  } else {
+    check('canvas OFF: Carbon falls back to the shared light neutrals',
+      carbon.background === LIGHT_NEUTRALS.background, carbon.background);
+    check('canvas OFF: …and darkMode stays the flag',
+      carbon.darkMode === false);
+  }
+
+  // A partial override must still yield a COMPLETE palette — adding one key to
+  // a theme later cannot leave a screen with `undefined` for a colour.
+  const missing = Object.keys(LIGHT_NEUTRALS).filter((k) => carbon[k] === undefined);
+  check('the palette is complete whichever way the switch is set', missing.length === 0,
+    missing.join(', '));
+  check('the canvas declares no key the base set lacks',
+    Object.keys(CARBON_NEUTRALS).every((k) => k in LIGHT_NEUTRALS),
+    Object.keys(CARBON_NEUTRALS).filter((k) => !(k in LIGHT_NEUTRALS)).join(', '));
+}
+
+// ── theme.* must be a SUPERSET of the static colors.* ──────────────────────
+// This is the claim that makes the pending surface migration mechanical rather
+// than a redesign: a screen moves off the static palette by renaming the object.
+// `inputBorder` was the one key that existed on `colors` and not on the palette,
+// which is exactly the kind of thing that turns a rename into a debugging
+// session — it is on both now, and this keeps it that way.
+console.log('\n── palette ⊇ static colors ──');
+{
+  const { execSync } = await import('node:child_process');
+  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const used = new Set(
+    execSync(`grep -rho "\\bcolors\\.[a-zA-Z]*" ${SRC}/screens ${SRC}/components || true`)
+      .toString().trim().split('\n').filter(Boolean).map((m) => m.split('.')[1]),
+  );
+  check(`the app really does use the static palette (${used.size} distinct keys)`, used.size > 10);
+  const palette = buildPalette('carbon', false);
+  const orphans = [...used].filter((k) => palette[k] === undefined);
+  check('every static colour key has a palette twin', orphans.length === 0,
+    `no theme equivalent for: ${orphans.join(', ')}`);
+
+  // ── RATCHET: the dark-mode backlog may shrink, never grow ────────────────
+  // Every one of these is a style `StyleSheet.create` freezes at module load,
+  // which no theme change can reach. The budget is the number recorded in
+  // docs/DARK_MODE.md, read from the doc so there is ONE source of truth.
+  const plan = readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/docs/DARK_MODE.md', 'utf8');
+  const budget = Number(plan.match(/\*\*(\d+) files · (\d+) references\.\*\*/)?.[2]);
+  check('docs/DARK_MODE.md records the backlog size', Number.isFinite(budget), `${budget}`);
+  const actual = Number(
+    execSync(`grep -rho "\\bcolors\\.[a-zA-Z]" ${SRC}/screens ${SRC}/components ${SRC}/navigation | wc -l`)
+      .toString().trim(),
+  );
+  check(`static-palette references have not grown (${actual} vs a budget of ${budget})`,
+    actual <= budget,
+    'new code must use useTheme() + makeStyles(theme) — see docs/DARK_MODE.md');
+  if (actual < budget) {
+    console.log(`     ${budget - actual} fewer than recorded — update the count in docs/DARK_MODE.md`);
+  }
+}
+
+// ── a gradient carries WHITE text, so it stays dark (ratchet) ──────────────
+// Not a WCAG bar — white on a gradient is the app's KNOWN GAP (ui-consistency
+// §7) and three of five accents are still under 4.5:1. This is a RATCHET: no new
+// or edited accent may be worse than today's floor. Sunset is that floor at
+// 2.55:1, and the reason the bar sits just under it.
+//
+// The rule this encodes, learned adding Carbon (Aug-31): a bright accent belongs
+// in `primary`, where every ink is derived from it, NOT in the gradient, where
+// white is painted on it flat. Pure #00FFC2 holds white at 1.31:1 — the header
+// title, greeting and chips would all be illegible — so Carbon's gradient ends
+// on that mint mixed 40% into the slate instead.
+console.log('\n── gradients stay dark enough for white ──');
+{
+  const FLOOR = 2.5;
+  let worst = Infinity, where = '';
+  for (const t of Object.values(THEMES)) {
+    const stops = t.gradientStops || [t.gradientStart, t.gradientEnd];
+    for (const stop of stops) {
+      const r = contrastRatio('#FFFFFF', stop);
+      if (r < worst) { worst = r; where = `${t.label} ${stop}`; }
+    }
+  }
+  check(`every gradient stop holds white at ≥${FLOOR}:1 (worst ${worst.toFixed(2)}, ${where})`,
+    worst >= FLOOR, where);
+
+  // Carbon specifically: the accent is the mint, the gradient is the slate.
+  const carbon = THEMES.carbon;
+  check('Carbon exists and is the mint accent', carbon?.primary === '#00FFC2');
+  const carbonStops = carbon.gradientStops || [carbon.gradientStart, carbon.gradientEnd];
+  check('…and the pure mint is NOT a gradient stop',
+    !carbonStops.some((c) => c.toUpperCase() === '#00FFC2'),
+    `white on #00FFC2 is ${contrastRatio('#FFFFFF', '#00FFC2').toFixed(2)}:1`);
+  check(`…while its slate base is the darkest start in the app (${contrastRatio('#FFFFFF', '#0F172A').toFixed(2)}:1)`,
+    carbonStops[0] === '#0F172A' && contrastRatio('#FFFFFF', carbonStops[0]) >= 15);
+
+  // Guard the guard: the ratchet has to be able to fail. Pure mint must be the
+  // kind of value it rejects, or the check above is decoration.
+  check('the ratchet would reject the raw mint as a stop',
+    contrastRatio('#FFFFFF', '#00FFC2') < FLOOR);
+}
+
 // ── the header badge must be VISIBLE on every accent ───────────────────────
 // A badge is an opaque graphical element (3:1 bar). No flat colour clears it on
-// all five gradients — white bottoms out at 1.41:1 on Amber, near-black at
+// all five gradients — white bottoms out at 2.55:1 on Sunset, near-black at
 // 1.03:1 on Platinum. The level badge shipped as a hardcoded violet `#7C3AED`,
 // the worst of the three at **1.02:1 on Platinum**: a badge nobody could see.
 // `badgeOnGradient` picks per theme instead.
@@ -516,7 +752,7 @@ check("removed themes are gone ('sky')", !THEMES.sky);
   // The block above proves `readableOn('#FFFFFF', primary)` produces a passing
   // colour — but it says nothing about whether the screen actually calls it. A
   // mutation replacing `periodActiveInk` with a raw `theme.primary` left every
-  // contrast assertion green while putting 1.41:1 text back on Gold. Testing the
+  // contrast assertion green while putting 1.31:1 text back on Carbon. Testing the
   // helper is not testing the caller, so grep the caller.
   const dash = readFileSync(`${ROOT}/screens/DashboardScreen.js`, 'utf8');
   const dashLines = dash.split('\n');

@@ -8,8 +8,23 @@
 // everything else lives here once (ui-consistency §0).
 //
 // `align` is the named axis of variation, not a caller's name:
-//   'center' — a card-sized moment (the weekly recap)
-//   'bottom' — a taller sheet that reads better rising from the edge (monthly)
+//   'center' — a card-sized moment, centred and SCROLLABLE (both recaps)
+//   'bottom' — a sheet rising from the edge. Currently UNUSED: the monthly recap
+//     moved to 'center' on Sep-1. Kept because it is the shell's one axis and
+//     the layout is non-obvious (see the flex-end note in the styles), but treat
+//     it as unexercised — nothing renders it today.
+//
+// DISMISS: `dismissLabel` is OPTIONAL. Give one and you get the labelled button
+// below the content; omit it and you get the shared floating ✕
+// (`SheetCloseButton`). The monthly recap omits it — on a bottom sheet the
+// labelled button reads as a stray control sitting on the backdrop UNDER the
+// card rather than as part of it, which is exactly what SheetCloseButton's own
+// doc says to drop: "a sheet needs NO bottom 'Close' button" (ui-consistency
+// §3bb). The weekly recap keeps its "Done": a centred card is a moment you
+// acknowledge, and the button is the acknowledgement.
+//
+// There is deliberately no third state. Omitting the label can never leave a
+// modal with no visible way out — it swaps one affordance for the other.
 //
 // Safe-area handling is the reason the centred variant existed in a broken state:
 // `statusBarTranslucent` makes the modal span the FULL screen, behind the status
@@ -28,6 +43,7 @@ import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import SheetCloseButton from './SheetCloseButton';
 import { useTheme } from '../hooks/useTheme';
 
 interface Palette { textSecondary: string; textMuted: string; }
@@ -37,8 +53,11 @@ type Props = {
   onClose: () => void;
   /** Where the content sits. See the note above — this is the axis, not a flag. */
   align?: 'center' | 'bottom';
-  /** Text of the dismiss button ("Done", "Maybe later"). */
-  dismissLabel: string;
+  /**
+   * Text of the dismiss button ("Done"). OMIT to use the shared floating ✕
+   * instead — the right choice for a bottom sheet. See the note above.
+   */
+  dismissLabel?: string;
   children: React.ReactNode;
 };
 
@@ -48,7 +67,7 @@ const RecapModalShell: React.FC<Props> = ({
   const theme = useTheme() as Palette;
   const insets = useSafeAreaInsets();
 
-  const dismiss = (
+  const dismiss = dismissLabel ? (
     <Pressable
       onPress={onClose}
       style={[styles.dismissBtn, { backgroundColor: `${theme.textMuted}1F` }]}
@@ -57,7 +76,7 @@ const RecapModalShell: React.FC<Props> = ({
     >
       <Text style={[styles.dismissText, { color: theme.textSecondary }]}>{dismissLabel}</Text>
     </Pressable>
-  );
+  ) : null;
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
@@ -65,6 +84,13 @@ const RecapModalShell: React.FC<Props> = ({
         {align === 'bottom' ? (
           <>
             <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+            {/* `flow` variant: the sibling immediately BEFORE the sheet, in a
+                flex-end backdrop — the arrangement SheetCloseButton documents,
+                and the one that can never be clipped. This is why the sheet no
+                longer carries `marginTop: 'auto'`: that would have absorbed the
+                free space BETWEEN the ✕ and the sheet and pinned the ✕ to the
+                top of the screen. */}
+            {!dismissLabel ? <SheetCloseButton onPress={onClose} /> : null}
             <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 16 }]}>
               {children}
               {dismiss}
@@ -88,6 +114,16 @@ const RecapModalShell: React.FC<Props> = ({
                 doesn't close it. */}
             <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
             <View style={styles.centerSheet}>
+              {/* `flow`, not `absolute`. The sheet is a plain View inside the
+                  scroll content, so a flow sibling above the card is exactly the
+                  arrangement SheetCloseButton documents — and it adds its own
+                  44pt to the scroll height instead of hanging over the edge on a
+                  negative offset, which a ScrollView clips on Android and which
+                  would collide with the contentContainer's top padding on a
+                  device with a short status-bar inset.
+                  `gutter={0}` so the ✕ aligns with the card's right EDGE; the
+                  sheet has no horizontal padding of its own to match. */}
+              {!dismissLabel ? <SheetCloseButton onPress={onClose} gutter={0} /> : null}
               {children}
               {dismiss}
             </View>
@@ -101,9 +137,12 @@ const RecapModalShell: React.FC<Props> = ({
 export default RecapModalShell;
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(5, 8, 16, 0.6)' },
+  // flex-end, so the bottom variant's [✕, sheet] pair sits together at the
+  // bottom. The centred variant fills it with a flex:1 ScrollView, so this has
+  // no effect there.
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(5, 8, 16, 0.6)' },
   fill: { flex: 1 },
-  bottomSheet: { marginTop: 'auto', paddingHorizontal: 16, paddingTop: 20 },
+  bottomSheet: { paddingHorizontal: 16, paddingTop: 20 },
   centerContent: {
     flexGrow: 1,
     justifyContent: 'center',

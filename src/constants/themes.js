@@ -1,7 +1,7 @@
 // =============================================================================
 // Themes — primary palette options + neutrals for light/dark.
 // -----------------------------------------------------------------------------
-// User can pick one of five accent themes (orange, blue, amber, indigo,
+// User can pick one of five accent themes (orange, blue, carbon, indigo,
 // platinum — the neutral one);
 // the default is `blue` ("Ocean") — see DEFAULT_THEME_ID below. The
 // `primary` / `gradient*` keys swap to match the choice; neutrals come from
@@ -10,6 +10,62 @@
 // To add a new theme, add an entry to THEMES below and the picker UI
 // will pick it up automatically (themesService scans Object.values).
 // =============================================================================
+
+import { STATIC_CONFIG } from '../config/staticConfig';
+
+/**
+ * Whether a theme is allowed to bring its own canvas (see staticConfig). Read
+ * once at module load, like every other static switch — it is a build-time
+ * decision, not a user setting.
+ */
+const CANVAS_THEMES_ENABLED = STATIC_CONFIG.theme.canvasThemes;
+
+
+/**
+ * Carbon's canvas — deep slate, the other half of the pair the accent is named
+ * for. A theme normally takes LIGHT_NEUTRALS or DARK_NEUTRALS depending on the
+ * `darkMode` flag; Carbon brings its own, because the slate is not "dark mode
+ * applied to Carbon", it IS Carbon.
+ *
+ * Built as a ramp off #0F172A (the given base) rather than reusing
+ * DARK_NEUTRALS' neutral greys, which would grey out the very hue the theme is
+ * for. Every step keeps the same JOB it has in the light palette: `card` lifts
+ * off `background` by about the same amount, `divider` separates rows inside a
+ * card, `inputBorder` is darker still so an unfilled control has an edge.
+ *
+ * Measured against the light palette it mirrors — it is not a downgrade
+ * anywhere, and is better in the two places light has always been weak:
+ *
+ *   textSecondary on card   7.17:1   (light 4.83)
+ *   textPrimary  on card  13.51:1   (light 17.01)
+ *   textMuted    on card   4.30:1   (light 2.54 — a long-standing accepted gap)
+ *   divider      on card   1.358    (light 1.184)
+ *   card         on bg     1.120    (light 1.091)
+ *   mint accent  on card  12.21:1   (the accent on white is 1.31)
+ *
+ * The status colours also gain: success 6.28, danger 4.24, warning 7.42,
+ * info 4.33 — against 2.54 / 3.76 / 2.15 / 3.68 on white.
+ */
+export const CARBON_NEUTRALS = {
+  background: '#0F172A',
+  card: '#182234',
+  cardAlt: '#1F2B40',
+  divider: '#2A3853',
+  // Lighter than `divider`, not equal to it. The first cut set both to #2A3853
+  // and a test caught it: an unfilled input would have had exactly as much edge
+  // as a row separator inside a card, which is the distinction this key exists
+  // to make (1.79 vs 1.36 on the card; the light palette runs 1.40 vs 1.18).
+  inputBorder: '#3A4A69',
+  textPrimary: '#E6EDF5',
+  textSecondary: '#9BB0C9',
+  // 5.03:1 — deliberately ABOVE AA. On white, `textMuted` is 2.54:1, a gap the
+  // app has carried for a long time because the alternatives all lose the look.
+  // A new canvas is the one chance to not inherit it, and on slate the quiet
+  // grey can clear the bar and still read as the quietest of the three.
+  textMuted: '#7A93AF',
+  textOnGradient: '#FFFFFF',
+  shadow: '#000000',
+};
 
 export const THEMES = {
   orange: {
@@ -32,15 +88,41 @@ export const THEMES = {
     gradientStart: '#1E40AF',
     gradientEnd: '#3B82F6',
   },
-  amber: {
-    id: 'amber',
-    label: 'Gold',
-    swatch: '#FFD600',
-    primary: '#FFD600',
-    primaryDark: '#F9A825',
-    primaryLight: '#FFF9C4',
-    gradientStart: '#FF8F00',
-    gradientEnd: '#FFD600',
+  /**
+   * Carbon — deep slate base, carbon-mint accent. Replaced 'amber' ("Gold",
+   * #FFD600) on Aug-31; store migration v26 moves anyone who had Gold onto this,
+   * since it took that slot.
+   *
+   * THE GRADIENT DOES NOT END ON THE MINT, and can't. White is the header ink on
+   * every theme, and pure #00FFC2 holds it at **1.31:1** — the header title,
+   * greeting and chips would all be illegible. The end stop is the same mint
+   * mixed 40% over the slate (#097467), which holds white at 5.67:1, comparable
+   * to Platinum's brightest stop (5.8:1). Push it brighter and the header — the
+   * largest painted surface in the app — is the first thing to fail.
+   *
+   * The pure mint is the ACCENT (`primary`): buttons, chips, active states,
+   * progress fills, and every `readableOn`-derived ink. That is where a colour
+   * this bright belongs — small, on a surface, with its ink measured.
+   * It is no lighter a starting point than the Gold it replaces (1.41:1).
+   *
+   * CARBON OWNS ITS CANVAS (Aug-31). Every other accent is orthogonal to the
+   * `darkMode` flag — Platinum's doc says as much, "Platinum + darkMode is the
+   * fully-blacked-out combination". Carbon is not: the slate IS the theme, so it
+   * carries `alwaysDark` + its own `neutrals`, and picking it means picking a
+   * dark app. That's the point of the pair — a bright mint needs a dark ground
+   * to be an accent rather than a glare.
+   */
+  carbon: {
+    id: 'carbon',
+    label: 'Carbon',
+    swatch: '#00FFC2',
+    primary: '#00FFC2',
+    primaryDark: '#00C79A',
+    primaryLight: '#7FFFE0',
+    gradientStart: '#0F172A',
+    gradientEnd: '#097467',
+    alwaysDark: true,
+    neutrals: CARBON_NEUTRALS,
   },
   /**
    * Platinum — the one NEUTRAL accent. Near-black graphite with a silver-grey
@@ -117,6 +199,12 @@ export const LIGHT_NEUTRALS = {
   card: '#FFFFFF',
   cardAlt: '#FAFAFB',
   divider: '#EAECEE',
+  // Border for OUTLINED controls — deliberately darker than `divider`, which is
+  // tuned to separate rows INSIDE a filled card and leaves an unfilled control
+  // with no visible edge. Mirrors `colors.inputBorder`; it lives here too so
+  // `theme.*` is a SUPERSET of the static palette, which is what lets a screen
+  // be migrated off `colors` by renaming the object and nothing else.
+  inputBorder: '#D7DADE',
   textPrimary: '#1C1C1E',
   textSecondary: '#6B7280',
   textMuted: '#9CA3AF',
@@ -130,6 +218,7 @@ export const DARK_NEUTRALS = {
   card: '#1A1D24',
   cardAlt: '#22252C',
   divider: '#2A2D34',
+  inputBorder: '#3A3E47',
   textPrimary: '#F4F5F7',
   textSecondary: '#9CA3AF',
   textMuted: '#6B7280',
@@ -155,7 +244,26 @@ export const STATUS_COLORS = {
 // ----- Build a full palette from themeId + darkMode -------------------------
 export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
   const theme = THEMES[themeId] || THEMES[DEFAULT_THEME_ID];
-  const neutrals = darkMode ? DARK_NEUTRALS : LIGHT_NEUTRALS;
+
+  // A theme may OWN ITS CANVAS. `alwaysDark` forces the dark neutrals whatever
+  // the user's `darkMode` flag says, and `neutrals` overrides individual keys on
+  // top — so an accent that only makes sense on one ground (Carbon's mint) can
+  // carry that ground with it instead of depending on a separate switch.
+  //
+  // Order matters: base neutrals, then the theme's overrides. A theme supplying
+  // a PARTIAL set still gets a complete palette, so adding one key later can't
+  // leave a screen with `undefined` for a colour.
+  //
+  // `darkMode` in the returned palette is the EFFECTIVE value, not the flag —
+  // everything that branches on it (status-bar glyphs, decorative gradients,
+  // the reward palette's light/dark pairs) has to follow the canvas actually
+  // being painted, not the setting.
+  const effectiveDark = !!darkMode || (CANVAS_THEMES_ENABLED && !!theme.alwaysDark);
+  const base = effectiveDark ? DARK_NEUTRALS : LIGHT_NEUTRALS;
+  const neutrals = CANVAS_THEMES_ENABLED && theme.neutrals
+    ? { ...base, ...theme.neutrals }
+    : base;
+
   return {
     ...theme,
     ...neutrals,
@@ -163,6 +271,6 @@ export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
     // Every gradient consumer reads `gradientStops`, so a theme can be a simple
     // pair OR a multi-stop ramp without any call site knowing the difference.
     gradientStops: theme.gradientStops || [theme.gradientStart, theme.gradientEnd],
-    darkMode,
+    darkMode: effectiveDark,
   };
 };

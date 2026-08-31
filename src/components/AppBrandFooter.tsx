@@ -14,9 +14,9 @@
 // ever be right for one accent anyway.
 //
 // The wash alone is NOT enough, which measuring is the only way to know: at 10%
-// the band is hue-distinct but barely luminance-distinct, and on Gold it lands at
-// 1.03:1 — flatter than the grey it replaced. So the boundary is carried by a
-// hairline DERIVED to a floor (≥1.98:1 worst case, vs 1.02:1 before) while the
+// the band is hue-distinct but barely luminance-distinct, and on Carbon it lands
+// at 1.04:1 — flatter than the grey it replaced. So the boundary is carried by a
+// hairline DERIVED to a floor (≥1.80:1 worst case, vs 1.02:1 before) while the
 // wash carries the identity. Wash for whose app this is, hairline for where it
 // starts.
 // =============================================================================
@@ -44,7 +44,8 @@ const BAND_TINT = 0.1;
  * Contrast floor for the band's top edge. Not a WCAG bar (a decorative divider
  * has none); it's the "actually visible on every accent" floor, and the reason
  * this is a `readableOn` call rather than a second tint: a fixed alpha bottoms
- * out at 1.11:1 on Gold, whose accent is nearly the page's own luminance.
+ * out near 1.1:1 on whichever accent sits closest to the page's own luminance
+ * (Gold when this was written; Carbon replaced it Aug-31 and is flatter still).
  */
 const EDGE_MIN = 1.8;
 

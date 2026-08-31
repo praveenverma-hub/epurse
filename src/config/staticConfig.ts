@@ -67,6 +67,32 @@ export const STATIC_CONFIG = {
     snapOnRelease: true,
   },
 
+  /** The theme system — `constants/themes.js` / `useTheme()`. */
+  theme: {
+    /**
+     * Let a THEME own its canvas: `alwaysDark` + a `neutrals` override on the
+     * theme, merged by `buildPalette`. Only Carbon uses it — deep slate ground,
+     * carbon-mint accent — and for Carbon it is the whole point: a #00FFC2
+     * accent needs a dark ground to read as an accent rather than a glare.
+     *
+     * ⚠ OFF until the surface migration lands, and this is why:
+     * **972 references across 50 files still paint from the STATIC `colors`
+     * import**, not from `useTheme()`. `StyleSheet.create` captures those at
+     * module load, so no palette change can reach them. Turning this on today
+     * paints the themed surfaces slate and leaves everything else white — a
+     * half-lit app, which is worse than a consistently light one.
+     *
+     * The migration is mechanical, not clever: `theme.*` is a strict SUPERSET of
+     * `colors.*` (verified by a test — `inputBorder` was the last missing key and
+     * now exists on both), so each file becomes `makeStyles(theme)` + `useMemo`
+     * with `colors.` renamed to `t.`. The risk is volume and the lack of a device
+     * to look at, not difficulty.
+     *
+     * Flip this to `true` the moment that sweep is done; nothing else changes.
+     */
+    canvasThemes: false,
+  },
+
   /** `DashboardScreen` (Home). */
   dashboard: {
     /**

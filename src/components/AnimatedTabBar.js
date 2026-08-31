@@ -23,7 +23,7 @@
 // same surface (card + hairline + elevation), so the two must match.
 //
 // ACTIVE INK: never the raw accent. `theme.primary` on this surface measures
-// 3.12:1 on Sunset and 1.41:1 on Gold, so on four of the five accents the
+// 3.12:1 on Sunset and 1.31:1 on Carbon, so on four of the five accents the
 // SELECTED tab was harder to read than the unselected ones (`textSecondary` is
 // 4.83:1). Same bug the period selector had; same fix.
 // =============================================================================
