@@ -13,14 +13,20 @@ import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import HeaderChip from './HeaderChip';
+import { readableOn } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 
 export interface BellIconProps {
   hasUnread:           boolean;
   onPress:             () => void;
   /** Glyph size in px. Defaults to 22 to mirror the avatar glyph weight. */
   size?:               number;
-  /** Bell stroke color. Defaults to solid white. */
+  /** Bell stroke color. Defaults to solid white (or the pinned ink when
+   *  `onLight`). An explicit value always wins. */
   iconColor?:          string;
+  /** The bell sits on the LIGHT pinned bar — forwarded to HeaderChip, and it
+   *  flips the default stroke from white to the theme's own ink. */
+  onLight?:            boolean;
   /** Unread-badge dot color. Defaults to red. */
   dotColor?:           string;
   containerStyle?:     ViewStyle;
@@ -34,13 +40,15 @@ const BellIcon: React.FC<BellIconProps> = ({
   hasUnread,
   onPress,
   size               = 22,
-  iconColor          = DEFAULT_ICON,
+  iconColor,
   dotColor           = DEFAULT_DOT,
+  onLight            = false,
   containerStyle,
   accessibilityLabel = 'Notifications',
 }) => (
   <HeaderChip
     onPress={onPress}
+    onLight={onLight}
     accessibilityLabel={hasUnread ? `${accessibilityLabel}, unread` : accessibilityLabel}
     style={containerStyle}
     overlay={hasUnread ? (
@@ -50,11 +58,23 @@ const BellIcon: React.FC<BellIconProps> = ({
       />
     ) : null}
   >
-    <Ionicons name="notifications-outline" size={size} color={iconColor} />
+    <BellGlyph size={size} color={iconColor} onLight={onLight} />
   </HeaderChip>
 );
 
+/** Split out so the stroke colour can read the theme (HeaderChip's own children
+ *  are built by the caller, so the default cannot come from a prop default). */
+const BellGlyph: React.FC<{ size: number; color?: string; onLight: boolean }> = ({ size, color, onLight }) => {
+  const theme = useTheme();
+  const ink = color ?? (onLight ? readableOn(theme.card, theme.textPrimary) : DEFAULT_ICON);
+  return <Ionicons name="notifications-outline" size={size} color={ink} />;
+};
+
 const styles = StyleSheet.create({
+  // The white ring separates the dot from whatever is behind the chip. On the
+  // gradient that is the contrast it needs; on the pinned light bar it is that
+  // bar's own colour, so it reads as spacing rather than a ring. (It would be
+  // wrong on a dark-mode `card` — revisit when dark mode ships.)
   dot: {
     position:     'absolute',
     top:          8,

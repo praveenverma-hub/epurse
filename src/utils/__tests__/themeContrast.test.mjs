@@ -18,7 +18,8 @@
 import { register } from 'node:module';
 register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
 
-const { mix, luminance, contrastRatio, readableOn, colors, LB_BASE, gradientTextPlan, badgeOnGradient } =
+const { mix, luminance, contrastRatio, readableOn, colors, LB_BASE, gradientTextPlan, badgeOnGradient,
+        pinnedHeaderChrome, chromeHairline, PINNED_FILL_SCALE, withAlpha } =
   await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/theme.js');
 const { THEMES, DEFAULT_THEME_ID, buildPalette } =
   await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
@@ -619,6 +620,49 @@ check("removed themes are gone ('sky')", !THEMES.sky);
     dash.includes('useStoreHydrated') && /loading=\{!hydrated\}/.test(dash),
     'an empty store is not a user with no data');
 
+  // ── Home's collapsing header ───────────────────────────────────────────────
+  // Turning collapsing ON is a migration, not a flag flip: the component OWNS the
+  // ScrollView in that mode, so the body has to be its children rather than a
+  // sibling <ScrollView>, and it manages `contentContainerStyle`'s paddingTop
+  // (= the expanded header height). Leaving the screen's own paddingTop in place
+  // would push the first card that far below the header a second time.
+  const header = readFileSync(`${ROOT}/components/CollapsingHeaderScreen.tsx`, 'utf8');
+  check('Home no longer forces the header into fixed mode',
+    !/collapsible=\{false\}/.test(dash), 'collapsible={false} is still on the Dashboard header');
+  // Test the IMPORT, not the JSX: the comment explaining this migration contains
+  // the string "<ScrollView>", and the first version of this check matched its
+  // own documentation.
+  check('…and the body is INSIDE the header component, not a sibling ScrollView',
+    dash.includes('</CollapsingHeaderScreen>')
+    && !/^\s*View, Text, StyleSheet, ScrollView/m.test(dash),
+    'collapsing mode owns the scroll view — the screen must not import its own');
+  check('…and the screen does not double the managed top padding',
+    !/bodyContent: \{[^}]*paddingTop: spacing\.xl \+ spacing\.lg/.test(dash),
+    'contentContainerStyle paddingTop is set by CollapsingHeaderScreen');
+
+  // The hero is three stacked TEXT blocks, so its height moves with the font and
+  // the OS font-scale setting. A pinned `heroHeight` lays it out at exactly that
+  // number — too small clips it, too large leaves it floating — and no test can
+  // catch either, because the value that is right on one device is wrong on the
+  // next. It must measure itself.
+  check('Home lets its hero MEASURE itself rather than pinning a height',
+    !/heroHeight=\{/.test(dash) && /estimatedHeroHeight=\{/.test(dash),
+    'pass estimatedHeroHeight (first frame only), never heroHeight, for a text hero');
+  check('the header component supports a self-measuring hero',
+    /const autoHero = heroHeight == null;/.test(header)
+    && /onLayout=\{autoHero \? onHeroLayout : undefined\}/.test(header)
+    && /height: autoHero \? undefined : heroHeight,/.test(header),
+    'auto mode must let the hero size to content and report it back');
+  check('the measurement guards against an infinite re-render',
+    /prev === h \? prev : h/.test(header),
+    'onLayout fires on every render; setting state unconditionally loops');
+  // A pinned caller must keep its old behaviour exactly.
+  check('an explicit heroHeight still wins (Accounts is unchanged)',
+    /const heroH = heroHeight \?\? measuredHero \?\? estimatedHeroHeight;/.test(header));
+  check('a zero-height hero cannot divide by zero in the interpolation',
+    /const FULL = Math\.max\(1, heroH \/ P\);/.test(header),
+    'heroH is 0 on the first frame when no estimate is given');
+
   // ── Nobody may hand-pick the tab-bar clearance again ──────────────────────
   // AnalyticsScreen paid `spacing.lg` (16) against a bar that occupies 62 + the
   // safe-area inset, so its last section rendered behind the bar. Three other
@@ -632,6 +676,141 @@ check("removed themes are gone ('sky')", !THEMES.sky);
   const missing = CLEARANCE_SCREENS.filter((rel) => !readFileSync(`${ROOT}/${rel}`, 'utf8').includes('tabBarClearance'));
   check('every tab screen pays its bottom clearance through the shared helper',
     missing.length === 0, missing.join(', '));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// A COLLAPSING HEADER'S PINNED (LIGHT) STATE
+// -----------------------------------------------------------------------------
+// The header cross-fades from a saturated gradient to `theme.card` as it pins, so
+// every colour in its bar has two ends. The gradient end was already measured
+// (white ink, `badgeOnGradient`); this is the other end, which is a colour
+// inversion — and the failure mode is total, not marginal: white text and a
+// `#FFFFFF14` chip on a white strip are not "low contrast", they are gone.
+// ═════════════════════════════════════════════════════════════════════════════
+console.log(`\n${C.bold}══════ Pinned header chrome ══════${C.reset}\n`);
+{
+  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const { LIGHT_NEUTRALS, DARK_NEUTRALS } = await import(`${SRC}/constants/themes.js`);
+
+  // Both neutral sets: the whole point of deriving rather than hardcoding a dark
+  // ink is that `card` is near-black in dark mode, where the ink must LIGHTEN.
+  const SURFACES = [
+    ['light card', (LIGHT_NEUTRALS ?? colors).card ?? colors.card, LIGHT_NEUTRALS ?? colors],
+    ['dark card',  (DARK_NEUTRALS  ?? {}).card ?? '#1A1D24',       DARK_NEUTRALS  ?? colors],
+  ];
+
+  for (const [label, surface, palette] of SURFACES) {
+    const pin = pinnedHeaderChrome(surface, palette);
+
+    const inkR = contrastRatio(pin.ink, surface);
+    check(`${label}: the bar's ink clears AA on it (${inkR.toFixed(2)}:1)`,
+      inkR >= AA_TEXT, `${pin.ink} on ${surface}`);
+
+    const mutedR = contrastRatio(pin.inkMuted, surface);
+    check(`${label}: the muted ink clears AA too (${mutedR.toFixed(2)}:1)`,
+      mutedR >= AA_TEXT, `${pin.inkMuted} on ${surface}`);
+
+    // A badge is opaque and cannot tint its way to legibility, so it inverts.
+    const badgeR = contrastRatio(pin.badgeInk, pin.badgeFill);
+    check(`${label}: the badge number reads on the badge (${badgeR.toFixed(2)}:1)`,
+      badgeR >= AA_TEXT, `${pin.badgeInk} on ${pin.badgeFill}`);
+    const badgeOnBar = contrastRatio(pin.badgeFill, surface);
+    check(`${label}: and the badge itself is visible on the bar (${badgeOnBar.toFixed(2)}:1)`,
+      badgeOnBar >= AA_UI, `${pin.badgeFill} on ${surface}`);
+
+    // The chips are translucent, so they only have to be SEEN, not read.
+    // `mix` composites the alpha down onto the surface the way the GPU will.
+    const composite = (c) => {
+      const a = parseInt(c.slice(7, 9), 16) / 255;
+      return mix(c.slice(0, 7), a, surface);
+    };
+    const fillR   = contrastRatio(composite(pin.fill(0x14 / 255)), surface);
+    const borderR = contrastRatio(composite(pin.fill(0x2e / 255)), surface);
+    check(`${label}: a chip fill is visible against the bar (${fillR.toFixed(3)}:1)`,
+      fillR > 1.02, 'a chip you cannot see is not a control');
+    check(`${label}: its border is stronger than its fill`,
+      borderR > fillR, `${borderR.toFixed(3)} vs ${fillR.toFixed(3)}`);
+
+    const hairR = contrastRatio(pin.hairline, surface);
+    check(`${label}: the bottom hairline separates bar from body (${hairR.toFixed(3)}:1)`,
+      hairR > 1.05, 'card content scrolls under a card-coloured bar');
+  }
+
+  // ── The surface is a PROP, so it need not agree with the palette ──────────
+  // The two cases above are self-consistent — a dark palette carries a light
+  // `textPrimary`, so even an underived ink passes on a dark card, and the
+  // derivation looks unnecessary. It isn't: `collapsedSurface` is an override,
+  // and the moment a header pins to something that is not its palette's `card`
+  // (an accent strip, a tinted surface) a raw `textPrimary` is what fails.
+  for (const t of Object.values(THEMES)) {
+    const pin = pinnedHeaderChrome(t.primary, colors);
+    const raw = contrastRatio(colors.textPrimary, t.primary);
+    const der = contrastRatio(pin.ink, t.primary);
+    check(`${t.label}: an accent surface still gets a legible ink (${der.toFixed(2)}:1)`,
+      der >= AA_TEXT, `${pin.ink} on ${t.primary}`);
+    if (raw < AA_TEXT) {
+      check(`${t.label}: …which the raw textPrimary would NOT have been (${raw.toFixed(2)}:1)`,
+        der > raw, 'this is the pair the derivation exists for');
+    }
+    // The muted ink carries the greeting — small text, so the same bar. It is
+    // the one MORE likely to fail: textSecondary is only 4.83:1 on plain white.
+    const mRaw = contrastRatio(colors.textSecondary, t.primary);
+    const mDer = contrastRatio(pin.inkMuted, t.primary);
+    check(`${t.label}: and a legible MUTED ink (${mDer.toFixed(2)}:1)`,
+      mDer >= AA_TEXT, `${pin.inkMuted} on ${t.primary}`);
+    if (mRaw < AA_TEXT) {
+      check(`${t.label}: …raw textSecondary would have been ${mRaw.toFixed(2)}:1`, mDer > mRaw);
+    }
+  }
+
+  // The pinned header and the tab bar are the same surface at opposite ends of
+  // the screen. Two separately-derived hairlines would drift the first time one
+  // was tuned; one helper, asserted here, cannot.
+  check('the header edge and the tab-bar edge are the SAME derivation',
+    pinnedHeaderChrome(colors.card, colors).hairline === chromeHairline(colors.card, colors));
+
+  // ── The transition must not JUMP at either end ────────────────────────────
+  // Both ends are hand-authored numbers, and the visible symptom of getting
+  // them wrong is a chip that changes weight the instant you touch the screen.
+  check('the expanded end is exactly what the chip already painted',
+    withAlpha('#FFFFFF', 0x14 / 255).toLowerCase() === '#ffffff14'
+    && withAlpha('#FFFFFF', 0x2e / 255).toLowerCase() === '#ffffff2e',
+    'the animation starts from the chip\'s own static colours');
+
+  // Near-black at alpha A on white is heavier than white at alpha A on a
+  // gradient, so carrying the alpha across unchanged makes every chip gain
+  // weight as the header lightens. Measured on Ocean's mid stop.
+  {
+    const gradMid = THEMES.blue.gradientEnd;
+    const A = 0x2e / 255;
+    const onGradient = contrastRatio(mix('#FFFFFF', A, gradMid), gradMid);
+    const unscaled   = contrastRatio(mix(colors.textPrimary, A, colors.card), colors.card);
+    const scaled     = contrastRatio(mix(colors.textPrimary, A * PINNED_FILL_SCALE, colors.card), colors.card);
+    check(`unscaled, the pinned chip is HEAVIER than the gradient one (${unscaled.toFixed(2)} vs ${onGradient.toFixed(2)})`,
+      unscaled > onGradient, 'if this stops being true the scale is solving nothing');
+    check(`scaling by ${PINNED_FILL_SCALE} lands closer to the gradient weight`,
+      Math.abs(scaled - onGradient) < Math.abs(unscaled - onGradient),
+      `${scaled.toFixed(2)} vs ${unscaled.toFixed(2)}, target ${onGradient.toFixed(2)}`);
+    check('…and errs quiet rather than heavy',
+      scaled <= onGradient + 0.01, `${scaled.toFixed(3)} vs ${onGradient.toFixed(3)}`);
+  }
+
+  // ── The chip variant must actually derive, not re-pick ────────────────────
+  // HeaderChip's `onLight` is where every collapsing bar gets its light-surface
+  // fill, border and badge. If it hardcoded them, the same wrong numbers would
+  // reach both screens and the derivation above would be measuring nothing.
+  const chipSrc = readFileSync(`${SRC}/components/HeaderChip.tsx`, 'utf8');
+  check('HeaderChip derives its light-surface colours',
+    /pinnedHeaderChrome\(theme\.card, theme\)/.test(chipSrc)
+    && /pinnedChrome\.fill\(CHIP_FILL_ALPHA\)/.test(chipSrc));
+  check('…from the SAME alphas the gradient variant uses',
+    /const GRADIENT_CHIP_FILL {3}= '#FFFFFF14';/.test(chipSrc)
+    && withAlpha('#FFFFFF', 0x14 / 255).toLowerCase() === '#ffffff14',
+    'a drift here shows as chips that change weight between the two bars');
+  const badge = pinnedHeaderChrome(colors.card, colors);
+  check(`the pinned badge inverts rather than tinting (${contrastRatio(badge.badgeInk, badge.badgeFill).toFixed(1)}:1)`,
+    contrastRatio(badge.badgeInk, badge.badgeFill) >= AA_TEXT,
+    'a badge is opaque, so it cannot tint its way to legibility like the chips can');
 }
 
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);

@@ -233,6 +233,67 @@ export const LB_BASE = {
   borrowed: ['#6D28D9', '#8B5CF6'],   // violet  — money you owe
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Chrome for a header that turns LIGHT when it pins to the top
+// -----------------------------------------------------------------------------
+// A collapsing header is a gradient while it is tall and a plain light strip once
+// it pins — so every colour in its bar has TWO values, and the pinned pair has to
+// be derived, not picked. White text, a `#FFFFFF14` chip fill and a white-or-dark
+// badge are all chosen against a saturated gradient; drop them onto `card` and
+// the text is white-on-white and the chips vanish entirely.
+//
+// One helper owns the pinned end so the two collapsing headers can't disagree,
+// and so it can be measured headlessly on every accent (and on the dark-mode
+// neutrals, where `readableOn` flips the ink rather than returning black).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Translucent white at alpha `a` reads far softer on a saturated gradient than
+ * the same alpha of near-black does on white, so carrying the alpha across
+ * unchanged makes every chip jump heavier as the header lightens. Measured on
+ * Ocean's mid stop: white at 0.18 is ~1.35:1 against it, near-black at 0.18 on
+ * `card` is ~1.54:1; scaled by 0.6 it lands at ~1.27:1 — the closest match, and
+ * the direction that errs quiet rather than heavy.
+ */
+export const PINNED_FILL_SCALE = 0.6;
+
+/**
+ * Separator between a pinned chrome surface and the content scrolling past it.
+ *
+ * Shared by the bottom of the pinned header and the top of the tab bar: both are
+ * `card`-coloured strips with `card`-coloured cards passing under them, so the
+ * elevation shadow alone is not a boundary. Derived from the ink rather than
+ * taken from `divider` — `divider` is tuned to separate rows INSIDE a card.
+ */
+export const CHROME_HAIRLINE_ALPHA = 0.1;
+export const chromeHairline = (surface, palette = colors) =>
+  mix(palette.textPrimary, CHROME_HAIRLINE_ALPHA, surface);
+
+/**
+ * Every colour a collapsing header's bar needs once it has gone light.
+ *
+ * @param {string} surface the colour the header fades to (normally `theme.card`)
+ * @param {object} palette anything carrying `textPrimary` / `textSecondary`
+ * @returns {{surface: string, ink: string, inkMuted: string, hairline: string,
+ *           fill: (alpha: number) => string, badgeFill: string, badgeInk: string}}
+ */
+export const pinnedHeaderChrome = (surface, palette = colors) => {
+  const ink      = readableOn(surface, palette.textPrimary);
+  const inkMuted = readableOn(surface, palette.textSecondary);
+  return {
+    surface,
+    ink,
+    inkMuted,
+    hairline: chromeHairline(surface, palette),
+    /** The pinned twin of `withAlpha('#FFFFFF', alpha)` on the gradient. */
+    fill: (alpha) => withAlpha(ink, alpha * PINNED_FILL_SCALE),
+    // A badge is opaque, so it can't tint its way to legibility like the chips:
+    // it inverts instead — ink-on-surface becomes surface-on-ink.
+    badgeFill: ink,
+    badgeInk:  surface,
+  };
+};
+
 /**
  * Fill + ink for a small opaque BADGE sitting on a themed gradient.
  *

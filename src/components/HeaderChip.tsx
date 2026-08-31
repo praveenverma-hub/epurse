@@ -16,17 +16,25 @@
 // used to be a hardcoded violet that measured 1.02:1 on Platinum.
 // =============================================================================
 
-import React, { type ReactNode } from 'react';
+import React, { useMemo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
-import { badgeOnGradient, typography as typographyBase } from '../constants/theme';
-import { useGradient } from '../hooks/useTheme';
+import { badgeOnGradient, pinnedHeaderChrome, typography as typographyBase } from '../constants/theme';
+import { useGradient, useTheme } from '../hooks/useTheme';
 import type { TextStyle } from 'react-native';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
 /** Diameter. Matches the 44pt tap-target minimum once hitSlop is added. */
 export const CHIP_SIZE = 42;
+
+/** The chip's weights, as alphas rather than baked hex, so the light-bar variant
+ *  is derived from the SAME numbers — a drift here shows as chips that change
+ *  weight between the two bars. */
+export const CHIP_FILL_ALPHA   = 0x14 / 255;   // 0.078
+export const CHIP_BORDER_ALPHA = 0x2e / 255;   // 0.180
+const GRADIENT_CHIP_FILL   = '#FFFFFF14';
+const GRADIENT_CHIP_BORDER = '#FFFFFF2E';
 
 export interface HeaderChipProps {
   onPress: () => void;
@@ -39,6 +47,15 @@ export interface HeaderChipProps {
   /** Extra overlay (BellIcon's unread dot). Not clipped. */
   overlay?: ReactNode;
   style?: ViewStyle;
+  /**
+   * The chip sits on the LIGHT pinned bar rather than on the gradient.
+   *
+   * One boolean rather than four colour props: the translucent white fill, the
+   * white border and `badgeOnGradient`'s white-or-black badge are all invisible
+   * on `card`, and every caller would otherwise have to re-derive the same three
+   * replacements. The derivation lives here, once (`pinnedHeaderChrome`).
+   */
+  onLight?: boolean;
   children: ReactNode;
 }
 
@@ -50,12 +67,22 @@ const HeaderChip: React.FC<HeaderChipProps> = ({
   badge,
   overlay,
   style,
+  onLight = false,
   children,
 }) => {
   // Badge colours follow the ACTIVE gradient, not the accent — the badge sits on
-  // the header, so the header is what it has to be legible against.
+  // the header, so the header is what it has to be legible against. On the pinned
+  // LIGHT bar the surface is `card` instead, and the badge inverts (it is opaque,
+  // so unlike the chip it cannot tint its way to legibility).
   const gradient = useGradient();
-  const { fill, ink } = badgeOnGradient(gradient);
+  const theme = useTheme();
+  const pinnedChrome = useMemo(() => pinnedHeaderChrome(theme.card, theme), [theme]);
+  const { fill, ink } = onLight
+    ? { fill: pinnedChrome.badgeFill, ink: pinnedChrome.badgeInk }
+    : badgeOnGradient(gradient);
+  const surface = onLight
+    ? { backgroundColor: pinnedChrome.fill(CHIP_FILL_ALPHA), borderColor: pinnedChrome.fill(CHIP_BORDER_ALPHA) }
+    : { backgroundColor: GRADIENT_CHIP_FILL, borderColor: GRADIENT_CHIP_BORDER };
 
   return (
     <Pressable
@@ -68,7 +95,7 @@ const HeaderChip: React.FC<HeaderChipProps> = ({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
-      style={({ pressed }) => [styles.chip, style, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.chip, surface, style, pressed && styles.pressed]}
     >
       {children}
       {overlay}
@@ -96,9 +123,8 @@ const styles = StyleSheet.create({
     borderRadius: CHIP_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF14',
+    // Fill and border are applied by the component (they depend on `onLight`).
     borderWidth: 1,
-    borderColor: '#FFFFFF2E',
     // Badges and dots straddle the edge; never clip them.
     overflow: 'visible',
   },

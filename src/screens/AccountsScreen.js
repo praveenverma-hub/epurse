@@ -9,12 +9,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState, Animated, View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
+  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Keyboard, Modal, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { useIsFocused, useFocusEffect } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -23,7 +23,7 @@ import {
   selectShouldShowAnchorNudge,
   selectAccountLinkSuggestions,
 } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, pinnedHeaderChrome, withAlpha } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency, formatCompact } from '../utils/format';
 import { ACCOUNT_TYPES } from '../constants/categories';
@@ -38,6 +38,7 @@ import CenterModal    from '../components/CenterModal';
 import InfoSheet      from '../components/InfoSheet';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
+import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
 
 const TYPE_ORDER = {
   [ACCOUNT_TYPES.CASH]:        0,
@@ -74,6 +75,11 @@ const BALANCE_SENSITIVE = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT_CARD]
 //     lands centered. Neighbour peek = SIDE − CARD_GAP.
 const SCREEN_W  = Dimensions.get('window').width;
 const CARD_GAP  = 14;
+
+/** The bar's on-gradient weights, as alphas so the light-bar variants derive from
+ *  the same numbers. Were `#FFFFFF22` / `#FFFFFF26` inline. */
+const ICON_BTN_ALPHA = 0x22 / 255;
+const BAL_CHIP_ALPHA = 0x26 / 255;
 const CARD_W    = Math.min(300, SCREEN_W - 88);
 const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
 const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
@@ -112,16 +118,13 @@ export default function AccountsScreen({ navigation }) {
   const [confirm,            setConfirm]            = useState(null);
   const [phoneInput,         setPhoneInput]         = useState('');
 
-  // StatusBar: light glyphs over the gradient header — but ONLY while focused.
-  // A declarative <StatusBar> stays mounted in the tab navigator and would keep
-  // forcing light-content onto the (light-topped) Activity screen, turning its
-  // text invisible. Gating on focus lets each screen own the bar while it's up.
-  useFocusEffect(
-    useCallback(() => {
-      StatusBar.setBarStyle('light-content');
-      StatusBar.setBackgroundColor?.('transparent');
-    }, []),
-  );
+  // StatusBar: light glyphs over the gradient header, dark once the LIGHT bar has
+  // pinned over it (it covers the status-bar inset). The imperative, focus-gated
+  // handling this screen pioneered now lives in the shared hook — a declarative
+  // <StatusBar> stays mounted in the tab navigator and leaks its style onto the
+  // next tab. Dashboard goes through the same one.
+  const [headerPinned, setHeaderPinned] = useState(false);
+  useHeaderStatusBar(headerPinned);
 
   const handleAddPhone = () => {
     const digits = phoneInput.replace(/\D/g, '');
@@ -212,10 +215,66 @@ export default function AccountsScreen({ navigation }) {
     setBalancesVisible(true);
   };
 
+  /**
+   * The Accounts bar, rendered on the gradient AND on the light bar that pins to
+   * the top. `onLight` is the only axis.
+   *
+   * The BALANCE CHIP belongs to the pinned bar only, and that is what replaced a
+   * fiddle worth remembering. The two bars used to be one, so the chip had to
+   * fade in on `progress` from an absolutely-positioned slot: in flow it reserved
+   * its width while still invisible (a dead gap beside the title when expanded)
+   * and it could not animate its own width away, because `width` is not a
+   * native-animatable prop. With a second bar it is simply in flow here and
+   * absent there — no float, no interpolation.
+   *
+   * The eye stays in BOTH (Aug-26): the chip and the toggle used to cross-fade in
+   * one slot, so the way to unmask disappeared at exactly the moment the masked
+   * `••••` was on screen. While the pinned bar is up the gradient bar behind it
+   * is inert, so every affordance has to be here too.
+   */
+  const pinned = useMemo(() => pinnedHeaderChrome(theme.card, theme), [theme]);
+
+  const accountsBar = (onLight) => {
+    const ink = onLight ? pinned.ink : '#fff';
+    const fill = (alpha) => (onLight ? pinned.fill(alpha) : withAlpha('#FFFFFF', alpha));
+    return (
+      <View style={styles.barRow}>
+        <Text style={[styles.headerTitle, { color: ink }]} numberOfLines={1}>Accounts</Text>
+        <View style={styles.headerActions}>
+          {onLight ? (
+            <TouchableOpacity
+              style={[styles.balChip, { backgroundColor: fill(BAL_CHIP_ALPHA) }]}
+              onPress={handleToggleBalances}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.balChipText, { color: ink }]} numberOfLines={1}>
+                {balancesVisible ? formatCompact(totalBalance) : '\u2022\u2022\u2022\u2022'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={[styles.iconBtn, { backgroundColor: fill(ICON_BTN_ALPHA) }]}
+            onPress={handleToggleBalances}
+            activeOpacity={0.7}
+          >
+            <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={ink} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconBtn, { backgroundColor: fill(ICON_BTN_ALPHA) }]}
+            onPress={() => setAddAccountVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="add" size={22} color={ink} />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      {/* StatusBar is driven imperatively via useFocusEffect (above) so it doesn't
-          leak light-content onto other tabs. */}
+      {/* StatusBar is driven imperatively via useHeaderStatusBar (above) so it
+          doesn't leak its style onto other tabs. */}
 
       {/* ── Collapsing themed header + scrollable body ──
           The gradient header (with curve) slides up on scroll; the big "Net Worth"
@@ -229,43 +288,9 @@ export default function AccountsScreen({ navigation }) {
         heroHeight={HEADER_HERO_H}
         curveRadius={radius.xl}
         contentContainerStyle={styles.bodyContent}
-        renderBar={(progress) => {
-          // Collapsed, the bar shows the balance chip AND keeps the eye (Aug-26 —
-          // they used to cross-fade in one slot, so the toggle disappeared exactly
-          // when the masked value was on screen and there was no way to reveal it
-          // without scrolling back up).
-          const chipOpacity = progress.interpolate({ inputRange: [0.4, 1], outputRange: [0, 1], extrapolate: 'clamp' });
-          const chipShift   = progress.interpolate({ inputRange: [0.4, 1], outputRange: [8, 0], extrapolate: 'clamp' });
-          return (
-            <View style={styles.barRow}>
-              <Text style={styles.headerTitle} numberOfLines={1}>Accounts</Text>
-              <View style={styles.headerActions}>
-                {/* The eye is in flow and always visible; the chip is absolutely
-                    positioned to its LEFT so it can fade in without reserving width
-                    — in flow it would leave a dead gap next to the title while
-                    expanded, and it can't animate its own width here (`progress` is
-                    native-driven, and width isn't a native-animatable prop). */}
-                <View style={styles.balSlot}>
-                  <Animated.View
-                    style={[styles.balChipFloat, { opacity: chipOpacity, transform: [{ translateX: chipShift }] }]}
-                  >
-                    <TouchableOpacity style={styles.balChip} onPress={handleToggleBalances} activeOpacity={0.8}>
-                      <Text style={styles.balChipText} numberOfLines={1}>
-                        {balancesVisible ? formatCompact(totalBalance) : '••••'}
-                      </Text>
-                    </TouchableOpacity>
-                  </Animated.View>
-                  <TouchableOpacity style={styles.iconBtn} onPress={handleToggleBalances} activeOpacity={0.7}>
-                    <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity style={styles.iconBtn} onPress={() => setAddAccountVisible(true)} activeOpacity={0.7}>
-                  <Ionicons name="add" size={22} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        }}
+        onCollapseChange={setHeaderPinned}
+        renderCollapsedBar={() => accountsBar(true)}
+        renderBar={() => accountsBar(false)}
         renderHero={() => (
           <View>
             <Text style={styles.headerLabel}>Net Worth</Text>
@@ -596,37 +621,29 @@ const styles = StyleSheet.create({
 
   // Pinned bar: "Accounts" title (flex) + right-side actions (chip / eye / add).
   barRow:         { flexDirection: 'row', alignItems: 'center' },
-  headerTitle:    { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: '#fff' },
+  // Ink is applied at the call site: this row renders on the gradient AND on
+  // the light pinned bar (`accountsBar`).
+  headerTitle:    { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
   headerLabel:   { color: '#FFFFFFCC', ...typography.small },
   headerBalance: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#FFFFFF22',
     alignItems: 'center', justifyContent: 'center',
   },
-  // Balance control slot: the EYE defines the slot (always visible, in flow); the
-  // chip floats to its left so appearing/disappearing never shifts the + button.
-  balSlot: { position: 'relative', justifyContent: 'center' },
-  balChipFloat: {
-    position: 'absolute',
-    right: 40 + spacing.sm,   // iconBtn width + the same gap headerActions uses
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-  },
-  // Compact balance chip — same 40px height as the icon buttons.
+  // Compact balance chip — same 40px height as the icon buttons. It is in FLOW:
+  // it only exists on the pinned bar, so there is no invisible state to reserve
+  // width for. (It used to float and fade in on scroll — see `accountsBar`.)
   balChip: {
     height:            40,
     minWidth:          64,
     maxWidth:          140,
     paddingHorizontal: 14,
     borderRadius:      20,
-    backgroundColor:   '#FFFFFF26',
     alignItems:        'center',
     justifyContent:    'center',
   },
-  balChipText: { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: -0.2 },
+  balChipText: { fontWeight: '800', fontSize: 15, letterSpacing: -0.2 },
 
   // paddingTop is managed by CollapsingHeaderScreen (= expanded header height).
   bodyContent: { paddingHorizontal: spacing.lg },

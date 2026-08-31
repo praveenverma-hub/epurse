@@ -3,7 +3,7 @@
   "version": "1.5.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "test": "npm run test:parse && npm run test:parser && npm run test:self && npm run test:group && npm run test:store && npm run test:smsSync && npm run test:homeCards && npm run test:carousel && npm run test:dateRange && npm run test:contrast && npm run test:backup && npm run test:payload && npm run test:drive",
+    "test": "npm run test:parse && npm run test:parser && npm run test:self && npm run test:group && npm run test:store && npm run test:smsSync && npm run test:homeCards && npm run test:carousel && npm run test:headerLayout && npm run test:dateRange && npm run test:contrast && npm run test:backup && npm run test:payload && npm run test:drive",
     "test:parse": "node --no-warnings src/utils/__tests__/parseAll.test.mjs",
     "test:parser": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/messageParser.test.mjs",
     "test:self": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/selfTransfer.test.mjs",
@@ -28,6 +28,7 @@
     "deploy": "bash deploy.sh",
     "test:smsSync": "node --no-warnings src/utils/__tests__/smsSync.test.mjs",
     "test:homeCards": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/homeCards.test.mjs",
+    "test:headerLayout": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/headerLayout.test.mjs",
     "test:carousel": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/carouselGeometry.test.mjs"
   },
   "dependencies": {

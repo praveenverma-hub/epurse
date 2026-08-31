@@ -18,7 +18,9 @@
 // mode ships. Its top hairline is DERIVED from the ink rather than taken from
 // `divider`, because `divider` is tuned to separate rows INSIDE a card — here
 // the two surfaces being separated are the bar and a white card scrolling under
-// it, which are the same colour.
+// it, which are the same colour. That derivation is now `chromeHairline`, shared
+// with the collapsing header's bottom edge: since Aug-30 a pinned header IS this
+// same surface (card + hairline + elevation), so the two must match.
 //
 // ACTIVE INK: never the raw accent. `theme.primary` on this surface measures
 // 3.12:1 on Sunset and 1.41:1 on Gold, so on four of the five accents the
@@ -33,7 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTabBarVisibility, TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import { useTheme } from '../hooks/useTheme';
-import { mix, readableOn } from '../constants/theme';
+import { chromeHairline, readableOn } from '../constants/theme';
 
 /**
  * Was 18, which is undersized next to a 10px label in a 62pt bar — the platform
@@ -86,7 +88,9 @@ export default function AnimatedTabBar({ state, navigation }) {
     () => readableOn(theme.card, theme.primary),
     [theme.card, theme.primary],
   );
-  const hairline = useMemo(() => mix(theme.textPrimary, 0.1, theme.card), [theme.textPrimary, theme.card]);
+  // Shared with the pinned header's bottom edge (`chromeHairline`) — both are
+  // card-coloured strips that cards scroll under, and they must not drift apart.
+  const hairline = useMemo(() => chromeHairline(theme.card, theme), [theme]);
 
   return (
     <Animated.View

@@ -28,8 +28,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, RefreshControl,
+  View, Text, StyleSheet, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,8 +40,10 @@ import {
   selectLevel,
 } from '../store/useRewardStore';
 const selectPendingSavings = (s) => s.pendingSavingsReward;
-import { colors, radius, readableOn, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography, shadows, pinnedHeaderChrome } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
+import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
+import { STATIC_CONFIG } from '../config/staticConfig';
 import { formatCurrency } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
@@ -103,62 +104,36 @@ const PERIODS = [
 ];
 
 /**
- * Restore the pre-Aug-26 header wholesale.
+ * Both of these are build-time SWITCHES, so they live in `config/staticConfig.ts`
+ * with the rest of them — the full rationale for each (what `true` restores, and
+ * which fixes are deliberately NOT reverted with the look) is on the flag there.
  *
- * `false` (current) — REWORKED: profile avatar on the LEFT, on the same alignment
- *   spine as the greeting and the whole hero below it; right cluster is vault +
- *   bell; the vault is a 42pt circle (asset 32) with the streak day in a corner
- *   badge.
- * `true` — AS IT WAS: greeting leads the row, avatar at the END of the right-hand
- *   cluster, and the vault back in its rounded-rect chip with a 40pt asset
- *   carrying its own internal "Xd Aware" label.
+ * Aliased to short local names because they read at a dozen call sites below and
+ * `STATIC_CONFIG.dashboard.useOriginalHeader` inline would bury the JSX. The alias is
+ * the only copy: nothing else in this file re-derives them.
  *
- * Flipping this is the only change needed. `renderBar` defines each element's
- * BEHAVIOUR once (handlers, a11y, the dev long-press) and varies only its position
- * and chrome, so the two arrangements can't drift — a second full JSX branch would
- * be a copy that goes stale the first time one of them gains a prop.
- *
- * A build-time constant rather than a user setting on purpose: nobody wants to
- * configure where their avatar lives, and persisting it would cost a store key, a
- * backup entry and a Settings row for a switch only we will ever flip.
- *
- * NOT reverted by this flag, deliberately — these were correctness fixes, not
- * style: the avatar's accessibility label (a screen reader used to announce the
- * header's main nav target as the letter "P"), the 44pt tap targets, and
- * `badgeOnGradient` replacing a hardcoded violet badge that measured 1.02:1 on
- * Platinum. Reverting a LOOK should not reintroduce a defect.
+ * `PERIOD_SLOP` stays here — it is per-variant tap geometry, not a switch.
  */
-const USE_ORIGINAL_HEADER = false;
+const USE_ORIGINAL_HEADER = STATIC_CONFIG.dashboard.useOriginalHeader;
+const PERIOD_SELECTOR     = STATIC_CONFIG.dashboard.periodSelector;
 
 /**
- * How the D/W/M/Y period selector is drawn.
- *
- *   'segmented' (current) — one 32pt translucent track, active cell filled white.
- *                           Shares its language with the Income/Refunds block.
- *   'original'            — four separate 38pt circles, active filled solid white.
- *                           The pre-Aug-26 look.
- *   'underline'           — plain text, 2pt underline under the active one. The
- *                           lightest of the three; lowest affordance.
- *
- * Behaviour (handler, a11y role/label/selected state) is defined ONCE for all
- * three in `renderHero` — only the chrome and the geometry that depends on it
- * vary, so the variants can't disagree about what the control does.
- *
- * `PERIOD_SLOP` is per variant because the geometry genuinely differs: a
- * segmented track's cells TOUCH, so horizontal slop would overlap a neighbour and
- * fire the wrong period; the original circles sit in a 6pt gap, so 3pt each side
- * is safe and is what keeps them circular rather than stretched to 44 wide.
- *
- * `'original'` restores the original CONTROL, not pixel-identical outer spacing:
- * `periodRow` keeps its `paddingVertical` in every variant because that padding is
- * what makes the vertical tap target reachable at all (a touch outside an
- * ancestor's bounds never reaches its children). The original shipped with 3pt of
- * vertical slop that fell OUTSIDE the row and therefore did nothing — reverting a
- * look shouldn't revert that fix.
+ * Pinned bar height: the header row's `marginTop` (12) + the 42pt HeaderChip,
+ * which is the tallest thing in it. Deterministic — no text drives it — so this
+ * one is safe as a constant, unlike the hero.
  */
-const PERIOD_SELECTOR = 'segmented';
+const HEADER_BAR_H = 54;
 
-/** Per-variant tap-target padding — see the note on PERIOD_SELECTOR. */
+/**
+ * FIRST-FRAME estimate for the hero only; the real height is measured. Roughly:
+ * balance block (16 + label 14 + 2 + 38px figure ≈ 50) + period row (2 + 12 + 32)
+ * + stats row (12 + 10 + 14 + 3 + 20 + 10). Being a few points out is invisible
+ * because the measurement corrects it on the next frame — do NOT promote this to
+ * `heroHeight`.
+ */
+const HEADER_HERO_EST = 196;
+
+/** Per-variant tap-target padding — see the note on the periodSelector flag. */
 const PERIOD_SLOP = {
   // Cells touch: width carries the target sideways (minWidth 44), slop vertically.
   segmented: { top: 6, bottom: 6, left: 0, right: 0 },
@@ -238,10 +213,16 @@ const DashboardScreen = ({ navigation }) => {
     [theme.primary],
   );
 
-  const { onScroll, scrollEventThrottle } = useTabBarScroll();
+  // `scrollEventThrottle` isn't taken: CollapsingHeaderScreen owns the ScrollView
+  // and pins it to 16 (the native driver needs every frame).
+  const { onScroll } = useTabBarScroll();
   const insets = useSafeAreaInsets();
 
   const [period, setPeriod]     = useState('M');
+  // The header's gradient bar cross-fades into a LIGHT pinned bar, which also
+  // covers the status-bar inset — so the glyphs have to flip with it.
+  const [headerPinned, setHeaderPinned] = useState(false);
+  useHeaderStatusBar(headerPinned);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTxn, setActiveTxn] = useState(null);
   const [lbLinkTxn, setLbLinkTxn] = useState(null);   // { txn, categoryId }
@@ -508,141 +489,172 @@ const DashboardScreen = ({ navigation }) => {
     ? 'Today'
     : `this ${periodTitle}`;
 
+  /**
+   * The header's identity row — rendered TWICE: on the gradient, and on the
+   * light bar that pins to the top. `onLight` is the only thing that varies.
+   *
+   * One function, not two JSX branches. The pinned bar must not simply DROP the
+   * avatar, vault or bell: while it is up, the gradient bar behind it is inert,
+   * so anything missing here has no route at all (ui-consistency §2). And a
+   * second copy of a row this size goes stale the first time one control gains a
+   * prop — the same argument the USE_ORIGINAL_HEADER note below already makes.
+   *
+   * The chips derive their own light-surface fill/border/badge from `onLight`
+   * (see HeaderChip); only the two text inks are passed, because those are
+   * plain styles with nothing to derive.
+   */
+  const pinned = useMemo(() => pinnedHeaderChrome(theme.card, theme), [theme]);
+
+  const identityRow = (onLight) => {
+    const ink      = onLight ? pinned.ink      : '#fff';
+    const inkMuted = onLight ? pinned.inkMuted : '#FFFFFFCC';
+    /* ── Top row: identity and actions, side configurable ───────────────
+       The avatar moved from the right cluster to the left (Aug-26). The
+       constraint that decides HOW is an alignment spine: the greeting, the
+       hero eyebrow, the 38px figure, the period toggle and the stat block
+       all start at the same x. Putting the avatar *before* the greeting text
+       would indent only the greeting and break that line — so the avatar
+       itself sits on the spine and the greeting rides beside it.
+
+       What it buys: the bar splits semantically (who you are | what needs
+       you), and the right cluster drops from three controls to two.
+
+       `USE_ORIGINAL_HEADER` flips it back. Each element is defined ONCE below and
+       only its POSITION varies, so the two arrangements can't drift — a
+       second JSX branch would be a copy that goes stale the first time one
+       of these gains a prop. The only thing that changes with the flag is
+       the greeting's margins, which differ because in right-mode it has no
+       avatar on its left. */
+    const avatarChip = (
+      <HeaderChip
+        onLight={onLight}
+        onPress={() => navigation.navigate('RewardShop')}
+        // Was a bare TouchableOpacity with no role and no label, so a screen
+        // reader announced the header's main nav target as the letter "P".
+        accessibilityLabel={
+          userName ? `${userName}'s profile · level ${level}` : `Profile · level ${level}`
+        }
+        accessibilityHint="Opens rewards and settings"
+        badge={level}
+      >
+        <Text style={[styles.avatarInitial, { color: ink }]}>
+          {userName ? userName.charAt(0).toUpperCase() : '👤'}
+        </Text>
+      </HeaderChip>
+    );
+
+    const greeting_ = (
+      <View style={[
+        styles.headerGreetWrap,
+        USE_ORIGINAL_HEADER ? styles.headerGreetLeading : styles.headerGreetBesideAvatar,
+      ]}>
+        <Text style={[styles.greeting, { color: inkMuted }]} numberOfLines={1}>{greeting}</Text>
+        <Text style={[styles.userName, { color: ink }]} numberOfLines={1} ellipsizeMode="tail">
+          {userName ? `Hi, ${userName}` : 'ePurse'}
+        </Text>
+      </View>
+    );
+
+    // Behaviour defined ONCE; only the chrome differs between the two
+    // header modes. The a11y label, the hint and the dev-only tier cycler
+    // are identical either way, so they can't fall out of sync.
+    const vaultBehaviour = {
+      onPress: () => setVaultInfoVisible(true),
+      accessibilityLabel: awareStreak > 0
+        ? `Crystal Piggy Vault · ${awareStreak} day Aware Run · ${vaultTier} tier`
+        : `Crystal Piggy Vault · ${vaultTier} tier`,
+      accessibilityHint: 'Explains how the Aware Run streak works',
+      // Dev-only tier preview, gated like TxnDebugSheet. UnGated, a user
+      // long-pressing got an unexplainable 8-second visual change.
+      onLongPress: IS_PREVIEW_BUILD ? () => {
+        const ORDER = ['base', 'streak', 'premium'];
+        const current = devVaultTier ?? vaultTier;
+        const next = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
+        setDevVaultTier(next);
+        clearTimeout(devVaultTimer.current);
+        devVaultTimer.current = setTimeout(() => setDevVaultTier(null), 8000);
+      } : undefined,
+    };
+
+    const vaultChip = USE_ORIGINAL_HEADER ? (
+      /* AS IT WAS: a rounded-rect chip sized around a 40pt asset that draws
+         its own "Xd Aware" label internally. That label is why this control
+         was taller than the circular bell and avatar beside it — restoring
+         the look restores that too, which is the point of the flag.
+         `hitSlop` is NOT part of the old look: it's the 44pt tap-target fix,
+         and the original had none. */
+      <TouchableOpacity
+        style={[
+          styles.vaultBtnOriginal,
+          onLight && { backgroundColor: pinned.fill(0x14 / 255), borderColor: pinned.fill(0x22 / 255) },
+        ]}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        hitSlop={{ top: 2, bottom: 2, left: 2, right: 2 }}
+        {...vaultBehaviour}
+      >
+        <CrystalPiggyVault
+          tier={devVaultTier ?? vaultTier}
+          size={40}
+          day={awareStreak > 0 ? awareStreak : undefined}
+        />
+      </TouchableOpacity>
+    ) : (
+      <HeaderChip
+        {...vaultBehaviour}
+        onLight={onLight}
+        // The streak day is a proper corner badge here, legible at 9px
+        // instead of the 8px two-line pill drawn inside the asset.
+        badge={awareStreak > 0 ? awareStreak : undefined}
+      >
+        {/* 32, not 40: it has to sit inside the shared 42pt chip with its
+            border, and the day count moved out to the badge so the asset no
+            longer carries text of its own. */}
+        <CrystalPiggyVault tier={devVaultTier ?? vaultTier} size={32} />
+      </HeaderChip>
+    );
+
+    const bell = (
+      <BellIcon
+        hasUnread={hasUnreadNotifications}
+        onPress={() => setNotificationsVisible(true)}
+        onLight={onLight}
+      />
+    );
+
+    return (
+      <View style={styles.headerRow}>
+        {!USE_ORIGINAL_HEADER && avatarChip}
+        {greeting_}
+        <View style={styles.headerRight}>
+          {vaultChip}
+          {bell}
+          {/* Right-mode returns the avatar to the END of the action cluster,
+              exactly where it used to live. */}
+          {USE_ORIGINAL_HEADER && avatarChip}
+        </View>
+      </View>
+    );
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      {/* The status bar is driven by useHeaderStatusBar (imperative + focus-gated).
+          The header now pins as a LIGHT bar, so 'light-content' is no longer
+          always right — and a declarative StatusBar stays mounted in the tab
+          navigator and would leak the wrong style onto the next tab. */}
 
       {/* Floating check-in banner — auto-shows on new-day launches. */}
       <CheckInBanner />
 
       {/* ───── Gradient header ───── */}
       <CollapsingHeaderScreen
-        collapsible={false}
         gradientColors={gradient}
-        renderBar={() => {
-          /* ── Top row: identity and actions, side configurable ───────────────
-             The avatar moved from the right cluster to the left (Aug-26). The
-             constraint that decides HOW is an alignment spine: the greeting, the
-             hero eyebrow, the 38px figure, the period toggle and the stat block
-             all start at the same x. Putting the avatar *before* the greeting text
-             would indent only the greeting and break that line — so the avatar
-             itself sits on the spine and the greeting rides beside it.
-
-             What it buys: the bar splits semantically (who you are | what needs
-             you), and the right cluster drops from three controls to two.
-
-             `USE_ORIGINAL_HEADER` flips it back. Each element is defined ONCE below and
-             only its POSITION varies, so the two arrangements can't drift — a
-             second JSX branch would be a copy that goes stale the first time one
-             of these gains a prop. The only thing that changes with the flag is
-             the greeting's margins, which differ because in right-mode it has no
-             avatar on its left. */
-          const avatarChip = (
-            <HeaderChip
-              onPress={() => navigation.navigate('RewardShop')}
-              // Was a bare TouchableOpacity with no role and no label, so a screen
-              // reader announced the header's main nav target as the letter "P".
-              accessibilityLabel={
-                userName ? `${userName}'s profile · level ${level}` : `Profile · level ${level}`
-              }
-              accessibilityHint="Opens rewards and settings"
-              badge={level}
-            >
-              <Text style={styles.avatarInitial}>
-                {userName ? userName.charAt(0).toUpperCase() : '👤'}
-              </Text>
-            </HeaderChip>
-          );
-
-          const greeting_ = (
-            <View style={[
-              styles.headerGreetWrap,
-              USE_ORIGINAL_HEADER ? styles.headerGreetLeading : styles.headerGreetBesideAvatar,
-            ]}>
-              <Text style={styles.greeting} numberOfLines={1}>{greeting}</Text>
-              <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
-                {userName ? `Hi, ${userName}` : 'ePurse'}
-              </Text>
-            </View>
-          );
-
-          // Behaviour defined ONCE; only the chrome differs between the two
-          // header modes. The a11y label, the hint and the dev-only tier cycler
-          // are identical either way, so they can't fall out of sync.
-          const vaultBehaviour = {
-            onPress: () => setVaultInfoVisible(true),
-            accessibilityLabel: awareStreak > 0
-              ? `Crystal Piggy Vault · ${awareStreak} day Aware Run · ${vaultTier} tier`
-              : `Crystal Piggy Vault · ${vaultTier} tier`,
-            accessibilityHint: 'Explains how the Aware Run streak works',
-            // Dev-only tier preview, gated like TxnDebugSheet. UnGated, a user
-            // long-pressing got an unexplainable 8-second visual change.
-            onLongPress: IS_PREVIEW_BUILD ? () => {
-              const ORDER = ['base', 'streak', 'premium'];
-              const current = devVaultTier ?? vaultTier;
-              const next = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
-              setDevVaultTier(next);
-              clearTimeout(devVaultTimer.current);
-              devVaultTimer.current = setTimeout(() => setDevVaultTier(null), 8000);
-            } : undefined,
-          };
-
-          const vaultChip = USE_ORIGINAL_HEADER ? (
-            /* AS IT WAS: a rounded-rect chip sized around a 40pt asset that draws
-               its own "Xd Aware" label internally. That label is why this control
-               was taller than the circular bell and avatar beside it — restoring
-               the look restores that too, which is the point of the flag.
-               `hitSlop` is NOT part of the old look: it's the 44pt tap-target fix,
-               and the original had none. */
-            <TouchableOpacity
-              style={styles.vaultBtnOriginal}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              hitSlop={{ top: 2, bottom: 2, left: 2, right: 2 }}
-              {...vaultBehaviour}
-            >
-              <CrystalPiggyVault
-                tier={devVaultTier ?? vaultTier}
-                size={40}
-                day={awareStreak > 0 ? awareStreak : undefined}
-              />
-            </TouchableOpacity>
-          ) : (
-            <HeaderChip
-              {...vaultBehaviour}
-              // The streak day is a proper corner badge here, legible at 9px
-              // instead of the 8px two-line pill drawn inside the asset.
-              badge={awareStreak > 0 ? awareStreak : undefined}
-            >
-              {/* 32, not 40: it has to sit inside the shared 42pt chip with its
-                  border, and the day count moved out to the badge so the asset no
-                  longer carries text of its own. */}
-              <CrystalPiggyVault tier={devVaultTier ?? vaultTier} size={32} />
-            </HeaderChip>
-          );
-
-          const bell = (
-            <BellIcon
-              hasUnread={hasUnreadNotifications}
-              onPress={() => setNotificationsVisible(true)}
-            />
-          );
-
-          return (
-            <View style={styles.headerRow}>
-              {!USE_ORIGINAL_HEADER && avatarChip}
-              {greeting_}
-              <View style={styles.headerRight}>
-                {vaultChip}
-                {bell}
-                {/* Right-mode returns the avatar to the END of the action cluster,
-                    exactly where it used to live. */}
-                {USE_ORIGINAL_HEADER && avatarChip}
-              </View>
-            </View>
-          );
-        }}
+        onCollapseChange={setHeaderPinned}
+        /* The pinned bar is that same row, inked for a light surface. */
+        renderCollapsedBar={() => identityRow(true)}
+        renderBar={() => identityRow(false)}
         renderHero={() => (
           <>
           {/* Spend (expenses − refunds) for the selected period. The label is an
@@ -735,15 +747,21 @@ const DashboardScreen = ({ navigation }) => {
           </View>
           </>
         )}
-      />
-
-      {/* ───── Scrollable body ───── */}
-      <ScrollView
-        style={styles.body}
+        // ── Collapsing mode ──────────────────────────────────────────────────
+        // The component owns the ScrollView here, so the body lives as children
+        // rather than as a sibling <ScrollView>. The component ADDS
+        // `contentContainerStyle`'s paddingTop to the expanded header height, so
+        // the value in `bodyContent` is the gap BELOW the header.
+        //
+        // `heroHeight` is deliberately NOT passed: this hero is three stacked
+        // TEXT blocks, so its height moves with the font and the user's OS
+        // font-scale setting. A pinned number would clip it on one device and
+        // leave it floating on another. The estimate below is only for the very
+        // first frame, before the measurement lands.
+        barHeight={HEADER_BAR_H}
+        estimatedHeroHeight={HEADER_HERO_EST}
         contentContainerStyle={styles.bodyContent}
-        showsVerticalScrollIndicator={false}
         onScroll={onScroll}
-        scrollEventThrottle={scrollEventThrottle}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
@@ -878,7 +896,7 @@ const DashboardScreen = ({ navigation }) => {
         {/* The footer's own padding IS this screen's tab-bar clearance — the band
             must reach the screen's bottom edge, so the space can't sit after it. */}
         <AppBrandFooter bottomClearance={tabBarClearance(insets.bottom)} />
-      </ScrollView>
+      </CollapsingHeaderScreen>
 
       <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
 
@@ -1278,8 +1296,10 @@ const styles = StyleSheet.create({
   headerGreetBesideAvatar: { marginLeft: spacing.md, marginRight: spacing.sm },
   /** Original: the greeting leads the row, so it only needs a trailing gap. */
   headerGreetLeading: { marginRight: spacing.md },
-  greeting:  { color: '#FFFFFFCC', ...typography.small },
-  userName:  { color: '#fff', ...typography.h2, marginTop: 2 },
+  // Colour is applied at the call site — the row renders on the gradient AND on
+  // the light pinned bar (`identityRow`). Only the type weights live here.
+  greeting:  { ...typography.small },
+  userName:  { ...typography.h2, marginTop: 2 },
   headerRight: {
     flexDirection: 'row',
     alignItems:    'center',
@@ -1302,7 +1322,6 @@ const styles = StyleSheet.create({
   },
 
   avatarInitial: {
-    color: '#fff',
     fontSize: 17,
     fontWeight: '700',
   },
@@ -1457,7 +1476,6 @@ const styles = StyleSheet.create({
   statValue: { color: '#fff', ...typography.bodyBold, fontWeight: '700', marginTop: 3 },
 
   // Body
-  body: { flex: 1, marginTop: -spacing.lg },
   // ── Vertical rhythm: TWO levels, not one ──────────────────────────────────
   // `gap: spacing.xl` (24) separates GROUPS; `styles.group`'s `gap: spacing.lg`
   // (16) separates sections inside a group. One uniform gap everywhere gave the
@@ -1470,7 +1488,11 @@ const styles = StyleSheet.create({
   //
   // paddingTop adds back the body's -spacing.lg overlap (tuck under the curved
   // header) so the header→first-section gap equals the inter-GROUP gap.
-  bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl + spacing.lg, gap: spacing.xl, flexGrow: 1 },
+  // `paddingTop` here is space BELOW the header, not from the top of the screen:
+  // CollapsingHeaderScreen ADDS it to the expanded header height. 24 reproduces
+  // the old fixed-mode gap exactly — that was 16pt of header padding, minus a
+  // 16pt body tuck, plus 40pt of content padding.
+  bodyContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.xl, flexGrow: 1 },
   // A wrapper must never be EMPTY: it still occupies a slot in the parent `gap`,
   // so an empty one opens a double gap around nothing. Every group here contains
   // at least one always-rendered section (see the JSX comments).
