@@ -29,7 +29,7 @@ interface SheetCloseButtonProps {
    * horizontal padding so the ✕ lines up with the sheet's content column.
    */
   gutter?: number;
-  /** Set on dark/bespoke sheets (RewardShop, debug) for a legible contrast. */
+  /** Set on dark/bespoke sheets (Profile / Shop, debug) for a legible contrast. */
   dark?: boolean;
   /**
    * `flow` (default) — render as the sibling immediately BEFORE the sheet, inside

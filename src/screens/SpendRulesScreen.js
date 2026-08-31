@@ -34,6 +34,7 @@ import { useCategoryTree } from '../hooks/useCategoryTree';
 import { NON_BUDGETABLE_PARENT_IDS } from '../constants/twoTierCategories';
 import InfoIcon from '../components/InfoIcon';
 import SectionHeader from '../components/SectionHeader';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 
 const SpendRulesScreen = ({ navigation }) => {
   const theme = useTheme();
@@ -58,13 +59,7 @@ const SpendRulesScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style="dark" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Counts as expense</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <PlainScreenHeader title="Counts as expense" onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
@@ -141,17 +136,6 @@ const SpendRulesScreen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { ...typography.h2, color: colors.textPrimary, flex: 1, textAlign: 'center' },
-
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card,

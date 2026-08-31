@@ -21,6 +21,7 @@ import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
 import SectionHeader from '../components/SectionHeader';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 
 const COLOR_PALETTE = [
   '#FF5A1F', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981',
@@ -130,13 +131,7 @@ const CategoriesScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Categories</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <PlainScreenHeader title="Categories" onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Category tree ───────────────────────────────────────────── */}
@@ -349,19 +344,6 @@ const CategoriesScreen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  // Pushed screen → centred title. The 40px spacer opposite the back button
-  // makes the side slots equal, so flex + textAlign centres it truly.
-  title: { ...typography.h2, color: colors.textPrimary, flex: 1, textAlign: 'center' },
-
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card,

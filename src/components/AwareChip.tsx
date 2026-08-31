@@ -31,7 +31,7 @@
 // // ─── Public types ───────────────────────────────────────────────────────────
 //
 // export interface AwareChipProps {
-//   /** Fired when the user taps the chip — usually navigation to RewardShop. */
+//   /** Fired when the user taps the chip — usually navigation to the Profile hub. */
 //   onPress?: () => void;
 //   /** Optional extra style applied to the outermost touchable. */
 //   style?:   ViewStyle;

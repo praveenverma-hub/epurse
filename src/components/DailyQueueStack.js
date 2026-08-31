@@ -524,7 +524,7 @@ const DailyQueueStack = () => {
           ) : <View />}
           <TouchableOpacity
             style={styles.xpPill}
-            onPress={() => navigation.navigate('RewardShop')}
+            onPress={() => navigation.navigate('Profile')}
             activeOpacity={0.75}
           >
             <Text style={styles.xpPillText}>⚡ {totalRP.toLocaleString('en-IN')} RP</Text>

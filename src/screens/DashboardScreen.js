@@ -528,13 +528,13 @@ const DashboardScreen = ({ navigation }) => {
     const avatarChip = (
       <HeaderChip
         onLight={onLight}
-        onPress={() => navigation.navigate('RewardShop')}
+        onPress={() => navigation.navigate('Profile')}
         // Was a bare TouchableOpacity with no role and no label, so a screen
         // reader announced the header's main nav target as the letter "P".
         accessibilityLabel={
           userName ? `${userName}'s profile · level ${level}` : `Profile · level ${level}`
         }
-        accessibilityHint="Opens rewards and settings"
+        accessibilityHint="Opens your profile — shop, reminders, backup and settings"
         badge={level}
       >
         <Text style={[styles.avatarInitial, { color: ink }]}>

@@ -888,6 +888,106 @@ console.log(`\n${C.bold}══════ Pinned header chrome ═════�
     'a badge is opaque, so it cannot tint its way to legibility like the chips can');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Reward surfaces — the "earned" gold, measured on the pill it sits on
+// -----------------------------------------------------------------------------
+// The reward screens (Profile, Shop) paint gold and success text on 14% tints of
+// those same hues. That is the trap this whole suite exists for: using an accent
+// as text on a tint of itself. The first cut of useRewardPalette derived its ink
+// from `card` — the surface the ink does NOT sit on — and measured 4.75:1 while
+// the pill it renders on was 4.33:1.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n── reward surfaces (Profile / Shop) ──');
+{
+  const SRC2 = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const paletteSrc = readFileSync(`${SRC2}/hooks/useRewardPalette.ts`, 'utf8');
+  const goldMatch  = paletteSrc.match(/export const REWARD_GOLD = '(#[0-9A-Fa-f]{6})';/);
+  const alphaMatch = paletteSrc.match(/export const REWARD_TINT_ALPHA = ([0-9.]+);/);
+  check('the reward gold and its tint alpha are named constants',
+    !!goldMatch && !!alphaMatch);
+
+  const GOLD  = goldMatch?.[1] ?? '#F59E0B';
+  const ALPHA = Number(alphaMatch?.[1] ?? 0.14);
+
+  // Guard the guard: if raw gold already passed, the derivation below would be
+  // measuring nothing at all.
+  check(`raw gold is unreadable as small text on a light card (${contrastRatio(GOLD, colors.card).toFixed(2)}:1)`,
+    contrastRatio(GOLD, colors.card) < AA_TEXT);
+
+  check('the ink is derived from the TINT, not the card',
+    /goldInk: +readableOn\(goldSurface, REWARD_GOLD, 4\.5\)/.test(paletteSrc)
+    && /successInk: +readableOn\(successSurface, theme\.success, 4\.5\)/.test(paletteSrc)
+    && !/readableOn\(theme\.card, REWARD_GOLD/.test(paletteSrc),
+    'card is the surface the ink does not sit on');
+  check('…and the tint/border are built from the same alphas',
+    /goldTint: +withAlpha\(REWARD_GOLD, REWARD_TINT_ALPHA\)/.test(paletteSrc)
+    && /successTint: +withAlpha\(theme\.success, REWARD_TINT_ALPHA\)/.test(paletteSrc),
+    'a fill darkened on its own would leave the ink behind');
+
+  // Every theme, both modes, both surfaces the ink can land on: its own tint
+  // (pills, the stat tile) and the plain card (the eyebrow, the level title).
+  for (const t of Object.values(THEMES)) {
+    for (const darkMode of [false, true]) {
+      const p = buildPalette(t.id, darkMode);
+      const mode = darkMode ? 'dark' : 'light';
+
+      const goldSurface = mix(GOLD, ALPHA, p.card);
+      const goldInk = readableOn(goldSurface, GOLD, AA_TEXT);
+      const goldWorst = Math.min(contrastRatio(goldInk, goldSurface), contrastRatio(goldInk, p.card));
+      check(`gold ink clears both surfaces on ${t.label} ${mode} (${goldWorst.toFixed(2)}:1)`,
+        goldWorst >= AA_TEXT, `${goldInk}`);
+
+      const succSurface = mix(p.success, ALPHA, p.card);
+      const succInk = readableOn(succSurface, p.success, AA_TEXT);
+      const succWorst = Math.min(contrastRatio(succInk, succSurface), contrastRatio(succInk, p.card));
+      check(`success ink clears both surfaces on ${t.label} ${mode} (${succWorst.toFixed(2)}:1)`,
+        succWorst >= AA_TEXT, `${succInk}`);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NavListRow — the accent glyph on its own tinted tile
+// -----------------------------------------------------------------------------
+// Same trap, one bar lower: the tile glyph is a GRAPHIC (3:1), and it is drawn
+// in the accent on a 12% fill of that accent. Two themes failed when the ink was
+// measured against the card instead of the tile.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n── NavListRow tile ──');
+{
+  const SRC3 = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const rowSrc = readFileSync(`${SRC3}/components/NavListRow.tsx`, 'utf8');
+  const tileAlpha = Number(rowSrc.match(/export const TILE_FILL_ALPHA = ([0-9.]+);/)?.[1] ?? 0.12);
+  check('the tile fill alpha is a named constant', tileAlpha > 0 && tileAlpha < 1);
+
+  // The failure this replaced: ink measured against the CARD, rendered on the
+  // TILE. Collected so the fix can be shown to matter, not just to pass.
+  const naiveFailures = [];
+
+  for (const t of Object.values(THEMES)) {
+    for (const darkMode of [false, true]) {
+      const p = buildPalette(t.id, darkMode);
+      const mode = darkMode ? 'dark' : 'light';
+      const tile = mix(p.primary, tileAlpha, p.card);
+
+      const ink = readableOn(tile, p.primary, AA_UI);
+      const worst = Math.min(contrastRatio(ink, tile), contrastRatio(ink, p.card));
+      check(`tile glyph reads on ${t.label} ${mode} (${worst.toFixed(2)}:1)`,
+        worst >= AA_UI, `${ink} on ${tile}`);
+
+      const naive = readableOn(p.card, p.primary, AA_UI);
+      const naiveRatio = contrastRatio(naive, tile);
+      if (naiveRatio < AA_UI) naiveFailures.push(`${t.label} ${mode} ${naiveRatio.toFixed(2)}:1`);
+    }
+  }
+
+  // Guard the guard. If this ever comes back empty, the tinted-surface
+  // derivation has stopped doing anything and the check above is decoration.
+  check(`the old card-measured ink genuinely failed (${naiveFailures.length} theme/mode pairs)`,
+    naiveFailures.length > 0, naiveFailures.join(' · '));
+  console.log(`     ${naiveFailures.join(' · ')}`);
+}
+
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);
 console.log(`  ${fail ? C.red : C.green}${C.bold}${pass}/${pass + fail} passed${C.reset}\n`);
 process.exit(fail ? 1 : 0);

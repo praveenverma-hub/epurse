@@ -10,6 +10,10 @@
 // Sections, in order of how often they're touched:
 //   Appearance (theme)  →  Monthly recap (+ what the report includes)  →  Manage.
 //
+// Backup used to be a section here. It MOVED to the Profile hub (Aug-31): it is
+// its own screen, so a nav row inside a settings section put it three taps from
+// home for no reason. It is not duplicated — one entry point, on the hub.
+//
 // "Appearance" used to live at the top of CategoriesScreen, which is why that
 // screen was titled "Categories & Settings". Theme has nothing to do with
 // categories; it now has its own section here and CategoriesScreen is just
@@ -28,6 +32,8 @@ import { colors, radius, spacing, typography, shadows } from '../constants/theme
 import { THEMES } from '../constants/themes';
 import { useTheme } from '../hooks/useTheme';
 import SectionHeader from '../components/SectionHeader';
+import NavListRow from '../components/NavListRow';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 
 const RECAP_INCLUDES = [
   { key: 'includePrivate', label: 'Private transactions' },
@@ -63,14 +69,7 @@ const SettingsScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Light header painted from the static palette → dark glyphs (status-bar skill). */}
       <StatusBar style="dark" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Settings</Text>
-        {/* Equal-width spacer opposite the back button so the title centres truly. */}
-        <View style={styles.backBtn} />
-      </View>
+      <PlainScreenHeader title="Settings" onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Appearance ─────────────────────────────────────────────────── */}
@@ -152,56 +151,27 @@ const SettingsScreen = ({ navigation }) => {
           ) : null}
         </View>
 
-        {/* ── Backup ─────────────────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <SectionHeader icon="cloud-outline" title="Backup" accentColor={theme.primary} />
-          <Text style={styles.hint}>
-            Keep an encrypted copy in your own Google Drive, so a new phone starts where this one left off.
-          </Text>
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('Backup')}
-            accessibilityRole="button"
-          >
-            <Ionicons name="shield-checkmark-outline" size={18} color={theme.primary} style={styles.rowIcon} />
-            <View style={styles.rowTextWrap}>
-              <Text style={styles.rowLabel} numberOfLines={1}>Backup &amp; restore</Text>
-              <Text style={styles.rowHint} numberOfLines={1}>End-to-end encrypted · Google Drive</Text>
-            </View>
-            <Text style={styles.rowChevron}>›</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* ── Manage ─────────────────────────────────────────────────────── */}
         <View style={styles.card}>
           <SectionHeader icon="options-outline" title="Manage" accentColor={theme.primary} />
           {MANAGE_ROWS.map(({ icon, label, hint, route }, i) => (
-            <TouchableOpacity
+            <NavListRow
               key={route}
-              style={[styles.row, i > 0 && styles.rowDivided]}
-              activeOpacity={0.7}
+              icon={icon}
+              label={label}
+              divided={i > 0}
               onPress={() => navigation.navigate(route)}
-              accessibilityRole="button"
-            >
-              <Ionicons name={icon} size={18} color={theme.primary} style={styles.rowIcon} />
-              <View style={styles.rowTextWrap}>
-                <Text style={styles.rowLabel} numberOfLines={1}>{label}</Text>
-                {/* An exclusion has to be visible from OUTSIDE the screen that set it —
-                    otherwise "why is Spent low?" has no discoverable answer. */}
-                <Text
-                  style={[styles.rowHint, route === 'SpendRules' && excludedCount > 0 && styles.rowHintWarn]}
-                  numberOfLines={1}
-                >
-                  {route === 'SpendRules'
-                    ? (excludedCount > 0
-                        ? `${excludedCount} categor${excludedCount === 1 ? 'y' : 'ies'} not counted`
-                        : 'All categories counted')
-                    : hint}
-                </Text>
-              </View>
-              <Text style={styles.rowChevron}>›</Text>
-            </TouchableOpacity>
+              /* An exclusion has to be visible from OUTSIDE the screen that set it —
+                 otherwise "why is Spent low?" has no discoverable answer. */
+              hint={
+                route === 'SpendRules'
+                  ? (excludedCount > 0
+                      ? `${excludedCount} categor${excludedCount === 1 ? 'y' : 'ies'} not counted`
+                      : 'All categories counted')
+                  : hint
+              }
+              hintTone={route === 'SpendRules' && excludedCount > 0 ? 'warn' : 'default'}
+            />
           ))}
         </View>
       </ScrollView>
@@ -211,18 +181,6 @@ const SettingsScreen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  // Pushed screen → centred title (ui-consistency §2), same as Categories / LbPerson.
-  title: { ...typography.h2, color: colors.textPrimary, flex: 1, textAlign: 'center' },
-
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card,
@@ -247,19 +205,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: spacing.sm,
   },
-  rowDivided: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.divider,
-  },
   // Fixed width so every label starts at the same x, whatever the glyph.
   rowIcon: { width: 22, textAlign: 'center' },
-  // flex:1 + numberOfLines so a long label can't push the chevron off the row
-  // (input-validation skill's overflow rule).
-  rowTextWrap: { flex: 1 },
   rowLabel: { ...typography.body, color: colors.textPrimary, flex: 1, fontWeight: '600' },
-  rowHint: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
-  rowHintWarn: { color: colors.warning, fontWeight: '700' },
-  rowChevron: { ...typography.h3, color: colors.textMuted },
   subRow: { paddingLeft: spacing.xl },
   subLabel: { ...typography.small, color: colors.textPrimary, flex: 1 },
 

@@ -40,6 +40,7 @@ import {
   runBackup, listRemoteBackups, fetchAndDecrypt, applyRestore,
   removeRemoteBackup, getPreRestoreSnapshot, undoRestore,
 } from '../backup/backupService';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 
 const MIN_PASSWORD = 8;
 
@@ -242,13 +243,10 @@ const BackupScreen = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style="dark" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{fromOnboarding ? 'Restore' : 'Backup'}</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <PlainScreenHeader
+        title={fromOnboarding ? 'Restore' : 'Backup'}
+        onBack={() => navigation.goBack()}
+      />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Not configured in this build ────────────────────────────────── */}
@@ -475,13 +473,6 @@ const BackupScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { ...typography.h2, color: colors.textPrimary, flex: 1, textAlign: 'center' },
-
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg,

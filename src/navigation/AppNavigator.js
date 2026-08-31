@@ -17,7 +17,9 @@ import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import BudgetPlanScreen    from '../screens/BudgetPlanScreen';
 import LbPersonScreen      from '../screens/LbPersonScreen';
 import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
-import RewardShop          from '../screens/RewardShop';
+import ProfileScreen       from '../screens/ProfileScreen';
+import ShopScreen          from '../screens/ShopScreen';
+import RemindersScreen     from '../screens/RemindersScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -64,11 +66,17 @@ export default function AppNavigator() {
         <Stack.Screen name="BudgetPlan"     component={BudgetPlanScreen} />
         <Stack.Screen name="LbPerson"       component={LbPersonScreen} />
         <Stack.Screen name="SmsDiagnostic" component={SmsDiagnosticScreen} />
+        {/* Profile hub → its three destinations. The hub was one screen
+            ("RewardShop") holding the profile, the widget catalogue and the
+            settings sheet; each is now its own route so the list on the hub can
+            point at a real place. */}
         <Stack.Screen
-          name="RewardShop"
-          component={RewardShop}
+          name="Profile"
+          component={ProfileScreen}
           options={{ animation: 'slide_from_right' }}
         />
+        <Stack.Screen name="Shop"      component={ShopScreen} />
+        <Stack.Screen name="Reminders" component={RemindersScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
