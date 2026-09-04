@@ -21,10 +21,18 @@ const STUBS = {
     'export default {getItem:async k=>s.has(k)?s.get(k):null,setItem:async(k,v)=>{s.set(k,String(v));},' +
     'removeItem:async k=>{s.delete(k);},clear:async()=>{s.clear();},getAllKeys:async()=>[...s.keys()],' +
     'multiRemove:async ks=>{ks.forEach(k=>s.delete(k));}};',
+  // ASYNC, matching the real notifications.js signatures — every one of these
+  // is `async function` in production, and two call sites in the store chain
+  // `.catch(() => {})` straight onto the result (checkBudgetBreach,
+  // maybeFireMidmonthNudge). A synchronous stub returns `undefined`, and
+  // `undefined.catch` crashes the whole test process the first time a test
+  // actually triggers a budget breach or a mid-month nudge — found while
+  // writing e2eJourney.test.mjs, which is the first suite to cross a budget
+  // cap under ingestMessage.
   notifications:
-    'export const fireBudgetBreachNotification=()=>{};' +
-    'export const fireMidmonthNudgeNotification=()=>{};' +
-    'export const fireCCPaymentNotification=()=>{};' +
+    'export const fireBudgetBreachNotification=async()=>{};' +
+    'export const fireMidmonthNudgeNotification=async()=>{};' +
+    'export const fireCCPaymentNotification=async()=>{};' +
     'export const scheduleCCBillDueReminder=async()=>null;' +
     'export const cancelScheduledNotification=async()=>{};' +
     'export const fireSubscriptionHikeNotification=async()=>null;' +

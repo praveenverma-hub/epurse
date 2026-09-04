@@ -11,8 +11,12 @@
 // keeping tests permanently in sync with shipping behaviour.
 //
 // A transaction is self when its OWN leg is a user account AND any one of:
-//   (a) dual-leg SMS whose counterparty mask is ALSO a user account
-//       ("Acct XX171 debited … & Acct XX972 credited"), or
+//   (a) it names a counterparty mask that is ALSO a user account — either a
+//       dual-leg SMS reporting both sides ("Acct XX171 debited … & Acct XX972
+//       credited") or a solo leg that still names its destination/source via
+//       transfer language ("debited from A/c X and transferred to A/c Y"),
+//       which is what each half of a two-SEPARATE-SMS self-transfer looks
+//       like on its own, or
 //   (b) the counterparty mobile is the user's own registered number, or
 //   (c) the counterparty NAME matches the user's own name
 //       ("credited by a/c linked to mobile 7XXXXXX221-PRAVEEN VE"), or
@@ -77,7 +81,9 @@ export const SELF_TXN_FIELDS = {
 export const isSelfTransfer = (txn, userMasks, userPhones, userName) => {
   if (!txn) return false;
   if (!maskInList(txn.accountMask, userMasks)) return false; // own leg must be a user account
-  if (txn.selfDualLeg && maskInList(txn.counterpartyMask, userMasks)) return true;
+  // `counterpartyMask` already requires EITHER selfDualLeg OR transfer language
+  // (see messageParser.js) — no need to re-check selfDualLeg here.
+  if (maskInList(txn.counterpartyMask, userMasks)) return true;
   if (txn.counterpartyPhone && phoneIsUser(txn.counterpartyPhone, userPhones)) return true;
   if (txn.counterpartyName && nameIsUser(txn.counterpartyName, userName)) return true;
   return false;
@@ -90,6 +96,17 @@ export const isSelfTransfer = (txn, userMasks, userPhones, userName) => {
  * transfer reference (IMPS/UPI ref). Once either leg is known to be self, the
  * shared reference lets us tag the other leg too — an exact-match link with no
  * false positives.
+ *
+ * Deliberately does NOT originate a self-tag from a shared ref alone (i.e. two
+ * untagged legs sharing a ref are not, on their own, treated as self) — real
+ * IMPS/NEFT/UPI reference numbers can coincidentally collide between totally
+ * UNRELATED transactions from different banks (see the regression case in
+ * `storeIntegration.test.mjs`: an unrelated ₹1500 credit and ₹15,000 transfer
+ * between other people's accounts, sharing one ref by chance). A ref is only
+ * trustworthy once ONE leg is already confirmed self by a stronger signal —
+ * see `isSelfTransfer`'s case (a) for how the common two-SEPARATE-SMS
+ * self-transfer is actually originated (each leg names the other account
+ * directly, not via ref).
  *
  * Returns a NEW array; transactions on a user account that share a transferRef
  * with an already-self transaction are tagged self. Leaves user-edited and

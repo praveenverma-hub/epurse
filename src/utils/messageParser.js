@@ -234,8 +234,20 @@ const AMOUNT_REGEX_GLOBAL =
 const ACCOUNT_REGEX =
   /(?:a\/c|\bac\b|acct?|account|card|\bcc\b)(?:\s+ending)?\.?\s*(?:no\.?\s*)?[xX*•·]{0,8}\s*([xX*•·]*\d{3,6})/i;
 
+// Two branches, because bank SMS use BOTH orderings for "which account, which
+// verb" and neither is rare: "A/c XX171 debited..." (mask-then-verb — the only
+// shape this regex used to catch) and "debited from A/c XX4021..." (verb-then-
+// mask — the DOMINANT shape everywhere else in this file's own test fixtures).
+// A message missing verb-then-mask entirely isn't a corner case: it's the
+// common phrasing, and a message containing BOTH a debit and a credit verb
+// (a same-SMS self-transfer) with neither leg in mask-then-verb order used to
+// leave `firstVerb` empty, silently falling back to a whole-text keyword scan
+// that always resolves CREDIT (the text necessarily contains "credited"
+// somewhere) — reversing which of the two accounts was actually debited.
+// `.match()` returns the leftmost successful branch, so ordinary single-leg
+// messages are unaffected either way.
 const FIRST_ACCOUNT_EVENT_REGEX =
-  /(?:a\/c|acct?\.?|account)\s*[xX*•·]{0,8}(\d{3,6})\s+(debited|credited|deposited|withdrawn|deducted|refunded|received)\b/i;
+  /(?:a\/c|acct?\.?|account)\s*[xX*•·]{0,8}(\d{3,6})\s+(debited|credited|deposited|withdrawn|deducted|refunded|received)\b|(debited|credited|deposited|withdrawn|deducted|refunded|received)\s+(?:from|to|in|on)?\s*(?:a\/c|acct?\.?|account)\s*[xX*•·]{0,8}(\d{3,6})/i;
 
 // Every masked account/card number in the body (global). Used for self-transfer
 // detection: a single SMS that references two accounts (e.g. "Acct XX171 debited
@@ -361,7 +373,7 @@ const CC_PAYMENT_OUTGOING_REGEX =
 // These contain an amount (the "eligible spend") but no actual transaction happened.
 // Examples: "spends of INR 8497 are eligible for FLEXI EMI conversion"
 const PROMOTIONAL_OFFER_REGEX =
-  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b|\b(?:extra|flat|bonus)\s+cashback\b|\b\d{1,3}\s*%\s*(?:extra\s+|flat\s+|bonus\s+)?cashback\b|\b(?:get|earn|enjoy|avail|win|unlock)\s+(?:up\s*to\s+)?(?:\d{1,3}\s*%\s*)?(?:extra\s+|flat\s+)?cashback\b|\bmax\.?\s*cashback\b|\bcashback\s+up\s?to\b|\bcashback\s+on\b|\b(?:flat|extra|bonus|get|earn|win|enjoy|avail|unlock|upto|up\s?to)\s+(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?\s*cashback\b|\b(?:instant|flat|extra|bonus|festive)\s+discount\b|\b\d{1,3}\s*%\s*(?:instant\s+|flat\s+)?discount\b|\b(?:get|earn|enjoy|avail|save|unlock|grab)\s+(?:up\s*to\s+)?(?:(?:\d{1,3}\s*%|(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?)\s*)?(?:instant\s+|flat\s+)?discount\b|\bmax\.?\s*discount\b|\bdiscount\s+(?:on|at|up\s?to|of\s+up\s?to)\b/i;
+  /\beligible\s+for\s+(?:emi|flexi|conversion|offer|cashback|reward|discount)\b|\bconvert\s+(?:now|to|into|your|bill)\b|\bflexi[\s-]*emi\b|\bconvert\s+(?:spends?|bill\s+of)\b|\breward\s+points?\s+eligible\b|\bpre[- ]?approved\b|\bget\s+(?:an?\s+)?(?:instant\s+)?(?:loan|credit)\s+of\b|\bloan\s+of\s+up\s+to\b|\binstant\s+disbursal\b|\busing\s+code\b|\bdownload\s+the\s+\w+\s+app\b|\b(?:credit|card|loan)\s+limit\b[\s\S]{0,80}\b(?:increased|changed|updated|raised|revised)\b|\bincreased\s+(?:from|to)\s+(?:rs\.?|inr|₹)|\b(?:increase|increasing|raise|raising)\s+(?:the\s+)?(?:credit\s+)?limit\b|\b\d{1,3}\s*%\s*off\b|\buse\s+(?:promo\s+)?code\b|https?:\/\/|\breward\s+points?\s+(?:worth|accumulated|earned|balance)\b|\bredeem\s+(?:now|your|points?|rewards?)\b|\b(?:extra|flat|bonus)\s+cashback\b|\b\d{1,3}\s*%\s*(?:extra\s+|flat\s+|bonus\s+)?cashback\b|\b(?:get|earn|enjoy|avail|win|unlock)\s+(?:up\s*to\s+)?(?:\d{1,3}\s*%\s*)?(?:extra\s+|flat\s+)?cashback\b|\bmax\.?\s*cashback\b|\bcashback\s+up\s?to\b|\bcashback\s+on\b(?!\s*\d{1,2}[-\/])|\b(?:flat|extra|bonus|get|earn|win|enjoy|avail|unlock|upto|up\s?to)\s+(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?\s*cashback\b|\b(?:instant|flat|extra|bonus|festive)\s+discount\b|\b\d{1,3}\s*%\s*(?:instant\s+|flat\s+)?discount\b|\b(?:get|earn|enjoy|avail|save|unlock|grab)\s+(?:up\s*to\s+)?(?:(?:\d{1,3}\s*%|(?:rs\.?|inr|₹)\s*[\d,]+(?:\.\d+)?)\s*)?(?:instant\s+|flat\s+)?discount\b|\bmax\.?\s*discount\b|\bdiscount\s+(?:on(?!\s*\d{1,2}[-\/])|at|up\s?to|of\s+up\s?to)\b/i;
 
 // EMI conversion NOTICE — an already-booked purchase being restructured into
 // instalments ("...purchase of Rs.45,000 ... has been converted to 6 Months EMI").
@@ -1100,8 +1112,10 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // ── Normal single-leg parse ───────────────────────────────────────────────
   const firstEvent = text.match(FIRST_ACCOUNT_EVENT_REGEX);
   const acctMatch = text.match(ACCOUNT_REGEX);
-  const accountMask = firstEvent?.[1] || acctMatch?.[1] || null;
-  const firstVerb = (firstEvent?.[2] || '').toLowerCase();
+  // Groups 1/2 are the mask-then-verb branch, 3/4 the verb-then-mask branch —
+  // exactly one pair is populated, whichever branch matched.
+  const accountMask = firstEvent?.[1] || firstEvent?.[4] || acctMatch?.[1] || null;
+  const firstVerb = (firstEvent?.[2] || firstEvent?.[3] || '').toLowerCase();
   const inferredTypeFromFirstVerb =
     creditedToOther || debitedFromOther
       ? creditedToOther ? TRANSACTION_TYPES.DEBIT : TRANSACTION_TYPES.CREDIT
@@ -1123,13 +1137,33 @@ export const parseMessageDetailed = (message, opts = {}) => {
   ACCOUNT_MASK_GLOBAL.lastIndex = 0;
   const distinctMasks = [...new Set(allMasks)];
 
-  // Dual-leg: one SMS reporting both a debit and a credit across ≥2 accounts.
+  // Dual-leg: one SMS reporting both a debit and a credit across ≥2 accounts
+  // (e.g. "Acct XX171 debited … & Acct XX972 credited"). `selfDualLeg` gates
+  // whether the STORE may synthesize the missing leg's own transaction
+  // (buildSelfCounterLeg) — it must stay this strict, because a message that
+  // only reports ONE side completing must never fabricate a matching entry
+  // for the other side; that side's own SMS, when it arrives, is the real one.
   const hasDebitEvt  = /\bdebited\b/i.test(text);
   const hasCreditEvt = /\bcredited\b/i.test(text);
   const selfDualLeg  = distinctMasks.length >= 2 && hasDebitEvt && hasCreditEvt;
 
-  // The "other" account mask in a dual-leg message (the counterparty leg).
-  const counterpartyMask = selfDualLeg
+  // A message can also name a SECOND account mask while reporting only ONE
+  // side of the transfer — "Rs.5000 debited from A/c X and transferred to A/c
+  // Y" has no "credited" anywhere, so `selfDualLeg` is false, but it still
+  // names Y as plainly as a true dual-leg message names its counterpart. Two
+  // banks reporting their own halves of one NEFT/IMPS self-transfer as SEPARATE
+  // SMS is the common case (unlike a combined dual-leg SMS, which is rarer) —
+  // each half individually looks exactly like this. Gated on transfer-type
+  // language so an unrelated message that happens to name two accounts (e.g.
+  // an EMI debited from a savings account against a loan account) doesn't
+  // qualify — those don't say NEFT/IMPS/RTGS/UPI/"transfer".
+  const hasTransferLanguage = /\b(?:neft|imps|rtgs|upi|transfer(?:red)?)\b/i.test(text);
+
+  // The "other" account mask this message names — from a true dual-leg
+  // message, or a solo leg that still names its counterparty via transfer
+  // language. Either way it's the SAME signal to the store (case (a) below);
+  // only the synthesis decision above cares which kind it was.
+  const counterpartyMask = (distinctMasks.length >= 2 && (selfDualLeg || hasTransferLanguage))
     ? (distinctMasks.find((m) => m !== accountMask) || null)
     : null;
 

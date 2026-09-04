@@ -2603,10 +2603,13 @@ export const useEPurseStore = create(
 
         if (added.length === 0 && archivedCount === 0) return null;
 
-        // Reconcile self-transfer tags: a dual-leg transfer's counterpart account
-        // is often only learned from its OWN later SMS, so re-check earlier
-        // candidates against the now-grown account set. Re-tagging only changes
-        // the category (balances already applied), so it's safe to run anytime.
+        // Reconcile self-transfer tags: a transfer's counterpart account is
+        // often only learned from its OWN later SMS — including the common
+        // two-SEPARATE-SMS self-transfer, where each bank's SMS names the
+        // OTHER account (via `counterpartyMask`) before that account has
+        // necessarily been created yet — so re-check earlier candidates
+        // against the now-grown account set. Re-tagging only changes the
+        // category (balances already applied), so it's safe to run anytime.
         // User-edited / LB-locked transactions are left untouched. Only the active
         // ledger needs this — archived (historical) rows are reference-only.
         if (added.length > 0) {
@@ -2615,7 +2618,10 @@ export const useEPurseStore = create(
           const userName   = state.userName || '';
           nextTransactions = nextTransactions.map((t) => {
             if (!t || t.userEditedCategory || t.lbLocked || t.categoryId === 'self') return t;
-            if (!t.selfDualLeg && !t.counterpartyPhone && !t.counterpartyName) return t;
+            // `counterpartyMask` is a superset of the old `selfDualLeg`-only
+            // check (see messageParser.js) — a candidate carrying it always
+            // needs re-checking here, whichever of the two ways it got set.
+            if (!t.counterpartyMask && !t.counterpartyPhone && !t.counterpartyName) return t;
             return isSelfTransfer(t, finalMasks, userPhones, userName)
               ? { ...t, ...SELF_TXN_FIELDS }
               : t;
