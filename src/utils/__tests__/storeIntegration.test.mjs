@@ -1555,6 +1555,8 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 {
   reset();
   const bills = () => useStore.getState().ccBills || {};
+  useStore.getState().addAccount({ name: 'SBI Card', type: 'Credit Card', mask: '1234', bankName: 'SBI', balance: -5000 });
+  const sbiCard = () => useStore.getState().accounts.find((a) => a.mask === '1234');
 
   ingest('SBICRD', 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-May-26 is Rs.16,748.65. Min Amount Due: Rs.837.00. Payment due date: 07-Jun-26.',
     { smsId: 'bill-1' });
@@ -1563,8 +1565,16 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   const b = bills()[keys[0]];
   check('the bill keeps its amount', b && b.amount > 0, JSON.stringify(b));
   check('the bill keeps its due date', !!(b && b.dueDate), JSON.stringify(b));
+  check('the bill keeps its statement date', b && b.statementDate === '20-May-26', JSON.stringify(b));
   check('a bill reminder does NOT become a transaction',
     txns().length === 0, `${txns().length}`);
+
+  // The recurring cycle-day info lands on the CARD ACCOUNT too (Sep-6-26) — not just
+  // the one-off bill — so the app "remembers" the cycle across months.
+  check('due-day is distilled onto the matching card account',
+    sbiCard()?.dueDay === 7, JSON.stringify(sbiCard()));
+  check('statement-day is distilled onto the matching card account',
+    sbiCard()?.statementDay === 20, JSON.stringify(sbiCard()));
 
   // A later statement for the SAME card is a new CYCLE — it must replace, not add.
   ingest('SBICRD', 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-Jun-26 is Rs.9,100.00. Min Amount Due: Rs.455.00. Payment due date: 07-Jul-26.',
@@ -1588,6 +1598,60 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   const after = Object.keys(bills());
   check('paying a card clears that card\'s bill', !after.includes('1234'), JSON.stringify(after));
   check('and leaves the OTHER card\'s bill alone', after.includes('9876'), JSON.stringify(after));
+}
+
+// ─── CC CYCLE HEADS-UP — soft nudge from a SAVED statementDay alone (Sep-6-26) ─
+// Distinct from the bill-due tests above: this fires with NO fresh SMS that
+// cycle, purely from `account.statementDay` learned earlier. `statementDay: 1`
+// is used throughout so "today >= statementDay" is trivially true on whatever
+// real date this suite happens to run — no date-mocking needed.
+{
+  const { monthKey } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+  const thisMonth = monthKey(new Date());
+  // `reset()` doesn't touch ccBills/ccCycleHeadsUpNotified (by design — see the CC
+  // BILL DUE block above, which relies on them surviving a reset within ITS own
+  // flow), so this block clears them itself between cases.
+  const resetCcCycle = () => { reset(); useStore.setState({ ccBills: {}, ccCycleHeadsUpNotified: {} }); };
+
+  resetCcCycle();
+  useStore.getState().addAccount({
+    name: 'Test Card', type: 'Credit Card', mask: '4321', bankName: 'TestBank',
+    balance: -1000, statementDay: 1,
+  });
+  const cardId = useStore.getState().accounts.find((a) => a.mask === '4321').id;
+
+  useStore.getState().maybeFireCcCycleHeadsUp();
+  check('fires once the (learned) statement day has passed this month',
+    useStore.getState().ccCycleHeadsUpNotified[cardId] === thisMonth,
+    JSON.stringify(useStore.getState().ccCycleHeadsUpNotified));
+
+  const afterFirst = JSON.stringify(useStore.getState().ccCycleHeadsUpNotified);
+  useStore.getState().maybeFireCcCycleHeadsUp();
+  check('calling it again the same month is a no-op (deduped)',
+    JSON.stringify(useStore.getState().ccCycleHeadsUpNotified) === afterFirst, afterFirst);
+
+  // A real bill for this card THIS month must suppress the synthetic nudge —
+  // the real cc_bill_reminder already told the user their cycle closed.
+  resetCcCycle();
+  useStore.getState().addAccount({
+    name: 'Test Card 2', type: 'Credit Card', mask: '5555', bankName: 'TestBank',
+    balance: -1000, statementDay: 1,
+  });
+  useStore.setState({
+    ccBills: { '5555': { amount: 500, cardLast4: '5555', bankName: 'TestBank', seenAt: new Date().toISOString() } },
+  });
+  useStore.getState().maybeFireCcCycleHeadsUp();
+  check('a REAL bill this cycle suppresses the synthetic heads-up',
+    Object.keys(useStore.getState().ccCycleHeadsUpNotified).length === 0,
+    JSON.stringify(useStore.getState().ccCycleHeadsUpNotified));
+
+  // A card with no statementDay yet (never seen a parseable statement SMS) never fires.
+  resetCcCycle();
+  useStore.getState().addAccount({ name: 'Test Card 3', type: 'Credit Card', mask: '6666', bankName: 'TestBank', balance: -1000 });
+  useStore.getState().maybeFireCcCycleHeadsUp();
+  check('a card with no learned statementDay never fires',
+    Object.keys(useStore.getState().ccCycleHeadsUpNotified).length === 0,
+    JSON.stringify(useStore.getState().ccCycleHeadsUpNotified));
 }
 
 // ── Account bucketing: the two surfaces MUST agree ───────────────────────────
@@ -2209,6 +2273,52 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   const second = doCheckIn();
   check('a second check-in the same day is a no-op', second.type === 'SAME_DAY'
     && JSON.stringify(useReward.getState().pendingSavingsReward) === before, second.type);
+}
+
+// ── deleteAccount prunes every stale reference, not just live transactions ──
+// Manage Account modal (Sep-2026) surfaces delete fresh from the account list,
+// so this extension closes gaps that used to just linger: archivedTransactions
+// stayed pointed at the dead id, declinedAccountLinks kept a stale mask-pair,
+// and a deleted CC's unpaid bill/reminder/heads-up bookkeeping never cleared.
+{
+  const { ACCOUNT_TYPES } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+  reset();
+  const acctId = 'acct_test_delete_cleanup';
+  const mask = '9911';
+  useStore.setState((s) => ({
+    accounts: [
+      ...s.accounts,
+      { id: acctId, type: ACCOUNT_TYPES.CREDIT_CARD, name: 'Test CC', bankName: 'TestBank', mask, balance: -500, aliasMasks: [] },
+    ],
+    transactions: [
+      { id: 'live1', accountId: acctId, amount: 10, type: 'debit', createdAt: Date.now(), categoryId: 'other' },
+    ],
+    archivedTransactions: [
+      { id: 'arch1', accountId: acctId, amount: 10, type: 'debit', createdAt: Date.now(), categoryId: 'other' },
+    ],
+    declinedAccountLinks: [`${mask}:5555`, '1111:2222'],
+    ccBills: { [mask]: { cardLast4: mask, bankName: 'TestBank', amount: 500, dueDate: '10-09-26' } },
+    ccDueReminderIds: { [`${mask}:someid`]: 'notif-id-123' },
+    ccCycleHeadsUpNotified: { [acctId]: '2026-09' },
+  }));
+
+  useStore.getState().deleteAccount(acctId);
+  const s = useStore.getState();
+
+  check('deleteAccount removes the account', !s.accounts.some((a) => a.id === acctId));
+  check('…and still unlinks live transactions',
+    s.transactions.find((t) => t.id === 'live1')?.accountId === null);
+  check('…now also unlinks archivedTransactions (was left dangling)',
+    s.archivedTransactions.find((t) => t.id === 'arch1')?.accountId === null);
+  check('…strips declinedAccountLinks naming this account\'s mask, keeps unrelated pairs',
+    !s.declinedAccountLinks.includes(`${mask}:5555`) && s.declinedAccountLinks.includes('1111:2222'));
+  check('…clears the card\'s outstanding ccBills entry',
+    !(mask in s.ccBills));
+  check('…cancels ccDueReminderIds for the card',
+    !Object.keys(s.ccDueReminderIds).some((k) => k.startsWith(`${mask}:`)));
+  check('…clears ccCycleHeadsUpNotified for the account',
+    !(acctId in s.ccCycleHeadsUpNotified));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

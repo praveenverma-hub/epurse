@@ -37,6 +37,7 @@ const STUBS = {
     'export const cancelScheduledNotification=async()=>{};' +
     'export const fireSubscriptionHikeNotification=async()=>null;' +
     'export const fireMonthlyRecapNotification=async()=>null;' +
+    'export const fireCcCycleHeadsUpNotification=async()=>null;' +
     'export const parseDueDate=()=>null;',
   notifStore:
     'export const useNotificationStore={getState:()=>new Proxy({},{get:()=>()=>{}}),setState:()=>{},subscribe:()=>()=>{}};',

@@ -283,15 +283,22 @@ const TRANSFER_REF_REGEX =
 // Guard: skips account references (Acct/A/c/Account) so own-account transfers don't leak through.
 const BENEFICIARY_CREDITED_REGEX = /;\s*(?!(?:a\/c|acct?|account)\b)([A-Za-z][A-Za-z\s]{1,29}?)\s+credited\b/i;
 
-// Merchant after "to", "at", "@", "from", "by", "for" — lazy, stops at stop words.
-// Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right after anchor,
-// and "to/by mobile <digits>" — "a/c linked to mobile 9XXXXXX13245" is a P2P/self-transfer
-// routing description (the counterparty's masked phone), never a real merchant name.
+// Merchant after "to", "at", "@", "from", "by", "for", "toward(s)" — lazy, stops at stop
+// words. Negative lookahead blocks currency captures (Rs.xxx / INR xxx / ₹xxx) right
+// after anchor, and "to/by mobile <digits>" — "a/c linked to mobile 9XXXXXX13245" is a
+// P2P/self-transfer routing description (the counterparty's masked phone), never a real
+// merchant name. `towards?` (not just `towards`) — SIP/NACH SMS commonly use the singular
+// "toward" ("via NACH toward PARAG PARIKH FLEXI CAP FUND"), which this anchor missed
+// entirely before, falling through to the bank sender as the "merchant". `against` and
+// `subscription` in the stop-word list for the same reason: NACH mandate SMS phrase the
+// payee as "initiated by GROWW-STOCKS against your account", and autopay SMS as "for
+// Apple One Premium Bundle annual subscription" — both closed off the capture before the
+// bare word-count cap could kick in, so it matched null and fell back to the sender.
 const MERCHANT_REGEX =
-  /(?:towards|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d|mobile\s+[0-9x]{2,})([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\s*\.|\s*,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
+  /(?:towards?|to|at|@|from|by|for)\s+(?!(?:rs\.?|inr|₹)\s*\d|mobile\s+[0-9x]{2,})([A-Za-z0-9][A-Za-z0-9&._\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&._\-]*){0,4}?)(?=\s+(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not|against|subscription)\b|\s+from\s+(?:a\/c|acct\.?|account|your)\b|\s+to\s+your\b|\s*\.|\s*,|;|\s*[(+]|\/(?![A-Za-z])|$)/i;
 
 const MERCHANT_STOP =
-  /\s+(?:(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not)\b|from\s+(?:a\/c|acct\.?|account|your)\b).*$/i;
+  /\s+(?:(?:on|via|ref|rrn|upi|avl|info|txn|bal|tot|udf|imps|neft|rtgs|dt|dated|by|has|is|was|div|id|mandate|using|not|against|subscription)\b|from\s+(?:a\/c|acct\.?|account|your)\b).*$/i;
 
 // A period glued directly to a stop keyword or a ref/balance number-run (no space),
 // e.g. "REEMA KUMARI.RRN 853904840357.Avl Bal" → cut at ".RRN". The merchant char
@@ -357,6 +364,17 @@ const CC_CARD_LAST4_REGEX =
 // "due date soon" still matches nothing.
 const CC_DUE_DATE_REGEX =
   /\b(?:pay\s+(?:instantly\s+)?by|due\s+(?:date|on|by))\s*:?\s*-?\s*(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
+
+// Pull the STATEMENT/cycle-close date from a CC reminder body — a real, already-seen
+// phrasing is "Total Amount Due ... for statement dt 20-May-26 is ..." (SBI). Distinct
+// from CC_DUE_DATE_REGEX (the PAYMENT deadline): this is when the billing cycle itself
+// closed, which is what lets the app learn a card's recurring cycle day rather than
+// only ever reacting to a bill that already arrived. Same date-shape alternation as
+// CC_DUE_DATE_REGEX. A statement mentioning only a month ("statement for Jul-26 is
+// generated", no day) intentionally does NOT match here — a month alone can't give a
+// day-of-month, and the anchor for THAT phrasing lives in CC_BILL_REMINDER_REGEX only.
+const CC_STATEMENT_DATE_REGEX =
+  /\bstatement\s+(?:dt|dated|date|generated\s+on|as\s+of)\s*:?\s*-?\s*(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
 
 // Outgoing CC bill payment from source bank account (not an expense — it's a
 // liability settlement). Patterns: "towards [bank] credit card", "credit card
@@ -608,9 +626,12 @@ const inferAccountType = (text) => {
   // 3. Strong credit-card-ONLY signals that a debit card / bank a/c never carry — a
   //    credit/available/card LIMIT, outstanding, (min/total) amount due, a generated
   //    statement, "billed to". Recovers CC formats that OMIT the word "credit"
-  //    (Amex, OneCard, "Axis Card xx1002 … Avl Limit Rs.X").
+  //    (Amex, OneCard, "Axis Card xx1002 … Avl Limit Rs.X"). The optional
+  //    "spend(s)/spending" before LIMIT recovers "Available Spends Limit" (Amex) /
+  //    "Clear Spends Limit" (IndusInd) — without it these fell through to Debit Card,
+  //    since the word "limit" wasn't immediately after "available"/"avl"/"card".
   if (
-    /(?:credit|avl\.?|available|card)\s+limit|\bcr\.?\s+limit\b|\boutstanding\b|(?:min(?:imum)?|total)\s+(?:amt|amount)\s+due|statement\s+(?:generated|is\s+ready)|\bbilled\s+to\b/i.test(text)
+    /(?:credit|avl\.?|available|clear|card)(?:\s+spend(?:s|ing)?)?\s+limit|\bcr\.?\s+limit\b|\boutstanding\b|(?:min(?:imum)?|total)\s+(?:amt|amount)\s+due|statement\s+(?:generated|is\s+ready)|\bbilled\s+to\b/i.test(text)
   ) {
     return ACCOUNT_TYPES.CREDIT_CARD;
   }
@@ -869,6 +890,8 @@ export const parseMessageDetailed = (message, opts = {}) => {
     const cardLast4 = cardMatch?.[1] || cardMatch?.[2] || null;
     const dateMatch = text.match(CC_DUE_DATE_REGEX);
     const dueDate   = dateMatch?.[1] || null;
+    const stmtMatch = text.match(CC_STATEMENT_DATE_REGEX);
+    const statementDate = stmtMatch?.[1] || null;
     return {
       ok: false,
       error: {
@@ -877,7 +900,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
           'Credit-card bill reminder detected (amount due / pay by …), so it was not added as a spend.',
       },
       ccDue: dueAmt > 0
-        ? { amount: dueAmt, cardLast4, dueDate, bankName: getBankName(opts.sender) }
+        ? { amount: dueAmt, cardLast4, dueDate, statementDate, bankName: getBankName(opts.sender) }
         : null,
     };
   }

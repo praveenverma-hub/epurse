@@ -184,6 +184,26 @@ export const ACCOUNT_TYPES = {
   CASH: 'Cash',
 };
 
+// Single source for the emoji + short label shown for each account type — was
+// duplicated identically in AccountCard.tsx and AccountsScreen.js (a third,
+// differently-worded all-caps subtitle map lives only in AccountCard, for the
+// card's own visual style, and is NOT folded in here since it isn't a dupe).
+export const ACCOUNT_TYPE_EMOJI = {
+  [ACCOUNT_TYPES.BANK]: '🏦',
+  [ACCOUNT_TYPES.CREDIT_CARD]: '💳',
+  [ACCOUNT_TYPES.DEBIT_CARD]: '🏧',
+  [ACCOUNT_TYPES.WALLET]: '👛',
+  [ACCOUNT_TYPES.CASH]: '💵',
+};
+
+export const ACCOUNT_TYPE_LABEL = {
+  [ACCOUNT_TYPES.BANK]: 'Bank',
+  [ACCOUNT_TYPES.CREDIT_CARD]: 'Credit Card',
+  [ACCOUNT_TYPES.DEBIT_CARD]: 'Debit Card',
+  [ACCOUNT_TYPES.WALLET]: 'Wallet',
+  [ACCOUNT_TYPES.CASH]: 'Cash',
+};
+
 export const TRANSACTION_TYPES = {
   DEBIT: 'debit',
   CREDIT: 'credit',

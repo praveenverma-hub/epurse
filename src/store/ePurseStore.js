@@ -57,7 +57,12 @@ import {
 // disagreed with this one, which is how spend went missing from a card's ledger.
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
 import { isSameMonth, monthKey } from '../utils/format';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification } from '../utils/notifications';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification } from '../utils/notifications';
+// Imported directly from the pure module, NOT from notifications.js — that module
+// is stubbed wholesale in the headless test runner (it pulls in expo-notifications),
+// and its stub for parseDueDate always returns null. dueDate.js has zero
+// dependencies, so the store can use the REAL implementation in tests too.
+import { parseDueDate } from '../utils/dueDate';
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { locationKey } from '../utils/location';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
@@ -148,6 +153,64 @@ const clearCcBill = (bills, { cardLast4, bankName }) => {
     return true;
   });
   return kept.length === entries.length ? bills : Object.fromEntries(kept);
+};
+
+/**
+ * Cancel every scheduled CC-due-reminder OS notification for a card (any due date)
+ * and drop those entries from `ccDueReminderIds`. Called whenever a bill for that
+ * card is confirmed paid — via the automatic "payment received" SMS
+ * (`applyCCPayment`) or the manual reconcile flow (`markAsCCBillPayment`) — so a
+ * reminder can't fire for a due date that's already settled. Without this, only a
+ * NEW bill's reminder cancelled the old one; a bill that was simply paid off left
+ * its OS reminder scheduled to fire anyway on the due date.
+ */
+const cancelCcDueRemindersForCard = (ccDueReminderIds, cardKey) => {
+  const entries = Object.entries(ccDueReminderIds || {});
+  const prefix = `${cardKey}:`;
+  const kept = entries.filter(([k, id]) => {
+    if (!k.startsWith(prefix)) return true;
+    cancelScheduledNotification(id);
+    return false;
+  });
+  return kept.length === entries.length ? (ccDueReminderIds || {}) : Object.fromEntries(kept);
+};
+
+/**
+ * Persist a card's recurring billing-cycle day(s) onto its ACCOUNT record —
+ * `dueDay` (payment deadline) / `statementDay` (cycle-close), each 1-31. From REAL
+ * message dates only, never guessed or interpolated: a card this app has never
+ * seen a parseable date for keeps `dueDay`/`statementDay` unset. This is the
+ * groundwork for eventually reminding the user as a NEW cycle closes, without
+ * needing a fresh SMS every single month — not built yet, this only saves what
+ * today's message actually said.
+ *
+ * Matches the SAME loose mask-or-bank-name rule `clearCcBill` already uses for
+ * this exact class of message (a reminder and the account it refers to don't
+ * always carry the identical mask format) — deliberately not the heavier scored
+ * matcher in `accountMatch.js`, which answers a different question ("which
+ * account did this MONEY move on") than "which card does this FYI concern".
+ * A reminder alone never creates an account; if none matches, the info is
+ * dropped rather than guessed at.
+ */
+const applyCcCycleInfoToAccount = (accounts, { cardLast4, bankName, dueDay, statementDay }) => {
+  if (!dueDay && !statementDay) return accounts;
+  const bank = (bankName || '').trim().toLowerCase();
+  let matched = false;
+  const next = (accounts || []).map((a) => {
+    if (matched || a.type !== ACCOUNT_TYPES.CREDIT_CARD) return a;
+    const byMask = !!(cardLast4 && a.mask && maskMatch(a.mask, cardLast4));
+    // Bank-only fallback only when the reminder carried no mask at all — otherwise
+    // a reminder for ONE of two cards at the same bank could stamp the wrong one.
+    const byBank = !cardLast4 && !!bank && (a.bankName || '').trim().toLowerCase() === bank;
+    if (!byMask && !byBank) return a;
+    matched = true;
+    return {
+      ...a,
+      ...(dueDay ? { dueDay } : {}),
+      ...(statementDay ? { statementDay } : {}),
+    };
+  });
+  return matched ? next : accounts;
 };
 
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
@@ -243,11 +306,13 @@ const ensureAccountForParsed = (accounts, parsed) => {
     // `aliasMasks` = linked debit-card masks folded into a bank account (a card is
     // just an access point to the bank — same money). See linkDebitCardToBank.
     aliasMasks: [],
-    // TODO(cc-limits): NOT built yet. When credit-card limits / billing dates land,
-    // add to this object — `creditLimit` (number), `limitGroupId` (string: cards that
+    // TODO(cc-limits): `creditLimit` (number) and `limitGroupId` (string: cards that
     // SHARE one limit are grouped by this id, e.g. an add-on card on the primary's
-    // limit), `statementDay` (1–31), `dueDay` (1–31). Until then, net worth treats a
-    // CC purely as a liability (outstanding balance) — see selectEPurseNetWorth.
+    // limit) are still NOT built. `statementDay`/`dueDay` (1–31) ARE now populated —
+    // see `applyCcCycleInfoToAccount`, set from real CC-bill-reminder SMS dates, NOT
+    // here at account creation (a reminder never creates an account, only updates one
+    // that already exists). Until creditLimit lands, net worth treats a CC purely as
+    // a liability (outstanding balance) — see selectEPurseNetWorth.
   };
   return { accounts: [...accounts, auto], account: auto };
 };
@@ -825,6 +890,11 @@ export const useEPurseStore = create(
       // card arrives. One entry per card — a new bill is a new CYCLE and replaces
       // the old one, so this never grows past the number of cards.
       ccBills: {},
+      // Soft "your cycle just closed" heads-up already sent this month, per card:
+      // { [accountId]: '2026-09' }. Distinct from `ccBills`/`ccDueReminderIds` (a REAL
+      // bill's due-date reminder) — this fires from the SAVED statementDay alone, with
+      // no fresh SMS, so it needs its own dedup or it would refire every foreground.
+      ccCycleHeadsUpNotified: {},
       // Subscription price-hike alerts already sent: keys `${merchantKey}:${hikeTo}`.
       subscriptionHikesNotified: [],
 
@@ -1264,6 +1334,57 @@ export const useEPurseStore = create(
       },
 
       /**
+       * Soft "your billing cycle likely just closed" heads-up — fired purely from
+       * a card's SAVED `statementDay` (no fresh SMS needed that cycle), which is
+       * the whole point: `applyCcCycleInfoToAccount` only ever learns this from a
+       * real message, but once learned, the app can nudge every month even on a
+       * cycle where the bank's own reminder SMS never arrives. Deliberately the
+       * SOFT half only (per user's Sep-6-26 scoping) — no predicted due-date /
+       * "pay now" reminder; that would need guessing an amount this function has
+       * no way to know.
+       *
+       * Per card: fires at most once per calendar month, the first time the app
+       * is opened on/after `statementDay` (dedup: `ccCycleHeadsUpNotified[accountId]
+       * === thisMonthKey`). Skipped entirely if a REAL `cc_bill_reminder` already
+       * landed for this card this month — that one already told the user their
+       * cycle closed (with a real amount), so a synthetic heads-up would be pure
+       * noise. Called on launch / foreground (see App.js), like the sibling
+       * maybeFire* checks above.
+       */
+      maybeFireCcCycleHeadsUp: () => {
+        const s = get();
+        const now = new Date();
+        const today = now.getDate();
+        const thisMonth = monthKey(now);
+        const notified = { ...(s.ccCycleHeadsUpNotified || {}) };
+        let changed = false;
+
+        (s.accounts || []).forEach((a) => {
+          if (a.type !== ACCOUNT_TYPES.CREDIT_CARD || !a.statementDay) return;
+          if (today < a.statementDay) return; // cycle hasn't closed yet this month
+          if (notified[a.id] === thisMonth) return; // already nudged this cycle
+
+          // A real bill/statement SMS already covered this cycle — don't duplicate.
+          const bill = (s.ccBills || {})[ccBillKey({ cardLast4: a.mask, bankName: a.bankName })];
+          if (bill?.seenAt && monthKey(new Date(bill.seenAt)) === thisMonth) return;
+
+          const cardLabel = [a.bankName || a.name, a.mask ? `••${a.mask}` : null].filter(Boolean).join(' ');
+          useNotificationStore.getState().add({
+            kind:  'cc_cycle_heads_up',
+            title: `💳 ${cardLabel} cycle closed`,
+            body:  'Your billing cycle likely just closed — a new statement should arrive soon.',
+            dedupeKey: `cc_cycle:${a.id}:${thisMonth}`,
+            meta:  { accountId: a.id, statementDay: a.statementDay },
+          });
+          fireCcCycleHeadsUpNotification({ cardLabel }).catch(() => {});
+          notified[a.id] = thisMonth;
+          changed = true;
+        });
+
+        if (changed) set({ ccCycleHeadsUpNotified: notified });
+      },
+
+      /**
        * Returns how many consecutive recent cycles a category stayed under its
        * cap. Walks backward from the most recent history month. Stops at first
        * breach or missing entry. Used to render mastery badges (⭐ at 3, 🥇 at 6).
@@ -1478,7 +1599,12 @@ export const useEPurseStore = create(
         set((s) => ({
           accounts: [
             ...s.accounts,
-            { id: `acct_${Date.now()}`, balance: 0, color: '#6B7280', ...account },
+            // Random suffix, matching every other account-id generator in this file —
+            // `Date.now()` alone collides when two accounts are added in the same
+            // millisecond (e.g. onboarding creating several in a tight loop), and a
+            // shared id means a later single-account update (balance, anchor, CC
+            // reconcile…) silently mutates BOTH accounts.
+            { id: `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, balance: 0, color: '#6B7280', ...account },
           ],
         })),
 
@@ -1523,13 +1649,53 @@ export const useEPurseStore = create(
       // on the Accounts screen. Survives reloads via partialize.
       dismissAnchorNudge: () => set({ anchorNudgeDismissed: true }),
 
+      /**
+       * Deletes the account AND prunes every stale reference it leaves behind —
+       * not just the live transactions. Without this, a re-created account with
+       * the same mask could inherit a dead `declinedAccountLinks` entry, or a
+       * deleted card's unpaid bill/reminder/heads-up bookkeeping would linger
+       * forever with nothing left to reconcile it.
+       */
       deleteAccount: (accountId) =>
+        set((s) => {
+          const acct = s.accounts.find((a) => a.id === accountId);
+          const masks = new Set(
+            [acct?.mask, ...(acct?.aliasMasks || [])].filter(Boolean),
+          );
+          const unlink = (list) =>
+            (list || []).map((t) =>
+              t.accountId === accountId ? { ...t, accountId: null } : t,
+            );
+
+          const cardKey = acct
+            ? ccBillKey({ cardLast4: acct.mask || null, bankName: acct.bankName || null })
+            : null;
+          const ccCycleHeadsUpNotified = { ...(s.ccCycleHeadsUpNotified || {}) };
+          delete ccCycleHeadsUpNotified[accountId];
+
+          return {
+            accounts: s.accounts.filter((a) => a.id !== accountId),
+            transactions: unlink(s.transactions),
+            archivedTransactions: unlink(s.archivedTransactions),
+            declinedAccountLinks: (s.declinedAccountLinks || []).filter((key) => {
+              const [cardMask, bankMask] = String(key).split(':');
+              return !masks.has(cardMask) && !masks.has(bankMask);
+            }),
+            ccBills: acct
+              ? clearCcBill(s.ccBills, { cardLast4: acct.mask || null, bankName: acct.bankName || null })
+              : s.ccBills,
+            ccDueReminderIds: cardKey
+              ? cancelCcDueRemindersForCard(s.ccDueReminderIds, cardKey)
+              : s.ccDueReminderIds,
+            ccCycleHeadsUpNotified,
+          };
+        }),
+
+      /** Rename an account (create-time name is otherwise permanent). No store-side
+       *  validation — the UI gates this per the input-validation skill. */
+      renameAccount: (accountId, name) =>
         set((s) => ({
-          accounts: s.accounts.filter((a) => a.id !== accountId),
-          // Unlink transactions that were attached to this account
-          transactions: s.transactions.map((t) =>
-            t.accountId === accountId ? { ...t, accountId: null } : t
-          ),
+          accounts: s.accounts.map((a) => (a.id === accountId ? { ...a, name } : a)),
         })),
 
       /**
@@ -2229,6 +2395,10 @@ export const useEPurseStore = create(
             cardLast4: account.mask || accountMask || null,
             bankName:  account.bankName || bankName || null,
           }),
+          ccDueReminderIds: cancelCcDueRemindersForCard(
+            state.ccDueReminderIds,
+            ccBillKey({ cardLast4: account.mask || accountMask || null, bankName: account.bankName || bankName || null }),
+          ),
         });
         fireCCPaymentNotification({
           amount,
@@ -2294,6 +2464,13 @@ export const useEPurseStore = create(
       //       mode 'none'   → leave the card alone (use when the card's own
       //                       "payment received" SMS already reduced it → no
       //                       double reduction).
+      //   • clear the card's `ccBills` due-entry (if any) — the user just told us
+      //     THIS transaction paid it, so the Home carousel's "bill due" card must
+      //     stop nagging for it. Without this, a bill whose "payment received" SMS
+      //     never arrived (the whole reason this manual flow exists) kept showing
+      //     as due forever, even though the user had just marked it paid.
+      //   • cancel any scheduled OS due-date reminder for that card too — same
+      //     reasoning, otherwise a paid-off bill's push notification still fires.
       markAsCCBillPayment: (txnId, cardAccountId = null, mode = 'none') =>
         set((s) => {
           const txn = (s.transactions || []).find((t) => t.id === txnId);
@@ -2319,7 +2496,8 @@ export const useEPurseStore = create(
 
           // Optionally knock down the paid card's outstanding.
           let accounts = s.accounts;
-          if (cardAccountId && mode !== 'none') {
+          const card = cardAccountId ? s.accounts.find((a) => a.id === cardAccountId) : null;
+          if (card && mode !== 'none') {
             accounts = s.accounts.map((a) => {
               if (a.id !== cardAccountId) return a;
               if (mode === 'trueup') {
@@ -2330,7 +2508,14 @@ export const useEPurseStore = create(
             });
           }
 
-          return { transactions, lentBorrowed, accounts };
+          const ccBills = card
+            ? clearCcBill(s.ccBills, { cardLast4: card.mask || null, bankName: card.bankName || null })
+            : s.ccBills;
+          const ccDueReminderIds = card
+            ? cancelCcDueRemindersForCard(s.ccDueReminderIds, ccBillKey({ cardLast4: card.mask || null, bankName: card.bankName || null }))
+            : s.ccDueReminderIds;
+
+          return { transactions, lentBorrowed, accounts, ccBills, ccDueReminderIds };
         }),
 
       // User tapped "Skip" — leave the balance untouched, but file this payment's
@@ -2370,7 +2555,7 @@ export const useEPurseStore = create(
             parsedResult?.error?.code === 'cc_bill_reminder' &&
             parsedResult.ccDue
           ) {
-            const { amount, cardLast4, dueDate, bankName } = parsedResult.ccDue;
+            const { amount, cardLast4, dueDate, statementDate, bankName } = parsedResult.ccDue;
             const cardLabel = cardLast4
               ? `${bankName || 'Credit Card'} •• ${cardLast4}`
               : (bankName || 'Credit Card');
@@ -2383,15 +2568,25 @@ export const useEPurseStore = create(
             // than pile up (the reminder scheduling below already works that
             // way). One entry per card, so it's bounded by how many cards the
             // user has and needs no pruning.
+            //
+            // ── Also persist the recurring CYCLE onto the card's account ──
+            // (Sep-6-26) `dueDate`/`statementDate` are one-off strings for THIS
+            // bill; `dueDay`/`statementDay` (below) are the day-of-month distilled
+            // from them, saved on the account so the card "remembers" its cycle
+            // across months, not just this one bill. Real dates only — see
+            // applyCcCycleInfoToAccount's doc comment.
+            const dueDay       = dueDate ? parseDueDate(dueDate)?.getDate() ?? null : null;
+            const statementDay = statementDate ? parseDueDate(statementDate)?.getDate() ?? null : null;
             set((s) => ({
               ccBills: {
                 ...(s.ccBills || {}),
                 [ccBillKey({ cardLast4, bankName })]: {
                   amount, cardLast4: cardLast4 || null, bankName: bankName || null,
-                  dueDate: dueDate || null,
+                  dueDate: dueDate || null, statementDate: statementDate || null,
                   seenAt: opts.receivedAt || new Date().toISOString(),
                 },
               },
+              accounts: applyCcCycleInfoToAccount(s.accounts, { cardLast4, bankName, dueDay, statementDay }),
             }));
             useNotificationStore.getState().add({
               kind:      'cc_due',
@@ -4729,6 +4924,7 @@ export const useEPurseStore = create(
         notificationIds: state.notificationIds,
         ccDueReminderIds: state.ccDueReminderIds ?? {},
         ccBills: state.ccBills ?? {},
+        ccCycleHeadsUpNotified: state.ccCycleHeadsUpNotified ?? {},
         subscriptionHikesNotified: state.subscriptionHikesNotified ?? [],
         budget: state.budget,
         lastBudgetPlan: state.lastBudgetPlan,

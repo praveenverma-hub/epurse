@@ -17,6 +17,7 @@ import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
+import { locationKey } from '../utils/location';
 import type { GroupSplit } from '../types/group';
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
@@ -30,6 +31,9 @@ interface GroupTxn {
   isGroupMemo?: boolean;
   groupSplit?: GroupSplit;
   note?: string;
+  /** Coarse place stamped at capture time (manual add only for group expenses —
+   *  see services/locationService). City-level only. */
+  location?: { city?: string | null; district?: string | null; region?: string | null } | null;
 }
 
 interface GroupTxnDetailSheetProps {
@@ -51,6 +55,9 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
   const payerName = iPaid ? 'You' : (gs?.paidByName || 'Someone');
   const myShare = Number(shares.find((s) => s.memberId === 'me')?.shareAmount) || 0;
   const othersOwe = shares.filter((s) => s.memberId !== 'me' && (Number(s.shareAmount) || 0) > 0);
+  // City-only for now (per user request) — locationKey already falls back to
+  // district/region when the geocoder couldn't name a city.
+  const place = locationKey(txn.location);
 
   return (
     <Modal visible={!!txn} animationType="slide" transparent onRequestClose={onClose}>
@@ -76,6 +83,10 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
             ) : null}
           </View>
           {txn.createdAt ? <Text style={styles.date}>{formatDateTime(txn.createdAt)}</Text> : null}
+          {/* Colour applied inline from useTheme(), not the static palette — this
+              file's StyleSheet.create is frozen at load, and new code must go
+              through the theme hook (docs/DARK_MODE.md). */}
+          {place ? <Text style={[styles.place, { color: theme.textMuted }]}>{place}</Text> : null}
           <Text style={styles.total}>{formatCurrency(amount)}</Text>
           {txn.note ? <Text style={styles.note} numberOfLines={3}>{txn.note}</Text> : null}
 
@@ -176,6 +187,7 @@ const styles = StyleSheet.create({
   },
   editTxt:  { ...typography.small, fontWeight: '700' },
   date:     { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
+  place:    { ...typography.tiny, marginTop: 2 },
   total:    { ...typography.display, color: colors.textPrimary, marginTop: spacing.sm },
   note:     { ...typography.small, color: colors.textSecondary, marginTop: spacing.xs },
   sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.lg, marginBottom: spacing.xs },

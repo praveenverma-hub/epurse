@@ -220,6 +220,29 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
 }
 
 /**
+ * Soft, non-urgent heads-up that a card's billing cycle likely just closed —
+ * fired from a SAVED `statementDay` alone (no fresh SMS that cycle), distinct
+ * from `scheduleCCBillDueReminder` (a real bill's payment deadline). No amount,
+ * no urgency styling: this is "expect a bill soon", not "pay now". Same
+ * DEFAULT-priority/budget-channel treatment as the mid-cycle nudge and
+ * subscription-hike alerts — none of those are urgent either.
+ */
+export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: `💳 ${cardLabel} cycle closed`,
+      body:  'Your billing cycle likely just closed — a new statement should arrive soon.',
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger: null,
+  });
+}
+
+/**
  * Fires a "monthly recap is ready" notification on the first open of a new
  * month. No-ops without notification permission. Carries `data.monthKey` so
  * tapping it (handled by the listener in App.js) re-opens that month's recap.

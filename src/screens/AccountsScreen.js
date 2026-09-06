@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Keyboard, Modal, Dimensions,
+  TextInput, Keyboard, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -26,16 +26,17 @@ import {
 import { colors, radius, spacing, typography, shadows, pinnedHeaderChrome, withAlpha } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency, formatCompact } from '../utils/format';
-import { ACCOUNT_TYPES } from '../constants/categories';
+import { ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL } from '../constants/categories';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
 
 import AccountCard    from '../components/AccountCard';
-import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState     from '../components/EmptyState';
 import InfoIcon       from '../components/InfoIcon';
 import AddAccountModal from '../components/AddAccountModal';
 import CenterModal    from '../components/CenterModal';
 import InfoSheet      from '../components/InfoSheet';
+import LinkCardToBankSheet from '../components/LinkCardToBankSheet';
+import ManageAccountModal from '../components/ManageAccountModal';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
@@ -46,21 +47,6 @@ const TYPE_ORDER = {
   [ACCOUNT_TYPES.DEBIT_CARD]:  2,
   [ACCOUNT_TYPES.CREDIT_CARD]: 3,
   [ACCOUNT_TYPES.BANK]:        4,
-};
-
-const TYPE_EMOJI = {
-  [ACCOUNT_TYPES.BANK]:        '🏦',
-  [ACCOUNT_TYPES.CREDIT_CARD]: '💳',
-  [ACCOUNT_TYPES.DEBIT_CARD]:  '🏧',
-  [ACCOUNT_TYPES.WALLET]:      '👛',
-  [ACCOUNT_TYPES.CASH]:        '💵',
-};
-const TYPE_LABEL = {
-  [ACCOUNT_TYPES.BANK]:        'Bank',
-  [ACCOUNT_TYPES.CREDIT_CARD]: 'Credit Card',
-  [ACCOUNT_TYPES.DEBIT_CARD]:  'Debit Card',
-  [ACCOUNT_TYPES.WALLET]:      'Wallet',
-  [ACCOUNT_TYPES.CASH]:        'Cash',
 };
 
 // Balances reflecting real bank money are gated behind biometric reveal.
@@ -141,6 +127,8 @@ export default function AccountsScreen({ navigation }) {
   const [addAccountVisible,  setAddAccountVisible]  = useState(false);
   const [confirm,            setConfirm]            = useState(null);
   const [phoneInput,         setPhoneInput]         = useState('');
+  // Manage Account modal — opened from the flat list row's left icon.
+  const [manageAccountId,    setManageAccountId]    = useState(null);
 
   // StatusBar: light glyphs over the gradient header, dark once the LIGHT bar has
   // pinned over it (it covers the status-bar inset). The imperative, focus-gated
@@ -420,9 +408,9 @@ export default function AccountsScreen({ navigation }) {
                   holderName={userName}
                   onDelete={() =>
                     setConfirm({
-                      title: 'Remove account?',
-                      message: `Remove "${a.name}"?\n\nTransactions will be kept but unlinked.`,
-                      primaryText: 'Remove',
+                      title: 'Delete account?',
+                      message: `Delete "${a.name}"?\n\nTransactions will be kept but unlinked.`,
+                      primaryText: 'Delete',
                       destructive: true,
                       secondaryText: 'Cancel',
                       onSecondary: () => setConfirm(null),
@@ -470,13 +458,19 @@ export default function AccountsScreen({ navigation }) {
               onPress={() => navigation.navigate('AccountDetails', { accountId: a.id })}
               activeOpacity={0.7}
             >
-              <View style={styles.listIcon}>
-                <Text style={{ fontSize: 20 }}>{TYPE_EMOJI[a.type] ?? '💳'}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.listIcon}
+                onPress={() => setManageAccountId(a.id)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Manage ${a.name}`}
+              >
+                <Text style={{ fontSize: 20 }}>{ACCOUNT_TYPE_EMOJI[a.type] ?? '💳'}</Text>
+              </TouchableOpacity>
               <View style={{ flex: 1, marginRight: spacing.sm }}>
                 <Text style={styles.listName} numberOfLines={1} ellipsizeMode="tail">{a.name}</Text>
                 <Text style={styles.listType} numberOfLines={1}>
-                  {TYPE_LABEL[a.type] ?? a.type}
+                  {ACCOUNT_TYPE_LABEL[a.type] ?? a.type}
                   {(a.aliasMasks?.length ?? 0) > 0 ? ` · card ··${a.aliasMasks[0]}` : ''}
                 </Text>
               </View>
@@ -586,56 +580,33 @@ export default function AccountsScreen({ navigation }) {
       />
 
       {/* Manual link: pick which bank a debit card draws from → merge into it */}
-      <Modal
+      <LinkCardToBankSheet
         visible={!!linkTarget}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setLinkTarget(null)}
-      >
-        <View style={styles.pickBackdrop}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setLinkTarget(null)} />
-          <View style={styles.pickSheet}>
-            <SheetCloseButton onPress={() => setLinkTarget(null)} variant="absolute" />
-            <View style={styles.pickHandle} />
-            <Text style={styles.pickTitle}>Link {linkTarget?.name} to…</Text>
-            <Text style={styles.pickHelp}>
-              Pick the bank account this debit card draws from. They'll share one balance and
-              be counted once in net worth.
-            </Text>
-            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
-              {bankAccounts.map((b) => (
-                <TouchableOpacity
-                  key={b.id}
-                  style={styles.pickRow}
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    const dc = linkTarget;
-                    setLinkTarget(null);
-                    setConfirm({
-                      title: 'Link card to bank?',
-                      message: `We'll treat "${dc.name}" as part of "${b.name}" — one balance, counted once. This can't be auto-undone.`,
-                      primaryText: 'Link them',
-                      secondaryText: 'Cancel',
-                      onSecondary: () => setConfirm(null),
-                      onConfirm: () => { linkDebitCardToBank(dc.id, b.id); setConfirm(null); },
-                    });
-                  }}
-                >
-                  <Text style={{ fontSize: 20, marginRight: spacing.sm }}>{TYPE_EMOJI[b.type]}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.pickRowName} numberOfLines={1}>{b.name}</Text>
-                    {b.mask ? <Text style={styles.pickRowSub}>··{b.mask}</Text> : null}
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.pickCancel} onPress={() => setLinkTarget(null)}>
-              <Text style={styles.pickCancelTxt}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        card={linkTarget}
+        bankAccounts={bankAccounts}
+        onClose={() => setLinkTarget(null)}
+        onLink={(bankId) => {
+          const dc = linkTarget;
+          const b = bankAccounts.find((acc) => acc.id === bankId);
+          setLinkTarget(null);
+          setConfirm({
+            title: 'Link card to bank?',
+            message: `We'll treat "${dc.name}" as part of "${b.name}" — one balance, counted once. This can't be auto-undone.`,
+            primaryText: 'Link them',
+            secondaryText: 'Cancel',
+            onSecondary: () => setConfirm(null),
+            onConfirm: () => { linkDebitCardToBank(dc.id, bankId); setConfirm(null); },
+          });
+        }}
+      />
+
+      {/* Manage Account — rename / change type / link / delete (left icon on a row) */}
+      <ManageAccountModal
+        accountId={manageAccountId}
+        visible={!!manageAccountId}
+        onClose={() => setManageAccountId(null)}
+        onDeleted={() => setManageAccountId(null)}
+      />
     </View>
   );
 }
@@ -872,25 +843,6 @@ const styles = StyleSheet.create({
   rowLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 4 },
   rowLinkTxt: { ...typography.tiny, fontWeight: '700' },
 
-  // Bank-picker bottom sheet (manual link)
-  pickBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
-  pickSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
-    padding: spacing.lg, paddingBottom: spacing.xl,
-  },
-  pickHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md },
-  pickTitle:  { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
-  pickHelp:   { ...typography.small, color: colors.textSecondary, lineHeight: 18, marginTop: spacing.xs, marginBottom: spacing.sm },
-  pickRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderBottomWidth: 1, borderBottomColor: colors.divider,
-  },
-  pickRowName: { ...typography.bodyBold, color: colors.textPrimary },
-  pickRowSub:  { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
-  pickCancel:  { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
-  pickCancelTxt: { ...typography.body, color: colors.textSecondary },
   // Same fix as DashboardScreen's `recentEmpty`: `compact` EmptyState is short
   // by design, so with no accounts the whole page barely clears the header.
   // Reserve the space a populated account list would occupy and centre inside it.

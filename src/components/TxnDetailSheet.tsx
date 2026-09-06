@@ -22,6 +22,7 @@ import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
+import { locationKey } from '../utils/location';
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
@@ -52,6 +53,10 @@ interface Txn {
   splitPaidBy?: { contactId: string | null; name: string } | null;
   myShareAmount?: number;
   splitWith?: SplitShare[];
+  /** Coarse place stamped at capture time (manual add or a live incoming SMS
+   *  only — see services/locationService). City-level only; district/region
+   *  are the fallback when the geocoder couldn't name a city. */
+  location?: { city?: string | null; district?: string | null; region?: string | null } | null;
 }
 
 interface TxnDetailSheetProps {
@@ -137,6 +142,11 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, myName }: TxnDeta
   const accountLabel = [txn.bankName || txn.accountType, txn.accountMask ? `··${txn.accountMask}` : null]
     .filter(Boolean)
     .join(' ');
+  // City-only for now (per user request) — `locationKey` already falls back to
+  // district/region when the geocoder couldn't name a city, so this still shows
+  // SOMETHING useful rather than nothing on the rare city-less fix.
+  const place = locationKey(txn.location);
+  const isLastRow = !txn.note && !txn.isSplit;
 
   return (
     <Modal visible={!!txn} animationType="slide" transparent onRequestClose={onClose}>
@@ -184,6 +194,12 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, myName }: TxnDeta
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Account</Text>
                 <Text style={styles.detailValue} numberOfLines={1}>{accountLabel}</Text>
+              </View>
+            ) : null}
+            {place ? (
+              <View style={[styles.detailRow, isLastRow && styles.detailRowLast]}>
+                <Text style={styles.detailLabel}>Location</Text>
+                <Text style={styles.detailValue} numberOfLines={1}>{place}</Text>
               </View>
             ) : null}
             {/* The USER's note only. Never render `txn.smsText` (the bank message

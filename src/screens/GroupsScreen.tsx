@@ -37,6 +37,7 @@ import TransactionItemRaw from '../components/TransactionItem';
 import CreateGroupModal, { type CreateGroupData } from '../components/CreateGroupModal';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import InfoSheet from '../components/InfoSheet';
@@ -116,6 +117,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
   const [infoVisible, setInfoVisible] = useState(false);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
+  const [ccBillTxn, setCcBillTxn] = useState<any | null>(null);
   const [balancesVisible, setBalancesVisible] = useState(false);
   const scrollProps = useTabBarScroll();
 
@@ -622,6 +624,15 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
         categoryLocked={!!categoryTxn?.lbLocked}
         currentGroupId={categoryTxn?.groupId || null}
         onSelectCategory={(categoryId) => {
+          // "Credit Card Bill" opens the card-picker + reconcile sheet (sets the
+          // category AND optionally credits the paid card) — matches Dashboard/
+          // TransactionsScreen so the card side is never skipped here.
+          if (categoryId === 'cc_bill') {
+            const t = categoryTxn;
+            setCategoryTxn(null);
+            setCcBillTxn(t);
+            return;
+          }
           if (categoryTxn) updateTransactionCategory(categoryTxn.id, categoryId);
           setCategoryTxn(null);
         }}
@@ -670,6 +681,11 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
           });
         }}
         onClose={() => setCategoryTxn(null)}
+      />
+
+      <CCBillPaymentSheet
+        txn={ccBillTxn}
+        onClose={() => setCcBillTxn(null)}
       />
 
       <InfoSheet

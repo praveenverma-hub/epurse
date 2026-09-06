@@ -47,6 +47,7 @@ import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
 import EditIcon from '../components/EditIcon';
+import ManageAccountModal from '../components/ManageAccountModal';
 import MonthDivider from '../components/MonthDivider';
 import { monthKey } from '../utils/format';
 import { txnBelongsToAccount } from '../utils/accountMatch';
@@ -209,6 +210,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // ── Balance anchoring — tap the balance to set/correct it; header ⓘ explains it.
   // (Replaces the old first-visit anchor chip with an on-demand affordance.)
   const [balanceInfoVisible, setBalanceInfoVisible] = useState(false);
+  const [manageVisible, setManageVisible] = useState(false);
   const {
     modalVisible: anchorVisible,
     openModal: openAnchor,
@@ -338,29 +340,42 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         backgroundColor={theme.background}
       />
       <View style={styles.navBar}>
-      <TouchableOpacity
-        onPress={() => navigation.goBack()}
-        style={styles.navBtn}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-      >
-        <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
-      </TouchableOpacity>
-      <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
-      {account ? (
+      <View style={[styles.navSide, styles.navSideLeft]}>
         <TouchableOpacity
-          onPress={() => setBalanceInfoVisible(true)}
+          onPress={() => navigation.goBack()}
           style={styles.navBtn}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           accessibilityRole="button"
-          accessibilityLabel="About balance & anchoring"
+          accessibilityLabel="Go back"
         >
-          <InfoIcon size={22} color={theme.textSecondary} />
+          <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
         </TouchableOpacity>
-      ) : (
-        <View style={styles.navBtn} />
-      )}
+      </View>
+      <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
+      <View style={[styles.navSide, styles.navSideRight]}>
+        {account ? (
+          <>
+            <TouchableOpacity
+              onPress={() => setManageVisible(true)}
+              style={styles.navBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Manage account"
+            >
+              <EditIcon size={20} color={theme.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setBalanceInfoVisible(true)}
+              style={styles.navBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="About balance & anchoring"
+            >
+              <InfoIcon size={22} color={theme.textSecondary} />
+            </TouchableOpacity>
+          </>
+        ) : null}
+      </View>
       </View>
     </>
   );
@@ -558,6 +573,14 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       />
 
+      {/* Header pencil → rename / change type / link / delete this account. */}
+      <ManageAccountModal
+        accountId={accountId ?? null}
+        visible={manageVisible}
+        onClose={() => setManageVisible(false)}
+        onDeleted={() => { setManageVisible(false); navigation.goBack(); }}
+      />
+
     </SafeAreaView>
   );
 };
@@ -577,6 +600,11 @@ const styles = StyleSheet.create({
   },
   navBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   navTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
+  // Fixed-width side slots (matched) so the centered title stays centered whether
+  // the right side holds one icon or two.
+  navSide:      { width: 80, flexDirection: 'row', alignItems: 'center' },
+  navSideLeft:  { justifyContent: 'flex-start' },
+  navSideRight: { justifyContent: 'flex-end' },
 
   // 2. Card stage
   // marginBottom: -POCKET_OVERLAP is the single structural trick — it shifts the

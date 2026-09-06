@@ -32,7 +32,7 @@ import Animated, {
 import { radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCompact } from '../utils/format';
 import { INPUT_LIMITS, sanitizeAmount } from '../utils/validation';
-import { ACCOUNT_TYPES } from '../constants/categories';
+import { ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI } from '../constants/categories';
 import { useEPurseStore } from '../store/ePurseStore';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -79,14 +79,6 @@ const TYPE_SUBTITLE: Record<string, string> = {
   [ACCOUNT_TYPES.DEBIT_CARD]: 'DEBIT CARD',
   [ACCOUNT_TYPES.WALLET]: 'DIGITAL WALLET',
   [ACCOUNT_TYPES.CASH]: 'CASH',
-};
-
-const TYPE_EMOJI: Record<string, string> = {
-  [ACCOUNT_TYPES.BANK]: '🏦',
-  [ACCOUNT_TYPES.CREDIT_CARD]: '💳',
-  [ACCOUNT_TYPES.DEBIT_CARD]: '🏧',
-  [ACCOUNT_TYPES.WALLET]: '👛',
-  [ACCOUNT_TYPES.CASH]: '💵',
 };
 
 // Debit-card balance reflects real bank money, so hide it when backgrounded too.
@@ -140,7 +132,7 @@ const AccountCard: React.FC<Props> = ({
 }) => {
   const palette = useMemo(() => paletteFor(account), [account?.id]);
   const subtitle = TYPE_SUBTITLE[account.type] || 'CARD';
-  const emoji = TYPE_EMOJI[account.type] || '💳';
+  const emoji = ACCOUNT_TYPE_EMOJI[account.type] || '💳';
   const isSensitive = BALANCE_SENSITIVE_TYPES.has(account.type);
   const isBank = account.type === ACCOUNT_TYPES.BANK;
   const bankDisplay = deriveBankName(account);

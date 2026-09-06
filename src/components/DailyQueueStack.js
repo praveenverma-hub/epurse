@@ -36,6 +36,7 @@ import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
 import CategoryPickerModal from './CategoryPickerModal';
+import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
 import SplitConfigModal from './SplitConfigModal';
 import GroupPickerSheet from './GroupPickerSheet';
@@ -314,6 +315,7 @@ const DailyQueueStack = () => {
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
   const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
   const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split on a grouped txn
+  const [ccBillTxn,  setCcBillTxn]  = useState(null); // txn being reclassified as a CC bill payment
   const [confirm,    setConfirm]    = useState(null);
   const [showCapInfo, setShowCapInfo] = useState(false);
 
@@ -363,11 +365,26 @@ const DailyQueueStack = () => {
 
   const handleSelectCategory = useCallback((categoryId) => {
     if (!pickerTxn) return;
+    // "Credit Card Bill" opens the card-picker + reconcile sheet (which sets the
+    // category AND optionally credits the paid card), rather than a plain re-tag —
+    // matches Dashboard/TransactionsScreen so the card side is never skipped here.
+    if (categoryId === 'cc_bill') {
+      const t = pickerTxn;
+      setPickerTxn(null);
+      setCcBillTxn(t);
+      return;
+    }
     updateTransactionCategory(pickerTxn.id, categoryId);
     recordReview();
     markReviewed(pickerTxn.id);
     setPickerTxn(null);
   }, [pickerTxn, updateTransactionCategory, markReviewed, recordReview]);
+
+  const handleCcBillConfirm = useCallback(() => {
+    if (!ccBillTxn) return;
+    recordReview();
+    markReviewed(ccBillTxn.id);
+  }, [ccBillTxn, markReviewed, recordReview]);
 
   const handleSelectTwoTier = useCallback((parentCategory, childCategory) => {
     if (!pickerTxn) return;
@@ -598,6 +615,13 @@ const DailyQueueStack = () => {
         onIgnore={handleIgnore}
         onDelete={handleDelete}
         onClose={handlePickerClose}
+      />
+
+      {/* ── Credit card bill payment reconcile ── */}
+      <CCBillPaymentSheet
+        txn={ccBillTxn}
+        onConfirm={handleCcBillConfirm}
+        onClose={() => setCcBillTxn(null)}
       />
 
       {/* ── Link contact (for lent/borrow re-categorisation) ── */}

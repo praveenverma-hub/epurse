@@ -28,7 +28,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 
 const outstandingOf = (acc) => Math.abs(Math.min(acc?.balance ?? 0, 0));
 
-const CCBillPaymentSheet = ({ txn, onClose }) => {
+const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
   const theme  = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
@@ -85,6 +85,7 @@ const CCBillPaymentSheet = ({ txn, onClose }) => {
 
   const confirm = () => {
     markAsCCBillPayment(txn.id, cardId, cardId ? mode : 'none');
+    onConfirm?.();
     onClose?.();
   };
 

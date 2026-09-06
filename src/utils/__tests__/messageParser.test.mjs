@@ -408,26 +408,35 @@ const INVEST_CARDS_MARKETING = [
     sms: 'Alert: Fixed Deposit No. XXXXXX4412 for INR 1,00,000.00 has matured on 06-Jun-26 & total proceeds of INR 1,07,450.00 have been credited back to your Indian Bank A/c XX9532.',
     expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 107450, accountMask: '9532' },
   },
-  // KNOWN GAP: merchant should be the fund ("Parag Parikh…"); currently leaks sender.
+  // FIXED (Sep-6-26): merchant leaked sender because MERCHANT_REGEX only matched
+  // "towards" (with an 's'), not the singular "toward" this SIP format uses. Now
+  // resolves to the fund name.
   {
     name: 'SIP via NACH toward a mutual fund',
     sender: 'HDFCBK',
     sms: 'SIP Order: Your HDFC Bank A/c XX4398 has been debited with ₹5,000.00 on 05-Jun-26 via NACH toward PARAG PARIKH FLEXI CAP FUND-GROWTH. Folio No: 8812493/11.',
-    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 5000, accountMask: '4398', categoryId: 'investments' },
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 5000, accountMask: '4398', categoryId: 'investments', merchant: 'PARAG PARIKH FLEXI CAP FUND-GROWTH' },
   },
-  // KNOWN GAP: merchant should be "Groww"; currently leaks sender.
+  // FIXED (Sep-6-26): merchant leaked sender because the capture ran past the payee
+  // into "against your Axis Bank A/c..." with no stop word to anchor on. Added
+  // "against" to MERCHANT_REGEX's stop-word list.
   {
     name: 'Groww NACH mandate debit',
     sender: 'AXISBK',
     sms: 'Groww Alert: Mandate debit request of INR 10,000.00 initiated by GROWW-STOCKS against your Axis Bank A/c XX1102 on 04/06/26.',
-    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 10000, accountMask: '1102', categoryId: 'investments' },
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 10000, accountMask: '1102', categoryId: 'investments', merchant: 'GROWW-STOCKS' },
   },
-  // KNOWN GAP: merchant should be "Apple One"; category ideally subscription. Leaks sender.
+  // FIXED (Sep-6-26): merchant leaked sender because "Apple One Premium Bundle annual
+  // subscription" is 6 words and the capture caps at 5. Added "subscription" as a
+  // stop word so the capture can end right before it. Merchant still carries a
+  // trailing "annual" (not a clean brand name), but no longer leaks the bank — real
+  // improvement, not a perfect one. Category still resolves to 'other', not
+  // subscription — untouched by this fix, tracked separately.
   {
     name: 'UPI-autopay subscription debit (Apple One)',
     sender: 'ICICIB',
     sms: 'Autopay Executed: Your ICICI Bank A/c XX2019 has been debited by ₹3,199.00 on 05-Jun-26 for Apple One Premium Bundle annual subscription via UPI Mandate Ref: UMN993041.',
-    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 3199, accountMask: '2019' },
+    expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 3199, accountMask: '2019', merchant: 'Apple One Premium Bundle annual' },
   },
   // Scheduled for tomorrow → money has NOT moved yet.
   {
@@ -436,12 +445,15 @@ const INVEST_CARDS_MARKETING = [
     sms: 'BillDesk Alert: Auto-debit of Rs.1,450.00 scheduled tomorrow (08-Jun-26) for your BESCOM Electricity Bill from your anchored HDFC Credit Card ending 9876.',
     expect: { accept: false, code: 'future_scheduled_debit' },
   },
-  // KNOWN GAP: merchant noisy ("a purchase of Rs.850"); category still resolves to food.
+  // Was flagged as a KNOWN GAP (merchant noisy, "a purchase of Rs.850") but turned out
+  // to already be fixed — the JUNK_MERCHANT_REGEX + AT_MERCHANT_REGEX retry (added in
+  // an earlier sweep) already discards "a purchase of Rs.850" and recovers the real
+  // merchant from "at CAFE COFFEE DAY DELHI". Adding the assertion that was missing.
   {
     name: 'Indian Bank debit-card purchase (CCD)',
     sender: 'INDBNK',
     sms: 'Thank you for using your Indian Bank Debit Card ending 9182 for a purchase of Rs.850.00 at CAFE COFFEE DAY DELHI on 06-Jun-26. Avl Bal: Rs.14,210.35.',
-    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 850, accountMask: '9182', categoryId: 'food' },
+    expect: { accept: true, type: 'debit', accountType: 'Debit Card', amount: 850, accountMask: '9182', categoryId: 'food', merchant: 'CAFE COFFEE DAY DELHI' },
   },
   // Clean end-to-end: merchant + category both resolve.
   {
@@ -519,12 +531,15 @@ const FASTAG_FX_SURCHARGE = [
     sms: 'EMI Alert: Your recent purchase of Rs.45,000.00 at APPLE INDIA STORE on HDFC CC xx9876 has been converted to 6 Months EMI. Monthly Installment: Rs.7,950.00.',
     expect: { accept: false, code: 'emi_conversion' },
   },
-  // Govt DBT / tax refund credit. KNOWN GAP: merchant leaks sender; category 'other'.
+  // Govt DBT / tax refund credit. Was flagged as a KNOWN GAP (merchant leaks sender)
+  // but already resolves correctly ("towards Income Tax Refund AY..." was never
+  // affected by the sender-leak cases fixed Sep-6-26 — this one already worked).
+  // Category stays 'other', which is fine (no dedicated tax-refund category exists).
   {
     name: 'DBT income-tax refund (credit)',
     sender: 'SBIINB',
     sms: 'DBT Credit: INR 2,000.00 credited to your State Bank of India A/c XX7741 on 05-Jun-26 via NACH/PFMS towards Income Tax Refund AY 2026-27.',
-    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 2000, accountMask: '7741' },
+    expect: { accept: true, type: 'credit', accountType: 'Bank', amount: 2000, accountMask: '7741', merchant: 'Income Tax Refund AY 2026-27' },
   },
 ];
 
@@ -583,10 +598,13 @@ const UPI_CC_DC_NACH = [
   { name: 'Axis Card charged-on format',
     sender: 'AXISBK', sms: 'Transaction Alert: INR 2,150.00 charged on Axis Card xx1002 at SWIGGY DINESTRUCT on 08-Jun-26. Outstanding Amount: INR 14,250.00.',
     expect: { accept: true, type: 'debit', amount: 2150, accountMask: '1002' } },
-  // Amex — previously rejected source_not_financial; amex added to sender keys
+  // Amex — previously rejected source_not_financial; amex added to sender keys.
+  // accountType was a KNOWN GAP (fell through to Debit Card) until Sep-6-26 — fixed by
+  // recognising "Available Spends Limit" (not just "Available Limit") as a
+  // credit-card-only signal in `inferAccountType`.
   { name: 'Amex Card spend at Taj Hotels',
     sender: 'AMEXIN', sms: 'Your Amex Card ending 2004 was used for a payment of ₹6,800.00 at TAJ HOTELS on 07-Jun-26. Available Spends Limit: ₹3,12,000.00.',
-    expect: { accept: true, type: 'debit', amount: 6800, accountMask: '2004', merchant: 'TAJ HOTELS' } },
+    expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 6800, accountMask: '2004', merchant: 'TAJ HOTELS' } },
   { name: 'Kotak CC spend at MakeMyTrip',
     sender: 'KOTAKB', sms: 'Alert: INR 18,500.00 spent on Kotak Credit Card xx3192 at MAKE MY TRIP on 08/06/26. Avl Limit: INR 1,11,500.00.',
     expect: { accept: true, type: 'debit', accountType: 'Credit Card', amount: 18500, accountMask: '3192' } },
@@ -1535,7 +1553,19 @@ const CC_DUE_DATE_AUG26 = [
   { name: 'SBI: "Payment due date: 07-Jun-26" (colon — the regression)',
     sender: 'SBICRD',
     sms: 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-May-26 is ₹16,748.65. Min Amount Due: ₹837.00. Payment due date: 07-Jun-26.',
-    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65 } },
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65, ccStatementDate: '20-May-26' } },
+  { name: 'Statement cycle date — "statement dated <date>" phrasing',
+    sender: 'HDFCBK',
+    sms: 'Your HDFC Bank Credit Card ending 9876 statement dated 05-Sep-26 is ready. Total Amount Due Rs.12,400.00. Due date: 25-Sep-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '25-Sep-26', ccStatementDate: '05-Sep-26' } },
+  { name: 'Statement cycle date — "statement generated on <date>" phrasing',
+    sender: 'ICICIB',
+    sms: 'Your ICICI Bank Credit Card XX5004 statement generated on 06-Sep-26. Total Amount Due Rs.8,120.00. Payment due date : 26-Sep-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '26-Sep-26', ccStatementDate: '06-Sep-26' } },
+  { name: 'Statement mentions only a month, no day — statement date stays null',
+    sender: 'ICICIB',
+    sms: 'Your ICICI Bank Credit Card XX5004 statement for Jul-26 is generated. Total due Rs.24,190.00, min due Rs.1,210.00, due by 18-Aug-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '18-Aug-26', ccStatementDate: null } },
   { name: 'No colon still works (the shape that always passed)',
     sender: 'SBICRD',
     sms: 'Total Amount Due on your SBI Credit Card ending 1234 is ₹9,100.00. Payment due date 07-Jul-26.',
@@ -1630,6 +1660,8 @@ function checkCase({ sender, sms, expect }) {
       cmp('ccDue.dueDate', r.ccDue?.dueDate ?? null, expect.ccDueDate);
     if (expect.ccDueAmount !== undefined)
       cmp('ccDue.amount', r.ccDue?.amount ?? null, expect.ccDueAmount);
+    if (expect.ccStatementDate !== undefined)
+      cmp('ccDue.statementDate', r.ccDue?.statementDate ?? null, expect.ccStatementDate);
   }
   return fails;
 }

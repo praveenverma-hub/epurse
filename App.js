@@ -86,12 +86,14 @@ function BudgetRolloverBoot() {
   const rollover   = useEPurseStore((s) => s.rolloverBudgetIfNeeded);
   const nudge      = useEPurseStore((s) => s.maybeFireMidmonthNudge);
   const subAlerts  = useEPurseStore((s) => s.maybeFireSubscriptionAlerts);
+  const ccCycle    = useEPurseStore((s) => s.maybeFireCcCycleHeadsUp);
   const recap      = useEPurseStore((s) => s.maybeQueueMonthlyRecap);
   const weeklyRecap = useEPurseStore((s) => s.maybeQueueWeeklyRecap);
   useEffect(() => {
     rollover();
     nudge();
     subAlerts();
+    ccCycle();
     recap();
     weeklyRecap();
     const sub = AppState.addEventListener('change', (state) => {
@@ -99,12 +101,13 @@ function BudgetRolloverBoot() {
         rollover();
         nudge();
         subAlerts();
+        ccCycle();
         recap();
         weeklyRecap();
       }
     });
     return () => sub.remove();
-  }, [rollover, nudge, subAlerts, recap, weeklyRecap]);
+  }, [rollover, nudge, subAlerts, ccCycle, recap, weeklyRecap]);
   return null;
 }
 
