@@ -3,7 +3,7 @@
   "version": "1.5.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "test": "npm run test:parse && npm run test:parser && npm run test:self && npm run test:group && npm run test:store && npm run test:e2e && npm run test:bulk && npm run test:smsSync && npm run test:homeCards && npm run test:carousel && npm run test:headerLayout && npm run test:dateRange && npm run test:arrange && npm run test:profile && npm run test:contrast && npm run test:backup && npm run test:payload && npm run test:drive",
+    "test": "npm run test:parse && npm run test:parser && npm run test:self && npm run test:group && npm run test:store && npm run test:e2e && npm run test:bulk && npm run test:smsSync && npm run test:homeCards && npm run test:carousel && npm run test:headerLayout && npm run test:dateRange && npm run test:reminders && npm run test:arrange && npm run test:profile && npm run test:contrast && npm run test:backup && npm run test:payload && npm run test:drive",
     "test:parse": "node --no-warnings src/utils/__tests__/parseAll.test.mjs",
     "test:parser": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/messageParser.test.mjs",
     "test:self": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/selfTransfer.test.mjs",
@@ -12,6 +12,7 @@
     "test:e2e": "node --no-warnings --import ./src/utils/__tests__/_store-hook.mjs src/utils/__tests__/e2eJourney.test.mjs",
     "test:bulk": "node --no-warnings --import ./src/utils/__tests__/_store-hook.mjs src/utils/__tests__/bulkReconciliation.test.mjs",
     "test:dateRange": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/dateRange.test.mjs",
+    "test:reminders": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/reminderSchedule.test.mjs",
     "test:contrast": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/themeContrast.test.mjs",
     "test:backup": "node --no-warnings src/utils/__tests__/backupCrypto.test.mjs",
     "test:payload": "node --no-warnings src/utils/__tests__/backupPayload.test.mjs",

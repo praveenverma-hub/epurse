@@ -1569,6 +1569,9 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('a bill reminder does NOT become a transaction',
     txns().length === 0, `${txns().length}`);
 
+  // This fixture's dates are in the PAST (they're hardcoded), so no reminder is
+  // mirrored for it — correct, and asserted with a future-dated bill further down.
+
   // The recurring cycle-day info lands on the CARD ACCOUNT too (Sep-6-26) — not just
   // the one-off bill — so the app "remembers" the cycle across months.
   check('due-day is distilled onto the matching card account',
@@ -2319,6 +2322,290 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     !Object.keys(s.ccDueReminderIds).some((k) => k.startsWith(`${mask}:`)));
   check('…clears ccCycleHeadsUpNotified for the account',
     !(acctId in s.ccCycleHeadsUpNotified));
+}
+
+// ── Reminders: the registry the Reminders screen renders ────────────────────
+// Repeats are expanded into absolute one-off dates by the store (SDK 50 has no
+// cross-platform monthly trigger — see utils/reminderSchedule), so the thing to
+// pin here is that the OS queue and the records stay in agreement: N occurrences
+// armed for a repeat, nothing recorded when nothing could be armed, and a
+// reconcile that both drops spent one-offs and re-arms exhausted repeats.
+{
+  const { REPEAT, QUEUE_DEPTH } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/reminderSchedule.js');
+
+  const st = () => useStore.getState();
+  const HOUR = 60 * 60 * 1000;
+  const resetReminders = () => {
+    reset();
+    useStore.setState({ reminders: [], reminderNotifIds: {}, notificationPrefs: {} });
+  };
+
+  // ── one-off ──
+  resetReminders();
+  const oneOff = await st().scheduleReminder({
+    title: 'Pay rent', body: 'To the landlord',
+    repeat: REPEAT.ONCE, anchorAt: Date.now() + 24 * HOUR,
+  });
+  check('one-off: a record is created', !!oneOff && st().reminders.length === 1);
+  check('…carrying the anchor and repeat it was given',
+    oneOff.repeat === REPEAT.ONCE && oneOff.anchorAt > Date.now());
+  check('…and exactly ONE occurrence is armed with the OS',
+    (st().reminderNotifIds[oneOff.id] || []).length === 1,
+    JSON.stringify(st().reminderNotifIds));
+
+  // ── repeating ──
+  resetReminders();
+  const weekly = await st().scheduleReminder({
+    title: 'Weekly review', repeat: REPEAT.WEEKLY, anchorAt: Date.now() + 2 * HOUR,
+  });
+  check(`weekly: QUEUE_DEPTH (${QUEUE_DEPTH}) occurrences armed at once`,
+    (st().reminderNotifIds[weekly.id] || []).length === QUEUE_DEPTH,
+    `${(st().reminderNotifIds[weekly.id] || []).length}`);
+  check('…as ONE record, not one per occurrence', st().reminders.length === 1);
+
+  // A reminder the OS can't accept must not be listed as pending — that would be
+  // the app confidently showing a reminder nothing will ever deliver.
+  resetReminders();
+  const past = await st().scheduleReminder({
+    title: 'Already gone', repeat: REPEAT.ONCE, anchorAt: Date.now() - HOUR,
+  });
+  check('a past one-off schedules nothing AND records nothing',
+    past === null && st().reminders.length === 0);
+
+  // ── cancel ──
+  resetReminders();
+  const doomed = await st().scheduleReminder({
+    title: 'Cancel me', repeat: REPEAT.MONTHLY, anchorAt: Date.now() + 3 * HOUR,
+  });
+  await st().cancelReminder(doomed.id);
+  check('cancel drops the record and its armed ids',
+    st().reminders.length === 0 && !st().reminderNotifIds[doomed.id]);
+
+  // ── edit (replaceId) ──
+  resetReminders();
+  const first = await st().scheduleReminder({
+    title: 'v1', repeat: REPEAT.ONCE, anchorAt: Date.now() + 4 * HOUR,
+  });
+  const edited = await st().scheduleReminder({
+    title: 'v2', repeat: REPEAT.ONCE, anchorAt: Date.now() + 5 * HOUR, replaceId: first.id,
+  });
+  check('editing keeps ONE record under the same id, with the new values',
+    st().reminders.length === 1 && edited.id === first.id && st().reminders[0].title === 'v2',
+    `${st().reminders.length} record(s)`);
+
+  // ── reconcile ──
+  // Spent one-off + a repeat whose armed ids are gone (what a restore looks like:
+  // records come back from the backup, notification ids deliberately don't).
+  resetReminders();
+  useStore.setState({
+    reminders: [
+      { id: 'r_spent',  kind: 'custom', title: 'Spent',  repeat: REPEAT.ONCE,    anchorAt: Date.now() - HOUR, createdAt: 0 },
+      { id: 'r_live',   kind: 'custom', title: 'Live',   repeat: REPEAT.ONCE,    anchorAt: Date.now() + HOUR, createdAt: 0 },
+      { id: 'r_repeat', kind: 'custom', title: 'Repeat', repeat: REPEAT.MONTHLY, anchorAt: Date.now() + 2 * HOUR, createdAt: 0 },
+    ],
+    reminderNotifIds: { r_live: ['notif_keep'] },
+  });
+  await st().reconcileReminders();
+
+  const ids = st().reminders.map((r) => r.id).sort();
+  check('reconcile drops the spent one-off', !ids.includes('r_spent'), ids.join(','));
+  check('…keeps the pending one-off and the repeat',
+    ids.includes('r_live') && ids.includes('r_repeat'), ids.join(','));
+  check('…re-arms the repeat whose ids were lost (restore path)',
+    (st().reminderNotifIds.r_repeat || []).length === QUEUE_DEPTH,
+    JSON.stringify(st().reminderNotifIds.r_repeat));
+  check('…and leaves an already-armed reminder alone',
+    (st().reminderNotifIds.r_live || []).length === 1);
+  check('…while clearing the dropped record\'s id entry', !st().reminderNotifIds.r_spent);
+
+  // Nothing to do must stay cheap and side-effect free.
+  resetReminders();
+  await st().reconcileReminders();
+  check('reconcile on an empty registry is a no-op', st().reminders.length === 0);
+
+  // ── person-scoped reminders keep the balance they are ABOUT ──
+  // The form emphasises the amount and the name ("Remind yourself to pay ₹1,200
+  // to Rahul") and composes the notification body from the same two values, so
+  // both have to survive on the record — losing them is what turned the form
+  // into a blank alarm the first time round.
+  resetReminders();
+  const lb = await st().scheduleReminder({
+    kind: 'lb_borrow', title: 'Pay Rahul', body: 'You owe ₹1,200 to Rahul',
+    repeat: REPEAT.ONCE, anchorAt: Date.now() + 6 * HOUR,
+    sourceKey: 'rahul:9876543210', amount: 1200, person: 'Rahul',
+  });
+  check('a person-scoped reminder stores the amount and the person',
+    lb.amount === 1200 && lb.person === 'Rahul', JSON.stringify(lb));
+  check('…and the personKey, so the LB bell can tell one is already set',
+    lb.sourceKey === 'rahul:9876543210');
+
+  // Re-arming must carry them through, or an edit after a restore would show a
+  // reminder with no idea what it was about.
+  useStore.setState({ reminderNotifIds: {} });
+  await st().reconcileReminders();
+  const rearmed = st().reminders.find((r) => r.kind === 'lb_borrow');
+  check('reconcile re-arms it WITHOUT dropping amount/person',
+    rearmed?.amount === 1200 && rearmed?.person === 'Rahul', JSON.stringify(rearmed));
+
+  // A custom reminder carries neither — the fields are absent, not null, so the
+  // record stays clean for the common case.
+  resetReminders();
+  const plain = await st().scheduleReminder({
+    title: 'Water the plants', repeat: REPEAT.ONCE, anchorAt: Date.now() + HOUR,
+  });
+  check('a custom reminder carries no balance fields at all',
+    !('amount' in plain) && !('person' in plain), JSON.stringify(plain));
+
+  // ── the OS refusing must never EAT an existing reminder ──
+  // Found by cross-checking, not by a failure: `scheduleReminder` used to cancel
+  // the record it was replacing BEFORE it knew the new occurrences had been
+  // accepted. Since `reconcileReminders` re-arms repeats on every launch, that
+  // meant revoking notification permission silently deleted every repeating
+  // reminder the user had. New occurrences are armed first now.
+  resetReminders();
+  const keeper = await st().scheduleReminder({
+    title: 'Rent', repeat: REPEAT.MONTHLY, anchorAt: Date.now() + 5 * HOUR,
+  });
+  check('(setup) the reminder exists and is armed', !!keeper && st().reminders.length === 1);
+
+  globalThis.__notifDenied = true;                 // permission revoked
+  useStore.setState({ reminderNotifIds: {} });     // …and its ids are gone
+  await st().reconcileReminders();
+  check('permission revoked: the reminder RECORD survives reconcile',
+    st().reminders.length === 1 && st().reminders[0].id === keeper.id,
+    `${st().reminders.length} left`);
+  check('…and is simply left unarmed, not half-written',
+    (st().reminderNotifIds[keeper.id] || []).length === 0);
+
+  // …and it re-arms itself once permission comes back, with no user action.
+  globalThis.__notifDenied = false;
+  await st().reconcileReminders();
+  check('permission restored: it re-arms on the next launch',
+    (st().reminderNotifIds[keeper.id] || []).length === QUEUE_DEPTH,
+    JSON.stringify(st().reminderNotifIds[keeper.id]));
+
+  // Same guarantee on the EDIT path: a refused edit leaves the original intact.
+  globalThis.__notifDenied = true;
+  const refused = await st().scheduleReminder({
+    title: 'Rent (edited)', repeat: REPEAT.MONTHLY,
+    anchorAt: Date.now() + 9 * HOUR, replaceId: keeper.id,
+  });
+  globalThis.__notifDenied = false;
+  check('a refused EDIT returns null and keeps the original reminder',
+    refused === null && st().reminders.length === 1 && st().reminders[0].title === 'Rent',
+    JSON.stringify(st().reminders.map((r) => r.title)));
+  check('…still armed from before, not stripped by the failed edit',
+    (st().reminderNotifIds[keeper.id] || []).length === QUEUE_DEPTH);
+}
+
+// ── A card bill is MIRRORED onto the Reminders screen ───────────────────────
+// The write happens in a `.then()` on the scheduler whose `.catch(() => {})`
+// SWALLOWS whatever throws inside it, so this feature could be completely dead
+// and silent. It was: `formatCurrency` wasn't imported in the store, that line
+// threw, and no test noticed because none asserted the record existed.
+//
+// The due date is computed from real "now" rather than hardcoded, because
+// `ccReminderFireAt` correctly returns null for a bill that is already due — the
+// other CC-bill fixtures in this file use past dates and legitimately mirror
+// nothing.
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ reminders: [], reminderNotifIds: {}, ccBills: {}, ccDueReminderIds: {} });
+  useStore.getState().addAccount({ name: 'Axis Card', type: 'Credit Card', mask: '4321', bankName: 'Axis', balance: -2000 });
+
+  const due = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+  const p2 = (n) => String(n).padStart(2, '0');
+  const dueStr = `${p2(due.getDate())}-${p2(due.getMonth() + 1)}-${due.getFullYear()}`; // DD-MM-YYYY
+  ingest('AXISBK', `Total Amount Due on your Axis Credit Card ending 4321 for statement dt 20-08-2026 is Rs.7,500.00. Payment due date: ${dueStr}.`,
+    { smsId: 'bill-future-1' });
+  await new Promise((r) => setTimeout(r, 0));   // the mirror lands in a .then()
+
+  const ccRem = (st().reminders || []).filter((r) => r.kind === 'cc_bill');
+  check('a future card bill is mirrored into the reminder registry',
+    ccRem.length === 1, JSON.stringify(st().reminders));
+  check('…with the amount in its body',
+    /7,500|7500/.test(ccRem[0]?.body || ''), JSON.stringify(ccRem[0]));
+  check('…and a fire time BEFORE the due date (it warns the day before)',
+    ccRem[0]?.anchorAt > Date.now() && ccRem[0]?.anchorAt < due.getTime(),
+    `${ccRem[0]?.anchorAt} vs due ${due.getTime()}`);
+  check('…carrying its OS id, so cancelling from the screen really cancels it',
+    ((st().reminderNotifIds || {})[ccRem[0]?.id] || []).length === 1,
+    JSON.stringify(st().reminderNotifIds));
+
+  // Cancelling from the Reminders screen must also release the ingest dedupe
+  // index, or the next bill for this card would be silently skipped.
+  const ccKey = ccRem[0].sourceKey;
+  check('(setup) the bill is indexed in ccDueReminderIds', !!(st().ccDueReminderIds || {})[ccKey],
+    JSON.stringify(st().ccDueReminderIds));
+  await st().cancelReminder(ccRem[0].id);
+  check('cancelling a card-bill reminder clears that index too',
+    !(st().ccDueReminderIds || {})[ccKey], JSON.stringify(st().ccDueReminderIds));
+
+  // Silenced by the switch → no reminder, and nothing half-written either.
+  reset();
+  useStore.setState({
+    reminders: [], reminderNotifIds: {}, ccBills: {}, ccDueReminderIds: {},
+    notificationPrefs: { ccBillDue: false },
+  });
+  useStore.getState().addAccount({ name: 'Axis Card', type: 'Credit Card', mask: '4321', bankName: 'Axis', balance: -2000 });
+  ingest('AXISBK', `Total Amount Due on your Axis Credit Card ending 4321 for statement dt 20-08-2026 is Rs.7,500.00. Payment due date: ${dueStr}.`,
+    { smsId: 'bill-future-2' });
+  await new Promise((r) => setTimeout(r, 0));
+  check('with the bill-due nudge OFF, no reminder is scheduled or listed',
+    (st().reminders || []).filter((r) => r.kind === 'cc_bill').length === 0
+    && Object.keys(st().ccDueReminderIds || {}).length === 0,
+    JSON.stringify(st().reminders));
+  // …but the bill itself is still tracked: the switch silences the nudge, it does
+  // not stop the app knowing you owe money.
+  check('…yet the bill is still recorded in ccBills', Object.keys(st().ccBills || {}).length === 1,
+    JSON.stringify(st().ccBills));
+  useStore.setState({ notificationPrefs: {} });
+}
+
+// ── Per-nudge on/off switches actually gate the OS notification ──────────────
+// The switch suppresses the PUSH only, never the in-app feed entry — the bell is
+// a log you open on purpose. Both halves are asserted, because "it went quiet"
+// is exactly as easy to achieve by accidentally deleting the feed entry too.
+{
+  const st = () => useStore.getState();
+  const notifCalls = () => (globalThis.__notifCalls || []);
+  const armNudge = (prefs) => {
+    reset();
+    useStore.setState({ notificationPrefs: prefs, budgetBreachNotified: {} });
+    globalThis.__notifCalls = [];
+  };
+
+  // A budget breach is the easiest gate to drive end-to-end: set a ₹100 cap and
+  // spend ₹500 on it.
+  const breach = () => {
+    useStore.setState({
+      budget: { totalCap: 100, perCategory: { food: 100 }, createdAt: new Date().toISOString() },
+    });
+    useStore.getState().addTransaction({
+      amount: 500, type: 'debit', merchant: 'Swiggy', categoryId: 'food',
+      createdAt: new Date(T0).toISOString(),
+    });
+    useStore.getState().checkBudgetBreach?.();
+  };
+
+  armNudge({ budgetBreach: true });
+  breach();
+  check('breach nudge ON: the OS notification fires',
+    notifCalls().includes('budgetBreach'), notifCalls().join(','));
+
+  armNudge({ budgetBreach: false });
+  breach();
+  check('breach nudge OFF: no OS notification',
+    !notifCalls().includes('budgetBreach'), notifCalls().join(','));
+
+  // An unknown/absent pref must never silence a nudge — that's the upgrade path
+  // for every existing user, whose persisted prefs predate these keys.
+  armNudge({});
+  breach();
+  check('a pref that was never written defaults to ON',
+    notifCalls().includes('budgetBreach'), notifCalls().join(','));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

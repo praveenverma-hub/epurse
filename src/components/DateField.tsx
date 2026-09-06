@@ -26,6 +26,9 @@ interface DateFieldProps {
   value: Date;
   onChange: (date: Date) => void;
   maximumDate?: Date;
+  /** Earliest selectable day. Reminders are forward-looking, where transactions
+   *  are backward-looking — hence both bounds rather than just `maximumDate`. */
+  minimumDate?: Date;
   disabled?: boolean;
   /** Tints the calendar icon — pass the screen's `theme.primary`. */
   accentColor?: string;
@@ -53,6 +56,7 @@ export default function DateField({
   value,
   onChange,
   maximumDate,
+  minimumDate,
   disabled,
   accentColor = colors.primary,
   variant = 'row',
@@ -115,6 +119,7 @@ export default function DateField({
           mode="date"
           display="default"
           maximumDate={maximumDate}
+          minimumDate={minimumDate}
           onChange={(event: DateTimePickerEvent, d?: Date) => {
             setOpen(false);
             if (event.type === 'set' && d) onChange(d);
@@ -138,6 +143,7 @@ export default function DateField({
                 mode="date"
                 display="inline"
                 maximumDate={maximumDate}
+                minimumDate={minimumDate}
                 accentColor={accentColor}
                 onChange={(_: DateTimePickerEvent, d?: Date) => d && setDraft(d)}
                 style={styles.iosPicker}

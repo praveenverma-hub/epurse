@@ -1,33 +1,52 @@
 // =============================================================================
-// WhatsAppReminderModal — 5 themed SVG banners + WA deep-link reminder
+// WhatsAppReminderScreen — 5 themed SVG banners + WA deep-link reminder.
+//
+// Nudging someone who owes YOU is a compose-and-send job: pick a tone, set a due
+// date, edit the wording, save the banner to the gallery, then hand off to
+// WhatsApp. That is a form, not a glance, so it is a pushed SCREEN (Sep-6-26) —
+// it was a bottom sheet with a fixed 88%-of-screen height, which is a screen
+// wearing a sheet's clothes.
+//
+// Becoming a screen also removes a real hazard: its "saved to gallery" CenterModal
+// used to be a second <Modal> stacked on the sheet's own, which is exactly the
+// pattern ui-consistency §8b warns about (two native modals, one of them silently
+// not appearing). Over a plain screen there is only ever one.
+//
+// Route params: { person, phone, amount }. The sender's name comes from the store
+// rather than a prop — a screen can read it itself.
+//
+// This stayed .js rather than becoming .tsx: it is a MOVE plus a shell swap, and
+// typing 5 SVG banner components in the same change would bury the diff. Convert
+// on the next real touch (see project_typescript_migration).
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
   TextInput, ScrollView, Linking, Dimensions,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import Svg, {
   Path, Circle, Rect, Ellipse,
   Defs, LinearGradient as SvgGradient, Stop,
-  Line, G,
+  Line,
 } from 'react-native-svg';
 
 import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
+import { useEPurseStore } from '../store/ePurseStore';
 import { formatCurrency } from '../utils/format';
-import { useToast } from './Toast';
-import SheetCloseButton from './SheetCloseButton';
-import CenterModal from './CenterModal';
+import { hapticLight } from '../utils/haptics';
+import { useToast } from '../components/Toast';
+import CenterModal from '../components/CenterModal';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 
 // ── Screen dimensions ─────────────────────────────────────────────────────────
 const SCREEN_W = Dimensions.get('window').width;
-const SCREEN_H = Dimensions.get('window').height;
-// Sheet height: fixed so flex: 1 on the inner ScrollView is unambiguous
-const SHEET_H  = Math.min(Math.round(SCREEN_H * 0.88), 700);
-// Banner fills the sheet content area (sheet has spacing.lg padding on each side)
+// Banner fills the content column (the body pads spacing.lg on each side).
 const BANNER_W = SCREEN_W - spacing.lg * 2;
 const BANNER_H = Math.round(BANNER_W * (110 / 320));
 
@@ -381,11 +400,18 @@ const WhatsAppIcon = ({ size = 18, color = '#25D366' }) => (
 );
 
 // =============================================================================
-// Modal component
+// Screen component
 // =============================================================================
-const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onClose }) => {
+const WhatsAppReminderScreen = ({ navigation, route }) => {
+  const { person, phone, amount = 0 } = route?.params || {};
   const theme = useTheme();
   const toast = useToast();
+  // Read straight from the store instead of taking a prop: as a screen this is
+  // the only consumer that needs it, and threading it through navigation params
+  // would let a stale name travel with the route.
+  const senderName = useEPurseStore((s) => s.userName);
+  const insets = useSafeAreaInsets();
+  const onClose = useCallback(() => { hapticLight(); navigation.goBack(); }, [navigation]);
   const bannerRef = useRef(null);
   const [themeId, setThemeId]     = useState('friendly');
   const [dueDateKey, setDueDateKey] = useState(null);
@@ -410,16 +436,6 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
   }, [person, amount, dueText, senderName, activeTheme]);
 
   const message = msgOverride !== null ? msgOverride : generatedMsg;
-
-  useEffect(() => {
-    if (visible) {
-      setDueDateKey(null);
-      setCustomDate('');
-      setMsgOverride(null);
-      setThemeId('friendly');
-      setBannerSaved(false);
-    }
-  }, [visible]);
 
   // Regenerate message when theme changes (only if user hasn't manually edited)
   useEffect(() => {
@@ -482,14 +498,20 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
   const { Banner } = activeTheme;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
+      <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <PlainScreenHeader
+          title="Send Reminder"
+          onBack={onClose}
+          tint={theme.textPrimary}
+          titleColor={theme.textPrimary}
+        />
 
-        <View style={[styles.sheet, { height: SHEET_H }]}>
-          <SheetCloseButton onPress={onClose} variant="absolute" />
-          <View style={styles.handle} />
-
+        <View style={[styles.sheet, {
+          backgroundColor: theme.card,
+          paddingBottom: Math.max(insets.bottom, spacing.lg),
+        }]}>
           {/* ── Top info row ── */}
           <View style={styles.infoRow}>
             <WhatsAppIcon size={18} />
@@ -612,11 +634,10 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
               {phone ? `Send to ${(person || '').split(' ')[0]}` : 'Open WhatsApp'}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+          {/* No Cancel button: the header's back chevron is the way out of a
+              screen, and a second one at the bottom is sheet furniture. */}
         </View>
-      </View>
+      </SafeAreaView>
 
       <CenterModal
         visible={!!confirm}
@@ -629,7 +650,7 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
         onSecondary={() => setConfirm(null)}
         onClose={() => setConfirm(null)}
       />
-    </Modal>
+    </View>
   );
 };
 
@@ -637,20 +658,20 @@ const WhatsAppReminderModal = ({ visible, person, phone, amount, senderName, onC
 // Styles
 // =============================================================================
 const styles = StyleSheet.create({
-  backdrop:    { flex: 1, backgroundColor: '#0007', justifyContent: 'flex-end' },
-  dismissArea: { flex: 1 },
+  root:      { flex: 1 },
+  container: { flex: 1 },
+  // Was a fixed-height sheet; as a screen it simply takes what's left under the
+  // header, which is what made the fixed 88% height unnecessary in the first place.
+  //
+  // It KEEPS the card fill the sheet had. Every field inside (the message box, the
+  // due chips, the custom-date input) uses the page grey as its own fill, which
+  // only reads as a filled control against a card — dropping this left grey on
+  // grey, visible only by its border. Full-bleed rather than an inset card with a
+  // radius, because `BANNER_W` is derived as `SCREEN_W - spacing.lg * 2` and an
+  // extra inset would push the banner past the content column.
   sheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    flex: 1,
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  handle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: colors.divider,
-    alignSelf: 'center',
-    marginBottom: spacing.md,
   },
 
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 4 },
@@ -756,8 +777,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg, paddingVertical: spacing.md, marginTop: spacing.sm,
   },
   sendBtnText: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
-  cancelBtn:  { alignItems: 'center', marginTop: spacing.sm },
-  cancelText: { ...typography.body, color: colors.textSecondary },
 });
 
-export default WhatsAppReminderModal;
+export default WhatsAppReminderScreen;

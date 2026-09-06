@@ -29,15 +29,31 @@ const STUBS = {
   // actually triggers a budget breach or a mid-month nudge — found while
   // writing e2eJourney.test.mjs, which is the first suite to cross a budget
   // cap under ingestMessage.
+  // Every fire/schedule fn also RECORDS its name on `globalThis.__notifCalls`, so
+  // a test can assert a nudge really was (or wasn't) sent — the per-nudge
+  // on/off switches are otherwise untestable: a suppressed notification and a
+  // fired one both look like "nothing happened" from the store's own state.
   notifications:
-    'export const fireBudgetBreachNotification=async()=>{};' +
-    'export const fireMidmonthNudgeNotification=async()=>{};' +
-    'export const fireCCPaymentNotification=async()=>{};' +
-    'export const scheduleCCBillDueReminder=async()=>null;' +
+    'const rec=(n)=>{(globalThis.__notifCalls ||= []).push(n);};' +
+    'export const fireBudgetBreachNotification=async()=>{rec("budgetBreach");};' +
+    'export const fireMidmonthNudgeNotification=async()=>{rec("midmonthNudge");};' +
+    'export const fireCCPaymentNotification=async()=>{rec("ccPayment");};' +
+    // Returns an ID, not null: returning null short-circuited the whole `.then()`
+    // in ingestMessage's cc_due branch, so the code that mirrors a card bill into
+    // the reminder registry was never executed by ANY test — which is how a missing
+    // `formatCurrency` import survived in there. Same trap as the parseDueDate stub.
+    'export const scheduleCCBillDueReminder=async()=>{rec("ccBillDue");return "notif_cc";};' +
     'export const cancelScheduledNotification=async()=>{};' +
-    'export const fireSubscriptionHikeNotification=async()=>null;' +
-    'export const fireMonthlyRecapNotification=async()=>null;' +
-    'export const fireCcCycleHeadsUpNotification=async()=>null;' +
+    'export const fireSubscriptionHikeNotification=async()=>{rec("subscriptionHike");return null;};' +
+    'export const fireMonthlyRecapNotification=async()=>{rec("monthlyRecap");return null;};' +
+    'export const fireCcCycleHeadsUpNotification=async()=>{rec("ccCycleHeadsUp");return null;};' +
+    // Returns a UNIQUE id per call, unlike the other stubs: the reminder registry
+    // stores these and a test asserts on how many occurrences got armed, which a
+    // constant would make indistinguishable from "scheduled once".
+    // `globalThis.__notifDenied` makes it refuse, the way the real one does when
+    // permission has been revoked — the failure path that used to eat records.
+    'let __n=0; export const scheduleReminderAt=async()=>' +
+      '(globalThis.__notifDenied ? null : `notif_${++__n}`);' +
     'export const parseDueDate=()=>null;',
   notifStore:
     'export const useNotificationStore={getState:()=>new Proxy({},{get:()=>()=>{}}),setState:()=>{},subscribe:()=>()=>{}};',

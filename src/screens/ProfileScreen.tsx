@@ -261,7 +261,6 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               icon="alarm-outline"
               label="Reminders"
               hint="Bill dates and settle-up nudges"
-              badge="SOON"
               onPress={go('Reminders')}
             />
           </View>

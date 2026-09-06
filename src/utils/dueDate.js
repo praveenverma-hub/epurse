@@ -61,3 +61,37 @@ export function daysUntilDue(dueStr, nowMs = Date.now()) {
   today.setHours(0, 0, 0, 0);
   return Math.round((due.getTime() - today.getTime()) / 86400000);
 }
+
+/** Hour of day a CC bill-due reminder fires at. */
+export const CC_REMINDER_HOUR = 10;
+
+/**
+ * When a CC bill-due reminder should actually fire (epoch ms), or null if the
+ * date is unparseable or there is no usable moment left: 10:00 the day BEFORE
+ * the due date, falling back to 10:00 on the due date itself if that has passed.
+ *
+ * Lives here rather than inside `scheduleCCBillDueReminder` because the store
+ * records the same moment on the reminder it shows the user. When the scheduler
+ * owned this arithmetic privately and returned only a notification id, the
+ * listed time and the scheduled time were two independent calculations of the
+ * same thing — the classic way a UI ends up confidently displaying the wrong
+ * date. One function, both callers.
+ */
+export function ccReminderFireAt(dueStr, nowMs = Date.now()) {
+  const due = parseDueDate(dueStr);
+  if (!due) return null;
+
+  const dayBefore = new Date(due);
+  dayBefore.setDate(due.getDate() - 1);
+  dayBefore.setHours(CC_REMINDER_HOUR, 0, 0, 0);
+
+  const onDue = new Date(due);
+  onDue.setHours(CC_REMINDER_HOUR, 0, 0, 0);
+
+  // A minute of headroom: scheduling for "now" is a race with the OS, which
+  // silently drops a trigger already in the past.
+  const floor = nowMs + 60_000;
+  if (dayBefore.getTime() > floor) return dayBefore.getTime();
+  if (onDue.getTime() > floor) return onDue.getTime();
+  return null; // due date already here/passed — the in-app chip covers it
+}

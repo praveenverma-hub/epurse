@@ -106,6 +106,14 @@ export const STORE_KEYS = [
   // NOTE `ccDueReminderIds` is deliberately NOT here: those are OS notification
   // ids, meaningless on another device.
   'ccBills',
+  // Reminders the user set (and which nudges they want at all). The RECORDS are
+  // restorable — "pay rent on the 5th" is exactly the sort of thing you expect to
+  // survive a new phone — and `reconcileReminders` re-arms them locally on first
+  // launch. `reminderNotifIds` is deliberately NOT here for the same reason as
+  // `ccDueReminderIds`: OS notification ids belong to the device that scheduled
+  // them, and restoring them would leave the app listing reminders as armed that
+  // nothing will ever deliver.
+  'reminders', 'notificationPrefs',
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
   'welcomeReviewSeen', 'planBannerDismissed', 'anchorNudgeDismissed',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',

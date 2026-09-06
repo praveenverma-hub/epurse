@@ -56,13 +56,14 @@ import {
 // account" — analytics and the account ledger each had their own weaker rule and
 // disagreed with this one, which is how spend went missing from a card's ledger.
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
-import { isSameMonth, monthKey } from '../utils/format';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification } from '../utils/notifications';
+import { isSameMonth, monthKey, formatCurrency } from '../utils/format';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt } from '../utils/notifications';
+import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSchedule';
 // Imported directly from the pure module, NOT from notifications.js — that module
 // is stubbed wholesale in the headless test runner (it pulls in expo-notifications),
 // and its stub for parseDueDate always returns null. dueDate.js has zero
 // dependencies, so the store can use the REAL implementation in tests too.
-import { parseDueDate } from '../utils/dueDate';
+import { parseDueDate, ccReminderFireAt } from '../utils/dueDate';
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { locationKey } from '../utils/location';
 import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
@@ -132,6 +133,23 @@ const RAW_SMS_RETENTION_MS = 3 * DAY_MS;
  * than dropping it when neither is present.
  */
 const ccBillKey = ({ cardLast4, bankName }) => String(cardLast4 || bankName || 'unknown');
+
+/**
+ * May this automatic nudge fire? Reads the user's `notificationPrefs` switch for
+ * it (Reminders screen → "Automatic nudges").
+ *
+ * Every automatic notification in the app is fired from THIS file, so this one
+ * gate covers all of them — the reason the toggles could be added without
+ * touching a single screen. Absent/unknown keys are ON: a nudge must never go
+ * silent just because a pref row hasn't been written yet, and that also makes the
+ * upgrade path a no-op for existing users.
+ *
+ * It gates the OS notification ONLY, never the in-app feed entry beside it. The
+ * switch is about what interrupts you; the bell is a log you open on purpose, and
+ * silencing that would delete information rather than stop an interruption —
+ * a user who turns off budget pings still expects to find the breach in the feed.
+ */
+const nudgeAllowed = (state, prefKey) => (state?.notificationPrefs?.[prefKey] ?? true) !== false;
 
 /**
  * Remove any stored bill belonging to the card a payment just landed on.
@@ -880,8 +898,36 @@ export const useEPurseStore = create(
       // in-app spend logic elsewhere is unaffected. Transaction list off by default.
       recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
 
-      // Notification IDs: { [personKey]: notificationId }  — used to cancel/update reminders
-      notificationIds: {},
+      // ── Reminders (the Reminders screen renders THIS) ────────────────────
+      // One record per reminder the user can see, whatever created it:
+      //   { id, kind, title, body, repeat, anchorAt, sourceKey?, createdAt }
+      // `kind` is 'custom' | 'lb_borrow' | 'cc_bill' (no lent kind — money owed
+      // TO you is chased by messaging the person, not by an alarm); `repeat` is
+      // REPEAT.* from utils/reminderSchedule and `anchorAt` is the moment the
+      // user picked. Everything else a reminder needs to say (next fire time,
+      // "Every Monday", whether it's spent) DERIVES from those two via that pure
+      // util, so a label can never disagree with what was scheduled.
+      reminders: [],
+      // reminderId → the OS notification ids currently scheduled for it (an array:
+      // a repeating reminder has its next QUEUE_DEPTH occurrences armed at once).
+      // SEPARATE from `reminders`, and NOT backed up, for the same reason
+      // `ccDueReminderIds` isn't: notification ids are device-local and meaningless
+      // after a restore. Keeping them out of the record means a restored phone gets
+      // the reminder INTENT back and `reconcileReminders` re-arms it locally,
+      // instead of trusting ids that point at nothing.
+      reminderNotifIds: {},
+      // Which automatic nudges may fire. Mirrors `recapOptions`: absent keys mean
+      // "on", so a user who upgrades keeps every nudge they had, and a new nudge
+      // added later is on by default until they say otherwise.
+      notificationPrefs: {
+        ccBillDue:        true,
+        ccCycleHeadsUp:   true,
+        ccPayment:        true,
+        subscriptionHike: true,
+        budgetBreach:     true,
+        midmonthNudge:    true,
+        monthlyRecap:     true,
+      },
       // CC bill-due OS reminders: `${cardLast4||bankName}:${dueDate}` → scheduled id, so a
       // resent bill (same card+date) doesn't double-schedule and a NEW bill can cancel the stale one.
       ccDueReminderIds: {},
@@ -1100,7 +1146,9 @@ export const useEPurseStore = create(
             meta: { monthKey: prevMk },
           });
         } catch {}
-        fireMonthlyRecapNotification({ monthLabel: label, monthKey: prevMk });
+        if (nudgeAllowed(get(), 'monthlyRecap')) {
+          fireMonthlyRecapNotification({ monthLabel: label, monthKey: prevMk });
+        }
       },
 
       /** Recap modal closed — stop showing it (kept marked handled). */
@@ -1112,14 +1160,152 @@ export const useEPurseStore = create(
       /** User dismissed the persistent recap card for `mk`. */
       dismissMonthlyRecapCard: (mk) => set({ monthlyRecapCardDismissed: mk || null }),
 
-      setNotificationId: (personKey, id) =>
-        set((s) => ({ notificationIds: { ...s.notificationIds, [personKey]: id } })),
-      clearNotificationId: (personKey) =>
+      // ─── Reminders ──────────────────────────────────────────────────────────
+      /** Turn one automatic nudge on/off (see `notificationPrefs`). */
+      setNotificationPref: (key, value) =>
+        set((s) => ({ notificationPrefs: { ...s.notificationPrefs, [key]: !!value } })),
+
+      /**
+       * Create (or replace) a reminder and arm it with the OS.
+       *
+       * Async because scheduling is: it awaits the OS ids and stores them, so a
+       * caller that awaits this knows the reminder is really armed. Returns the
+       * record, or null if nothing could be scheduled (moment already passed, or
+       * notifications not permitted) — in which case NO record is written, because
+       * a reminder listed as pending that the OS never accepted is a lie.
+       *
+       * `replaceId` re-points an existing record (the edit flow), cancelling its
+       * old occurrences first so an edit can't leave a stale one armed.
+       */
+      scheduleReminder: async ({ kind = 'custom', title, body = '', repeat = REPEAT.ONCE, anchorAt, sourceKey = null, amount = undefined, person = undefined, replaceId = null }) => {
+        const fireTimes = nextOccurrences(anchorAt, repeat, Date.now());
+        if (fireTimes.length === 0) return null;
+
+        const id = replaceId || `rem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+        // Arm the NEW occurrences before retiring anything — the same ordering the
+        // backup service uses for prune-after-upload, and for the same reason.
+        // Cancelling first meant that when the OS refused (permission revoked is
+        // the realistic case), the old reminder had already been deleted and the
+        // new one was never written: `reconcileReminders` runs this on every
+        // launch, so revoking notification permission would have silently wiped
+        // every repeating reminder the user had.
+        const notifIds = [];
+        for (const fireAt of fireTimes) {
+          // Sequential, not Promise.all: expo's scheduler is a native queue and
+          // the ids come back in request order, which keeps them in fire order.
+          const notifId = await scheduleReminderAt({ title, body, fireAt });
+          if (notifId) notifIds.push(notifId);
+        }
+        // Nothing armed → leave whatever exists exactly as it was.
+        if (notifIds.length === 0) return null;
+
+        // Now it's safe to drop the occurrences this replaces. Only the OS
+        // notifications, not the record: the `set` below overwrites that in place,
+        // and going through `cancelReminder` here would also clear a cc_bill's
+        // `ccDueReminderIds` entry, which a re-arm has no business touching.
+        if (replaceId) {
+          for (const stale of (get().reminderNotifIds || {})[replaceId] || []) {
+            await cancelScheduledNotification(stale);
+          }
+        }
+
+        const record = {
+          id, kind, title, body,
+          repeat: repeat || REPEAT.ONCE,
+          anchorAt: Number(anchorAt),
+          sourceKey,
+          // Only present on a person-scoped reminder. Kept so re-opening the form
+          // can rebuild its emphasised "you owe ₹X to Y" line from the parts
+          // instead of parsing them back out of `body`.
+          ...(typeof amount === 'number' ? { amount } : {}),
+          ...(person ? { person } : {}),
+          createdAt: Date.now(),
+        };
+        set((s) => ({
+          reminders: [...(s.reminders || []).filter((r) => r.id !== id), record],
+          reminderNotifIds: { ...(s.reminderNotifIds || {}), [id]: notifIds },
+        }));
+        return record;
+      },
+
+      /** Cancel a reminder: drops every armed occurrence, then the record itself. */
+      cancelReminder: async (reminderId) => {
+        if (!reminderId) return;
+        const record = (get().reminders || []).find((r) => r.id === reminderId);
+        const ids = (get().reminderNotifIds || {})[reminderId] || [];
+        for (const notifId of ids) await cancelScheduledNotification(notifId);
         set((s) => {
-          const next = { ...s.notificationIds };
-          delete next[personKey];
-          return { notificationIds: next };
-        }),
+          const nextIds = { ...(s.reminderNotifIds || {}) };
+          delete nextIds[reminderId];
+          const patch = {
+            reminders: (s.reminders || []).filter((r) => r.id !== reminderId),
+            reminderNotifIds: nextIds,
+          };
+          // A CC bill reminder is also indexed in `ccDueReminderIds` (that map is
+          // what stops a resent bill SMS double-scheduling). Leaving its entry
+          // behind would make the ingest path believe a reminder is still armed
+          // and skip re-scheduling the next bill for that card.
+          if (record?.kind === 'cc_bill' && record.sourceKey) {
+            const ccMap = { ...(s.ccDueReminderIds || {}) };
+            delete ccMap[record.sourceKey];
+            patch.ccDueReminderIds = ccMap;
+          }
+          return patch;
+        });
+      },
+
+      /**
+       * Bring the OS queue back in line with the records. Called on launch and on
+       * every foreground (App.js), and it is what makes repeats work at all:
+       *
+       *  • a spent one-off is dropped (it has fired; nothing left to show);
+       *  • a repeating reminder whose armed occurrences have been used up — or
+       *    whose ids died with a restore/reinstall — is re-armed for its next
+       *    QUEUE_DEPTH occurrences.
+       *
+       * Repeats are expanded into absolute dates rather than handed to a native
+       * repeating trigger because SDK 50 has no cross-platform monthly one; see
+       * `utils/reminderSchedule`. The consequence is this pass: a repeating
+       * reminder stays armed for QUEUE_DEPTH occurrences unattended, and opening
+       * the app tops it back up.
+       */
+      reconcileReminders: async () => {
+        const { reminders = [], reminderNotifIds = {} } = get();
+        if (reminders.length === 0) return;
+        const now = Date.now();
+
+        const expired = reminders.filter((r) => isReminderExpired(r, now));
+        for (const r of expired) {
+          // The OS has already delivered these, so there is nothing to cancel —
+          // just clear our own bookkeeping.
+          set((s) => {
+            const nextIds = { ...(s.reminderNotifIds || {}) };
+            delete nextIds[r.id];
+            return {
+              reminders: (s.reminders || []).filter((x) => x.id !== r.id),
+              reminderNotifIds: nextIds,
+            };
+          });
+        }
+
+        const live = reminders.filter((r) => !isReminderExpired(r, now));
+        for (const r of live) {
+          const armed = reminderNotifIds[r.id] || [];
+          const wanted = nextOccurrences(r.anchorAt, r.repeat, now).length;
+          if (wanted === 0 || armed.length >= wanted) continue;
+          // Re-arm from scratch: we don't know WHICH of the armed ids are still
+          // pending (the OS drops delivered ones silently), and cancelling an
+          // already-delivered id is a no-op, so a clean re-arm is both correct
+          // and cheaper than trying to diff against the OS queue.
+          await get().scheduleReminder({
+            kind: r.kind, title: r.title, body: r.body,
+            repeat: r.repeat, anchorAt: r.anchorAt, sourceKey: r.sourceKey,
+            amount: r.amount, person: r.person,
+            replaceId: r.id,
+          });
+        }
+      },
 
       // ─── Budget actions ─────────────────────────────────────────────────────
       /** Bulk set / replace the active plan. Accepts { totalCap, perCategory }. */
@@ -1286,10 +1472,12 @@ export const useEPurseStore = create(
         const monthName = now.toLocaleDateString('en-IN', { month: 'long' });
 
         // Fire-and-forget — runs through the same budget_alerts channel
-        fireMidmonthNudgeNotification({
-          title: `${tone} ${monthName} check-in`,
-          body,
-        }).catch(() => {});
+        if (nudgeAllowed(s, 'midmonthNudge')) {
+          fireMidmonthNudgeNotification({
+            title: `${tone} ${monthName} check-in`,
+            body,
+          }).catch(() => {});
+        }
       },
 
       /**
@@ -1322,9 +1510,11 @@ export const useEPurseStore = create(
             dedupeKey: `sub_hike:${sub.merchantKey}`,
             meta:  { merchant: sub.merchant, hikeFrom: sub.hikeFrom, hikeTo: sub.hikeTo, dayOfMonth: sub.dayOfMonth },
           });
-          fireSubscriptionHikeNotification({
-            merchant: sub.merchant, oldAmount: sub.hikeFrom, newAmount: sub.hikeTo,
-          }).catch(() => {});
+          if (nudgeAllowed(s, 'subscriptionHike')) {
+            fireSubscriptionHikeNotification({
+              merchant: sub.merchant, oldAmount: sub.hikeFrom, newAmount: sub.hikeTo,
+            }).catch(() => {});
+          }
         });
         if (freshKeys.length) {
           // Keep the notified list bounded (last 100 keys).
@@ -1376,7 +1566,9 @@ export const useEPurseStore = create(
             dedupeKey: `cc_cycle:${a.id}:${thisMonth}`,
             meta:  { accountId: a.id, statementDay: a.statementDay },
           });
-          fireCcCycleHeadsUpNotification({ cardLabel }).catch(() => {});
+          if (nudgeAllowed(s, 'ccCycleHeadsUp')) {
+            fireCcCycleHeadsUpNotification({ cardLabel }).catch(() => {});
+          }
           notified[a.id] = thisMonth;
           changed = true;
         });
@@ -1435,23 +1627,27 @@ export const useEPurseStore = create(
             toMark.push(parentId);
             const meta = s.categories.find((c) => c.id === parentId);
             // Fire-and-forget — don't block the action on permission/network
-            fireBudgetBreachNotification({
-              scope: 'category',
-              categoryName: meta?.name || 'Category',
-              actual: cat.actual,
-              cap: cat.cap,
-            }).catch(() => {});
+            if (nudgeAllowed(s, 'budgetBreach')) {
+              fireBudgetBreachNotification({
+                scope: 'category',
+                categoryName: meta?.name || 'Category',
+                actual: cat.actual,
+                cap: cat.cap,
+              }).catch(() => {});
+            }
           }
         }
 
         // ── Total-level breach ────────────────────────────────────────────
         if (s.budget.totalCap != null && usage.total.over && !notifiedList.includes('__total__')) {
           toMark.push('__total__');
-          fireBudgetBreachNotification({
-            scope: 'total',
-            actual: usage.total.actual,
-            cap: usage.total.cap,
-          }).catch(() => {});
+          if (nudgeAllowed(s, 'budgetBreach')) {
+            fireBudgetBreachNotification({
+              scope: 'total',
+              actual: usage.total.actual,
+              cap: usage.total.cap,
+            }).catch(() => {});
+          }
         }
 
         if (toMark.length === 0) return;
@@ -2400,11 +2596,13 @@ export const useEPurseStore = create(
             ccBillKey({ cardLast4: account.mask || accountMask || null, bankName: account.bankName || bankName || null }),
           ),
         });
-        fireCCPaymentNotification({
-          amount,
-          accountMask: account.mask || accountMask || null,
-          bankName:    account.bankName || bankName || null,
-        });
+        if (nudgeAllowed(state, 'ccPayment')) {
+          fireCCPaymentNotification({
+            amount,
+            accountMask: account.mask || accountMask || null,
+            bankName:    account.bankName || bankName || null,
+          });
+        }
         return { ccPayment: 'pending', accountId: account.id };
       },
 
@@ -2604,11 +2802,18 @@ export const useEPurseStore = create(
               const key = `${cardLast4 || bankName || 'unknown'}:${dueDate}`;
               const cardKey = `${cardLast4 || bankName || 'unknown'}`;
               const existingMap = get().ccDueReminderIds || {};
-              if (!existingMap[key]) {
+              if (!existingMap[key] && nudgeAllowed(get(), 'ccBillDue')) {
                 // Cancel any prior reminder for this card (older due date) before scheduling.
                 Object.entries(existingMap).forEach(([k, id]) => {
                   if (k.startsWith(`${cardKey}:`)) { cancelScheduledNotification(id); }
                 });
+                // The moment it will actually fire — the SAME helper the scheduler
+                // uses, so the Reminders screen can't display a different time from
+                // the one that's armed.
+                const fireAt = ccReminderFireAt(dueDate);
+                const cardLabel = cardLast4
+                  ? `${bankName || 'Credit card'} ··${cardLast4}`
+                  : (bankName || 'Credit card');
                 scheduleCCBillDueReminder({ amount, cardLast4, bankName, dueDate })
                   .then((id) => {
                     if (!id) return;
@@ -2616,7 +2821,43 @@ export const useEPurseStore = create(
                       const map = { ...(s.ccDueReminderIds || {}) };
                       Object.keys(map).forEach((k) => { if (k.startsWith(`${cardKey}:`)) delete map[k]; });
                       map[key] = id;
-                      return { ccDueReminderIds: map };
+
+                      // Mirror it into the reminder registry so it appears on the
+                      // Reminders screen alongside the user's own. One record per
+                      // card (a new bill is a new cycle and replaces the old one),
+                      // and `reminderNotifIds` carries the same id so cancelling it
+                      // from the screen really cancels the OS notification.
+                      const rest = (s.reminders || []).filter(
+                        (r) => !(r.kind === 'cc_bill' && r.cardKey === cardKey),
+                      );
+                      const dropped = (s.reminders || []).filter(
+                        (r) => r.kind === 'cc_bill' && r.cardKey === cardKey,
+                      );
+                      const notifMap = { ...(s.reminderNotifIds || {}) };
+                      dropped.forEach((r) => { delete notifMap[r.id]; });
+
+                      if (!fireAt) return { ccDueReminderIds: map, reminders: rest, reminderNotifIds: notifMap };
+
+                      const recordId = `rem_cc_${cardKey}`;
+                      notifMap[recordId] = [id];
+                      return {
+                        ccDueReminderIds: map,
+                        reminders: [...rest, {
+                          id: recordId,
+                          kind: 'cc_bill',
+                          title: 'Credit card bill due',
+                          body: `${formatCurrency(amount)} on ${cardLabel}`,
+                          repeat: REPEAT.ONCE,
+                          anchorAt: fireAt,
+                          // The `ccDueReminderIds` key, so cancelling from the screen
+                          // can clear that index too and not leave it blocking the
+                          // next bill for this card.
+                          sourceKey: key,
+                          cardKey,
+                          createdAt: Date.now(),
+                        }],
+                        reminderNotifIds: notifMap,
+                      };
                     });
                   })
                   .catch(() => {});
@@ -4347,7 +4588,13 @@ export const useEPurseStore = create(
           monthlyRecapCardDismissed: null,
           pendingMonthlyRecap: null,
           recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
-          notificationIds: {},
+          reminders: [],
+          reminderNotifIds: {},
+          notificationPrefs: {
+            ccBillDue: true, ccCycleHeadsUp: true, ccPayment: true,
+            subscriptionHike: true, budgetBreach: true, midmonthNudge: true,
+            monthlyRecap: true,
+          },
           ccDueReminderIds: {},
           ccBills: {},
           subscriptionHikesNotified: [],
@@ -4921,7 +5168,9 @@ export const useEPurseStore = create(
         recapMonthHandled: state.recapMonthHandled ?? null,
         monthlyRecapCardDismissed: state.monthlyRecapCardDismissed ?? null,
         recapOptions: state.recapOptions ?? { includePrivate: true, includeGroups: true, includeTxnList: false },
-        notificationIds: state.notificationIds,
+        reminders: state.reminders ?? [],
+        reminderNotifIds: state.reminderNotifIds ?? {},
+        notificationPrefs: state.notificationPrefs ?? {},
         ccDueReminderIds: state.ccDueReminderIds ?? {},
         ccBills: state.ccBills ?? {},
         ccCycleHeadsUpNotified: state.ccCycleHeadsUpNotified ?? {},

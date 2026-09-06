@@ -46,23 +46,39 @@ export async function requestNotificationPermissions() {
   return status === 'granted';
 }
 
-export async function scheduleBorrowReminder({ personName, amount, triggerDate }) {
-  const secondsFromNow = Math.round((triggerDate.getTime() - Date.now()) / 1000);
-  if (secondsFromNow < 5) return null;
+/**
+ * Schedule ONE reminder at an absolute moment. The single scheduler behind every
+ * user-visible reminder — a lent/borrow nudge, a custom one, or one occurrence of
+ * a repeating one (the store queues several of these; see `utils/reminderSchedule`
+ * for why repeats are expanded into absolute dates rather than handed to a native
+ * repeating trigger).
+ *
+ * A DATE trigger, deliberately, not `{ seconds }`: a reminder is a calendar
+ * moment, and a date trigger is also the only kind whose fire time reads back
+ * intact from `getAllScheduledNotificationsAsync()`.
+ *
+ * Returns the scheduled id, or null when the moment has passed / permission is
+ * not granted — callers treat null as "not scheduled" rather than an error.
+ */
+export async function scheduleReminderAt({ title, body, fireAt }) {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
 
-  const id = await Notifications.scheduleNotificationAsync({
+  const when = Number(fireAt);
+  if (!Number.isFinite(when) || when <= Date.now() + 5_000) return null;
+
+  return Notifications.scheduleNotificationAsync({
     content: {
-      title: '💸 Payment Reminder',
-      body: `You owe ₹${amount.toLocaleString('en-IN')} to ${personName}`,
+      title: title || '🔔 Reminder',
+      body:  body || '',
       sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.MAX,
       vibrate: [0, 400, 200, 400, 200, 400],
       sticky: false,
       ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
     },
-    trigger: { seconds: secondsFromNow },
+    trigger: { date: new Date(when) },
   });
-  return id;
 }
 
 // ─── Credit-card bill-due reminder ───────────────────────────────────────────
@@ -73,9 +89,9 @@ export async function scheduleBorrowReminder({ personName, amount, triggerDate }
 // keep working; there is only one implementation.
 // Imported, not just re-exported: `scheduleCCBillDueReminder` below calls
 // parseDueDate itself, and `export … from` creates no local binding.
-import { parseDueDate, daysUntilDue } from './dueDate';
+import { parseDueDate, daysUntilDue, ccReminderFireAt } from './dueDate';
 
-export { parseDueDate, daysUntilDue };
+export { parseDueDate, daysUntilDue, ccReminderFireAt };
 
 /**
  * Schedule a local reminder ahead of a credit-card bill due date. Fires at 10:00
@@ -87,19 +103,13 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
 
-  const due = parseDueDate(dueDate);
-  if (!due) return null;
-
-  const dayBefore = new Date(due); dayBefore.setDate(due.getDate() - 1); dayBefore.setHours(10, 0, 0, 0);
-  const onDue     = new Date(due); onDue.setHours(10, 0, 0, 0);
-  const now = Date.now();
-  const when = dayBefore.getTime() > now + 60_000 ? dayBefore
-             : (onDue.getTime() > now + 60_000 ? onDue : null);
-  if (!when) return null; // due date already here/passed — the in-app chip covers it
+  // Shared with the store, which records this same moment on the reminder it
+  // lists — see `ccReminderFireAt`'s own note on why it isn't inlined here.
+  const when = ccReminderFireAt(dueDate);
+  if (!when) return null;
 
   const amtFmt  = `₹${Math.round(Number(amount) || 0).toLocaleString('en-IN')}`;
   const cardStr = cardLast4 ? `${bankName || 'Credit Card'} XX${cardLast4}` : (bankName || 'your credit card');
-  const secondsFromNow = Math.round((when.getTime() - now) / 1000);
 
   return Notifications.scheduleNotificationAsync({
     content: {
@@ -109,7 +119,7 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
       priority: Notifications.AndroidNotificationPriority?.HIGH,
       ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
     },
-    trigger: { seconds: secondsFromNow },
+    trigger: { date: new Date(when) },
   });
 }
 

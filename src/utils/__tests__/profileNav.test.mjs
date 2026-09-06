@@ -128,15 +128,91 @@ console.log('\n── hub vs catalogue ──');
     !/bg: {12}theme\.background/.test(profile) && !/bg: {12}theme\.background/.test(shop));
 }
 
-// ── 5. The reminders placeholder promises nothing ───────────────────────────
-console.log('\n── reminders placeholder ──');
+// ── 5. Reminders — built, and every control really moves something ─────────
+// This block used to assert the OPPOSITE: that the screen shipped no controls
+// and the hub row was badged SOON. Both were true of the placeholder and are the
+// wrong thing to guard now the feature exists, so they were replaced rather than
+// deleted — the standard they encoded (never show a switch that moves nothing)
+// is still enforced below, just against the real screen.
+console.log('\n── reminders ──');
 {
+  const store = read('store/ePurseStore.js');
+  const form  = read('screens/ReminderFormScreen.tsx');
+
   check('the Reminders route exists so the row is real', /name="Reminders"/.test(nav));
-  check('it says what it is with the shared EmptyState', /<EmptyState/.test(reminder));
-  // A screen of switches that move nothing is worse than an empty one.
-  check('it ships NO controls', !/Switch/.test(reminder) && !/onValueChange/.test(reminder),
-    'nothing here is user-tunable yet — do not imply otherwise');
-  check('the hub labels the row as not-yet-built', /badge="SOON"/.test(profile));
+  check('…and the form is a REGISTERED SCREEN, not a modal', /name="ReminderForm"/.test(nav));
+  check('the hub row no longer claims the feature is unbuilt',
+    !/badge="SOON"[\s\S]{0,120}Reminders/.test(profile) && !/Reminders[\s\S]{0,120}badge="SOON"/.test(profile));
+
+  // The empty state stays — an empty list still has to say what it is.
+  check('an empty list still explains itself via the shared EmptyState', /<EmptyState/.test(reminder));
+
+  // The switches are the whole point of the rewrite, so they must be wired to
+  // the store, not to local state that forgets on unmount.
+  check('every nudge switch writes to the store', /setNotificationPref/.test(reminder));
+  check('…and the store really exposes that action', /setNotificationPref:/.test(store));
+  check('…reading each value from notificationPrefs', /notificationPrefs\?\.\[key\]/.test(reminder));
+
+  // A switch that moves nothing is the failure this block has always guarded
+  // against: every pref row must have a matching GATE at a fire site.
+  const rowKeys = [...reminder.matchAll(/\{ key: '([A-Za-z]+)'/g)].map((m) => m[1]);
+  check(`the screen lists several nudges (${rowKeys.length})`, rowKeys.length >= 5, rowKeys.join(','));
+  for (const key of rowKeys) {
+    check(`"${key}" is actually gated in the store`,
+      new RegExp(`nudgeAllowed\\((?:get\\(\\)|s|state), '${key}'\\)`).test(store),
+      'a switch with no gate at the fire site moves nothing');
+  }
+
+  // The list must derive its times from the shared schedule util, or the row can
+  // say one thing while a different moment is armed with the OS.
+  check('the list derives "when" from the shared schedule util',
+    /nextOccurrence/.test(reminder) && /describeRepeat/.test(reminder));
+  check('…and so does the form', /nextOccurrence/.test(form));
+
+  // The context line: a person-scoped reminder must SAY what it's about
+  // ("Remind yourself to pay ₹1,200 to Rahul"), which the first cut demoted to a
+  // muted one-liner and then lost. It needs the amount and name as SEPARATE
+  // params — half of a pre-composed sentence can't be emphasised.
+  const lb = read('screens/LentBorrowedScreen.js');
+  check('the LB bell passes the amount + person structured, not pre-composed',
+    /presetAmount:/.test(lb) && /presetPerson:/.test(lb) && !/presetBody:/.test(lb),
+    'a ready-made sentence cannot be partially bolded');
+  check('the form states the balance in words', /Remind yourself to pay /.test(form));
+  check('…with the amount emphasised via formatCurrency', /formatCurrency\(amount as number\)/.test(form));
+  check('…and reads it from the record too, so an EDIT says the same thing',
+    /existing\?\.amount/.test(form) && /existing\?\.person/.test(form));
+
+  // One form, three entry points — the reason BorrowReminderModal was deleted.
+  check('the borrow-only reminder sheet is gone', !existsSync(`${ROOT}/components/BorrowReminderModal.js`));
+  check('Lent/Borrowed routes its bell to the shared form',
+    /navigate\('ReminderForm'/.test(lb));
+
+  // The two directions are deliberately NOT symmetric: money you owe is your own
+  // task (schedule an alarm), money owed TO you is someone else's (message them).
+  // A scheduled "lent" reminder was built and then removed on that reasoning, so
+  // this guards the decision rather than the code that once implemented it.
+  check('the bell is BORROW-only (net < 0)', /!isFullySettled && pb\.net < 0 \?/.test(lb));
+  check('…there is no scheduled lent reminder anywhere', !/lb_lent/.test(lb)
+    && !/lb_lent/.test(read('screens/ReminderFormScreen.tsx'))
+    && !/lb_lent/.test(read('screens/RemindersScreen.tsx')));
+  check('…and the lent side chases by MESSAGE instead',
+    /navigate\('WhatsAppReminder'/.test(lb));
+
+  // That WhatsApp flow is a compose-and-send form, so it is a screen too — and
+  // as a screen its "saved to gallery" CenterModal is no longer a second <Modal>
+  // stacked on a sheet's (ui-consistency §8b).
+  const wa = read('screens/WhatsAppReminderScreen.js');
+  check('the WhatsApp reminder is a registered SCREEN', /name="WhatsAppReminder"/.test(nav));
+  check('…that no longer renders itself as a Modal sheet',
+    !/<Modal/.test(wa) && !/styles\.backdrop/.test(wa));
+  check('…and uses the shared header like every other pushed screen',
+    /<PlainScreenHeader/.test(wa));
+  check('the old component-level modal file is gone',
+    !existsSync(`${ROOT}/components/WhatsAppReminderModal.js`));
+
+  // Repeats only keep repeating because a boot pass tops the OS queue back up.
+  check('the reconcile pass runs at launch/foreground',
+    /reconcileReminders\(\)/.test(code(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/App.js', 'utf8'))));
 }
 
 // ── 6. Shared chrome — one header, one row ──────────────────────────────────

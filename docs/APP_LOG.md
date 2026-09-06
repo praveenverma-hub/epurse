@@ -241,10 +241,72 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Full local-only inventory (no FCM): budget breach, mid-month nudge, CC payment, CC bill
   due (with OS reminder scheduling), subscription-hike alert, monthly recap.
 - Onboarding permission priming (+`POST_NOTIFICATIONS`).
+- **Sep-6-2026: Reminders, built.** The Profile → Reminders row was a `SOON` placeholder that
+  deliberately shipped no controls; it's now a real screen in two halves:
+  - **Upcoming** — a persisted `reminders` registry every source writes to, so a reminder is
+    visible once set instead of vanishing into the OS. Lists the user's own reminders, lent
+    AND borrow nudges, and credit-card bill dates; each row is editable (except a card bill,
+    whose date comes from the bank) and cancellable.
+  - **Automatic nudges** — real switches for all 7 app-initiated notifications, backed by a
+    new `notificationPrefs`. Every fire site in `ePurseStore` is gated through one
+    `nudgeAllowed` helper (they all live in that one file, which is why the toggles needed no
+    screen changes). The switch silences the PUSH only, never the in-app bell entry — a
+    breach you muted is still findable in the feed. A test asserts every switch on the screen
+    has a matching gate, so a control that moves nothing can't ship.
+- **Custom + repeating reminders**, via one full-screen `ReminderFormScreen` used by all three
+  entry points (Add, lent bell, borrow bell). Replaced `BorrowReminderModal`, which could only
+  ever do the borrow case. Presets (Tonight / Tomorrow / 3 days) + exact date & time pickers
+  (new shared `TimeField`, `DateField` gained `minimumDate`) + Once / Weekly / Monthly.
+- **The two directions are deliberately NOT symmetric** (settled Sep-6-2026, after a scheduled
+  lent reminder was built and then removed): money you OWE is your own task, so the bell
+  schedules a nudge to yourself; money owed TO YOU is someone else's task, so the action is to
+  message them. The lent row therefore keeps **WhatsApp only** and shows no bell. A test guards
+  the decision (`lb_lent` must not exist anywhere) rather than the code that once implemented it.
+- **`WhatsAppReminderModal` → `WhatsAppReminderScreen`.** Picking a tone, setting a due date,
+  editing the wording and saving a banner is a compose-and-send form, not a glance — and it was
+  already a sheet pinned to a fixed 88% of screen height, i.e. a screen in sheet's clothing. As
+  a screen its "saved to gallery" `CenterModal` also stops being a second `<Modal>` stacked on
+  the sheet's own (the ui-consistency §8b hazard). Kept as `.js`: a move plus a shell swap,
+  where also typing 5 SVG banner components would have buried the diff.
+- Fixed on report: the old sheet's "Remind yourself to pay **₹1,200** to **Rahul**" line was
+  demoted to a small muted string and read like a blank alarm. It's back above the banner with
+  the amount + name emphasised, which is why the caller passes `presetAmount`/`presetPerson`
+  SEPARATELY rather than a ready-made sentence — half a pre-composed string can't be bolded.
+  Both values live on the record too, so re-opening an existing reminder says the same thing,
+  and the notification body is composed from them (one source, so the two can't drift).
+- Repeats are expanded into absolute one-off dates by a pure `utils/reminderSchedule`, a few
+  occurrences at a time, and topped back up by `reconcileReminders()` at launch/foreground —
+  **not** a native repeating trigger, because expo SDK 50 has no cross-platform monthly one
+  (`CalendarTrigger` is iOS-only), so "remind me on the 5th" had no native answer on Android.
+  Consequence, stated plainly: a repeat stays armed ~3 occurrences unattended and re-arms
+  whenever the app is opened. Monthly clamps into short months (the 31st → Feb 28/29) instead
+  of skipping them, which a naive `setMonth` does silently; 34 unit tests pin that arithmetic.
+- Reminder RECORDS are backed up and re-armed on a restored device; notification **ids** are
+  not (device-local, same rule as `ccDueReminderIds`).
+
+- **Sep-6-2026: two bugs caught cross-checking a green suite**, both hidden by a swallowed
+  failure path. (a) `scheduleReminder` cancelled the reminder it was replacing *before* knowing
+  the new occurrences were accepted — since `reconcileReminders` re-arms repeats on every
+  launch, revoking notification permission would have silently deleted every repeating
+  reminder. Now arms first, retires second (prune-after-upload ordering). (b) The card-bill
+  mirror was entirely dead: `formatCurrency` wasn't imported in `ePurseStore.js`, the record-
+  composing line threw inside a `.then()` whose `.catch(() => {})` ate it, so card bills never
+  reached the Reminders screen and every CC-bill test still passed. The test stub for
+  `scheduleCCBillDueReminder` returned `null`, which short-circuited that `.then()` so no test
+  ever ran it; it returns an id now and the record is asserted. Both fixes mutation-verified.
+- Also fixed while cross-checking: the WhatsApp screen lost the card background its fields' grey
+  fills depend on (grey-on-grey, visible only by their borders), and its Send button wasn't
+  paying the bottom safe-area inset now that it's a screen with `edges={['top']}`.
 
 **Open**
-- None currently tracked (the CC-bill-due reminder not being cancelled on payment,
-  formerly listed here, is fixed — see Analytics & Insights / Home).
+- Reminders set before this build (via the old borrow sheet) still fire, but can no longer be
+  cancelled in-app: the dead `notificationIds` map they lived in was removed rather than kept
+  as a shim. One-time, affects only reminders already scheduled at upgrade.
+- Tapping a delivered reminder doesn't deep-link anywhere yet (no notification-response
+  handler exists) — a lent reminder can't jump straight into the WhatsApp nudge.
+- Not built from the suggested list: renewal reminders before a recurring charge (the data is
+  already there — `detectSubscriptions` returns merchant + amount + `dayOfMonth`), stale
+  settle-up nudges, stale-balance nudges, quiet hours, snooze.
 
 ---
 

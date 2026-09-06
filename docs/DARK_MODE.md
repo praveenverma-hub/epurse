@@ -42,7 +42,7 @@ Status colours are theme-agnostic and all gain: success 6.28, danger 4.24, warni
 
 ## 3. Why it isn't on yet — the one blocker
 
-**972 `colors.*` references across 50 files paint from the STATIC light palette.**
+**945 `colors.*` references across 53 files paint from the STATIC light palette.**
 
 `src/constants/theme.js` exports `colors` as a frozen light palette, and `StyleSheet.create`
 captures those values at module load. **No palette change can ever reach them** — not a theme
@@ -92,7 +92,7 @@ Tranche by what the user sees, so each step is eyeball-verifiable on a device:
 2. **Shared components they render** — `TransactionItem`, `MonthDivider`, `SectionHeader`,
    `EmptyState`, `NavListRow`, `PlainScreenHeader`, `HomeCarousel`, `AccountChip`.
 3. **Modals and sheets** — `CategoryPickerModal` (the single worst file), `SplitConfigModal`,
-   `LinkContactModal`, `TxnDetailSheet`, `GroupTxnDetailSheet`, `ExportSheet`, the reminder modals.
+   `LinkContactModal`, `TxnDetailSheet`, `GroupTxnDetailSheet`, `ExportSheet`. (The reminder sheets became SCREENS in Sep-26 — they belong in tranche 4.)
 4. **Pushed screens** — Settings, Categories, SpendRules, Backup, BudgetPlan, LbPerson,
    AddTransaction, AddGroupExpense, SmsDiagnostic.
 5. Flip `STATIC_CONFIG.theme.canvasThemes` to `true`. Nothing else changes.
@@ -105,9 +105,9 @@ was written. **The migration unblocks both** — same code path — so this can 
 before. WhatsApp-style suggests the toggle: *Settings → Appearance → Light / Dark / System*, with
 the accent orthogonal to it. Carbon would then be the accent that also *defaults* to dark.
 
-## 7. Inventory (measured, 2026-09-01)
+## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06)
 
-**50 files · 972 references.** `useTheme?` = already has the hook. `subs` = module-scope
+**53 files · 945 references.** `useTheme?` = already has the hook. `subs` = module-scope
 sub-components touching `styles` (the gotcha in §4.1) — bold means it needs the prop-passing fix.
 
 | File | `colors.*` refs | useTheme? | sheets | subs |
@@ -122,7 +122,6 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `screens/BackupScreen.js` | 34 | yes | 1 | 1 |
 | `screens/BudgetPlanScreen.js` | 34 | yes | 1 | 1 |
 | `components/TransactionItem.js` | 34 | **no** | 1 | 1 |
-| `components/BorrowReminderModal.js` | 33 | yes | 1 | 1 |
 | `screens/GroupsScreen.tsx` | 31 | yes | 1 | 1 |
 | `components/DailyQueueStack.js` | 29 | yes | 1 | **3** |
 | `screens/LbPersonScreen.js` | 28 | yes | 1 | **2** |
@@ -132,7 +131,7 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `screens/AnalyticsScreen.js` | 23 | yes | 1 | **6** |
 | `screens/CategoriesScreen.js` | 23 | yes | 1 | 1 |
 | `components/ExportSheet.tsx` | 21 | yes | 1 | 1 |
-| `components/WhatsAppReminderModal.js` | 21 | yes | 1 | 1 |
+| `screens/WhatsAppReminderScreen.js` | 17 | yes | 1 | 1 |
 | `components/GroupTxnDetailSheet.tsx` | 20 | yes | 1 | 0 |
 | `components/HabitLeakMatrix.js` | 17 | **no** | 1 | **2** |
 | `screens/LentBorrowedScreen.js` | 16 | yes | 1 | **2** |

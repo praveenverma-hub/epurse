@@ -22,8 +22,6 @@ import { formatCurrency, formatOutstanding, firstName } from '../utils/format';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import AccountPickerSheet from '../components/AccountPickerSheet';
-import WhatsAppReminderModal from '../components/WhatsAppReminderModal';
-import BorrowReminderModal, { BellIconSvg } from '../components/BorrowReminderModal';
 import LbEntryForm from '../components/LbEntryForm';
 import InfoIcon from '../components/InfoIcon';
 import InfoSheet from '../components/InfoSheet';
@@ -51,8 +49,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const setKind = useCallback((k) => setIndex(keyToIndex(k)), []);
   const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
   const [confirm, setConfirm] = useState(null);
-  const [reminderTarget, setReminderTarget] = useState(null);
-  const [borrowReminderTarget, setBorrowReminderTarget] = useState(null);
   const [infoVisible, setInfoVisible] = useState(false);
 
   const all = useEPurseStore((s) => s.lentBorrowed);
@@ -61,8 +57,14 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
   const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
-  const userName        = useEPurseStore((s) => s.userName);
-  const notificationIds = useEPurseStore((s) => s.notificationIds);
+  // "Does this person already have a reminder?" now comes from the reminder
+  // REGISTRY (keyed by personKey in `sourceKey`), which is also what the
+  // Reminders screen lists — one source, so the bell and that list can't disagree.
+  const reminders = useEPurseStore((s) => s.reminders);
+  const remindedKeys = useMemo(
+    () => new Set((reminders || []).map((r) => r.sourceKey).filter(Boolean)),
+    [reminders],
+  );
   /**
    * The person's signed net (> 0 = they owe you) as it stands NOW — call after the
    * store write so a toast can report the resulting position. Matches on the
@@ -259,28 +261,44 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 style={styles.waBtn}
                 onPress={(e) => {
                   e.stopPropagation?.();
-                  setReminderTarget(pb);
+                  navigation.navigate('WhatsAppReminder', {
+                    person: pb.person, phone: pb.phone, amount: pb.net,
+                  });
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <WAIcon />
               </TouchableOpacity>
             ) : null}
+            {/* Schedule a reminder — BORROW side only, by design. The two
+                directions need different things: money you owe is YOUR task, so
+                you schedule a nudge to yourself; money owed TO you is someone
+                else's task, so the action is to message them (the WhatsApp
+                button above), not to set your own alarm. */}
             {!isFullySettled && pb.net < 0 ? (
               <TouchableOpacity
-                style={[
-                  styles.bellBtn,
-                  notificationIds[pb.personKey] && styles.bellBtnActive,
-                ]}
+                style={[styles.bellBtn, remindedKeys.has(pb.personKey) && styles.bellBtnActive]}
                 onPress={(e) => {
                   e.stopPropagation?.();
-                  setBorrowReminderTarget(pb);
+                  // Amount + person go over STRUCTURED so the form can emphasise
+                  // them in its "Remind yourself to pay ₹X to Y" line and compose
+                  // the notification body from the same values.
+                  navigation.navigate('ReminderForm', {
+                    kind: 'lb_borrow',
+                    sourceKey: pb.personKey,
+                    presetTitle: `Pay ${pb.person}`,
+                    presetAmount: Math.abs(pb.net),
+                    presetPerson: pb.person,
+                  });
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Set a reminder to pay ${pb.person}`}
               >
-                <BellIconSvg
+                <Ionicons
+                  name={remindedKeys.has(pb.personKey) ? 'notifications' : 'notifications-outline'}
                   size={16}
-                  color={notificationIds[pb.personKey] ? '#6366F1' : '#6366F188'}
+                  color={remindedKeys.has(pb.personKey) ? theme.primary : colors.textMuted}
                 />
               </TouchableOpacity>
             ) : null}
@@ -291,7 +309,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         </View>
       );
     },
-    [navigation, notificationIds, theme.primary]
+    [navigation, remindedKeys, theme.primary]
   );
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
@@ -442,21 +460,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           // already committed to adding it by tapping "Add"; only the account
           // question was left open, so declining it shouldn't discard the entry.
           onClose={() => commitSettledBorrow(null)}
-        />
-
-        <WhatsAppReminderModal
-          visible={!!reminderTarget}
-          person={reminderTarget?.person}
-          phone={reminderTarget?.phone}
-          amount={reminderTarget?.net ?? 0}
-          senderName={userName}
-          onClose={() => setReminderTarget(null)}
-        />
-
-        <BorrowReminderModal
-          visible={!!borrowReminderTarget}
-          person={borrowReminderTarget}
-          onClose={() => setBorrowReminderTarget(null)}
         />
 
     </KeyboardAvoidingView>

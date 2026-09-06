@@ -89,6 +89,14 @@ function BudgetRolloverBoot() {
   const ccCycle    = useEPurseStore((s) => s.maybeFireCcCycleHeadsUp);
   const recap      = useEPurseStore((s) => s.maybeQueueMonthlyRecap);
   const weeklyRecap = useEPurseStore((s) => s.maybeQueueWeeklyRecap);
+  // Reminders: drop spent one-offs and top the OS queue back up for repeating
+  // ones. This pass is what makes a repeat repeat — occurrences are scheduled as
+  // absolute dates a few at a time (SDK 50 has no cross-platform monthly
+  // trigger), so a repeating reminder is only armed as far ahead as the last time
+  // the app was opened. It also re-arms everything after a restore, where the
+  // records come back from the backup but the notification ids deliberately
+  // don't. See utils/reminderSchedule.
+  const reconcileReminders = useEPurseStore((s) => s.reconcileReminders);
   useEffect(() => {
     rollover();
     nudge();
@@ -96,6 +104,7 @@ function BudgetRolloverBoot() {
     ccCycle();
     recap();
     weeklyRecap();
+    reconcileReminders();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         rollover();
@@ -104,10 +113,11 @@ function BudgetRolloverBoot() {
         ccCycle();
         recap();
         weeklyRecap();
+        reconcileReminders();
       }
     });
     return () => sub.remove();
-  }, [rollover, nudge, subAlerts, ccCycle, recap, weeklyRecap]);
+  }, [rollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders]);
   return null;
 }
 
