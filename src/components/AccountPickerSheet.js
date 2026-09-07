@@ -14,6 +14,7 @@ import SheetCloseButton from './SheetCloseButton';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 const TYPE_EMOJI = {
   [ACCOUNT_TYPES.BANK]:        '🏦',
@@ -35,11 +36,15 @@ const AccountPickerSheet = ({
 }) => {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  // A row tap here books real money movement (settle-with-account, CC true-up) —
+  // guarded here once rather than in every caller, since rows/skip have no
+  // per-caller disabled state of their own to lean on.
+  const { submit, submitting } = useSubmitGuard();
 
   return (
     <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, submitting && styles.sheetBusy]}>
         <SheetCloseButton onPress={onClose} variant="absolute" />
         <View style={styles.handle} />
         <Text style={styles.title}>{title}</Text>
@@ -47,7 +52,13 @@ const AccountPickerSheet = ({
 
         <ScrollView style={styles.list} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
           {(accounts || []).map((a) => (
-            <TouchableOpacity key={a.id} style={styles.row} onPress={() => onSelect?.(a.id)} activeOpacity={0.8}>
+            <TouchableOpacity
+              key={a.id}
+              style={styles.row}
+              onPress={() => submit(() => onSelect?.(a.id))}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
               <Text style={styles.rowEmoji}>{TYPE_EMOJI[a.type] || '💳'}</Text>
               <View style={styles.rowMid}>
                 <Text style={styles.rowName} numberOfLines={1}>
@@ -62,7 +73,12 @@ const AccountPickerSheet = ({
         </ScrollView>
 
         {skipLabel && onSkip ? (
-          <TouchableOpacity style={styles.skipBtn} onPress={onSkip} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={styles.skipBtn}
+            onPress={() => submit(() => onSkip())}
+            activeOpacity={0.8}
+            disabled={submitting}
+          >
             <Text style={styles.skipText}>{skipLabel}</Text>
           </TouchableOpacity>
         ) : null}
@@ -88,6 +104,7 @@ const makeStyles = (t) =>
       maxHeight: '70%',
       ...shadows.elevated,
     },
+    sheetBusy: { opacity: 0.7 },
     handle: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: t.divider, marginBottom: spacing.md },
     title: { color: t.textPrimary, fontSize: 17, fontWeight: '700' },
     subtitle: { color: t.textSecondary, fontSize: 13, marginTop: 2, marginBottom: spacing.sm },

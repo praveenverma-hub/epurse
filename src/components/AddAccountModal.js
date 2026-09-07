@@ -4,7 +4,7 @@
 
 import React, { useState, useCallback } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity,
+  ActivityIndicator, Modal, View, Text, StyleSheet, TouchableOpacity,
   TextInput, ScrollView,
 } from 'react-native';
 
@@ -14,6 +14,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { INPUT_LIMITS, sanitizeName } from '../utils/validation';
 import { useToast } from './Toast';
 import SheetCloseButton from './SheetCloseButton';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 const TYPE_OPTIONS = [
   { key: ACCOUNT_TYPES.CASH,        label: 'Cash',         emoji: '💵' },
@@ -34,6 +35,7 @@ const AddAccountModal = ({ visible, onClose, onAdd }) => {
   const [bankName, setBankName]     = useState('');
   const [lastFour, setLastFour]     = useState('');
   const [customName, setCustomName] = useState('');
+  const { submit, submitting } = useSubmitGuard();
 
   const reset = useCallback(() => {
     setSelectedType(ACCOUNT_TYPES.BANK);
@@ -75,17 +77,18 @@ const AddAccountModal = ({ visible, onClose, onAdd }) => {
       }
     }
 
-    onAdd({
-      type: typeKey,
-      name,
-      bankName: bank || null,
-      mask: last4 || '',
-      balance: 0,
+    submit(() => {
+      onAdd({
+        type: typeKey,
+        name,
+        bankName: bank || null,
+        mask: last4 || '',
+        balance: 0,
+      });
+      reset();
+      onClose();
     });
-
-    reset();
-    onClose();
-  }, [selectedType, bankName, lastFour, customName, onAdd, reset, onClose]);
+  }, [selectedType, bankName, lastFour, customName, onAdd, reset, onClose, submit]);
 
   const needsMask = NEEDS_MASK.has(selectedType);
   const needsBank = NEEDS_BANK.has(selectedType);
@@ -180,11 +183,14 @@ const AddAccountModal = ({ visible, onClose, onAdd }) => {
           </ScrollView>
 
           <TouchableOpacity
-            style={[styles.addBtn, { backgroundColor: theme.primary }]}
+            style={[styles.addBtn, { backgroundColor: theme.primary }, submitting && styles.addBtnBusy]}
             onPress={handleAdd}
             activeOpacity={0.85}
+            disabled={submitting}
           >
-            <Text style={styles.addBtnText}>Add Account</Text>
+            {submitting
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.addBtnText}>Add Account</Text>}
           </TouchableOpacity>
         </View>
       </View>
@@ -289,6 +295,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     marginTop: spacing.sm,
   },
+  addBtnBusy: { opacity: 0.7 },
   addBtnText: {
     color: '#fff',
     ...typography.bodyBold,

@@ -71,6 +71,7 @@ import {
   SPLIT_BLOCKED_CHILD_LABELS,
 } from '../constants/twoTierCategories';
 import { requestAndGetLocation } from '../services/locationService';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 // Two-tier → legacy category conversion is centralised in twoTierCategories.ts
 // (twoTierToLegacyCatId / LB_ALL_CATS / SPLIT_BLOCKED_CHILD_LABELS).
@@ -223,6 +224,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const transactions   = useEPurseStore((s: any) => s.transactions);
   const getBudgetUsage = useEPurseStore((s: any) => s.getBudgetUsage);
   const toast          = useToast();
+  const { submit, submitting } = useSubmitGuard();
 
   // ── Edit mode ────────────────────────────────────────────────────────────────
   const editTxnId = route?.params?.editTxnId;
@@ -705,7 +707,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     }
 
     if (isEdit) {
-      commitEdit();
+      submit(() => commitEdit());
       return;
     }
 
@@ -724,7 +726,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       return;
     }
 
-    commitTransaction();
+    submit(() => commitTransaction());
   };
 
   const handleParseSMS = () => {
@@ -1175,18 +1177,18 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
               suggestedPersons={[]}
               onConfirm={(contactInfo: any) => {
                 setLbPickerOpen(false);
-                commitTransaction({
+                submit(() => commitTransaction({
                   person:    contactInfo?.person || '',
                   phone:     contactInfo?.phone || null,
                   contactId: contactInfo?.contactId || null,
-                });
+                }));
               }}
               onSkip={() => {
                 setLbPickerOpen(false);
                 // Save without a contact — store leaves no LB entry, txn
                 // still lands in the list. User can attach a contact later
                 // via the re-categorise flow.
-                commitTransaction();
+                submit(() => commitTransaction());
               }}
               onClose={() => setLbPickerOpen(false)}
             />}
@@ -1198,6 +1200,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           <GradientButton
             title={isEdit ? 'Save changes' : 'Add transaction'}
             onPress={handleSave}
+            loading={submitting}
             style={{ width: '100%' }}
           />
         </View>

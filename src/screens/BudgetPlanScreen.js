@@ -33,6 +33,7 @@ import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import SheetCloseButton from '../components/SheetCloseButton';
 import GradientButton from '../components/GradientButton';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 // Categories pre-added when creating the very first plan (no history to seed from).
 const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
@@ -40,6 +41,7 @@ const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
 const BudgetPlanScreen = ({ navigation }) => {
   const theme = useTheme();
   const toast = useToast();
+  const { submit, submitting } = useSubmitGuard();
   // The SafeAreaView only takes the TOP edge (its white fill has to match the
   // header bar), so the pinned footer pays the bottom inset itself.
   const insets = useSafeAreaInsets();
@@ -136,10 +138,12 @@ const BudgetPlanScreen = ({ navigation }) => {
       const num = parseInt(cap, 10);
       if (Number.isFinite(num) && num > 0) perCategory[catId] = num;
     });
-    setBudget({ perCategory });
-    toast.success(isEdit ? 'Plan updated' : 'Plan created');
-    navigation.goBack();
-  }, [localCats, setBudget, navigation, isEdit, toast]);
+    submit(() => {
+      setBudget({ perCategory });
+      toast.success(isEdit ? 'Plan updated' : 'Plan created');
+      navigation.goBack();
+    });
+  }, [localCats, setBudget, navigation, isEdit, toast, submit]);
 
   // First-level categories available to add (not yet in the local list)
   const pickerCategories = useMemo(() => {
@@ -262,7 +266,7 @@ const BudgetPlanScreen = ({ navigation }) => {
             >
               <Text style={[styles.resetBtnText, { color: colors.danger }]}>Reset</Text>
             </TouchableOpacity>
-            <GradientButton title="Save Plan" onPress={savePlan} style={styles.saveBtn} />
+            <GradientButton title="Save Plan" onPress={savePlan} loading={submitting} style={styles.saveBtn} />
           </View>
         </View>
       </SafeAreaView>

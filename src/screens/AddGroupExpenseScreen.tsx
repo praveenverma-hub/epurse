@@ -24,9 +24,12 @@ import GroupExpenseForm from '../components/GroupExpenseForm';
 import GradientButtonBase from '../components/GradientButton';
 import { requestAndGetLocation } from '../services/locationService';
 import { useToast } from '../components/Toast';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupExpenseData } from '../types/group';
 
-const GradientButton = GradientButtonBase as React.FC<{ title: string; onPress: () => void; style?: object }>;
+const GradientButton = GradientButtonBase as React.FC<{
+  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean;
+}>;
 
 interface NavProp {
   goBack: () => void;
@@ -50,6 +53,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
   const insets = useSafeAreaInsets();
   const submitRef = useRef<(() => void) | null>(null);
   const toast = useToast();
+  const { submit, submitting } = useSubmitGuard();
 
   const handleAdd = async (expenseData: GroupExpenseData) => {
     if (isEdit && editTxnId) {
@@ -103,7 +107,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
           >
             <GroupExpenseForm
               group={group}
-              onAdd={handleAdd}
+              onAdd={(expenseData: GroupExpenseData) => submit(() => handleAdd(expenseData))}
               editTxn={isEdit ? editTxn : undefined}
               // Tagged SMS txns keep their parsed amount locked; manual ones stay editable.
               presetAmount={isEdit && editTxn && editTxn.source !== 'manual' ? editTxn.amount : undefined}
@@ -117,6 +121,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
             <GradientButton
               title={isEdit ? 'Save changes' : 'Add Expense'}
               onPress={() => submitRef.current?.()}
+              loading={submitting}
               style={{ width: '100%' }}
             />
           </View>

@@ -15,7 +15,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  ActivityIndicator, Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Animated, Easing, Pressable,
 } from 'react-native';
 
@@ -25,6 +25,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 const outstandingOf = (acc) => Math.abs(Math.min(acc?.balance ?? 0, 0));
 
@@ -42,6 +43,7 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
 
   const [cardId, setCardId] = useState(null);
   const [mode, setMode]     = useState('settle');
+  const { submit, submitting } = useSubmitGuard();
 
   const amount = txn?.amount || 0;
 
@@ -83,11 +85,11 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
     { key: 'none',   title: "Don't change balance",  sub: 'Card SMS already recorded it', result: cardOutstanding },
   ];
 
-  const confirm = () => {
+  const confirm = () => submit(() => {
     markAsCCBillPayment(txn.id, cardId, cardId ? mode : 'none');
     onConfirm?.();
     onClose?.();
-  };
+  });
 
   const cardLabel = (a) =>
     [a.bankName || a.name, a.mask ? `••${a.mask}` : null].filter(Boolean).join(' ');
@@ -113,8 +115,15 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
               No credit card on record yet — this payment will just be marked as
               non-spend (excluded from your totals).
             </Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={confirm} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>Mark as non-spend</Text>
+            <TouchableOpacity
+              style={[styles.primaryBtn, submitting && styles.primaryBtnBusy]}
+              onPress={confirm}
+              activeOpacity={0.85}
+              disabled={submitting}
+            >
+              {submitting
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.primaryBtnText}>Mark as non-spend</Text>}
             </TouchableOpacity>
           </>
         ) : (
@@ -174,8 +183,15 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
               })}
             </ScrollView>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={confirm} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>Mark as CC bill payment</Text>
+            <TouchableOpacity
+              style={[styles.primaryBtn, submitting && styles.primaryBtnBusy]}
+              onPress={confirm}
+              activeOpacity={0.85}
+              disabled={submitting}
+            >
+              {submitting
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.primaryBtnText}>Mark as CC bill payment</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -281,6 +297,7 @@ const makeStyles = (t) => {
       alignItems: 'center',
       marginTop: spacing.sm,
     },
+    primaryBtnBusy: { opacity: 0.85 },
     primaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
   });
 };

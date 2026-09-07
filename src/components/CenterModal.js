@@ -1,12 +1,19 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, Modal, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 /**
  * Generic centered modal for confirmations and info messages.
  * Buttons: primary + optional secondary.
+ *
+ * ~30 call sites drive real writes (settle/delete/pay/link) from `onPrimary`,
+ * each supplying its own handler with no guard of its own — so the double-tap
+ * guard lives HERE once, rather than in every caller. Covers sync handlers
+ * (the vast majority — a `set()` completes before the modal even finishes
+ * closing) and async ones the same way.
  */
 export default function CenterModal({
   visible,
@@ -21,10 +28,12 @@ export default function CenterModal({
 }) {
   const theme = useTheme();
   const primaryBg = destructive ? colors.danger : theme.primary;
+  const { submit, submitting } = useSubmitGuard();
+
   return (
-    <Modal visible={!!visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={!!visible} transparent animationType="fade" onRequestClose={submitting ? undefined : onClose}>
       <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
+        <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} disabled={submitting} />
         <View style={styles.card}>
           {!!title && <Text style={styles.title}>{title}</Text>}
           {!!message && <Text style={styles.message}>{message}</Text>}
@@ -34,18 +43,22 @@ export default function CenterModal({
               <TouchableOpacity
                 style={styles.secondaryBtn}
                 activeOpacity={0.85}
-                onPress={onSecondary || onClose}
+                onPress={() => submit(() => (onSecondary || onClose)())}
+                disabled={submitting}
               >
                 <Text style={styles.secondaryText}>{secondaryText}</Text>
               </TouchableOpacity>
             ) : null}
 
             <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: primaryBg }]}
+              style={[styles.primaryBtn, { backgroundColor: primaryBg }, submitting && styles.primaryBtnBusy]}
               activeOpacity={0.85}
-              onPress={onPrimary}
+              onPress={() => submit(() => onPrimary?.())}
+              disabled={submitting}
             >
-              <Text style={styles.primaryText}>{primaryText}</Text>
+              {submitting
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.primaryText}>{primaryText}</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -101,6 +114,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
+  primaryBtnBusy: { opacity: 0.85 },
   primaryText: { ...typography.bodyBold, color: '#fff', fontWeight: '900' },
 });
 

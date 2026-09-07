@@ -406,10 +406,20 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Input validation: one shared `src/utils/validation.js` (limits, sanitizers, validators)
   used by every user-typed field; overflow protection (`numberOfLines` + flex) tracked
   per-screen in the input-validation skill.
+- **Double-submit guard (Sep-2026):** new shared `src/hooks/useSubmitGuard.ts` — a
+  double-tap on a Save/Add button used to create two persisted rows (every add action
+  mints a fresh id, nothing de-dupes). Swept 13 forms: Add Transaction, Add Group
+  Expense, the Lent/Borrowed entry form (both shells), Add Account, the shared
+  `CenterModal` confirm dialog (~30 call sites), both CC-payment sheets, Create Group,
+  custom categories, Budget Plan. Wires into `GradientButton`'s existing but previously
+  unused `loading` prop for a real spinner + auto-disable. WhatsApp reminder screen and
+  the Daily Queue's review-award path still remain — lower risk, not yet done.
 
 **Open**
 - `align="bottom"` in `RecapModalShell.tsx` is dead code (no live caller) — flagged, not
   removed, in case a future recap variant wants it.
+- Double-submit guard not yet applied to `WhatsAppReminderScreen.js` (`handleSend`) or
+  `DailyQueueStack.js` (`markReviewed`/`recordReview`) — see the double-submit-guard memory.
 
 ---
 

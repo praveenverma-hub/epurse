@@ -21,9 +21,12 @@ const typography = typographyBase as unknown as Record<string, import('react-nat
 import GroupExpenseForm from './GroupExpenseForm';
 import SheetCloseButton from './SheetCloseButton';
 import GradientButtonBase from './GradientButton';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupExpenseData } from '../types/group';
 
-const GradientButton = GradientButtonBase as React.FC<{ title: string; onPress: () => void; style?: object }>;
+const GradientButton = GradientButtonBase as React.FC<{
+  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean;
+}>;
 
 interface GroupExpenseSheetProps {
   visible: boolean;
@@ -47,6 +50,9 @@ interface GroupExpenseSheetProps {
 
 export default function GroupExpenseSheet({ visible, group, onClose, onAdd, presetAmount, editTxn, showCategory = false, lockPayerToMe = false }: GroupExpenseSheetProps) {
   const submitRef = useRef<(() => void) | null>(null);
+  // Guarded here rather than in each of the 3 callers (Dashboard/Transactions/
+  // DailyQueueStack) that supply `onAdd` — one fix covers every entry point.
+  const { submit, submitting } = useSubmitGuard();
   if (!group) return null;
   const isEdit = !!editTxn;
 
@@ -82,7 +88,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
                 presetAmount={presetAmount}
                 editTxn={editTxn}
                 lockPayerToMe={lockPayerToMe}
-                onAdd={onAdd}
+                onAdd={(expenseData: GroupExpenseData) => submit(() => onAdd(expenseData))}
                 hideCategory={!showCategory}
                 hideSubmit
                 submitRef={submitRef}
@@ -91,12 +97,13 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
 
             {/* Pinned footer — Cancel + Add side by side. */}
             <View style={styles.footer}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8} disabled={submitting}>
                 <Text style={styles.cancelTxt}>Cancel</Text>
               </TouchableOpacity>
               <GradientButton
                 title={isEdit ? 'Save' : 'Add Expense'}
                 onPress={() => submitRef.current?.()}
+                loading={submitting}
                 style={styles.submitBtn}
               />
             </View>

@@ -19,6 +19,7 @@ import SheetCloseButton from './SheetCloseButton';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { fetchContactsForPicker, getContactsPermissionStatus } from '../services/contactsService';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupMember, GroupType } from '../types/group';
 
 // GradientButton.js has no TS declarations — cast to the props we use.
@@ -26,6 +27,7 @@ const GradientButton = GradientButtonBase as React.FC<{
   title: string;
   onPress: () => void;
   disabled?: boolean;
+  loading?: boolean;
   style?: object;
 }>;
 
@@ -123,10 +125,12 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
   const removeMember = (contactId: string | null | undefined) =>
     setMembers((prev) => prev.filter((m) => m.contactId !== contactId));
 
+  const { submit, submitting } = useSubmitGuard();
+
   const handleSave = () => {
     const cleaned = sanitizeName(name);
     if (!isValidName(cleaned)) return; // needs NAME_MIN..NAME_MAX chars
-    onSave({ name: cleaned, type, emoji, color, excludeFromTotals, members });
+    submit(() => onSave({ name: cleaned, type, emoji, color, excludeFromTotals, members }));
   };
 
   const nameValid = isValidName(sanitizeName(name));
@@ -311,13 +315,14 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
 
           {/* Pinned footer — Cancel + Save side by side. */}
           <View style={styles.footer}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8} disabled={submitting}>
               <Text style={styles.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
             <GradientButton
               title={group ? 'Save Changes' : 'Create Group'}
               onPress={handleSave}
               disabled={!nameValid}
+              loading={submitting}
               style={styles.submitBtn}
             />
           </View>

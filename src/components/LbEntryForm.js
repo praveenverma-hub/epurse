@@ -46,6 +46,7 @@ import CenterModal from './CenterModal';
 import SheetCloseButton from './SheetCloseButton';
 import DateField from './DateField';
 import { FormChipRow, FormChip } from './FormField';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 const ContactPickIcon = ({ size = 18, color = colors.primary }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -89,6 +90,7 @@ const LbEntryForm = ({
   const [alreadySettled, setAlreadySettled] = useState(false);
   const [formErr, setFormErr] = useState(null); // { person?, amount?, text }
   const [confirm, setConfirm] = useState(null);
+  const { submit, submitting } = useSubmitGuard();
 
   // ── Contact picker ─────────────────────────────────────────────────────────
   // Lives here, not in a shell: linking a contact to the person you're naming is
@@ -169,7 +171,7 @@ const LbEntryForm = ({
       return;
     }
     setFormErr(null);
-    onSubmit({
+    submit(() => onSubmit({
       person: person.trim(),
       amount: n,
       date: date.toISOString(),
@@ -178,7 +180,7 @@ const LbEntryForm = ({
       phone: phone.trim() || null,
       kind,
       alreadySettled,
-    });
+    }));
     // Clear for the next entry. The form owns its fields, so this has to happen
     // here: the inline panel shell stays mounted after a commit and would otherwise
     // keep the last entry on screen. (The sheet shell unmounts, so it's moot there.)
@@ -192,7 +194,7 @@ const LbEntryForm = ({
       setPhone('');
       setContactId(null);
     }
-  }, [person, amount, date, note, contactId, phone, kind, alreadySettled, onSubmit, locked]);
+  }, [person, amount, date, note, contactId, phone, kind, alreadySettled, onSubmit, locked, submit]);
 
   // Heading + chip reflect the resulting category when "already settled" is on:
   // lent → Lent Settled, borrowed → Borrow Repaid.
@@ -336,6 +338,7 @@ const LbEntryForm = ({
       <GradientButton
         title={submitLabel}
         onPress={handleSubmit}
+        loading={submitting}
         colors={submitColors}
         style={{ marginTop: spacing.sm }}
       />

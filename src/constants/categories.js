@@ -11,7 +11,7 @@ export const DEFAULT_CATEGORIES = [
   { id: 'food',          name: 'Food & Dining',  color: '#FF5A1F', emoji: '🍔' },
   { id: 'travel',        name: 'Travel & Cabs',  color: '#3B82F6', emoji: '🚕' },
   { id: 'fuel',          name: 'Fuel',           color: '#F97316', emoji: '⛽' },
-  { id: 'bills',         name: 'Bills & Utilities',color: '#8B5CF6', emoji: '💡' },
+  { id: 'bills',         name: 'Bills & Utility',color: '#8B5CF6', emoji: '💡' },
   { id: 'shopping',      name: 'Shopping',       color: '#EC4899', emoji: '🛍️' },
   { id: 'groceries',     name: 'Groceries',      color: '#10B981', emoji: '🥦' },
   { id: 'entertainment', name: 'Entertainment',  color: '#F59E0B', emoji: '🎬' },

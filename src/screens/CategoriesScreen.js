@@ -22,6 +22,7 @@ import { useToast } from '../components/Toast';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
 import SectionHeader from '../components/SectionHeader';
 import PlainScreenHeader from '../components/PlainScreenHeader';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 const COLOR_PALETTE = [
   '#FF5A1F', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981',
@@ -74,6 +75,7 @@ const CategoriesScreen = ({ navigation }) => {
   const resetAll             = useEPurseStore((s) => s.resetAll);
 
   const toast = useToast();
+  const { submit, submitting } = useSubmitGuard();
   const [confirm, setConfirm]   = useState(null);
   const [expanded, setExpanded] = useState({});      // { [parentId]: bool }
   // Add form target: null | { kind:'parent' } | { kind:'child', parentId, parentLabel }
@@ -107,13 +109,15 @@ const CategoriesScreen = ({ navigation }) => {
     // Never persist a half-typed / rejected emoji — fall back to the palette default
     // so a category can't end up with a blank icon everywhere it's shown.
     const emoji = isEmojiOnly(draftEmoji) ? draftEmoji : EMOJI_PALETTE[0];
-    if (addTarget?.kind === 'parent') {
-      addCustomParent({ label: name, emoji, color: draftColor });
-    } else if (addTarget?.kind === 'child') {
-      addCustomChild(addTarget.parentId, { label: name, emoji });
-    }
-    setAddTarget(null);
-    toast.success('Category added', `"${name}" is ready to use everywhere.`);
+    submit(() => {
+      if (addTarget?.kind === 'parent') {
+        addCustomParent({ label: name, emoji, color: draftColor });
+      } else if (addTarget?.kind === 'child') {
+        addCustomChild(addTarget.parentId, { label: name, emoji });
+      }
+      setAddTarget(null);
+      toast.success('Category added', `"${name}" is ready to use everywhere.`);
+    });
   };
 
   const confirmDelete = (id, label) => {
@@ -315,11 +319,11 @@ const CategoriesScreen = ({ navigation }) => {
             )}
 
             <View style={styles.formBtns}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setAddTarget(null)} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setAddTarget(null)} activeOpacity={0.7} disabled={submitting}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
               <View style={{ flex: 1 }}>
-                <GradientButton title="Add" onPress={saveAdd} />
+                <GradientButton title="Add" onPress={saveAdd} loading={submitting} />
               </View>
             </View>
           </View>

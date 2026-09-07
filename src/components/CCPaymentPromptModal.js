@@ -15,7 +15,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity,
+  ActivityIndicator, Modal, View, Text, StyleSheet, TouchableOpacity,
   Animated, Easing, Pressable, ScrollView,
 } from 'react-native';
 
@@ -25,6 +25,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 // Short label for an account chip, e.g. "HDFC ••4521".
 const acctLabel = (a) =>
@@ -44,6 +45,7 @@ const CCPaymentPromptModal = () => {
   const [choice, setChoice] = useState('trueup');
   // Which account paid the bill (null = "Not sure" → don't book a paying-side txn).
   const [sourceId, setSourceId] = useState(null);
+  const { submit, submitting } = useSubmitGuard();
 
   // Accounts money could have been paid FROM — banks/debit/wallet/cash, not cards.
   const payFromAccounts = useMemo(
@@ -99,12 +101,12 @@ const CCPaymentPromptModal = () => {
 
   const queueCount = queue.length;
 
-  const onDismiss = dismissCCPaymentPrompt;
-  const onConfirm = () => {
+  const onDismiss = () => submit(() => dismissCCPaymentPrompt());
+  const onConfirm = () => submit(() => {
     if (choice === 'trueup')      confirmCCTrueUp(sourceId);
     else if (choice === 'settle') settleCCPayment(sourceId);
     else                          dismissCCPaymentPrompt();
-  };
+  });
 
   const confirmLabel =
     choice === 'trueup' ? 'True-up to Zero'
@@ -234,13 +236,18 @@ const CCPaymentPromptModal = () => {
 
             {/* Confirm */}
             <TouchableOpacity
-              style={[styles.primaryBtn, confirmIsMuted && styles.primaryBtnMuted]}
+              style={[styles.primaryBtn, confirmIsMuted && styles.primaryBtnMuted, submitting && styles.primaryBtnBusy]}
               onPress={onConfirm}
               activeOpacity={0.85}
+              disabled={submitting}
             >
-              <Text style={[styles.primaryBtnText, confirmIsMuted && styles.primaryBtnTextMuted]}>
-                {confirmLabel}
-              </Text>
+              {submitting
+                ? <ActivityIndicator color={confirmIsMuted ? theme.textSecondary : '#fff'} />
+                : (
+                  <Text style={[styles.primaryBtnText, confirmIsMuted && styles.primaryBtnTextMuted]}>
+                    {confirmLabel}
+                  </Text>
+                )}
             </TouchableOpacity>
           </>
         ) : (
@@ -249,8 +256,15 @@ const CCPaymentPromptModal = () => {
             <Text style={styles.body}>
               Your tracked card balance is already clear — nothing to reconcile.
             </Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={onDismiss} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>Got it</Text>
+            <TouchableOpacity
+              style={[styles.primaryBtn, submitting && styles.primaryBtnBusy]}
+              onPress={onDismiss}
+              activeOpacity={0.85}
+              disabled={submitting}
+            >
+              {submitting
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.primaryBtnText}>Got it</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -517,6 +531,7 @@ const makeStyles = (t) => {
       borderWidth: 1,
       borderColor: t.divider,
     },
+    primaryBtnBusy: { opacity: 0.85 },
     primaryBtnText: {
       color: '#FFFFFF',
       fontSize: 16,
