@@ -98,6 +98,14 @@ interface ParentRowProps {
   selectedChild?: string;
   onParentPress: () => void;
   onChildPress: (parent: ParentCat, child: ChildCat) => void;
+  /**
+   * Extra row rendered below this parent's child chips, inside the same
+   * collapsible area. A named slot rather than a special case in ParentRow
+   * itself, so ParentRow stays generic — used for 'cc_bill', which can't be a
+   * normal child chip (selecting it opens the card-reconcile sheet, not a
+   * plain category tag) but still visually belongs under Bills & Utilities.
+   */
+  extraContent?: React.ReactNode;
 }
 
 const ParentRow: React.FC<ParentRowProps> = ({
@@ -107,6 +115,7 @@ const ParentRow: React.FC<ParentRowProps> = ({
   selectedChild,
   onParentPress,
   onChildPress,
+  extraContent,
 }) => {
   const maxH = useSharedValue(0);
   const childOpacity = useSharedValue(0);
@@ -195,6 +204,7 @@ const ParentRow: React.FC<ParentRowProps> = ({
             );
           })}
         </View>
+        {extraContent}
       </Animated.View>
     </View>
   );
@@ -237,17 +247,26 @@ const CategoryPickerModal: React.FC<Props> = ({
   const categoryTree = useCategoryTree();   // built-ins + user's custom categories
   const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
 
-  // Auto-expand the active parent when the sheet opens
+  // Auto-expand the active parent when the sheet opens. cc_bill never carries a
+  // parentCategory/childCategory label (see twoTierCategories.ts's cc_bill alias
+  // comment), so it's keyed off selectedCategoryId instead — otherwise reopening
+  // the picker on an already-tagged card-bill payment would land with Bills &
+  // Utilities collapsed and its own row (further down, inside that section) out
+  // of view.
   useEffect(() => {
-    if (visible && selectedParent) {
-      const match = categoryTree.find((p) => p.label === selectedParent);
-      setExpandedParentId(match?.id ?? null);
+    if (visible) {
+      if (selectedCategoryId === 'cc_bill') {
+        setExpandedParentId('bills');
+      } else if (selectedParent) {
+        const match = categoryTree.find((p) => p.label === selectedParent);
+        setExpandedParentId(match?.id ?? null);
+      }
     }
     if (!visible) {
       const t = setTimeout(() => setExpandedParentId(null), 260);
       return () => clearTimeout(t);
     }
-  }, [visible, selectedParent]);
+  }, [visible, selectedParent, selectedCategoryId]);
 
   const handleParentPress = (parentId: string) => {
     setExpandedParentId((prev) => (prev === parentId ? null : parentId));
@@ -271,6 +290,40 @@ const CategoryPickerModal: React.FC<Props> = ({
   // list doesn't yet include cc_bill (it's injected on rehydrate, but don't depend on it).
   const ccBillCat = categories.find((c) => c.id === 'cc_bill')
     ?? { id: 'cc_bill', name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' };
+
+  // Rendered as Bills & Utilities' `extraContent` (below), not a normal tree
+  // child — picking it opens the card-reconcile sheet via onSelectCategory,
+  // never onSelectTwoTier, so it can't route through handleChildPress.
+  const ccBillRow = (
+    <TouchableOpacity
+      style={[
+        styles.ccBillRow,
+        { borderColor: theme.divider, backgroundColor: theme.card },
+        selectedCategoryId === 'cc_bill' && {
+          borderColor: theme.primary,
+          backgroundColor: theme.primary + '14',
+        },
+      ]}
+      onPress={() => onSelectCategory('cc_bill')}
+      activeOpacity={0.72}
+    >
+      <Text style={styles.rowEmoji}>{ccBillCat.emoji}</Text>
+      <View style={styles.rowMid}>
+        <Text
+          style={[
+            styles.rowLabel,
+            selectedCategoryId === 'cc_bill' && { color: theme.primary, fontWeight: '700' },
+          ]}
+        >
+          {ccBillCat.name}
+        </Text>
+        <Text style={styles.lbHint}>Paid a card bill · excluded from spend</Text>
+      </View>
+      {selectedCategoryId === 'cc_bill' && (
+        <Text style={{ color: theme.primary, fontWeight: '800' }}>✓</Text>
+      )}
+    </TouchableOpacity>
+  );
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -325,6 +378,7 @@ const CategoryPickerModal: React.FC<Props> = ({
                   selectedChild={selectedChild}
                   onParentPress={() => handleParentPress(parent.id)}
                   onChildPress={handleChildPress}
+                  extraContent={parent.id === 'bills' ? ccBillRow : undefined}
                 />
               ))}
 
@@ -373,42 +427,6 @@ const CategoryPickerModal: React.FC<Props> = ({
                       </TouchableOpacity>
                     );
                   })}
-                </View>
-              )}
-
-              {/* Credit-card bill payment — opens the card-picker + reconcile sheet. */}
-              {ccBillCat && (
-                <View style={styles.settlementSection}>
-                  <Text style={styles.settlementSectionLabel}>CARD</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.parentRow,
-                      styles.settlementRow,
-                      selectedCategoryId === 'cc_bill' && {
-                        borderWidth: 1.5,
-                        borderColor: theme.primary + '66',
-                        backgroundColor: theme.primary + '10',
-                      },
-                    ]}
-                    onPress={() => onSelectCategory('cc_bill')}
-                    activeOpacity={0.72}
-                  >
-                    <Text style={styles.rowEmoji}>{ccBillCat.emoji}</Text>
-                    <View style={styles.rowMid}>
-                      <Text
-                        style={[
-                          styles.rowLabel,
-                          selectedCategoryId === 'cc_bill' && { color: theme.primary, fontWeight: '700' },
-                        ]}
-                      >
-                        {ccBillCat.name}
-                      </Text>
-                      <Text style={styles.lbHint}>Paid a card bill · excluded from spend</Text>
-                    </View>
-                    {selectedCategoryId === 'cc_bill' && (
-                      <Text style={{ color: theme.primary, fontWeight: '800' }}>✓</Text>
-                    )}
-                  </TouchableOpacity>
                 </View>
               )}
             </ScrollView>
@@ -654,6 +672,24 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   chipLabelActive: { color: '#FFFFFF' },
+
+  // Credit-card bill row — sits inside Bills & Utilities' collapsible area,
+  // below its child chips (not a chip itself: selecting it opens the
+  // card-reconcile sheet, so it keeps the fuller row layout + hint text).
+  // Colour comes from theme (applied inline at the call site) — this static
+  // sheet only carries layout, per the dark-mode ratchet: new code must use
+  // useTheme(), not add fresh static-colors references to the frozen StyleSheet.
+  ccBillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+  },
 
   // ── Settlement section ─────────────────────────────────────────────────────
   settlementSection: { marginTop: spacing.sm },

@@ -350,9 +350,29 @@ const CC_BILL_HARD_CONFIRMATION_REGEX =
 const COMPLETED_TRANSACTION_REGEX =
   /\b(?:has\s+been|was|have\s+been)\s+(?:debited|credited|transferred|deposited|refunded|disbursed|processed)\b/i;
 
-// Pull the card last-4 from a CC reminder body.
-const CC_CARD_LAST4_REGEX =
-  /\bcredit\s+card\b[^0-9]{0,30}(\d{4})\b|\bcard\s+(?:ending|no\.?)?\s*[xX*•·]*(\d{4})\b/i;
+// Pull the card last-4 from a CC message body (reminder OR payment notification —
+// both are answering the exact same question, "which card"). Tolerant of:
+//   • filler words between the keyword and the number ("ending WITH 2170",
+//     "Card Account 4xxx7004") — the old `[^0-9]{0,30}` gap already handled a plain
+//     word or two after "credit card", but the sibling regex ONE payment path used
+//     (a plain a/c-style mask regex requiring the mask chars to sit immediately
+//     before the digits) did not, and silently returned no mask on real HDFC/ICICI
+//     phrasing;
+//   • mask glyphs INTERLEAVED inside the digit run itself ("4xxx7004" — a leading
+//     digit exposed, middle masked, real last-4 at the end) — captured as one token
+//     and reduced to its digits so the trailing 4 are picked regardless of how much
+//     of the number the bank chose to show.
+// Always resolves to the LAST 4 real digits found in the matched token — that is
+// always the identifying last-4 no matter which convention the bank used.
+const CARD_TOKEN_NEAR_KEYWORD_REGEX =
+  /\b(?:credit\s+card|debit\s+card|card|a\/c|acct?|account)\b[^0-9]{0,30}([0-9][0-9xX*•·]{2,19})\b/i;
+
+const extractCardLast4 = (text) => {
+  const m = text.match(CARD_TOKEN_NEAR_KEYWORD_REGEX);
+  if (!m) return null;
+  const digits = m[1].replace(/[^0-9]/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : null;
+};
 
 // Pull the "pay by <date>" date string from a CC reminder body.
 // The separator is `\s*:?\s*-?\s*`, not `\s+`: banks write "Payment due date:
@@ -853,11 +873,16 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // Exclude card payment acknowledgement SMSes. The actual outgoing spend is
   // already captured from the source account debit message.
   // We still extract amount + mask so the store can credit the CC account balance.
+  // Mask via extractCardLast4 (NOT the generic ACCOUNT_REGEX) — that generic regex
+  // requires the mask chars to sit immediately before the digits with no filler
+  // word, so it silently returned null on real phrasing like "CREDIT CARD ENDING
+  // WITH 2170" or "Credit Card Account 4xxx7004". A null mask here isn't a missed
+  // notification (the SMS is still correctly intercepted) — it makes the STORE
+  // fall back to matching a credit-card account by type alone, so a payment can
+  // silently land on the wrong card when the user holds more than one.
   if (CC_PAYMENT_NOTIFICATION_REGEX.test(text)) {
-    const amtMatch  = text.match(AMOUNT_REGEX);
-    const paidAmt   = toNumber(amtMatch?.[1] || amtMatch?.[2]);
-    const acctMatch = text.match(ACCOUNT_REGEX);
-    const rawMask   = acctMatch?.[1]?.replace(/[x*·•]/gi, '') || null;
+    const amtMatch = text.match(AMOUNT_REGEX);
+    const paidAmt  = toNumber(amtMatch?.[1] || amtMatch?.[2]);
     return {
       ok: false,
       error: {
@@ -866,7 +891,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
           'Credit-card payment acknowledgement detected (notification only), so it was skipped.',
       },
       ccPayment: paidAmt > 0
-        ? { amount: paidAmt, accountMask: rawMask ? rawMask.slice(-4) : null, bankName: getBankName(opts.sender) }
+        ? { amount: paidAmt, accountMask: extractCardLast4(text), bankName: getBankName(opts.sender) }
         : null,
     };
   }
@@ -886,8 +911,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
   ) {
     const amtMatch  = text.match(AMOUNT_REGEX);
     const dueAmt    = toNumber(amtMatch?.[1] || amtMatch?.[2]);
-    const cardMatch = text.match(CC_CARD_LAST4_REGEX);
-    const cardLast4 = cardMatch?.[1] || cardMatch?.[2] || null;
+    const cardLast4 = extractCardLast4(text);
     const dateMatch = text.match(CC_DUE_DATE_REGEX);
     const dueDate   = dateMatch?.[1] || null;
     const stmtMatch = text.match(CC_STATEMENT_DATE_REGEX);

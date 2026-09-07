@@ -5,7 +5,7 @@
 // breakdown, spending pace, budget actuals and the Activity totals. Distinct from
 // Ignore (drop a single wrong transaction) and Private (hide it): this is a
 // standing rule about a whole category, and the transactions stay fully visible —
-// they just carry a NOT COUNTED tag instead of adding to your spend.
+// they just carry an EXCLUDED tag instead of adding to your spend.
 //
 // Two decisions worth keeping:
 //
@@ -66,7 +66,7 @@ const SpendRulesScreen = ({ navigation }) => {
           <Text style={styles.hint}>
             Turn a category off and its transactions stop adding to Spent, your category
             breakdown and budget — they stay in your list, tagged{' '}
-            <Text style={styles.hintStrong}>NOT COUNTED</Text>.
+            <Text style={styles.hintStrong}>EXCLUDED</Text>.
           </Text>
 
           <View style={[styles.noteRow, { backgroundColor: theme.primary + '0F', borderColor: theme.primary + '33' }]}>
@@ -88,7 +88,7 @@ const SpendRulesScreen = ({ navigation }) => {
                     style={[styles.rowState, !counted && { color: colors.warning }]}
                     numberOfLines={1}
                   >
-                    {counted ? 'Counted in expenses' : 'Not counted'}
+                    {counted ? 'Included in expenses' : 'Excluded'}
                   </Text>
                 </View>
                 <Switch
@@ -107,7 +107,7 @@ const SpendRulesScreen = ({ navigation }) => {
         <View style={styles.card}>
           <SectionHeader
             icon="lock-closed-outline"
-            title="Never counted"
+            title="Always excluded"
             subtitle="These move money between places rather than spending it, so they're excluded everywhere and can't be switched on."
           />
           {rows.filter((r) => r.fixed).map((p, i) => (

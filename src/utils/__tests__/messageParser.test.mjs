@@ -68,7 +68,7 @@ const ORIGINAL = [
     name: 'ICICI CC payment received (notification)',
     sender: 'ICICIB',
     sms: 'Thank you! Payment of ₹16,748.65 received towards ICICI Bank Credit Card xx5004 on 06-Jun-26 via UPI. Ref No: 615729301.',
-    expect: { accept: false, code: 'credit_card_payment_notification' },
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: '5004' },
   },
   {
     name: 'HDFC loan EMI scheduled for auto-debit (future)',
@@ -125,10 +125,13 @@ const ORIGINAL = [
     expect: { accept: false, code: 'promotional_offer' },
   },
   {
-    name: 'ICICI CC payment received (uppercase variant)',
+    // Partial-mask convention (leading digit exposed, middle masked, real
+    // last-4 at the end) — the generic account-mask regex required the mask
+    // glyphs to sit BEFORE the digit run, so this returned null.
+    name: 'ICICI CC payment received (uppercase variant, partial mask)',
     sender: 'ICICIB',
     sms: 'Pnt Radhe: Dear Customer, Payment of INR 7,844.00 has been received on your ICICI Bank Credit Card Account 4xxx7004 on 27-MAY-26.Thank you.',
-    expect: { accept: false, code: 'credit_card_payment_notification' },
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: '7004' },
   },
 ];
 
@@ -327,10 +330,14 @@ const REAL_WORLD = [
     expect: { accept: true, type: 'debit', accountType: 'Bank', amount: 690, accountMask: '9532', merchant: 'GULAFSHA D' },
   },
   {
-    name: 'HDFC CC payment received (uppercase)',
+    // "ENDING WITH" — the generic account-mask regex only tolerated a bare
+    // "ending" before the digits, not "ending WITH", so this returned null
+    // and the store fell back to guessing a Credit Card account by type
+    // alone. The real bug the user reported: wrong card shown as paid.
+    name: 'HDFC CC payment received (uppercase, "ENDING WITH")',
     sender: 'HDFCBK',
     sms: 'DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 3348.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 2170 ON 9-5-2026.YOUR AVAILABLE LIMIT IS RS. 249999.76',
-    expect: { accept: false, code: 'credit_card_payment_notification' },
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: '2170' },
   },
   {
     name: 'SBI credit leg — counterparty name + transfer ref surfaced for self-detection',
@@ -1115,7 +1122,7 @@ const CASHBACK_RRN_JUL26 = [
   { name: 'SBI CC payment received (no "has been") → cc payment, not income',
     sender: 'SBICRD',
     sms: 'Payment of Rs.12000 received on your SBI Credit Card XX1234. Thank you.',
-    expect: { accept: false, code: 'credit_card_payment_notification' } },
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: '1234' } },
   // "Instant Discount" offer — must reject (was booked as a ₹9000 debit).
   { name: 'SBI "Get up to Rs.9000 Instant Discount" offer → rejected',
     sender: 'SBICRD',
@@ -1553,11 +1560,11 @@ const CC_DUE_DATE_AUG26 = [
   { name: 'SBI: "Payment due date: 07-Jun-26" (colon — the regression)',
     sender: 'SBICRD',
     sms: 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-May-26 is ₹16,748.65. Min Amount Due: ₹837.00. Payment due date: 07-Jun-26.',
-    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65, ccStatementDate: '20-May-26' } },
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65, ccStatementDate: '20-May-26', ccDueCardLast4: '1234' } },
   { name: 'Statement cycle date — "statement dated <date>" phrasing',
     sender: 'HDFCBK',
     sms: 'Your HDFC Bank Credit Card ending 9876 statement dated 05-Sep-26 is ready. Total Amount Due Rs.12,400.00. Due date: 25-Sep-26.',
-    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '25-Sep-26', ccStatementDate: '05-Sep-26' } },
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '25-Sep-26', ccStatementDate: '05-Sep-26', ccDueCardLast4: '9876' } },
   { name: 'Statement cycle date — "statement generated on <date>" phrasing',
     sender: 'ICICIB',
     sms: 'Your ICICI Bank Credit Card XX5004 statement generated on 06-Sep-26. Total Amount Due Rs.8,120.00. Payment due date : 26-Sep-26.',
@@ -1590,6 +1597,42 @@ const CC_DUE_DATE_AUG26 = [
     expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: null } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUITE — "which card" mask extraction for CC payment/reminder messages
+// (Sep-26). The payment-notification interception and the bill-reminder
+// interception both need to answer "which card" — extractCardLast4 now
+// answers it for both, replacing the generic account-mask regex the payment
+// path used to use (which required the mask glyphs to sit immediately before
+// the digits, with no filler word between the keyword and the number).
+//
+// Real-world root cause: with a null mask, the STORE fell back to matching a
+// Credit Card account by TYPE ALONE (array/id order) — so a maskless payment
+// notification could silently credit the wrong card whenever the user held
+// more than one. These pin the exact phrasings that used to return null.
+// ─────────────────────────────────────────────────────────────────────────────
+const CC_CARD_MASK_SEP26 = [
+  { name: 'Payment: "ending WITH" filler between keyword and digits',
+    sender: 'HDFCBK',
+    sms: 'Payment of Rs.5,500.00 received towards your HDFC Bank Credit Card ending with 3344 on 07-Sep-26.',
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: '3344' } },
+  { name: 'Payment: "Card no. XX4567" (standard, regression guard)',
+    sender: 'AXISBK',
+    sms: 'Payment of Rs.2,000.00 received towards your Axis Bank Credit Card no. XX4567 on 07-Sep-26. Thank you.',
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: '4567' } },
+  { name: 'Payment: no card number anywhere in the body → mask stays null (no false guess)',
+    sender: 'HDFCBK',
+    sms: 'Payment of Rs.5,000.00 received towards your HDFC Bank Credit Card on 07-Sep-26. Thank you for your prompt payment.',
+    expect: { accept: false, code: 'credit_card_payment_notification', ccPaymentMask: null } },
+  { name: 'Reminder: "ending WITH" filler (same gap, reminder side)',
+    sender: 'HDFCBK',
+    sms: 'Total Amount Due on your HDFC Bank Credit Card ending with 3344 is Rs.9,800.00. Payment due date: 20-Sep-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueCardLast4: '3344' } },
+  { name: 'Reminder: partial mask "Card A/c 4xxx7004" shape',
+    sender: 'ICICIB',
+    sms: 'Total Amount Due on your ICICI Bank Credit Card Account 4xxx7004 is Rs.6,300.00. Payment due date: 22-Sep-26.',
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueCardLast4: '7004' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1615,6 +1658,7 @@ const SUITES = [
   ['Credit direction & spaced-period merchant (Aug-26)', CREDIT_DIRECTION_AUG26],
   ['50-msg sweep: fees/reversals/rails/decoys (Aug-26)', AUG26_SWEEP],
   ['CC bill DUE DATE extraction (Aug-26)', CC_DUE_DATE_AUG26],
+  ['CC card mask extraction (Sep-26)', CC_CARD_MASK_SEP26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1662,6 +1706,16 @@ function checkCase({ sender, sms, expect }) {
       cmp('ccDue.amount', r.ccDue?.amount ?? null, expect.ccDueAmount);
     if (expect.ccStatementDate !== undefined)
       cmp('ccDue.statementDate', r.ccDue?.statementDate ?? null, expect.ccStatementDate);
+    // "Which card" — was silently NEVER asserted despite the fields existing since
+    // whenever these interceptions were built. Real gap: the payment-notification
+    // path used a stricter mask regex than the reminder path and returned null on
+    // common real phrasing ("...ENDING WITH 2170", "...Account 4xxx7004"), which the
+    // store then silently papered over by guessing a Credit Card account by TYPE
+    // ALONE — landing on the wrong card whenever the user holds more than one.
+    if (expect.ccDueCardLast4 !== undefined)
+      cmp('ccDue.cardLast4', r.ccDue?.cardLast4 ?? null, expect.ccDueCardLast4);
+    if (expect.ccPaymentMask !== undefined)
+      cmp('ccPayment.accountMask', r.ccPayment?.accountMask ?? null, expect.ccPaymentMask);
   }
   return fails;
 }

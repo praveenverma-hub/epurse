@@ -166,8 +166,8 @@ const SettingsScreen = ({ navigation }) => {
               hint={
                 route === 'SpendRules'
                   ? (excludedCount > 0
-                      ? `${excludedCount} categor${excludedCount === 1 ? 'y' : 'ies'} not counted`
-                      : 'All categories counted')
+                      ? `${excludedCount} categor${excludedCount === 1 ? 'y' : 'ies'} excluded`
+                      : 'All categories included')
                   : hint
               }
               hintTone={route === 'SpendRules' && excludedCount > 0 ? 'warn' : 'default'}

@@ -87,7 +87,7 @@ const G = {
 };
 const addCat = (catId, amt) => { G.categoryBreakdown[catId] = round2((G.categoryBreakdown[catId] || 0) + amt); };
 const addPerson = (name, amt) => { G.personNet[name] = round2((G.personNet[name] || 0) + amt); };
-const PARENT_OF = { food: 'food', groceries: 'food', travel: 'travel', shopping: 'shopping' }; // the 3 budgeted lines; entertainment/bills/health/education/other/repayment are left unbudgeted on purpose
+const PARENT_OF = { food: 'food', groceries: 'food', travel: 'travel', shopping: 'shopping' }; // the 3 budgeted lines; entertainment/bills/health/education/other/borrow_repaid are left unbudgeted on purpose
 
 phase('Setup — 3 accounts');
 
@@ -251,7 +251,7 @@ addPerson('Ankit', -180); // nets to 0 in G too
 const divyaKey = () => useStore.getState().getPersonBalances().find((p) => p.person === 'Divya')?.personKey;
 useStore.getState().settlePersonBalance(divyaKey(), { accountId: 'cash1' }); // I repay her from Cash
 G.balance.cash -= 450;
-G.spend += 450; addCat('repayment', 450); // 'repayment' is countable (Transfers, not NON_SPEND) — no budget line
+G.spend += 450; addCat('borrow_repaid', 450); // Sep-2026: repaying a debt counts as spend (borrow_repaid ∉ NON_SPEND) — no budget line
 addPerson('Divya', 450); // nets to 0
 
 phase('Groups: 1 excluded personal group, 1 shared group with 2 expenses');
@@ -347,7 +347,7 @@ const expectedTotalCap = 5000 + 1000 + 4000;
 check(`total budget cap is the derived sum (₹${expectedTotalCap})`, usage?.total?.cap === expectedTotalCap, `got ${usage?.total?.cap}`);
 const expectedTotalActual = round2(G.budgetActual.food + G.budgetActual.travel + G.budgetActual.shopping);
 check(`total budget actual = ₹${expectedTotalActual}`, close(usage?.total?.actual, expectedTotalActual), `got ${usage?.total?.actual}`);
-// unbudgeted = allExpense - totalActual (entertainment + bills + groceries + health + education + repayment + cash misc, minus excluded/refund/etc — cross-checked as a residual rather than re-summing by hand)
+// unbudgeted = allExpense - totalActual (entertainment + bills + groceries + health + education + borrow_repaid + cash misc, minus excluded/refund/etc — cross-checked as a residual rather than re-summing by hand)
 const expectedUnbudgeted = round2(Math.max(0, G.spend - expectedTotalActual));
 check(`unbudgeted bucket = ₹${expectedUnbudgeted} (spend outside the 3 capped categories)`,
   close(usage?.unbudgeted, expectedUnbudgeted), `got ${usage?.unbudgeted}`);

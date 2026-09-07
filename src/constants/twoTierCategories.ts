@@ -134,7 +134,6 @@ export const PARENT_CATEGORIES: ParentCat[] = [
       { id: 'self',      label: 'Self',         emoji: '🔄', legacyId: 'self' },
       { id: 'lent',      label: 'Lent',         emoji: '🤝', legacyId: 'lent' },
       { id: 'borrowed',  label: 'Borrowed',     emoji: '🧾', legacyId: 'borrowed' },
-      { id: 'repayment', label: 'Repayment',    emoji: '💸', legacyId: 'repayment' },
     ],
   },
   {
@@ -226,7 +225,13 @@ export const buildLegacyMaps = (tree: ParentCat[]): CategoryMaps => {
   Object.assign(legacyToParentId, {
     lent_settled:  'transfers',
     borrow_repaid: 'transfers',
-    cc_bill:       'transfers',
+    // A credit-card bill payment is a bill, not a money-movement transfer — it
+    // just happens to be rendered via its own "CARD" section in the picker
+    // (like the settlement rows above) rather than as a normal tree child,
+    // because selecting it opens the card-reconcile sheet instead of simply
+    // tagging a category. See CategoryPickerModal's dedicated CARD section,
+    // rendered directly under the Bills & Utilities row for the same reason.
+    cc_bill:       'bills',
     other:         'other',
   });
   return { parentLabelToId, parentLabelToLegacy, childLabelToLegacy, legacyToParentId };

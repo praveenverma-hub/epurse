@@ -137,7 +137,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, myName }: TxnDeta
   if (txn.isSplitMemo) badges.push({ label: 'MEMO', bg: `${colors.textMuted}26`, color: colors.textSecondary });
   // Earns its place here (§3e): nothing else in this sheet says the amount is excluded
   // from spend, and this is exactly where someone checks "why isn't this counted?".
-  if (notCounted) badges.push({ label: 'NOT COUNTED', bg: `${colors.warning}1F`, color: colors.warning });
+  if (notCounted) badges.push({ label: 'EXCLUDED', bg: `${colors.warning}1F`, color: colors.warning });
 
   const accountLabel = [txn.bankName || txn.accountType, txn.accountMask ? `··${txn.accountMask}` : null]
     .filter(Boolean)

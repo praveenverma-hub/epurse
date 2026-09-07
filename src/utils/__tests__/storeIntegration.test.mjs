@@ -2169,6 +2169,58 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('running it twice is a no-op', twice.themeId === 'carbon', `${twice.themeId}`);
 }
 
+// ── v27: 'repayment' category MERGED into 'borrow_repaid' (Sep-2026) ────────
+// User request: "remove repayment globally, we already have lent settled and
+// borrow repaid" — but repayment wasn't a pure duplicate: it was the only
+// SPEND-counting category the settle-with-account flow used, while
+// borrow_repaid was blanket non-spend. Real fix: borrow_repaid stops being
+// blanket non-spend (paying off a debt is a real expense — see the comment
+// on NON_SPEND_CATEGORY_IDS in constants/categories.js), and `repayment` is
+// deleted. Existing persisted transactions must be rewritten, not orphaned.
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const { NON_SPEND_CATEGORY_IDS } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+
+  check('borrow_repaid is no longer blanket non-spend',
+    !NON_SPEND_CATEGORY_IDS.has('borrow_repaid'));
+  check('lent_settled stays non-spend (your own money coming back, not income)',
+    NON_SPEND_CATEGORY_IDS.has('lent_settled'));
+
+  const legacy = {
+    transactions: [
+      { id: 'r1', amount: 450, type: 'debit', categoryId: 'repayment',
+        parentCategory: 'Transfers', childCategory: 'Repayment', accountId: 'acc1' },
+      { id: 'r2', amount: 100, type: 'debit', categoryId: 'food' },
+    ],
+    categories: [
+      { id: 'repayment', name: 'Repayment', color: '#6B7280', emoji: '💸' },
+      { id: 'food', name: 'Food', color: '#f00', emoji: '🍔' },
+    ],
+  };
+  const migrated = migrate(legacy, 26);
+  const r1 = migrated.transactions.find((t) => t.id === 'r1');
+  const r2 = migrated.transactions.find((t) => t.id === 'r2');
+
+  check('an old repayment transaction is retagged to borrow_repaid',
+    r1.categoryId === 'borrow_repaid', r1.categoryId);
+  check('…and loses its stale two-tier labels (borrow_repaid is an alias, not a tree child)',
+    r1.parentCategory === undefined && r1.childCategory === undefined,
+    `${r1.parentCategory}/${r1.childCategory}`);
+  check('…other fields (account, amount) are untouched',
+    r1.accountId === 'acc1' && r1.amount === 450);
+  check('an unrelated transaction is left completely alone',
+    r2.categoryId === 'food' && r2.parentCategory === undefined);
+  check('the stale repayment category entry is dropped from the categories list',
+    !migrated.categories.some((c) => c.id === 'repayment'));
+  check('…other categories survive',
+    migrated.categories.some((c) => c.id === 'food'));
+
+  // Idempotent: a store already at 27 must not be touched again.
+  const twice = migrate(migrate(legacy, 26), 27);
+  check('running it twice is a no-op', twice.transactions.find((t) => t.id === 'r1').categoryId === 'borrow_repaid');
+}
+
 // ── The Zero-Transaction bonus must not fire on a day you SPENT ──────────────
 // Reported: "I made some transactions the previous day, didn't review them, and
 // today saw 'no expense yesterday' and the bonus was given."

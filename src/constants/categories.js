@@ -11,7 +11,7 @@ export const DEFAULT_CATEGORIES = [
   { id: 'food',          name: 'Food & Dining',  color: '#FF5A1F', emoji: '🍔' },
   { id: 'travel',        name: 'Travel & Cabs',  color: '#3B82F6', emoji: '🚕' },
   { id: 'fuel',          name: 'Fuel',           color: '#F97316', emoji: '⛽' },
-  { id: 'bills',         name: 'Bills & Utility',color: '#8B5CF6', emoji: '💡' },
+  { id: 'bills',         name: 'Bills & Utilities',color: '#8B5CF6', emoji: '💡' },
   { id: 'shopping',      name: 'Shopping',       color: '#EC4899', emoji: '🛍️' },
   { id: 'groceries',     name: 'Groceries',      color: '#10B981', emoji: '🥦' },
   { id: 'entertainment', name: 'Entertainment',  color: '#F59E0B', emoji: '🎬' },
@@ -24,15 +24,18 @@ export const DEFAULT_CATEGORIES = [
   { id: 'lent',          name: 'You Lent',       color: '#10B981', emoji: '🤝' },
   { id: 'borrowed',      name: 'You Borrowed',   color: '#8B5CF6', emoji: '🧾' },
   { id: 'lent_settled',  name: 'Lent Settled',   color: '#14B8A6', emoji: '✅' },
+  // Repaying a debt — money leaving an account for good, whether from an SMS
+  // ("loan repaid"), a manual re-tag, or a chosen-account borrow settle. THIS
+  // IS SPEND (see NON_SPEND_CATEGORY_IDS below) — unlike lent_settled, which is
+  // your OWN money coming back and is never income. A ledger-only "mark repaid,
+  // no expense" settle never creates a transaction at all, so it never reaches
+  // this category — there is no non-spend case of a `borrow_repaid` row that
+  // actually exists in `transactions`.
   { id: 'borrow_repaid', name: 'Borrow Repaid',  color: '#6366F1', emoji: '💳' },
   // Credit-card bill payment — money leaving a bank account to clear a card's dues.
   // A liability settlement, NOT spend (the card purchases were already counted), so
   // it lives in NON_SPEND_CATS and is excluded from all totals.
   { id: 'cc_bill',       name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' },
-  // Repaying money you borrowed. Unlike the borrow_repaid ledger marker, this IS a
-  // real expense (the money leaves an account now, and the original purchase was
-  // usually never logged) — so it is NOT in NON_SPEND_CATEGORY_IDS and counts as spend.
-  { id: 'repayment',     name: 'Repayment',      color: '#6B7280', emoji: '💸' },
   { id: 'other',         name: 'Other',          color: '#9CA3AF', emoji: '📌' },
 ];
 
@@ -42,16 +45,25 @@ export const DEFAULT_CATEGORIES = [
  * merchant bubbles, subscriptions, budgets). Balances still track these; only
  * the "how much did I spend/earn" view ignores them.
  *
- *  - lent / borrowed / lent_settled / borrow_repaid → the lend-borrow ledger
+ *  - lent / borrowed → active outstanding debts, not yet resolved either way
+ *  - lent_settled → getting your OWN money back is not new income
  *  - self → transfers between the user's own accounts
  *  - cc_bill → paying off a credit-card bill (the card purchases were already counted)
+ *
+ * `borrow_repaid` is DELIBERATELY NOT here (Sep-2026) — paying off a debt is a
+ * real, final expense (the original purchase it funded usually was never
+ * logged anywhere else), so it counts as spend like any other debit. This
+ * replaced a separate `repayment` category that existed only to carry that
+ * distinction for one entry point (settling with a chosen account) — merged
+ * away since `borrow_repaid` never has a non-spend case that's actually a
+ * transaction (see the comment on it above).
  *
  * SINGLE SOURCE OF TRUTH. The store re-exports this as NON_SPEND_CATS and the
  * analytics selectors import it directly — do not fork a second copy. Add a new
  * non-spend category here and every exclusion site picks it up.
  */
 export const NON_SPEND_CATEGORY_IDS = new Set([
-  'lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill',
+  'lent', 'borrowed', 'lent_settled', 'self', 'cc_bill',
 ]);
 
 /**

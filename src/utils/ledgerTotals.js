@@ -28,7 +28,7 @@ import {
   debitDisplayAmount, isGroupExcluded, isMemoTxn, isRefundCredit, spendContribution,
 } from './split';
 
-/** Plain-English reason for the footer's "not counted" line. */
+/** Plain-English reason for the footer's "excluded" line. */
 export const NON_SPEND_LABEL = {
   self:          'self-transfers',
   lent:          'lent',
@@ -59,7 +59,7 @@ export function computeLedgerTotals(txns, groups, spendExcluded) {
     const nonSpend = NON_SPEND_CATEGORY_IDS.has(t.categoryId);
     if (nonSpend || spendExcluded?.(t, groups)) {
       excluded += debitDisplayAmount(t);   // returns the full amount for credits
-      // Name the actual reason. A bare "not counted" is no explanation at all —
+      // Name the actual reason. A bare "excluded" is no explanation at all —
       // and this string is printed in an exported statement, where the reader may
       // not have the app in front of them.
       reasons.add(

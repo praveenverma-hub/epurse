@@ -87,7 +87,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
 const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
 const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
-const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill', 'repayment'];
+const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill'];
 
 /** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
@@ -448,8 +448,13 @@ const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
 };
 
 /**
- * Book a real "Repayment" EXPENSE for settling a borrow: a `repayment` debit on the
- * chosen account (reduces its balance, counts as spend — repayment ∉ NON_SPEND).
+ * Book a real "Borrow Repaid" EXPENSE for settling a borrow: a `borrow_repaid`
+ * debit on the chosen account (reduces its balance, counts as spend —
+ * borrow_repaid ∉ NON_SPEND, same as any other real debit; see the comment on
+ * it in constants/categories.js). No parentCategory/childCategory: borrow_repaid
+ * is an ALIAS in the two-tier tree (like cc_bill/lent_settled), not a real tree
+ * child, so it carries no two-tier label — matches how updateTransactionCategoryWithContact
+ * tags a settlement re-tag.
  * Returns { accounts, transactions, txnId } or null if no/invalid account.
  */
 const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) => {
@@ -461,9 +466,7 @@ const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) => {
     id: txnId,
     amount,
     type: TRANSACTION_TYPES.DEBIT,
-    categoryId: 'repayment',
-    parentCategory: 'Transfers',
-    childCategory: 'Repayment',
+    categoryId: 'borrow_repaid',
     accountId,
     accountType: acct.type,
     accountMask: acct.mask || null,
@@ -4613,7 +4616,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 26,
+      version: 27,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -5134,6 +5137,28 @@ export const useEPurseStore = create(
           if (state.themeId === 'amber') {
             state = { ...state, themeId: 'carbon' };
           }
+        }
+
+        // v27: the `repayment` category is GONE — merged into `borrow_repaid`,
+        // which is no longer blanket non-spend (see the comment on it in
+        // constants/categories.js: paying off a debt is a real expense, the
+        // same conclusion `repayment` existed to carry for just one entry
+        // point). Existing persisted transactions still tagged `repayment`
+        // are rewritten so they don't silently vanish from the category list
+        // (no id/name/color lookup would resolve for them otherwise) — and
+        // their stale two-tier labels are cleared, since `borrow_repaid` is
+        // an ALIAS in the tree (like cc_bill/lent_settled), not a real child,
+        // so it never carries a childCategory label.
+        if (version < 27) {
+          state = {
+            ...state,
+            transactions: (state.transactions || []).map((t) =>
+              t.categoryId === 'repayment'
+                ? { ...t, categoryId: 'borrow_repaid', parentCategory: undefined, childCategory: undefined }
+                : t
+            ),
+            categories: (state.categories || []).filter((c) => c.id !== 'repayment'),
+          };
         }
 
         return state;

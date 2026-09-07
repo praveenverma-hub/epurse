@@ -16,6 +16,9 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Non-spend single source (`NON_SPEND_CATEGORY_IDS`) — lent/borrowed/self/cc_bill excluded
   from every total consistently.
 - Spend rules (Aug-2026): user picks which parent categories count as expenses at all.
+  **Sep-7-2026: the "NOT COUNTED" tag renamed to "EXCLUDED"** everywhere it appears (Spend
+  Rules screen, transaction badges, Settings summary, Activity filter/footer) — flagged as
+  unprofessional wording for a finance app. Display strings only, no logic touched.
 - Account match fix: one shared `utils/accountMatch.js` for "which account", scored
   matching for same-last-4 cards across banks.
 - Parser sweep (Aug-2026, 50-msg audit): fixed reversal-credit rejection, bare "returned"
@@ -63,6 +66,27 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   user choice. Trusts even a single real data point (a bank's cycle day essentially
   never changes), but a newer SMS reporting a different day always overwrites freely —
   never locked in. Fires at most once per card per calendar month.
+
+- **Sep-7-2026: CC-payment "which card" bug fixed — was showing the WRONG card.** User report:
+  "the card bill paid for shown in modal is wrong, are we not fetching the card number from
+  msg." Confirmed true for common real phrasing: the payment-notification interceptor used a
+  generic account-mask regex that silently returned `null` on "...CREDIT CARD ENDING WITH
+  2170..." and partial-mask formats like "...Credit Card Account 4xxx7004..." — never asserted
+  by any test. With no mask, the store fell back to guessing a Credit Card account by TYPE
+  ALONE (array/id order, ignoring bank name), so `CCPaymentPromptModal` could show — and
+  True-up/Settle could mutate — the wrong card whenever the user held more than one. Fixed with
+  a new shared `extractCardLast4` (used by both the payment and bill-reminder interceptors) plus
+  a bank-aware fallback in `accountMatch.js`'s no-mask branch. New suites: `CC card mask
+  extraction (Sep-26)` in `messageParser.test.mjs`, and `src/utils/__tests__/accountMatch.test.mjs`
+  (`npm run test:accountMatch`, the module's first dedicated suite). Both mutation-verified.
+- **Sep-7-2026: `cc_bill` category re-homed from Transfers to Bills & Utilities.** Was aliased
+  to the `transfers` parent in the two-tier tree (grouped with settlement rows) purely because
+  nobody had revisited it since; re-aliased to `bills`. No effect on spend totals (`cc_bill`
+  stays in `NON_SPEND_CATEGORY_IDS` regardless). The category picker's "Credit Card Bill" row
+  also moved — it used to render at the very bottom of the sheet after Settlements; now renders
+  inside the Bills & Utilities section itself, right below its child chips, via a new named
+  `extraContent` slot on `ParentRow`. Fixed an adjacent label typo too (`categories.js`'s flat
+  list said "Bills & Utility", the tree said "Bills & Utilities").
 
 **Open / known gaps** (tracked in `.claude/skills/transaction-parser/SKILL.md`)
 - **FD create/maturity still books as investment debit/credit, not self-transfer** — this
@@ -150,13 +174,25 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   from totals, contact/phone linking, per-person net balance.
 - Split payer model: plain splits get a group-style "Who paid?"; a non-me payer books a
   memo (no balance movement, a `borrowed` row) instead of a real debit.
-- Settle + CC balances (Jul-2026): new countable `repayment` category; borrow-settle books
-  a real Repayment expense on a chosen account; single-row settlement invariant (never an
-  origin+counterpart pair) enforced across every settle path (group, full, re-tag, manual).
+- Settle + CC balances (Jul-2026): new countable `repayment` category (superseded — see
+  Sep-2026 below); borrow-settle books a real expense on a chosen account; single-row
+  settlement invariant (never an origin+counterpart pair) enforced across every settle
+  path (group, full, re-tag, manual).
 - LB form + retention: shared `LbEntryForm`, inline field errors, balance-aware toasts,
   backdating fix (retention counted from `createdAt`, extended 1yr→2yr).
 - Split flow audit (Aug-2026): fixed LB rows losing `contactId` on re-tag, untagging a memo
   conjuring a phantom expense.
+- **`repayment` category REMOVED, merged into `borrow_repaid` (Sep-2026).** User: "remove
+  repayment globally, we already have lent settled and borrow repaid." It wasn't a pure
+  duplicate — `repayment` was the only SPEND-counting category the settle-with-account flow
+  used, while `borrow_repaid` was blanket non-spend everywhere (even for a real bank-SMS
+  "loan repaid" debit). Real fix: `borrow_repaid` is no longer in `NON_SPEND_CATEGORY_IDS` —
+  paying off a debt is a genuine, final expense — and `repayment` is deleted outright.
+  `lent_settled` deliberately stays non-spend (getting your own money back isn't income).
+  Store v27 migration rewrites any existing `repayment` transaction to `borrow_repaid` and
+  drops the dead category entry so nothing orphans. `backupService.STORE_VERSION` bumped to
+  match. Mutation-verified: reverting either the category-set change or the migration turns
+  new `storeIntegration.test.mjs` checks red.
 
 **Open**
 - None currently tracked.

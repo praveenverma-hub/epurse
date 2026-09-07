@@ -124,7 +124,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
           {isMemo ? <Text style={styles.memoTag}>MEMO</Text> : null}
           {/* Deliberately does NOT mute the amount the way a memo does: this money really
               did leave the account, it just isn't counted as spending. */}
-          {notCounted ? <Text style={styles.notCountedTag}>NOT COUNTED</Text> : null}
+          {notCounted ? <Text style={styles.notCountedTag}>EXCLUDED</Text> : null}
         </View>
         <Text style={styles.time}>{formatDateTime(txn.createdAt)}</Text>
       </View>

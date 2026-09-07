@@ -140,7 +140,7 @@ const STATIC_OPTIONS = {
     { id: 'lent_settled',  label: 'Settled',       sublabel: 'Lent money returned'       },
     { id: 'borrow_repaid', label: 'Repaid',        sublabel: 'Borrowed money repaid'     },
     { id: 'split',         label: 'Split',         sublabel: 'Shared with others'        },
-    { id: 'not_counted',   label: 'Not counted',   sublabel: 'Category off in Settings'   },
+    { id: 'not_counted',   label: 'Excluded',      sublabel: 'Category off in Settings'   },
     { id: 'private',       label: 'Private',       sublabel: 'Hidden from default views' },
     { id: 'ignored',       label: 'Ignored',       sublabel: 'Excluded from all totals'  },
   ],
@@ -196,7 +196,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   // Subscribed purely so a "counts in expenses" rule change re-renders the totals.
   const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
   const catMaps = useCategoryMaps();
-  // Same predicate the NOT COUNTED tag on the row uses, so the filter and the tag can
+  // Same predicate the EXCLUDED tag on the row uses, so the filter and the tag can
   // never disagree about which transactions are excluded.
   const isNotCounted = useCallback(
     (t) =>
@@ -951,7 +951,7 @@ const TransactionsScreen = ({ navigation, route }) => {
                     ₹0 in" over a screenful of transactions and looks broken. */}
                 {filteredTotals.excluded > 0 && (
                   <Text style={styles.listNotCountedTxt}>
-                    {formatCurrency(filteredTotals.excluded)} not counted
+                    {formatCurrency(filteredTotals.excluded)} excluded
                     {filteredTotals.reasons.length ? ` · ${filteredTotals.reasons.join(', ')}` : ''}
                   </Text>
                 )}

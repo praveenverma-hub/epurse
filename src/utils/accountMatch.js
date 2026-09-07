@@ -73,11 +73,24 @@ export const accountCandidates = (accounts, parsed) => {
   const wantBank = parsed.bankName;
 
   if (!wantMask) {
-    // No digits at all: type is the only signal there is.
+    // No digits at all: bank name (if both sides state one) still narrows it
+    // before falling back to id order — the same "don't let array order decide
+    // when better evidence exists" rule the mask branch below already applies.
+    // Matters most for Credit Card: a maskless CC-payment notification (some
+    // banks phrase these with no card number at all) used to resolve to
+    // whichever card sorted first by id, silently crediting the wrong card
+    // when the user holds more than one from different banks.
     return list
       .filter((a) => a.type === wantType)
-      .map((a) => ({ account: a, score: 10, bankConfirmed: false }))
-      .sort((x, y) => String(x.account.id).localeCompare(String(y.account.id)));
+      .map((a) => {
+        const bankConfirmed = !!(a.bankName && wantBank && banksAgree(a.bankName, wantBank));
+        return { account: a, score: bankConfirmed ? 20 : 10, bankConfirmed };
+      })
+      .sort(
+        (x, y) =>
+          y.score - x.score ||
+          String(x.account.id).localeCompare(String(y.account.id)),
+      );
   }
 
   const scored = [];
