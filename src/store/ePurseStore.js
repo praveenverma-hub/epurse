@@ -41,6 +41,14 @@ import {
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
 } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID, THEMES } from '../constants/themes';
+import { GOAL_COLORS, DEFAULT_GOAL_EMOJI } from '../constants/goals';
+import {
+  snapAmount,
+  allocationWithinSalary,
+  freeAmount,
+  fundedPct,
+  paceStatus,
+} from '../utils/goalPlan';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { cleanMerchantName, detectIsSubscription } from '../utils/merchantEnricher';
@@ -445,6 +453,34 @@ const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
         : t,
     ),
   };
+};
+
+/**
+ * What a goal actually received in one month.
+ *
+ * Two sources, deliberately exclusive per goal:
+ *   • `autoParentId` set → the goal is funded by REAL SPEND in that parent
+ *     category (a SIP debit funds the SIP goal). Nothing to log by hand, which
+ *     is the whole point — the goals people abandon are the ones that need
+ *     manual upkeep.
+ *   • otherwise → the sum of manual contributions dated in that month.
+ *
+ * An auto goal ignores manual contributions rather than adding them: counting
+ * both would double up the moment a user logged the SIP they'd already paid.
+ */
+const goalFundedForMonth = (state, goal, mk) => {
+  if (goal?.autoParentId) {
+    return (state.transactions || []).reduce((sum, t) => {
+      if (t.isIgnored || !countsForSpend(t)) return sum;
+      if (monthKey(t.createdAt) !== mk) return sum;
+      if (parentCatId(t) !== goal.autoParentId) return sum;
+      return sum + spendContribution(t);
+    }, 0);
+  }
+  return (state.goalContributions || []).reduce(
+    (sum, c) => (c.goalId === goal.id && monthKey(c.date) === mk ? sum + (Number(c.amount) || 0) : sum),
+    0,
+  );
 };
 
 /**
@@ -983,6 +1019,32 @@ export const useEPurseStore = create(
       // (and one for the overall total) — { '2026-05': ['shopping', '__total__'] }
       budgetBreachNotified: {},
 
+      // ─── Goals ──────────────────────────────────────────────────────────────
+      // The forward-looking half of planning: Budget caps what LEAVES, Goals
+      // commits what STAYS. Same monthly rhythm as the budget plan on purpose —
+      // nothing carries silently, the user confirms each month from a prefill.
+      //
+      // `goals` are the durable definitions the user manages:
+      //   { id, name, emoji, color, kind: 'saving'|'investment'|'lending',
+      //     lifetimeTarget: number|null, autoParentId: string|null,
+      //     createdAt, archivedAt: string|null }
+      goals: [],
+      // The CURRENT month's plan. null until set — a new month starts empty and
+      // must be confirmed, exactly like `budget`.
+      //   { monthKey, salary, allocations: { [goalId]: amount }, createdAt, lastEditedAt }
+      goalPlan: null,
+      // Last confirmed plan, kept past rollover purely to prefill the next one.
+      lastGoalPlan: null,
+      // Funding events. Auto-tracked kinds (a goal with `autoParentId`) derive
+      // their progress from real transactions instead and add nothing here.
+      //   { id, goalId, amount, date, source: 'manual' }
+      goalContributions: [],
+      // Closed months, snapshotted at rollover — mirrors `budgetHistory` and for
+      // the same reason: raw transactions age out at RAW_RETENTION_MS, so a
+      // lifetime total recomputed from them would silently shrink over time.
+      //   { '2026-09': { salary, perGoal: { [goalId]: { planned, funded } }, closedAt } }
+      goalHistory: {},
+
       // When a month rollover commits a snapshot, we stash the result here so the
       // dashboard can pop a celebration modal on the user's next visit. Cleared
       // after the modal is dismissed.
@@ -1410,6 +1472,220 @@ export const useEPurseStore = create(
 
       /** Dismisses the celebration modal — called when the user closes it. */
       clearPendingCelebration: () => set({ pendingCelebration: null }),
+
+      // ─── Goals actions ──────────────────────────────────────────────────────
+
+      /** Create a goal definition. Returns its id so a caller can allocate to it. */
+      addGoal: ({ name, emoji, color, kind = 'saving', lifetimeTarget = null, autoParentId = null } = {}) => {
+        const clean = (name || '').trim();
+        if (!clean) return null;
+        const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        set((s) => ({
+          goals: [
+            ...s.goals,
+            {
+              id,
+              name: clean,
+              emoji: emoji || DEFAULT_GOAL_EMOJI,
+              color: color || GOAL_COLORS[s.goals.length % GOAL_COLORS.length],
+              kind,
+              lifetimeTarget: Number(lifetimeTarget) > 0 ? Number(lifetimeTarget) : null,
+              autoParentId: autoParentId || null,
+              createdAt: new Date().toISOString(),
+              archivedAt: null,
+            },
+          ],
+        }));
+        return id;
+      },
+
+      updateGoal: (goalId, patch = {}) =>
+        set((s) => ({
+          goals: s.goals.map((g) => (g.id === goalId ? { ...g, ...patch, id: g.id } : g)),
+        })),
+
+      /**
+       * Remove a goal and every reference to it. A goal left in `allocations`
+       * after its definition is gone would count toward the allocated total with
+       * nothing to render, so the plan would refuse to balance and the user
+       * would have no way to see why.
+       */
+      deleteGoal: (goalId) =>
+        set((s) => {
+          const strip = (plan) => {
+            if (!plan?.allocations || !(goalId in plan.allocations)) return plan;
+            const allocations = { ...plan.allocations };
+            delete allocations[goalId];
+            return { ...plan, allocations };
+          };
+          return {
+            goals: s.goals.filter((g) => g.id !== goalId),
+            goalPlan: strip(s.goalPlan),
+            lastGoalPlan: strip(s.lastGoalPlan),
+            goalContributions: s.goalContributions.filter((c) => c.goalId !== goalId),
+          };
+        }),
+
+      /** Confirm this month's plan. Also becomes next month's prefill source. */
+      setGoalPlan: ({ salary, allocations } = {}) =>
+        set((s) => {
+          const nowIso = new Date().toISOString();
+          const mk = monthKey(new Date());
+          const clean = {};
+          Object.entries(allocations || {}).forEach(([id, amt]) => {
+            const v = snapAmount(amt);
+            if (v > 0) clean[id] = v;
+          });
+          const plan = {
+            monthKey: mk,
+            salary: Math.max(0, Number(salary) || 0),
+            allocations: clean,
+            createdAt: s.goalPlan?.createdAt || nowIso,
+            lastEditedAt: nowIso,
+          };
+          return { goalPlan: plan, lastGoalPlan: plan };
+        }),
+
+      /**
+       * Set ONE goal's allocation, clamped so the plan can never exceed salary.
+       * The bar's drag rebalances a pair itself (rebalancePair) and commits via
+       * setGoalPlan; this is the steppers' path.
+       */
+      updateGoalAllocation: (goalId, amount) =>
+        set((s) => {
+          if (!s.goalPlan) return s;
+          const next = allocationWithinSalary(
+            s.goalPlan.salary, s.goalPlan.allocations, goalId, amount,
+          );
+          const allocations = { ...s.goalPlan.allocations };
+          if (next > 0) allocations[goalId] = next;
+          else delete allocations[goalId];
+          return {
+            goalPlan: { ...s.goalPlan, allocations, lastEditedAt: new Date().toISOString() },
+          };
+        }),
+
+      clearGoalPlan: () => set({ goalPlan: null }),
+
+      /**
+       * Month rollover. Snapshots the finished month into `goalHistory` BEFORE
+       * clearing, for the same reason the budget rollover does: raw transactions
+       * age out at RAW_RETENTION_MS, so lifetime progress computed from them
+       * alone would quietly shrink as history compacts.
+       */
+      rolloverGoalPlanIfNeeded: () =>
+        set((s) => {
+          if (!s.goalPlan) return s;
+          const currentMonth = monthKey(new Date());
+          if (s.goalPlan.monthKey === currentMonth) return s;
+
+          const prev = s.goalPlan.monthKey;
+          const perGoal = {};
+          Object.entries(s.goalPlan.allocations || {}).forEach(([goalId, planned]) => {
+            const goal = s.goals.find((g) => g.id === goalId);
+            perGoal[goalId] = {
+              planned,
+              funded: goal ? goalFundedForMonth(s, goal, prev) : 0,
+            };
+          });
+
+          return {
+            goalHistory: {
+              ...s.goalHistory,
+              [prev]: { salary: s.goalPlan.salary, perGoal, closedAt: new Date().toISOString() },
+            },
+            goalPlan: null,
+            lastGoalPlan: s.goalPlan,
+          };
+        }),
+
+      /** Log money put into a goal by hand. Auto-tracked goals don't need this. */
+      addGoalContribution: (goalId, amount, dateIso) => {
+        const amt = Number(amount) || 0;
+        if (!goalId || amt <= 0) return null;
+        const id = `gc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        set((s) => ({
+          goalContributions: [
+            { id, goalId, amount: amt, date: dateIso || new Date().toISOString(), source: 'manual' },
+            ...s.goalContributions,
+          ],
+        }));
+        return id;
+      },
+
+      deleteGoalContribution: (id) =>
+        set((s) => ({ goalContributions: s.goalContributions.filter((c) => c.id !== id) })),
+
+      // ─── Goals selectors ────────────────────────────────────────────────────
+
+      /** What this goal actually received in `date`'s month. */
+      getGoalFunded: (goalId, date = new Date()) => {
+        const s = get();
+        const goal = s.goals.find((g) => g.id === goalId);
+        if (!goal) return 0;
+        return goalFundedForMonth(s, goal, monthKey(date));
+      },
+
+      /**
+       * Everything the Goals screen needs for one month, in one pass:
+       * totals plus a per-goal row carrying planned / funded / pct / pace.
+       */
+      getGoalPlanUsage: (date = new Date()) => {
+        const s = get();
+        if (!s.goalPlan) return null;
+        const mk = monthKey(date);
+        const now = new Date();
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const dayOfMonth = mk === monthKey(now) ? now.getDate() : daysInMonth;
+
+        const perGoal = [];
+        let planned = 0;
+        let funded = 0;
+
+        s.goals.forEach((goal) => {
+          const p = Number(s.goalPlan.allocations?.[goal.id]) || 0;
+          if (p <= 0) return;
+          const f = goalFundedForMonth(s, goal, mk);
+          planned += p;
+          funded += f;
+          perGoal.push({
+            goalId: goal.id,
+            planned: p,
+            funded: f,
+            pct: fundedPct(f, p),
+            status: paceStatus(f, p, dayOfMonth, daysInMonth),
+            auto: !!goal.autoParentId,
+          });
+        });
+
+        return {
+          monthKey: mk,
+          salary: s.goalPlan.salary,
+          planned,
+          funded,
+          free: freeAmount(s.goalPlan.salary, s.goalPlan.allocations),
+          pct: fundedPct(funded, planned),
+          perGoal,
+        };
+      },
+
+      /**
+       * Total ever put into a goal: closed months come from the snapshot, the
+       * live month is computed. Never reads raw transactions for a past month —
+       * see the rollover comment.
+       */
+      getGoalLifetimeSaved: (goalId) => {
+        const s = get();
+        const goal = s.goals.find((g) => g.id === goalId);
+        if (!goal) return 0;
+        const thisMonth = monthKey(new Date());
+        let total = goalFundedForMonth(s, goal, thisMonth);
+        Object.entries(s.goalHistory || {}).forEach(([mk, snap]) => {
+          if (mk === thisMonth) return;
+          total += Number(snap?.perGoal?.[goalId]?.funded) || 0;
+        });
+        return total;
+      },
 
       // ─── Daily Queue actions ───────────────────────────────────────────────
       // NOTE: Economy (RP/EPC/streak) lives entirely in useRewardStore. This
@@ -4650,7 +4926,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 28,
+      version: 29,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -5214,6 +5490,22 @@ export const useEPurseStore = create(
           };
         }
 
+        // v29: Goals. Seed the new keys so a rehydrated store never hands the
+        // screen `undefined` where it expects a list — the plan itself stays
+        // null on purpose (a plan is always explicitly confirmed, never
+        // conjured), which is exactly what puts an upgrading user on the
+        // empty state rather than into a half-built plan they didn't make.
+        if (version < 29) {
+          state = {
+            ...state,
+            goals: Array.isArray(state.goals) ? state.goals : [],
+            goalPlan: state.goalPlan ?? null,
+            lastGoalPlan: state.lastGoalPlan ?? null,
+            goalContributions: Array.isArray(state.goalContributions) ? state.goalContributions : [],
+            goalHistory: state.goalHistory ?? {},
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -5258,6 +5550,11 @@ export const useEPurseStore = create(
         budgetHistory: state.budgetHistory,
         budgetStreak: state.budgetStreak,
         budgetBreachNotified: state.budgetBreachNotified,
+        goals: state.goals,
+        goalPlan: state.goalPlan,
+        lastGoalPlan: state.lastGoalPlan,
+        goalContributions: state.goalContributions,
+        goalHistory: state.goalHistory,
         pendingCelebration:    state.pendingCelebration,
         pendingCCPayment:      state.pendingCCPayment      ?? null,
         ccHandledSmsIds:       state.ccHandledSmsIds       ?? [],

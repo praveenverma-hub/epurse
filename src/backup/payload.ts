@@ -91,6 +91,14 @@ export const STORE_KEYS = [
   'categories', 'customParents', 'customChildren', 'excludedExpenseParents',
   // budget
   'budget', 'lastBudgetPlan', 'budgetHistory', 'budgetStreak', 'budgetBreachNotified',
+  // goals — the forward-looking plan. All of it is the user's own intent
+  // (targets they typed, months they closed), none of it is derivable from
+  // transactions, so losing it on a new phone would lose real work.
+  // `goalHistory` matters most: closed months can no longer be recomputed once
+  // their raw transactions age out, so it is the only record of lifetime
+  // progress. The salary figure inside a plan is typed by the user for planning
+  // maths and never leaves the encrypted payload.
+  'goals', 'goalPlan', 'lastGoalPlan', 'goalContributions', 'goalHistory',
   // profile / prefs
   'userName', 'userPhones', 'userOnboardedAt', 'hasOnboarded',
   'themeId', 'darkMode', 'recapOptions', 'smsAutoImport',

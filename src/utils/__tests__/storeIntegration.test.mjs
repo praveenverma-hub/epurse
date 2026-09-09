@@ -2329,6 +2329,141 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   reset();
 }
 
+// ── GOALS (Sep-2026) ─────────────────────────────────────────────────────────
+// The forward-looking half of planning. Budget caps what leaves; Goals commits
+// what stays. Same monthly rhythm on purpose — a new month starts with no plan
+// and the user confirms one from a prefill, exactly like `budget`.
+{
+  const st = () => useStore.getState();
+  const { monthKey: monthKeyOf } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+
+  // ── definitions ──────────────────────────────────────────────────────────
+  const efId  = st().addGoal({ name: 'Emergency Fund', emoji: '🛟', kind: 'saving', lifetimeTarget: 300000 });
+  const sipId = st().addGoal({ name: 'MF SIP', emoji: '📈', kind: 'investment', autoParentId: 'investments' });
+
+  check('addGoal returns an id and stores the goal', st().goals.length === 2 && !!efId);
+  check('a goal keeps its lifetime target',
+    st().goals.find((g) => g.id === efId).lifetimeTarget === 300000);
+  check('a goal with no emoji still gets one',
+    !!st().addGoal({ name: 'Bare' }) && st().goals.find((g) => g.name === 'Bare').emoji.length > 0);
+  check('an unnamed goal is refused rather than created as a blank row',
+    st().addGoal({ name: '   ' }) === null && st().goals.length === 3);
+
+  st().deleteGoal(st().goals.find((g) => g.name === 'Bare').id);
+  check('deleteGoal removes it', st().goals.length === 2);
+
+  // ── the plan ─────────────────────────────────────────────────────────────
+  st().setGoalPlan({ salary: 85000, allocations: { [efId]: 15000, [sipId]: 10240, dead: 0 } });
+  const plan = st().goalPlan;
+  check('the plan is stamped with the current month', plan.monthKey === monthKeyOf(new Date()));
+  check('allocations snap to the ₹500 step', plan.allocations[sipId] === 10000, `${plan.allocations[sipId]}`);
+  check('a zero allocation is dropped rather than stored', !('dead' in plan.allocations));
+  check('confirming a plan also arms next month\'s prefill',
+    st().lastGoalPlan && st().lastGoalPlan.allocations[efId] === 15000);
+
+  st().updateGoalAllocation(efId, 20000);
+  check('a stepper can raise an allocation into free space',
+    st().goalPlan.allocations[efId] === 20000);
+  // 85,000 salary − 10,000 already on the SIP leaves 75,000 of room.
+  st().updateGoalAllocation(efId, 90000);
+  check('a stepper cannot push the plan past the salary',
+    st().goalPlan.allocations[efId] === 75000, `${st().goalPlan.allocations[efId]}`);
+  st().updateGoalAllocation(efId, 15000);
+
+  // ── funding: manual ──────────────────────────────────────────────────────
+  st().addGoalContribution(efId, 6000);
+  st().addGoalContribution(efId, 3000);
+  check('manual contributions add up for the month', st().getGoalFunded(efId) === 9000);
+  check('a zero contribution is refused', st().addGoalContribution(efId, 0) === null);
+
+  // ── funding: automatic, from real spend ──────────────────────────────────
+  // The point of an auto goal: a SIP debit the user already made funds it with
+  // no second act of logging. This is what stops investment goals going stale.
+  useStore.getState().addAccount({ name: 'HDFC', type: 'Bank', mask: '1111', balance: 100000 });
+  const acc = st().accounts[0].id;
+  st().addTransaction({ amount: 4000, type: 'debit', categoryId: 'investments', merchant: 'Groww SIP', accountId: acc });
+  check('an investment goal is funded by spend in its category, with nothing logged',
+    st().getGoalFunded(sipId) === 4000, `${st().getGoalFunded(sipId)}`);
+
+  // The two-tier LABEL path resolves too — parentCatIdForTxn reads the label
+  // before the legacy id, so a txn tagged through the category sheet counts
+  // even when its flat categoryId says nothing useful.
+  st().addTransaction({
+    amount: 1000, type: 'debit', categoryId: 'other', merchant: 'Zerodha',
+    parentCategory: 'Investments', childCategory: 'Mutual Funds', accountId: acc,
+  });
+  check('…including one tagged only by its two-tier label',
+    st().getGoalFunded(sipId) === 5000, `${st().getGoalFunded(sipId)}`);
+
+  st().addGoalContribution(sipId, 5000);
+  check('an auto goal ignores manual logs, so the same SIP is never counted twice',
+    st().getGoalFunded(sipId) === 5000, `${st().getGoalFunded(sipId)}`);
+
+  // ── the usage selector ───────────────────────────────────────────────────
+  const usage = st().getGoalPlanUsage();
+  check('usage totals the plan', usage.planned === 25000, `${usage.planned}`);
+  check('usage totals what actually landed', usage.funded === 14000, `${usage.funded}`);
+  check('usage reports the free remainder', usage.free === 60000, `${usage.free}`);
+  check('usage carries a row per funded goal', usage.perGoal.length === 2);
+  check('…and marks which rows track themselves',
+    usage.perGoal.find((r) => r.goalId === sipId).auto === true &&
+    usage.perGoal.find((r) => r.goalId === efId).auto === false);
+
+  // ── rollover ─────────────────────────────────────────────────────────────
+  // Snapshot BEFORE clearing: raw transactions age out at RAW_RETENTION_MS, so
+  // a lifetime total recomputed from them later would quietly shrink.
+  useStore.setState({ goalPlan: { ...st().goalPlan, monthKey: '2020-01' } });
+  st().rolloverGoalPlanIfNeeded();
+  check('rollover clears the plan so the new month must be confirmed', st().goalPlan === null);
+  check('…keeps it as the prefill', st().lastGoalPlan.allocations[efId] === 15000);
+  check('…and snapshots the closed month', !!st().goalHistory['2020-01']);
+  check('the snapshot records what was planned',
+    st().goalHistory['2020-01'].perGoal[efId].planned === 15000);
+
+  st().rolloverGoalPlanIfNeeded();
+  check('rollover with no plan is a no-op, not a crash', st().goalPlan === null);
+
+  // ── lifetime ─────────────────────────────────────────────────────────────
+  useStore.setState({
+    goalHistory: { '2026-01': { perGoal: { [efId]: { planned: 15000, funded: 12000 } } },
+                   '2026-02': { perGoal: { [efId]: { planned: 15000, funded: 15000 } } } },
+  });
+  check('lifetime saved sums closed months plus the live one',
+    st().getGoalLifetimeSaved(efId) === 36000, `${st().getGoalLifetimeSaved(efId)}`);
+  check('an unknown goal has no lifetime', st().getGoalLifetimeSaved('nope') === 0);
+
+  // ── reference cleanup ────────────────────────────────────────────────────
+  // An allocation left behind after its goal is gone would count toward the
+  // total with nothing on screen to explain why the plan won't balance.
+  st().setGoalPlan({ salary: 85000, allocations: { [efId]: 15000, [sipId]: 10000 } });
+  st().deleteGoal(efId);
+  check('deleting a goal strips it from the live plan', !(efId in st().goalPlan.allocations));
+  check('…and from the prefill', !(efId in st().lastGoalPlan.allocations));
+  check('…and drops its contributions', !st().goalContributions.some((c) => c.goalId === efId));
+  check('…leaving the other goal untouched', st().goalPlan.allocations[sipId] === 10000);
+
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+}
+
+// ── v29: Goals keys seeded on upgrade ────────────────────────────────────────
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const out = migrate({ transactions: [], accounts: [] }, 28);
+  check('v29 seeds goals as a list', Array.isArray(out.goals) && out.goals.length === 0);
+  check('v29 seeds the contribution log', Array.isArray(out.goalContributions));
+  check('v29 seeds the history map', out.goalHistory && typeof out.goalHistory === 'object');
+  // Null, not an invented plan: a plan is always something the user confirmed.
+  check('v29 leaves the plan unset so the user confirms one', out.goalPlan === null);
+
+  const existing = migrate({ goals: [{ id: 'g1' }], goalPlan: { monthKey: '2026-09' } }, 28);
+  check('an existing goals list survives the migration', existing.goals.length === 1);
+  check('an existing plan survives the migration', existing.goalPlan.monthKey === '2026-09');
+}
+
 // ── The Zero-Transaction bonus must not fire on a day you SPENT ──────────────
 // Reported: "I made some transactions the previous day, didn't review them, and
 // today saw 'no expense yesterday' and the bonus was given."

@@ -184,6 +184,52 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 
 ---
 
+## Goals (savings / investment / to-lend planning)
+
+**Done — Phase 1, Sep-9-2026**
+- **The forward-looking half of planning.** Budget caps what leaves; Goals commits what
+  stays. Reached from Profile → Goals (`GoalsScreen.tsx`, route `Goals`).
+- **One salary, split by hand.** `AllocationBar.tsx` renders the whole month's income as a
+  single bar; Spending rides in it as a LOCKED segment (owned by Budget, immovable here) and
+  the unallocated remainder is a real segment rather than a number in a corner. Dragging a
+  divider moves money between its two neighbours only — `rebalancePair` keeps the pair's
+  total invariant, so the bar can never allocate more than the salary. Snaps to ₹500, with a
+  haptic per step and a success haptic when the plan balances.
+- **Monthly rhythm mirrors Budget exactly**: a new month starts with no plan;
+  `rolloverGoalPlanIfNeeded` snapshots the finished month into `goalHistory` and keeps the
+  old plan as `lastGoalPlan`, which the screen offers as a one-tap "Keep last month's plan".
+  Nothing ever carries silently.
+- **Two of the three kinds track themselves.** A goal with `autoParentId` is funded by REAL
+  spend in that category (a SIP debit funds the SIP goal) and ignores manual logs, so the
+  same payment is never counted twice. Only open-ended savings goals need contributions
+  logged by hand — the kinds people abandon are the ones needing upkeep.
+- **Salary is TYPED, never read from SMS.** The app already parses income, which is exactly
+  why this screen asks. Using the detected figure is a deliberate future opt-in, not a
+  default — see the memory note before wiring `getMonthlyIncome` in.
+- **Reconciliation strip** (Salary · Spending · Goals · Free) ties Budget and Goals into one
+  number so the two planning screens don't read as unrelated forms.
+- Starter templates (`constants/goals.ts`) make the empty state a launchpad; goal categories
+  are their OWN namespace, deliberately not the two-tier spend tree.
+- Manual goals get an "Add money" prompt on their progress row; auto goals show an AUTO tag
+  and no button, since a manual top-up there is the double-count the store prevents.
+  `CenterModal` gained an optional `children` SLOT for that one-input prompt — a named axis,
+  not a second dialog component.
+- Store v29 (`goals`, `goalPlan`, `lastGoalPlan`, `goalContributions`, `goalHistory`), all
+  five in the backup allow-list. `npm run test:goals` (47 pure-maths cases) + 30 store cases;
+  the drag invariant and the delete-cleanup/auto-funding rules are mutation-verified.
+
+**Open**
+- Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block.
+  These were phase 2 of the agreed plan.
+- The liquid-fill visual from the prototype was deliberately NOT used — `DailyBudgetLiquidWave`
+  is a PAID shop widget (`liquid_wave`, 600 EPC), so reusing it free here would undercut the
+  shop. Goal progress uses a plain track/fill instead; a distinct Goals visual is open.
+- Income-aware suggestions, goal feasibility warnings and the rewards tie-in are phase 3.
+- Not yet manually verified in a running app (no UI test infrastructure exists) — the usual
+  caveat for a UI change this size.
+
+---
+
 ## Lent/Borrowed & Splits
 
 **Done**

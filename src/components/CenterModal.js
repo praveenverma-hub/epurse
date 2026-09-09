@@ -25,6 +25,16 @@ export default function CenterModal({
   onSecondary,
   destructive = false,
   onClose,
+  /**
+   * Optional content between the message and the buttons — a single input, a
+   * short list. A NAMED SLOT, not a special case: a confirm dialog that also
+   * asks for one value is the same affordance, and forking a second dialog
+   * component for it is exactly what the shared-component rule forbids.
+   * Keep it small; anything taller than a couple of rows wants a bottom sheet.
+   * Defaulted so TS doesn't infer it as REQUIRED for the ~30 existing callers
+   * that pass no children (this file is JS, so its prop type is inferred).
+   */
+  children = /** @type {React.ReactNode} */ (null),
 }) {
   const theme = useTheme();
   const primaryBg = destructive ? colors.danger : theme.primary;
@@ -37,6 +47,7 @@ export default function CenterModal({
         <View style={styles.card}>
           {!!title && <Text style={styles.title}>{title}</Text>}
           {!!message && <Text style={styles.message}>{message}</Text>}
+          {children ? <View style={styles.slot}>{children}</View> : null}
 
           <View style={styles.btnRow}>
             {secondaryText ? (
@@ -93,6 +104,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     lineHeight: 22,
   },
+  slot: { marginTop: spacing.md },
   btnRow: {
     flexDirection: 'row',
     gap: spacing.sm,

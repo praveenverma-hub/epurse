@@ -20,6 +20,7 @@ import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 import ShopScreen          from '../screens/ShopScreen';
 import RemindersScreen     from '../screens/RemindersScreen';
+import GoalsScreen         from '../screens/GoalsScreen';
 import ReminderFormScreen  from '../screens/ReminderFormScreen';
 import WhatsAppReminderScreen from '../screens/WhatsAppReminderScreen';
 
@@ -79,6 +80,7 @@ export default function AppNavigator() {
         />
         <Stack.Screen name="Shop"      component={ShopScreen} />
         <Stack.Screen name="Reminders" component={RemindersScreen} />
+        <Stack.Screen name="Goals"     component={GoalsScreen} />
         <Stack.Screen name="ReminderForm" component={ReminderFormScreen} />
         <Stack.Screen name="WhatsAppReminder" component={WhatsAppReminderScreen} />
       </Stack.Navigator>

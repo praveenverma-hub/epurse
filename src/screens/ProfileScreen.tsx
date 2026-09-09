@@ -246,6 +246,14 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.listCard}>
             <NavListRow
               variant="tile"
+              icon="flag-outline"
+              label="Goals"
+              hint="Plan where your savings go each month"
+              onPress={go('Goals')}
+            />
+            <NavListRow
+              variant="tile"
+              divided
               icon="bag-handle-outline"
               label="Shop"
               hint={
