@@ -448,6 +448,26 @@ const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
 };
 
 /**
+ * Denormalise account type/mask/bank onto a transaction at write time — mirrors what
+ * buildTransaction already sets for SMS-parsed transactions. TransactionItem's card
+ * reads these fields directly (never does a live account lookup), so every write path
+ * that resolves an accountId must also stamp this, or the card shows no account at all.
+ */
+const stampAccountMeta = (txn, account) => {
+  if (!account) return txn;
+  txn.accountType = account.type;
+  txn.accountMask = account.mask || null;
+  txn.bankName = account.bankName || null;
+  return txn;
+};
+const clearAccountMeta = (txn) => {
+  delete txn.accountType;
+  delete txn.accountMask;
+  delete txn.bankName;
+  return txn;
+};
+
+/**
  * Book a real "Borrow Repaid" EXPENSE for settling a borrow: a `borrow_repaid`
  * debit on the chosen account (reduces its balance, counts as spend —
  * borrow_repaid ∉ NON_SPEND, same as any other real debit; see the comment on
@@ -2102,12 +2122,17 @@ export const useEPurseStore = create(
             newTxn.accountId = resolvedAccountId;
           }
 
+          if (resolvedAccountId) {
+            stampAccountMeta(newTxn, resolvedAccounts.find((a) => a.id === resolvedAccountId));
+          }
+
           // A split memo is someone else's outflow: park the account in memoAccountId
           // (so flipping the payer back can restore the debit) and leave accountId off,
           // so the txn never reads as money that left that account.
           if (newTxn.isSplitMemo) {
             newTxn.memoAccountId = resolvedAccountId;
             delete newTxn.accountId;
+            clearAccountMeta(newTxn);
           }
 
           // Group Zone: auto-tag a plain expense to the active zone group (no split —
@@ -2373,6 +2398,7 @@ export const useEPurseStore = create(
             resolvedAccounts  = ensured;
           }
           newTxn.accountId = resolvedAccountId;
+          stampAccountMeta(newTxn, resolvedAccounts.find((a) => a.id === resolvedAccountId));
         }
 
         // Debt legs (single source of truth) for shared groups — nets per-person across groups.
@@ -2443,7 +2469,13 @@ export const useEPurseStore = create(
         if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
         if (groupSplit)  updatedTxn.groupSplit  = groupSplit;  else delete updatedTxn.groupSplit;
         if (isGroupMemo) updatedTxn.isGroupMemo = true;        else delete updatedTxn.isGroupMemo;
-        if (isGroupMemo) delete updatedTxn.accountId; else updatedTxn.accountId = resolvedAccountId;
+        if (isGroupMemo) {
+          delete updatedTxn.accountId;
+          clearAccountMeta(updatedTxn);
+        } else {
+          updatedTxn.accountId = resolvedAccountId;
+          stampAccountMeta(updatedTxn, workingAccounts.find((a) => a.id === resolvedAccountId));
+        }
         if (location) updatedTxn.location = location;
 
         // Reverse the OLD account effect (old was a debit → add the amount back),
@@ -3267,8 +3299,10 @@ export const useEPurseStore = create(
         if (stillMemo) {
           updatedTxn.memoAccountId = payingAccountId;
           delete updatedTxn.accountId;
+          clearAccountMeta(updatedTxn);
         } else {
           updatedTxn.accountId = payingAccountId;
+          stampAccountMeta(updatedTxn, get().accounts.find((a) => a.id === payingAccountId));
         }
 
         set((s) => {
@@ -4616,7 +4650,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 27,
+      version: 28,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -5158,6 +5192,25 @@ export const useEPurseStore = create(
                 : t
             ),
             categories: (state.categories || []).filter((c) => c.id !== 'repayment'),
+          };
+        }
+
+        // v28: backfill accountType/accountMask/bankName on manually-added transactions.
+        // addTransaction/addGroupExpense/updateTransaction/updateGroupExpense only set
+        // accountId, never the denormalised display fields TransactionItem's card
+        // actually reads — so every manual entry showed no account at all. Fix is
+        // forward-only (see stampAccountMeta); this repairs already-persisted rows.
+        if (version < 28) {
+          const acctById = new Map((state.accounts || []).map((a) => [a.id, a]));
+          state = {
+            ...state,
+            transactions: (state.transactions || []).map((t) => {
+              if (!t.accountId || t.accountType) return t;
+              const acct = acctById.get(t.accountId);
+              return acct
+                ? { ...t, accountType: acct.type, accountMask: acct.mask || null, bankName: acct.bankName || null }
+                : t;
+            }),
           };
         }
 

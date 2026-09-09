@@ -135,6 +135,15 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - CC card limit schema is still note-only (`TODO(cc-limits)` in `ePurseStore.js`); net
   worth still treats a CC purely as its outstanding balance. `statementDay`/`dueDay`
   themselves ARE real, populated fields now (see the cycle-date entry below).
+- **Sep-9-2026: fixed manually-added transactions showing no account on their card at all**
+  (reported: "after submission, the transaction card does not show any account"). Cause:
+  `TransactionItem.js` reads `txn.accountType`/`txn.accountMask` directly (never a live
+  account lookup) — the shape SMS ingest already denormalises onto every parsed txn, but
+  `addTransaction`/`addGroupExpense`/`updateTransaction`/`updateGroupExpense` only ever set
+  `accountId`. New shared `stampAccountMeta`/`clearAccountMeta` helpers now set/clear these
+  fields at all 4 write paths (edit paths re-stamp from the newly chosen account, fixing a
+  second bug where editing a txn's account left the OLD bank's mask showing). Store v28
+  migration backfills already-persisted manual transactions.
 
 ---
 
@@ -151,6 +160,14 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   already-corrupted history.
 - Category mastery badges (⭐ ≥3mo, 🥇 ≥6mo) from `budgetHistory`.
 - Budget streak (consecutive on-budget months) drives the CelebrationModal.
+- **Sep-9-2026: fixed the Home budget card showing a stale progress bar** — reported as
+  "updates very late, I have to go to budget screen and back, restart app, then also very
+  late." `BudgetSummary.tsx` (the component rendered on Home) never subscribed to
+  `transactions`/`groups`/`excludedExpenseParents`, so it didn't even re-render on a new
+  transaction, and its `usage` `useMemo` deps (`[budget, getBudgetUsage]`) couldn't have
+  recomputed even if it had — the card was frozen at whatever spend existed the instant it
+  first mounted. `BudgetScreen.js`'s own `usage` memo already included `transactions`, which
+  is why that screen looked live. Now matches that pattern.
 
 **Open — reported Sep-6-2026, NOT YET REPRODUCED, needs your help to pin down**
 - **"App breaks when creating/saving a new budget plan"** — reported right after a month
@@ -210,6 +227,13 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Auto-prune (180 days inactive AND fully settled).
 - **Sep-6-2026: CC bill reconciliation now wired into GroupsScreen's category picker too**
   (see Budget/Accounts CC-payment entry) — previously bypassed the card-crediting step.
+- **Sep-9-2026: fixed a stale "already in group" checkmark in the group-tag picker** —
+  reported: after tagging txn A to Group X, opening the picker for a DIFFERENT untagged
+  txn B already showed a checkmark on Group X. `GroupPickerSheet.tsx` is one long-lived
+  instance reused across every open (no `key` per transaction); its local `selected` state
+  was only ever set on pick, never reset on close, so it survived into the next open. Now
+  resets on `visible → false` (every close path — pick, dismiss, create-new — flips
+  `visible`). Local UI-state bug only; the store's `tagTransactionToGroup` was never wrong.
 
 **Open**
 - None currently tracked (spend-exclusion cross-cutting checklist lives in the groups skill

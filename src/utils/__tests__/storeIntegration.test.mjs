@@ -2221,6 +2221,114 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('running it twice is a no-op', twice.transactions.find((t) => t.id === 'r1').categoryId === 'borrow_repaid');
 }
 
+// ── v28: backfill accountType/accountMask/bankName on manual transactions (Sep-2026) ──
+// User report: "when adding a normal transaction manually, the selected bank does not
+// reflect on card ui" — TransactionItem's card reads txn.accountType/accountMask
+// directly (never a live account lookup), but addTransaction/addGroupExpense/
+// updateTransaction/updateGroupExpense only ever set accountId, so every manual entry
+// showed no account at all. Forward-fix is stampAccountMeta; this repairs already-
+// persisted rows by looking up each transaction's accountId in the accounts list.
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const legacy = {
+    accounts: [
+      { id: 'acc1', type: 'bank', mask: '1234', bankName: 'HDFC' },
+      { id: 'acc2', type: 'credit_card', mask: '9876', bankName: 'ICICI' },
+    ],
+    transactions: [
+      // manual entry, missing accountType/accountMask/bankName — the bug.
+      { id: 'm1', amount: 200, type: 'debit', categoryId: 'food', accountId: 'acc1', source: 'manual' },
+      // SMS-parsed txn, already carries the fields — must be left untouched.
+      { id: 's1', amount: 300, type: 'debit', categoryId: 'food', accountId: 'acc2',
+        accountType: 'credit_card', accountMask: '9876', bankName: 'ICICI', source: 'sms' },
+      // a memo / no accountId at all — nothing to backfill, must stay absent.
+      { id: 'x1', amount: 50, type: 'debit', categoryId: 'food', isSplitMemo: true, memoAccountId: 'acc1' },
+      // dangling accountId (account since deleted) — must be left alone, not crash.
+      { id: 'd1', amount: 75, type: 'debit', categoryId: 'food', accountId: 'gone' },
+    ],
+  };
+  const migrated = migrate(legacy, 27);
+  const m1 = migrated.transactions.find((t) => t.id === 'm1');
+  const s1 = migrated.transactions.find((t) => t.id === 's1');
+  const x1 = migrated.transactions.find((t) => t.id === 'x1');
+  const d1 = migrated.transactions.find((t) => t.id === 'd1');
+
+  check('a manual transaction is backfilled with its account type/mask/bank',
+    m1.accountType === 'bank' && m1.accountMask === '1234' && m1.bankName === 'HDFC',
+    `${m1.accountType}/${m1.accountMask}/${m1.bankName}`);
+  check('an already-correct SMS transaction is untouched',
+    s1.accountType === 'credit_card' && s1.accountMask === '9876');
+  check('a memo with no accountId gets no account fields',
+    x1.accountType === undefined && x1.accountMask === undefined);
+  check('a dangling accountId (deleted account) does not crash and is left alone',
+    d1.accountType === undefined && d1.accountId === 'gone');
+
+  // Idempotent: a store already at 28 (or missing accounts entirely) must not crash/touch.
+  const twice = migrate(migrated, 28);
+  check('running it twice is a no-op',
+    twice.transactions.find((t) => t.id === 'm1').accountMask === '1234');
+  const noAccounts = migrate({ transactions: [{ id: 'z', accountId: 'acc1' }] }, 27);
+  check('missing accounts array does not crash', noAccounts.transactions[0].id === 'z');
+}
+
+// ── Forward fix: every live write path stamps accountType/accountMask/bankName ──
+// The migration above only repairs already-persisted rows; this exercises the real
+// addTransaction/addGroupExpense/updateTransaction/updateGroupExpense actions so a
+// future regression in the forward path (not just the migration) goes red too.
+{
+  reset();
+  useStore.getState().addAccount({ name: 'HDFC Bank', type: 'Bank', mask: '1234', bankName: 'HDFC' });
+  const acc1 = accts()[0].id;
+
+  useStore.getState().addTransaction({
+    amount: 200, type: 'debit', categoryId: 'food', merchant: 'Cafe', accountId: acc1,
+  });
+  const manual = txns().find((t) => t.merchant === 'Cafe');
+  check('addTransaction stamps accountType/accountMask/bankName',
+    manual.accountType === 'Bank' && manual.accountMask === '1234' && manual.bankName === 'HDFC',
+    `${manual.accountType}/${manual.accountMask}/${manual.bankName}`);
+
+  useStore.getState().addAccount({ name: 'ICICI Bank', type: 'Bank', mask: '5678', bankName: 'ICICI' });
+  const acc2 = accts().find((a) => a.mask === '5678').id;
+  useStore.getState().updateTransaction(manual.id, {
+    amount: 200, accountId: acc2, merchant: 'Cafe', categoryId: 'food',
+  });
+  const edited = useStore.getState().transactions.find((t) => t.id === manual.id);
+  check('updateTransaction re-stamps meta for the NEWLY chosen account, not the old one',
+    edited.accountMask === '5678' && edited.bankName === 'ICICI',
+    `${edited.accountMask}/${edited.bankName}`);
+
+  const groupId = useStore.getState().createGroup({ name: 'Trip', type: 'shared', members: [{ memberId: 'c1', name: 'Rahul' }] });
+  const geId = useStore.getState().addGroupExpense(groupId, {
+    amount: 500, merchant: 'Dinner', categoryId: 'food', paidByMemberId: 'me', accountId: acc1,
+    shares: [{ memberId: 'me', shareAmount: 250 }, { memberId: 'c1', shareAmount: 250 }],
+  });
+  const groupTxn = useStore.getState().transactions.find((t) => t.id === geId);
+  check('addGroupExpense stamps accountType/accountMask/bankName',
+    groupTxn.accountMask === '1234' && groupTxn.bankName === 'HDFC',
+    `${groupTxn.accountMask}/${groupTxn.bankName}`);
+
+  useStore.getState().updateGroupExpense(geId, {
+    amount: 500, merchant: 'Dinner', categoryId: 'food', paidByMemberId: 'me', accountId: acc2,
+    shares: [{ memberId: 'me', shareAmount: 250 }, { memberId: 'c1', shareAmount: 250 }],
+  });
+  const groupEdited = useStore.getState().transactions.find((t) => t.id === geId);
+  check('updateGroupExpense re-stamps meta for the NEWLY chosen account',
+    groupEdited.accountMask === '5678' && groupEdited.bankName === 'ICICI',
+    `${groupEdited.accountMask}/${groupEdited.bankName}`);
+
+  // A group memo (someone else paid) never had accountId — must stay meta-free.
+  const memoId = useStore.getState().addGroupExpense(groupId, {
+    amount: 300, merchant: 'Snacks', categoryId: 'food', paidByMemberId: 'c1', paidByName: 'Rahul',
+    shares: [{ memberId: 'me', shareAmount: 150 }, { memberId: 'c1', shareAmount: 150 }],
+  });
+  const memoTxn = useStore.getState().transactions.find((t) => t.id === memoId);
+  check('a group memo (not me) gets no account meta',
+    memoTxn.accountType === undefined && memoTxn.accountMask === undefined);
+
+  reset();
+}
+
 // ── The Zero-Transaction bonus must not fire on a day you SPENT ──────────────
 // Reported: "I made some transactions the previous day, didn't review them, and
 // today saw 'no expense yesterday' and the bonus was given."

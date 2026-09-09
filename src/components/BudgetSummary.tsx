@@ -106,6 +106,9 @@ type CategoryMeta = { id: string; name?: string; emoji?: string; color?: string 
 
 export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const budget = useEPurseStore((s) => s.budget);
+  const transactions = useEPurseStore((s) => s.transactions);
+  const groups = useEPurseStore((s) => s.groups);
+  const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
   const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
   const updateBudgetCategory = useEPurseStore((s) => s.updateBudgetCategory);
   // Typed at the boundary: the store is untyped JS, so without these the entries
@@ -119,7 +122,14 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const [showRebalance, setShowRebalance] = useState(false);
   const [essentialMode, setEssentialMode] = useState(false);
 
-  const usage = useMemo(() => getBudgetUsage(), [budget, getBudgetUsage]);
+  // Recomputes whenever a transaction/group/exclusion changes so the Home card
+  // stays live — mirrors BudgetScreen.js's `usage` memo and DashboardScreen's
+  // `budgetUsage` memo, which this component was missing (it never subscribed
+  // to `transactions` at all, so it wouldn't even re-render on a new txn).
+  const usage = useMemo(
+    () => getBudgetUsage(),
+    [budget, transactions, groups, excludedExpenseParents, getBudgetUsage],
+  );
 
   // Empty state - no budget set
   if (!budget || !usage) {

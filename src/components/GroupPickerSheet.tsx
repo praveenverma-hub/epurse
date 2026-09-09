@@ -1,7 +1,7 @@
 // =============================================================================
 // GroupPickerSheet — bottom sheet to assign an existing transaction to a group.
 // =============================================================================
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -42,6 +42,14 @@ export default function GroupPickerSheet({
   const groups = useEPurseStore((s: any) => s.groups) as Group[];
   const transactions = useEPurseStore((s: any) => s.transactions) as any[];
   const [selected, setSelected] = useState<string | null>(null);
+
+  // This sheet is one long-lived instance re-used across every open (no `key`
+  // tying it to a transaction), so a checkmark set for txn A would otherwise
+  // still show when the sheet reopens for txn B. Every close path (pick,
+  // dismiss, create-new) flips `visible` false — clear the pick then.
+  useEffect(() => {
+    if (!visible) setSelected(null);
+  }, [visible]);
 
   // Current-month total per group (your share) — personal groups track monthly,
   // so the subtitle must match the Groups tab's "this month" figure, not all-time.
