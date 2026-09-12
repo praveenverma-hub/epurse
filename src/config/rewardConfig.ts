@@ -79,6 +79,16 @@ export const REWARD_CONFIG = {
   /** Flat EPC bonus on a check-in day with zero queued transactions. */
   SAVINGS_EPC_BASE: 5,
 
+  // Goal completion ─────────────────────────────────────────────────────────
+  // A lifetime goal is months of work, so it pays like months of work: 25x a
+  // review, on the same multiplier ladder as everything else. It can fire at
+  // most once per goal (`bonusAwardedAt` on the goal), which is what keeps a
+  // big number from being farmable by editing the target down and up.
+  /** Base RP for reaching a goal's lifetime target (before multiplier). */
+  GOAL_ACHIEVED_RP_BASE:  250,
+  /** Base EPC for reaching a goal's lifetime target (before multiplier). */
+  GOAL_ACHIEVED_EPC_BASE: 25,
+
   // Level math ──────────────────────────────────────────────────────────────
   /** RP required to advance one level. Level = floor(RP / RP_PER_LEVEL) + 1. */
   RP_PER_LEVEL: 1000,
@@ -165,6 +175,8 @@ export const REWARD_COPY = {
     'next Profile Level. Levels gate which premium widgets you can buy.',
   RP_BULLET_EARN_LABEL:  'How you earn it',
   RP_BULLET_EARN_VALUE:  '+10 RP per reviewed transaction · scales with your Aware Run multiplier.',
+  RP_BULLET_GOAL_LABEL:  'The big one',
+  RP_BULLET_GOAL_VALUE:  '+250 RP when a savings goal reaches its target · once per goal.',
   RP_BULLET_LEVEL_LABEL: 'Level math',
   RP_BULLET_LEVEL_VALUE: 'Level = floor(Total RP / 1 000) + 1.',
 
@@ -178,6 +190,8 @@ export const REWARD_COPY = {
   EPC_BULLET_EARN_VALUE:  '+1 EPC per reviewed transaction · multiplier-boosted at Day 6+ and Day 16+.',
   EPC_BULLET_SAVE_LABEL:  'Bonus path',
   EPC_BULLET_SAVE_VALUE:  '+5 EPC on Zero-Spending check-in days (no SMS queue means a mindful day).',
+  EPC_BULLET_GOAL_LABEL:  'The big one',
+  EPC_BULLET_GOAL_VALUE:  '+25 EPC when a savings goal reaches its target · once per goal.',
 } as const;
 
 // ─── Derived helpers (pure, side-effect free) ────────────────────────────────

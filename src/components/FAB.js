@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { radius, shadows, spacing } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
 
-const FAB = ({ onPress, icon = '+', bottomInset = 0 }) => {
+const FAB = ({ onPress, icon = '+', bottomInset = 0, accessibilityLabel = 'Add' }) => {
   const gradient = useGradient();
   const { primary } = useTheme();
   return (
@@ -14,6 +14,8 @@ const FAB = ({ onPress, icon = '+', bottomInset = 0 }) => {
       activeOpacity={0.9}
       style={[styles.shadow, { shadowColor: primary, bottom: spacing.xl + bottomInset }]}
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
     >
       <LinearGradient
         colors={gradient}

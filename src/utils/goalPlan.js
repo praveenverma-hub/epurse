@@ -20,7 +20,18 @@ export const ALLOCATION_STEP = 500;
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-/** Round to the nearest step, never below zero. */
+/**
+ * Round to the nearest step, never below zero.
+ *
+ * JS-thread only. This was briefly marked `'worklet'` so AllocationBar's drag
+ * could call it on the UI thread — it CRASHED the app. A worklet may only call
+ * worklets, and a cross-FILE worklet reference is not reliably serialised by
+ * the Reanimated 3.6 babel plugin, so the first frame of a drag hit a
+ * non-worklet on the UI thread and took the process with it. The bar now owns a
+ * tiny local worklet for the preview and commits back through `rebalancePair`
+ * here, which re-snaps — so this file is still what produces every stored
+ * number. Do not put `'worklet'` back on these.
+ */
 export const snapAmount = (value, step = ALLOCATION_STEP) => {
   const s = step > 0 ? step : 1;
   return Math.max(0, Math.round(num(value) / s) * s);
@@ -137,4 +148,86 @@ export const rescaleAllocations = (allocations, fromSalary, toSalary) => {
   const ratio = to / from;
   Object.entries(allocations || {}).forEach(([k, v]) => { out[k] = snapAmount(num(v) * ratio); });
   return out;
+};
+
+// =============================================================================
+// Auto-funding rules — which real transactions COUNT toward a goal.
+// -----------------------------------------------------------------------------
+// A goal can name the spend it is made of: parent categories, specific
+// sub-categories, and merchant keywords. Categorising a transaction into one of
+// them funds the goal with no second act of logging, which is the whole point —
+// the goals people abandon are the ones that need manual upkeep.
+//
+// The rule is an OR across all three dimensions: a row counts if its parent
+// matches, OR its category matches, OR its merchant contains one of the
+// keywords. Narrowing (an AND) would make "Zerodha under Investments" silently
+// stop counting the month the user filed one under Other.
+// =============================================================================
+
+/**
+ * Merchant strings arrive as "SWIGGY*ORDER", "Zerodha Broking Ltd", "UPI-ZERODHA".
+ * Comparing them raw never matches, so both sides are folded to lowercase words
+ * before a substring test.
+ */
+export const merchantKey = (value) =>
+  String(value == null ? '' : value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const list = (v) => (Array.isArray(v) ? v.filter((x) => x != null && String(x).trim() !== '') : []);
+
+/**
+ * A goal's auto-funding rule in one normalised shape, whatever it was stored as.
+ *
+ * `autoParentId` is the phase-1 field (one parent, nothing else) and is still
+ * read here rather than migrated away in the maths layer: the store's migration
+ * moves it, but a goal restored from an older backup must not quietly stop
+ * funding itself while the two shapes coexist.
+ */
+export const goalAutoRule = (goal) => {
+  const rule = goal?.autoRule || {};
+  const parentIds = list(rule.parentIds).map(String);
+  if (goal?.autoParentId && !parentIds.includes(goal.autoParentId)) parentIds.push(String(goal.autoParentId));
+  return {
+    parentIds,
+    categoryIds: list(rule.categoryIds).map(String),
+    merchants: list(rule.merchants).map(merchantKey).filter(Boolean),
+  };
+};
+
+/** True when the goal funds itself from real spend rather than typed entries. */
+export const hasAutoRule = (goal) => {
+  const r = goalAutoRule(goal);
+  return r.parentIds.length > 0 || r.categoryIds.length > 0 || r.merchants.length > 0;
+};
+
+/**
+ * Does this transaction fund this rule? `parentId` is the caller's resolved
+ * first-level category (the store owns that mapping), so this stays pure.
+ */
+export const ruleMatchesTxn = (rule, { parentId, categoryId, merchant } = {}) => {
+  if (!rule) return false;
+  if (parentId && rule.parentIds.includes(String(parentId))) return true;
+  if (categoryId && rule.categoryIds.includes(String(categoryId))) return true;
+  if (rule.merchants.length > 0) {
+    const m = merchantKey(merchant);
+    if (m && rule.merchants.some((k) => m.includes(k))) return true;
+  }
+  return false;
+};
+
+/**
+ * Has a lifetime target been reached? Targetless goals are never "achieved" —
+ * an open-ended emergency fund has no finish line to celebrate, and inventing
+ * one would fire a congratulation the user never asked for.
+ */
+export const goalIsAchieved = (target, saved) => {
+  const t = num(target);
+  if (t <= 0) return false;
+  return num(saved) >= t;
+};
+
+/** 0..100 of the way to the lifetime target. 0 when there is no target. */
+export const lifetimePct = (target, saved) => {
+  const t = num(target);
+  if (t <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((num(saved) / t) * 100)));
 };

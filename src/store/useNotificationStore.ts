@@ -6,6 +6,7 @@
 //   • aware_check_in        — daily Aware Run check-in reward
 //   • aware_streak_reset    — Aware Run broken / new streak started
 //   • aware_savings_claimed — zero-spend bonus actually credited
+//   • goal_achieved         — a goal's lifetime target reached (bonus credited)
 //   • level_up              — Profile Level advanced
 //
 // Rules:
@@ -29,6 +30,7 @@ export type NotificationKind =
   | 'aware_check_in'
   | 'aware_streak_reset'
   | 'aware_savings_claimed'
+  | 'goal_achieved'
   | 'level_up';
 
 export interface NotificationEntry {

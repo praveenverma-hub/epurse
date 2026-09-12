@@ -199,32 +199,456 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `rolloverGoalPlanIfNeeded` snapshots the finished month into `goalHistory` and keeps the
   old plan as `lastGoalPlan`, which the screen offers as a one-tap "Keep last month's plan".
   Nothing ever carries silently.
-- **Two of the three kinds track themselves.** A goal with `autoParentId` is funded by REAL
-  spend in that category (a SIP debit funds the SIP goal) and ignores manual logs, so the
-  same payment is never counted twice. Only open-ended savings goals need contributions
-  logged by hand — the kinds people abandon are the ones needing upkeep.
+- **Goals can track themselves.** A goal with an auto rule is funded by REAL spend that
+  matches it (a SIP debit funds the SIP goal). Only open-ended savings goals need
+  contributions logged by hand — the kinds people abandon are the ones needing upkeep.
+  *(Phase 1 shipped this as a single `autoParentId` that IGNORED manual logs; both changed
+  in phase 2 below.)*
 - **Salary is TYPED, never read from SMS.** The app already parses income, which is exactly
   why this screen asks. Using the detected figure is a deliberate future opt-in, not a
   default — see the memory note before wiring `getMonthlyIncome` in.
 - **Reconciliation strip** (Salary · Spending · Goals · Free) ties Budget and Goals into one
-  number so the two planning screens don't read as unrelated forms.
+  number so the two planning screens don't read as unrelated forms. *(Sep-12: was its own
+  bordered card sitting after "This Month's Split", restating four numbers already visible on
+  that card — flagged as not belonging there. Folded IN as that card's own closing row, below
+  the goal legend, separated by a divider — a summary line the card ends on, not a second card
+  competing for attention at the bottom of the scroll.)*
 - Starter templates (`constants/goals.ts`) make the empty state a launchpad; goal categories
-  are their OWN namespace, deliberately not the two-tier spend tree.
-- Manual goals get an "Add money" prompt on their progress row; auto goals show an AUTO tag
-  and no button, since a manual top-up there is the double-count the store prevents.
-  `CenterModal` gained an optional `children` SLOT for that one-input prompt — a named axis,
-  not a second dialog component.
+  are their OWN namespace, deliberately not the two-tier spend tree. *(Sep-12: tapping one now
+  navigates to `GoalFormScreen` pre-filled rather than writing the goal silently — see the
+  Phase 4 bullet below.)*
+- Goals get an "Add money" prompt for logging by hand. `CenterModal` gained an optional
+  `children` SLOT for that one-input prompt — a named axis, not a second dialog component.
 - Store v29 (`goals`, `goalPlan`, `lastGoalPlan`, `goalContributions`, `goalHistory`), all
   five in the backup allow-list. `npm run test:goals` (47 pure-maths cases) + 30 store cases;
   the drag invariant and the delete-cleanup/auto-funding rules are mutation-verified.
 
+**Done — Phase 2, Sep-11-2026** (six changes asked for after using phase 1)
+
+- **Goals now fill themselves from any category OR merchant.** A goal carries an `autoRule`
+  — `{ parentIds, categoryIds, merchants }`, ORed — so categorising a transaction into any
+  of them funds the goal with nothing typed. Merchant keywords match case- and
+  punctuation-insensitively, so `zerodha` catches `UPI/ZERODHA BROKING LTD/9988`. Picked in
+  the goal editor: a checkbox per parent category, expandable to sub-categories, plus a
+  merchant keyword field. A memo (someone else paid) never funds a goal.
+- **Manual top-ups now work on EVERY goal, auto ones included.** Phase 1 made the two
+  sources exclusive to prevent a double count; that meant a goal whose bank SMS never
+  arrived was permanently short with no way to correct it. They now ADD, and the UI names
+  each part ("₹5,000 matched · ₹2,000 added") so a double entry is visible rather than
+  prevented. The "Add money" prompt on an auto goal says so.
+- **The allocation bar drags smoothly.** It was calling back into JavaScript on every frame
+  of the drag — a React state update and a full screen re-render per frame — so a slow drag
+  queued hundreds and the bar kept moving for seconds after the finger stopped. The gesture
+  now runs entirely on the UI thread against one shared array of values, and JS learns the
+  new numbers exactly ONCE, on release. `snapAmount` / `rebalancePair` are marked
+  `'worklet'` so the preview and the committed number come from the same maths.
+- **The plan is VIEW-first with an explicit Edit.** It used to be permanently live, with
+  Save appearing only once something was already dirty — so there was no way to look at your
+  plan without being inside it. Now read-only until "Edit", ending at Save or Cancel (and
+  Cancel can throw the draft away precisely because the committed plan was never being
+  written to). A month with no plan yet opens straight into editing.
+- **Goals are square tiles** (`GoalCard.tsx`), two per row: a state ribbon (GOAL COMPLETE /
+  8 MONTHS TO GO / pace), the goal's glyph as a medallion, the target in a pill, the name, a
+  progress bar, and a three-stat footer (Saved · Target · This month). The old list rows were
+  a planning control doing double duty as a status display.
+- **Reaching a lifetime target congratulates and pays.** `GoalAchievedModal` fires once per
+  goal, with confetti (extracted from `CelebrationModal` into a shared `Confetti.tsx`) and a
+  real bonus: **+250 RP / +25 EPC**, scaled by the Aware Run multiplier (`awardGoalBonus`,
+  plus a `goal_achieved` notification). Open-ended goals never fire it — there is no line to
+  cross. The once-per-goal guard is `bonusAwardedAt` on the goal, written AFTER the credit,
+  so a crash between the two can only ever under-award.
+- Store **v30** migrates `autoParentId` → `autoRule.parentIds` and seeds `achievedAt` /
+  `bonusAwardedAt`; `backupService.STORE_VERSION` bumped to match. `npm run test:goals` 47 →
+  70, store goals cases 30 → 44.
+
+**Done — Phase 2b, Sep-11-2026** (crash + the follow-up UI pass)
+
+- **FIXED: the app closed the moment you dragged the slider.** Phase 2 marked `snapAmount` /
+  `rebalancePair` in `goalPlan.js` as `'worklet'` so the UI-thread drag could reuse them. A
+  worklet may only call worklets, and a cross-FILE worklet reference is not reliably
+  serialised to the UI runtime by the Reanimated 3.6 babel plugin — so frame one of a drag
+  hit a plain JS function on the UI thread and took the process with it. The bar now owns a
+  small LOCAL worklet (`snapWithin`) and commits back through `rebalancePair` on the JS
+  thread, which re-snaps — so `goalPlan.js` still produces every stored number. **Never
+  import a function into a gesture worklet.**
+- **Header `+` → an info affordance.** The (i) opens an InfoSheet explaining how goals work
+  (auto-funding, manual top-ups, targets, and that Spending is Budget's).
+- **Adding a goal is the floating +**, the same FAB Home uses. Both dashed "add a goal" rows
+  are gone. The FAB hides at the 8-goal cap, which the dashed row used to enforce.
+- **"This month's split" no longer says "drag a divider" when there is no bar** — with no
+  salary typed the card is a single empty field, so the subtitle now tells you to enter one.
+- **Goal tiles: progress is the RING around the glyph**, not a bar under it, and it sits
+  FLUSH against the glyph disc (the disc is exactly the arc's inner diameter). The fill went
+  through two colours before landing: first a fixed amber, then the theme's dark accent
+  measured on a neutral track (because the tile is already washed in the goal's colour and a
+  same-hue track read as one more band of it). **Sep-12: it is now the GOAL's own colour** —
+  matching the wash and the medallion glow, so the tile reads as one coloured object rather
+  than the ring introducing a second, unrelated accent — with the neutral track
+  (`theme.divider`) staying the one deliberate exception to §5b. Still `readableOn(track,
+  color, 3)`: most of the 8 goal colours pass unboosted, a few (teal, sky, amber, pink) sit at
+  ~3.1–3.2:1 on the light-mode track and get nudged; dark mode clears 3:1 unboosted for all
+  eight.
+- The tile's top ribbon states, in priority order: **GOAL COMPLETE** → **NOTHING PLANNED** →
+  **N MONTHS TO GO** (target ÷ this month's allocation) → this month's pace (FULLY FUNDED /
+  AHEAD OF PACE / ON TRACK / BEHIND PACE). *Fixed:* a goal with no allocation in the current
+  plan has no pace row, and the chip fell through to a default of "ON TRACK" — announcing
+  progress on a goal doing nothing. **A status chip must never invent reassurance from
+  missing data.** It also went full-bleed across the tile's top (it was a centred pill at 74%
+  width, ~90pt of text room, which truncated "15 MONTHS TO GO" on a 360pt phone) and the
+  labels got longer now that they fit — "AHEAD" alone never said ahead of *what*. The band is
+  a TINT of the state's colour (18%), not the solid, and its ink is measured on what that
+  actually composites to — goal wash over card, then band over that — since a translucent
+  surface has no colour of its own to measure against. Worst case across every theme × goal
+  colour × state is 4.50:1. It carries the card's INNER radius and is inset by the border
+  width rather than relying on `overflow: hidden`, which left the band square against the
+  rounded corners on Android, plus a hairline under it so the translucent band has a defined
+  lower edge. The pencil sits top-right just below it; both offsets derive from one
+  `RIBBON_H` constant, and it clears the progress ring by 5.7pt even on a 320pt phone.
+- *Fixed:* the tile **printed the same number twice**. The footer's middle stat mirrored the
+  headline pill exactly — Target when the pill said TARGET, Monthly when it said MONTHLY — so
+  it duplicated whichever branch it took. The footer is two cells now (Saved so far · This
+  month), each with half the row instead of a third, and a size up from the labels the
+  three-cell version had been shrunk to.
+- "This month's split" subtitle is now a short prompt ("Add more to reach your goals sooner.")
+  instead of *"Saved. Tap Edit to change it."* — which narrated a button in its own header
+  row and repeated the saved state the month line already carries.
+  The drag hint stays, but only while editing: that the dividers are draggable is the one
+  thing on the card that isn't self-evident.
+- *Fixed:* the allocation bar's FREE segment is drawn with a border, and a square-cornered
+  stroke under the bar's rounded clip got sliced off at the ends — the outline stopped short
+  of the curve instead of following it. End segments now carry the bar's own radius.
+  (Clipping alone is enough for a solid fill; it is not for a stroke.)
+- **The card body no longer opens the edit form.** It used to be the SAME tap as the pencil,
+  so tapping anywhere on a tile could land you in a form you didn't ask for. Editing is the
+  pencil now, exclusively — and the body tap itself was later given its own job (see the
+  auto-fund-link bullet below): it opens the goal's matching-transactions drill-down.
+- Both edit affordances were inlined Ionicons (`pencil` on the tile, `create-outline` on the
+  plan button) — two different glyphs, and neither the app's. Both are `EditIcon` now (§4),
+  and the tile's sits in an outlined circle so it reads as a button rather than as part of
+  the tile's decoration. The glyph sits on a RADIAL glow in the goal's colour that fades to nothing at
+  the disc's edge — SVG, because RN's `shadow*`/`elevation` can only draw a hard drop
+  BENEATH a view, which is a different thing from light behind an icon. Each tile's gradient
+  gets a `useId`-derived id: SVG gradient ids are global, so a shared one makes every glow on
+  the screen pick up whichever card mounted last. One centred **Update**
+  button (the "Auto" tag beside it is gone; the sheet it opens says so instead), and an
+  explicit edit pencil.
+- The ring is a new shared **`ProgressRing.tsx`** — BudgetSummary's identical local copy was
+  deleted and now imports it. (AnalyticsScreen's and CustomWidgetContainer's rings are still
+  local; they weren't touched.)
+- **FIXED: Delete did nothing in the goal editor.** The editor was a `<Modal>` and its
+  confirm was a second `<Modal>` rendered while the first was still visible — the exact
+  stacked-modal failure ui-consistency §8b documents. Which leads to:
+- The goal form's selected-sub-category count is a tinted CHIP (NavListRow's badge geometry),
+  not a bare digit beside the label — which read as part of the label. Ink measured on the
+  tint rather than the card; worst case 4.50:1 across all five themes.
+- *Fixed:* the merchant row's add button was a hardcoded 46pt beside an input measuring ~43
+  (font + padding + border), so it stood 3pt proud. The row is `alignItems: 'stretch'` now
+  and the button takes its height from the field.
+- *Fixed:* in the goal form's category rows the selected-child COUNT and the expand chevron
+  printed on top of each other — the chevron was absolutely positioned over a flex row whose
+  last element was that count. The chevron is a sibling in the row now, not an overlay.
+- Goal form: **Delete moved into the pinned footer beside Save** (icon-only, outlined, same
+  height, a fraction of the width). At the end of the scroll it was reachable only after
+  scrolling past the whole auto-funding list, which made it feel missing.
+- **GoalsScreen section order corrected (Sep-12), TWICE — the second pass reverses the
+  first's reasoning.** Round one: "Your Goals" sat ABOVE "This Month's Split", so dragging the
+  bar's live effect on a goal's monthly figure was scrolled out of view above the control that
+  produced it. Fixed by moving the split card and reconciliation strip first, goals below —
+  correct for as long as the BAR was how you changed a goal's amount. Save/Cancel also moved
+  to a PINNED footer outside the `ScrollView` at the same time (a footer-CTA pattern, like
+  `GoalFormScreen`/BudgetPlan), which stands unchanged by round two.
+  Round two (see the very next bullet): once a goal's amount is only ever edited from that
+  goal's OWN form, the reason to put the split card first disappears — there's no more live
+  drag feedback to keep in view. **Goals now come FIRST again**, split card and reconciliation
+  strip below, because goals are the actual subject and the split is supporting arithmetic
+  underneath them. The floating + still hides while editing (still true — the footer occupies
+  the same corner) and can't collide with the new footer or invite starting an unrelated goal
+  mid-edit.
+- **A goal's monthly amount moved OUT of the split card and INTO the goal's own form
+  (Sep-12).** Reported as odd by design review: a goal's identity and lifetime target lived in
+  `GoalFormScreen`, but its MONTHLY commitment was only ever editable from a completely
+  different section — the split card's drag bar and ± steppers — with the identical rupee
+  figure then rendered a second time, unlinked, as the goal tile's own stat. Two screens both
+  claiming to own one number. Fixed:
+  - **`GoalFormScreen` gained a "Monthly Contribution" field**, right after Overall Target —
+    a goal's two numbers (lifetime target, monthly commitment) now both live where you'd look
+    for either. Saving writes it via `updateGoalAllocation`, clamped to what's actually free
+    this month (salary − the locked spending cap − every OTHER goal's share). If no plan
+    exists yet for this month (salary not set), the field explains that instead of silently
+    no-opping.
+  - **`updateGoalAllocation`'s clamp was ALSO wrong before this** (and unused until now — the
+    bar never actually called it, only its own local copy of the same logic did): it clamped
+    against the full salary, never subtracting the locked spending cap, so a form calling it
+    directly could over-commit into money Budget had already claimed. Fixed to compute room
+    the same way the old steppers did.
+  - **`AllocationBar` is now permanently view-only** on this screen (`disabled` hard-wired
+    true, no `onChangePair` wired to anything) — it shows the sum of what every goal's form has
+    already set, and nothing here writes to it any more. The split card's per-goal rows lost
+    their ± steppers, becoming a plain legend (swatch, name, amount) — a key to the bar's
+    segments, not a second control for the same number.
+  - GoalsScreen's local `alloc` draft state is GONE entirely — allocations are read live from
+    `goalPlan`/`lastGoalPlan` (`liveAllocations`) on every render, since there is no more
+    in-screen editing of them left to protect behind a draft. The salary figure keeps its own
+    draft + Edit/Save/Cancel (Sep-11's "view first" pattern, untouched) since that number
+    genuinely still belongs to this screen.
+  - *Fixed same day:* the empty-state template row first shipped as a silent `addGoal(...)`
+    call — tap a template and the goal existed immediately, with no chance to see or change
+    what got created, which read as a bug ("takes you to the goals screen" instead of a form).
+    **Templates now navigate to `GoalFormScreen` with a `prefill` route param** (name, emoji,
+    colour, kind, `autoParentId`, `suggestedPct`) instead of writing anything — the form seeds
+    its fields from it when creating (never for an edit), including the Monthly Contribution
+    field: `suggestedPct` × this month's salary, snapped and clamped to whatever's actually
+    free, if a plan exists. Nothing is created until the user reviews the form and taps Save,
+    same as typing one from scratch.
+- **The bar's drag + steppers came BACK the same day, on request** — "keep the slider edit
+  functionality for the monthly overview." The above stands otherwise: the goal's form still
+  has its own Monthly Contribution field, `updateGoalAllocation`'s fixed clamp is unchanged,
+  and the template→form prefill is unchanged. What's reversed:
+  - **`AllocationBar` on `GoalsScreen` is `disabled={!editing}` again**, not permanently true —
+    drag returns while the card is in Edit mode, same UI-thread gesture, same commit shape.
+  - **The per-goal legend rows have their ± steppers back** (`setOne`, mirroring the SAME
+    room-after-spending-cap clamp `updateGoalAllocation` now runs, kept local since the
+    stepper edits a draft, not the live plan).
+  - **GoalsScreen's local `alloc` draft is back**, seeded from `goalPlan`/`lastGoalPlan` in the
+    existing `seed()` effect — which re-fires whenever the store's `goalPlan` reference
+    changes, so a goal's form writing `updateGoalAllocation` directly still shows up here
+    (the two paths write the same store field, they just take different routes to it: the
+    bar/steppers via a local draft + Save, the form immediately).
+  - Card title reverted to **"This Month's Split"** (an edit surface again, not a pure view);
+    the subtitle's "drag a divider" copy is back for the same reason.
+  - Section order — goals grid ABOVE the split card — was left AS IS. That ordering's original
+    reasoning ("nothing to keep in view once the bar stopped editing") no longer strictly
+    holds now that the bar edits again, but reordering wasn't asked for here; flagged so it
+    isn't silently "fixed" without a fresh signal from the user.
+- **The auto-fund link is now VISIBLE from both sides (Sep-12).** The link between a
+  transaction and the goal(s) it funds already existed — a goal's `autoRule` is matched
+  against every transaction LIVE, nothing is ever stored on the transaction — but nothing in
+  the UI showed it. Two new read-only selectors (`getGoalsForTxn`, `getGoalTransactions`),
+  both re-running the exact match `goalFundingForMonth` already sums, so the total and what's
+  shown can never disagree:
+  - **`TxnDetailSheet`** gained a "Counts toward" row — 🛟 Emergency Fund, say — whenever the
+    transaction matches a goal's rule right now. Recomputed on every open; editing the rule or
+    recategorising the transaction changes the answer next time, no stale link to invalidate.
+  - **New `GoalTransactionsSheet`** lists a goal's matching transactions for the live month —
+    tapping a goal tile's BODY opens it (finally giving that reserved prop a job). Tapping a
+    row opens the same `TxnDetailSheet`, so a transaction found here reads identically to one
+    found on the Activity list. Gated against the stacked-modal bug (§8b): it hides itself the
+    instant a row's detail sheet opens.
+  - **`addGoalContribution` gained an optional `sourceTxnId`** — a manual contribution can now
+    remember which transaction it came from, and the SAME (goal, transaction) pair can only
+    ever produce one contribution (refused, not duplicated, on a repeat). Nothing writes it
+    yet; it's the plumbing a future review-queue quick-add needs, built now so that caller
+    doesn't need a migration later.
+  Considered and rejected: storing an explicit `goalId` on the transaction at categorisation
+  time. That would go stale the moment a rule or a category changed, and couldn't be
+  retroactive for a goal created after the transaction — the live match already gets both for
+  free.
+- *Fixed:* saving a goal, deleting one, saving/updating the monthly plan, keeping last month's
+  plan, and logging a manual contribution all did their thing with NO confirmation — every
+  other write flow in the app (`ReminderFormScreen`, group settle, etc.) shows a toast, and
+  Goals was silent. All five now `toast.success(...)` via the shared `useToast()`. The
+  goal-form toast fires AFTER `navigation.goBack()`, same as `ReminderFormScreen`: it needs to
+  render on the screen the user lands ON, not the one being popped.
+- Goal form pass: **Overall target moved up to sit directly under Type** (it is the substance
+  of the goal; glyph and colour are decoration and follow both), the Icon row gained the
+  **type-your-own emoji tile** the group and category forms already have — the device
+  keyboard is the picker, so no emoji-picker dependency — and the selected **colour swatch now
+  uses the app's treatment** (scale up + white inner ring + dark drop, per CreateGroupModal)
+  instead of a theme-coloured border that was invisible on half the palette.
+- **The goal editor is now a full screen** (`GoalFormScreen`, route `GoalForm`), replacing
+  `GoalEditorSheet`. It had outgrown a sheet anyway — name, glyph, colour, kind, target AND a
+  category/merchant rule list is a form, not a prompt (§2b: pick by growth). Its delete
+  confirm is now the only modal on screen, so it works.
+- *Fixed:* a brand-new goal with neither an overall target nor a monthly amount set (both are
+  deliberately optional — a goal that only auto-funds from categories needs neither) used to
+  print **"₹0" three times over**: the headline pill ("MONTHLY ₹0"), and both footer stats.
+  Every one of those zeros was technically true, but three in a row on a tile that also
+  already says "NOTHING PLANNED" on its ribbon reads as broken, not as "nothing has happened
+  yet." `GoalCard` now shows **"—" instead of ₹0** for the pill and both footer stats, but
+  ONLY when the goal is genuinely idle (`lifetimeSaved <= 0` — which can only be true if
+  nothing was ever saved into it, this month included) AND has no target and no plan. An
+  ONGOING goal that simply got nothing THIS month still shows a real "₹0" for "This month" —
+  that zero is informative (behind pace), so it is never dashed.
+- *Fixed a real rollover bug*, found by walking through "does the recurring/lifetime total
+  keep adding up" with the user: `rolloverGoalPlanIfNeeded`'s snapshot loop only walked
+  `goalPlan.allocations` — so a goal with **no monthly plan slot** (pure auto-fund, exactly the
+  "NOTHING PLANNED" shape) got **no row in that month's `goalHistory` snapshot at all**, even
+  if it earned real auto-matched money that month. Not an aging/retention issue — the month
+  was never recorded, period, so `getGoalLifetimeSaved` silently dropped it the moment the
+  month rolled over. Fixed to walk every goal in `s.goals`, recording `{planned, funded}` for
+  any goal with either one nonzero (a goal that did nothing that month still gets no row, so
+  history doesn't bloat with zeros). Covered by a new store test (isolated on scratch goals,
+  dated explicitly into the forced-rollover month since funded is computed by the
+  TRANSACTION's month, not the plan's).
+- **Goals gain a DURATION: One-Time vs Recurring (Sep-12, store v31).** A second axis from
+  `kind` (`kind` = what the money is for; `duration` = whether it has a finish line), designed
+  after the user asked how a goal should show "one-time" vs "recurring" given it already has
+  both a lifetime target AND a monthly figure. **First shipped as mutually exclusive (one-time
+  = target only, no split-bar membership at all) — corrected the SAME DAY**: the user pointed
+  out a one-time goal should ALSO be able to take a monthly contribution ("it will be much
+  better"), which is in fact the common case (saving toward a target at a steady monthly rate),
+  not an edge case. Settled shape:
+  - **One-Time** — an Overall Target, and OPTIONALLY a Monthly Contribution toward it. Can be
+    "achieved" (that's measured against the target). Its ribbon: `N MONTHS TO GO` when both a
+    target and a monthly rate are known (the ORIGINAL pre-duration projection, `monthsToTarget`
+    — this is exactly why `monthsLeft` came back onto `GoalCard` after being removed as
+    "unreachable" earlier the same day); `N% SAVED` when there's a target but no monthly rate
+    to project a date from (tracked purely by top-ups/auto-fund).
+  - **Recurring** — a Monthly Contribution ONLY, no target ever, never "achieved". Ribbon is
+    pace (FUNDED/AHEAD/ON TRACK/BEHIND/NOTHING PLANNED), same as it always was.
+  - **Both** live in the monthly split bar identically, and **both auto-carry their monthly
+    figure at rollover** — duration no longer gates which goals are in the bar or which
+    auto-carry; only whether the Target field exists at all. `rolloverGoalPlanIfNeeded` builds
+    a fresh CURRENT-month plan from every goal's last allocation (any goal, not "recurring
+    only") the instant the month turns over, instead of nulling it and waiting for "Keep Last
+    Month's Plan" — the one deliberate exception to "nothing carries over until you say so."
+    Salary still only carries forward as a pre-filled, freely-editable starting figure.
+  - **The design fork this whole feature turned on** — how "automatic" recurrence works — was
+    put to the user with two options (lean on the existing carry-forward vs. a real standing
+    order outside `goalPlan`, locked in the bar like Spending); chose the low-risk carry-forward
+    option, which is what made today's correction a small, safe change rather than a rearchitect.
+  - `GoalFormScreen`: Duration chip pair, chosen FIRST (decides only whether Target shows);
+    Monthly Contribution now renders for BOTH durations, unconditionally. Switching TO Recurring
+    clears the target (Recurring never has one); switching to One-Time no longer clears the
+    monthly figure, since One-Time keeps it too.
+  - Migration (v31) infers duration from what a goal already had (a target → one-time; none →
+    recurring) and — corrected same day — leaves EVERY existing allocation exactly as it was on
+    either kind; nothing is stripped, since a one-time goal keeps taking part in the monthly bar
+    just as it always did.
+  - Templates all default to Recurring (they suggest a monthly %, none ship a target amount).
+  - Store suite 469 → 483 (migration, duration inference on `addGoal`, and the auto-carry
+    rollover behaviour — corrected to cover BOTH durations — are all covered). tsc clean.
+- **`AllocationBar` divider fixed to trade against Free only (Sep-12).** With 3+ goals in the
+  bar, dragging the divider between goal 2 and goal 3 to grow goal 2 was silently taking the
+  money FROM goal 3 (`rebalancePair` on the two adjacent segments — the divider's original,
+  documented "one rule"). That's the opposite of what the row steppers already did
+  (`allocationWithinSalary`: any one goal only ever trades against the unallocated pool).
+  Reworked so every divider adjusts its LEFT segment against Free, wherever Free happens to
+  sit in the bar — goals drawn after the one being dragged keep their own rupee figures and
+  just shift position on screen as the dragged segment grows or shrinks. Both the drag path and
+  the accessibility increment/decrement action now go through the same "segment vs Free" model.
+  No store or migration change; `AllocationBar.tsx`'s own doc comment rewritten to match.
+- **`getGoalPlanUsage` was hiding real money on an unplanned goal (Sep-12).** Reported as:
+  "updating a One-Time goal's allocation adds value to 'This month', but a Recurring goal
+  behaves correctly." Root cause: the selector's per-goal loop skipped any goal with
+  `planned <= 0` entirely (`if (p <= 0) return`) — even one with REAL funded money that month
+  (a manual top-up or auto-matched spend). `GoalCard`'s "This month" stat read `row?.funded ??
+  0`, so that money was invisible until a plan slot existed, then suddenly appeared once an
+  allocation was set — reading as though SETTING the plan had added the money. Recurring goals
+  rarely show this because they're almost always created WITH a monthly figure; One-Time goals
+  commonly aren't (a target funded by ad-hoc top-ups, no monthly commitment). Fixed to include
+  a goal whenever EITHER `planned > 0` OR `funded > 0`. Same bug class, same fix shape, as the
+  rollover-snapshot bug fixed earlier the same day — this is the live-month twin of that one.
+  Dependent fix: `GoalCard`'s `planned0` used to be derived from `!status` (status was only
+  ever undefined because the store skipped the row) — now derived directly from `planned <= 0`,
+  so the ribbon's "nothing planned" state isn't perturbed by a goal that has money but no plan.
+  Store suite 483 → 487. tsc clean.
+- **A manual top-up is now a REAL transaction, not a bare number (Sep-12).** `addGoalContribution`
+  used to be written straight from a typed amount — no account, no trace in Activity, no effect
+  on any balance. Flagged directly: "it should either open Add Transaction with a goal variant,
+  or a better version where every goal value is linked to a transaction" — went with the latter,
+  since it's smaller than threading a goal mode through the 1500-line Add Transaction screen and
+  matches how an AUTO goal already worked (its money was always a real, categorised transaction;
+  only the MANUAL path was a shadow ledger). The "Add money" modal now also asks which account
+  the money left (skipped entirely with only one account), then calls the same `addTransaction`
+  every manual spend goes through and links `goalContributions`' existing (previously unused)
+  `sourceTxnId` back to it. Category is picked automatically, never asked: a goal WITH an auto
+  rule gets its rule's own first category, so the transaction satisfies the rule on its own and
+  is picked up by the ordinary auto-match — no separate contribution is written at all, which
+  structurally rules out the double-count the modal used to just warn about; a goal with no rule
+  falls back to Investments (investment-kind) or Other. `getGoalTransactions` (the goal-card body
+  tap's drill-down) now also lists a linked transaction alongside auto-matched ones, so "what is
+  this total made of" stays honest for a manual top-up too. `deleteTransaction`/`ignoreTransaction`
+  now also drop the `goalContributions` row a deleted/ignored transaction linked to — same cleanup
+  `lentBorrowed` already gets via its own `sourceTxnId` — so a removed transaction can't leave a
+  goal permanently crediting money that no longer left any account. Store suite 487 → 494. tsc clean.
+- **"Put aside" copy tightened.** The month subtitle read "₹X of ₹Y put aside this month", which
+  paired two different meanings (already-saved vs. planned) under one verb. Now "₹X saved of ₹Y
+  planned this month" — each number gets its own word. The info-sheet bullet and the top-up
+  modal's own copy were rewritten together with the transaction change above, since "put aside" no
+  longer described what the action does (it logs a transaction now, not a bare figure).
+- **"Log" corrected back to "Add" everywhere in Goals.** Flagged directly: the app already has
+  one verb for this action (Add Expense, Add Transaction) and the new top-up copy had quietly
+  introduced a second ("Log for X", "Logged under…"). Corrected throughout — modal title, primary
+  button, both message variants, the category hint, the toast, the info-sheet bullet, the
+  no-account error — to match the app's existing vocabulary rather than a locally "nicer" word.
+- **Card tap now opens a real screen, `GoalDetailScreen`, with the stats a sheet had no room
+  for.** `GoalTransactionsSheet` (a bottom sheet, this month's matching transactions only) is
+  DELETED — everything it did moved into the new screen's own transactions section, unchanged
+  (`getGoalTransactions`), alongside what never had a home before: a big ring + headline (lifetime
+  saved vs. target for a One-Time goal, this month's funded vs. planned for Recurring), a 4-tile
+  stat grid (saved so far / target / this month planned / this month funded), the goal's own
+  auto-rule named in plain words, and a `goalHistory` table of closed months (the live month is
+  already the stat grid, so history only shows what's actually settled). Registered as
+  `GoalDetail` in `AppNavigator.js`. The "Add money" flow was pulled out of `GoalsScreen` into its
+  own `GoalFundModal` component the moment a second screen needed the identical thing — same
+  account picker, same automatic category inference, same `addTransaction` + `sourceTxnId` write,
+  now with exactly one owner instead of two copies that could drift. tsc clean, full test suite
+  unaffected (this is UI-only; nothing in the store changed).
+- **The FAB sat too low on both `Goals` and `GoalDetail` — no `bottomInset` at all.** `FAB` never
+  reads the safe area itself; every caller has to pass its own `bottomInset`, and these two
+  simply didn't. Fixed to `bottomInset={insets.bottom}` on both (they're root stack screens, no
+  tab bar to also clear — `DashboardScreen`/`GroupsScreen` additionally add `TAB_BAR_HEIGHT` since
+  they sit on top of it). Now clears the home indicator / gesture-nav bar on both platforms.
+- **The goal's auto-fund categories moved INTO the hero card, as chips.** First shipped as a
+  single joined-string sentence ("Auto-tracks: Investments, merchants: x, y") in its own box
+  below the stat grid. Asked to fold it into the hero card itself, the same way for a One-Time
+  goal as a Recurring one, laid out as a row (or two, wrapping as needed) rather than one long
+  line. Now one chip per category (its own emoji, tinted by its own colour) plus one per merchant
+  keyword (a plain `pricetag-outline` glyph, since a typed keyword has no emoji of its own to
+  carry).
+- **The hero card was growing tall for no reason — rebuilt as two rows instead of six.** Flagged
+  directly: "just increasing height unnecessary… lots of empty space". It had been one centred
+  column — ring, value, sub, pace caption, kind/duration badges, auto-fund chips, each its OWN
+  row — so every row past the (narrow) ring left dead space on both sides while the card kept
+  growing taller. Rebuilt as: ring + the value/sub/caption column side by side in one row, then
+  kind/duration badges and auto-fund chips sharing ONE wrapping row (told apart by tint alone —
+  plain outline vs. a colour wash — instead of a label each). Ring shrunk 104→84pt to suit sitting
+  beside text rather than centred alone; hero's vertical padding tightened to match.
+- **The detail screen's fund trigger corrected to match "Add Goal" (same day).** First shipped as
+  a pinned, full-width footer button ("Add Money" with a leading icon). Corrected: `GoalsScreen`'s
+  only "start adding X" affordance is the shared `FAB` (a floating gradient "+", bottom-right,
+  icon-only) — the detail screen's own fund trigger now reuses that exact component and position
+  instead of a bespoke bar. Also the general rule this surfaced: **a full-width button in this app
+  never pairs an icon with text** — a FAB carries an icon alone, a full-width button carries text
+  alone. `FAB.js` gained an optional `accessibilityLabel` (default `'Add'`, every existing caller
+  unaffected) since "Add Money" as visible text no longer exists once the button is icon-only.
+- **The auto-fund category picker moved out of `GoalFormScreen` into its own sheet,
+  `GoalCategoryPickerModal`.** Flagged directly: a row per top-level category, each expandable to
+  its own sub-categories, printed straight into the form — the form's LENGTH grew with however
+  many categories exist in the tree, exactly the growth the form's own header comment already
+  warned about when it explained why this became a pushed screen in the first place (ui-consistency
+  §2b: pick by growth). The category TREE is what actually grows unboundedly, not the rest of the
+  form, so only that list moves into a sheet — name/glyph/colour/kind/duration/target/monthly stay
+  a normal, fixed-length screen. The form now shows one compact `FormSelectRow` ("Choose
+  categories" / a truncated one-line summary of what's picked); tapping it opens the sheet, and —
+  same interaction `CategoryPickerModal` already uses elsewhere ("changes apply on tap") — every
+  toggle inside writes straight to the SAME `parentIds`/`categoryIds` state the form already held,
+  so there's no separate draft to reconcile and the row's summary is never a tap behind reality.
+  Merchants keep their existing inline text-input + chip list (bounded by what the user has
+  actually typed, so it never had this growth problem). `test:parse` 175 → 176 (new file).
+- **The "How goals work" explainer trimmed, and `InfoSheet` itself capped at 75% screen height.**
+  Flagged directly: "too much content... used 75% height". Two separate fixes: (1) Goals' own
+  copy went from 6 bullets to 3 — folded "recurring goals reapply automatically" into the body
+  line (it's basic mechanics, not a separate callout), merged "they can fill themselves" +
+  "or you top them up" into one "two ways money counts" bullet, dropped the standalone
+  "split it here, or per goal" bullet (already covered by the body). (2) `InfoSheet` itself —
+  used by 10 screens, not just Goals — had NO height cap and no scroll, so any caller with enough
+  bullets could push its CTA button off the bottom of the screen with no way to reach it. Both
+  the `sheet` and `centerCard` variants now cap at `SCREEN_H * 0.75` with `overflow: 'hidden'`,
+  and the body/bullets sit in a `ScrollView` (`flexShrink: 1` — Yoga defaults flexShrink to 0,
+  unlike web, so without it the ScrollView just grows past its bounded parent instead of
+  scrolling) so the title stays put and the CTA stays reachable regardless of content length.
+
 **Open**
 - Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block.
-  These were phase 2 of the agreed plan.
 - The liquid-fill visual from the prototype was deliberately NOT used — `DailyBudgetLiquidWave`
   is a PAID shop widget (`liquid_wave`, 600 EPC), so reusing it free here would undercut the
   shop. Goal progress uses a plain track/fill instead; a distinct Goals visual is open.
-- Income-aware suggestions, goal feasibility warnings and the rewards tie-in are phase 3.
+- Income-aware suggestions and goal feasibility warnings are still open.
+- Sub-category rules only bite where a child has its OWN flat category id — in the built-in
+  tree that's Groceries and the Transfers children; every USER-created sub-category has one.
+  The editor only offers the ones it can actually enforce.
 - Not yet manually verified in a running app (no UI test infrastructure exists) — the usual
   caveat for a UI change this size.
 

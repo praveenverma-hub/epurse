@@ -17,6 +17,7 @@ import {
   Dimensions,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -164,31 +165,36 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
           </View>
           {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
 
-          {body ? <Text style={styles.body}>{body}</Text> : null}
+          {/* Capped + scrollable: a sheet with several bullets can otherwise
+              run past the screen (nothing above scrolled), clipping the CTA
+              off the bottom with no way to reach it. */}
+          <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false} bounces={false}>
+            {body ? <Text style={styles.body}>{body}</Text> : null}
 
-          {bullets?.length ? (
-            <View style={styles.bulletWrap}>
-              {bullets.map((b, i) => (
-                <View key={`${b.label}-${i}`} style={styles.bulletRow}>
-                  {b.icon ? (
-                    <View style={styles.bulletBadge}>
-                      <Ionicons name={b.icon} size={17} color={badgeInk} />
+            {bullets?.length ? (
+              <View style={styles.bulletWrap}>
+                {bullets.map((b, i) => (
+                  <View key={`${b.label}-${i}`} style={styles.bulletRow}>
+                    {b.icon ? (
+                      <View style={styles.bulletBadge}>
+                        <Ionicons name={b.icon} size={17} color={badgeInk} />
+                      </View>
+                    ) : b.emoji ? (
+                      <View style={styles.bulletBadge}>
+                        <Text style={styles.bulletBadgeText}>{b.emoji}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.bulletDot} />
+                    )}
+                    <View style={styles.bulletText}>
+                      <Text style={styles.bulletLabel}>{b.label}</Text>
+                      <Text style={styles.bulletValue}>{b.value}</Text>
                     </View>
-                  ) : b.emoji ? (
-                    <View style={styles.bulletBadge}>
-                      <Text style={styles.bulletBadgeText}>{b.emoji}</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.bulletDot} />
-                  )}
-                  <View style={styles.bulletText}>
-                    <Text style={styles.bulletLabel}>{b.label}</Text>
-                    <Text style={styles.bulletValue}>{b.value}</Text>
                   </View>
-                </View>
-              ))}
-            </View>
-          ) : null}
+                ))}
+              </View>
+            ) : null}
+          </ScrollView>
 
           <Pressable style={styles.ctaWrap} onPress={handleDismiss}>
             <LinearGradient
@@ -228,6 +234,11 @@ const styles = StyleSheet.create({
     paddingBottom:        34,
     borderTopLeftRadius:  24,
     borderTopRightRadius: 24,
+    // However many bullets a caller passes, the sheet itself never grows past
+    // 3/4 of the screen — the body scrolls internally instead, so the CTA at
+    // the bottom stays reachable rather than pushed off-screen.
+    maxHeight:            SCREEN_H * 0.75,
+    overflow:             'hidden',
   },
   // Centered card: all four corners rounded, no drag handle, symmetric padding.
   centerCard: {
@@ -238,6 +249,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius:    24,
     borderBottomLeftRadius:  24,
     borderBottomRightRadius: 24,
+    maxHeight:               SCREEN_H * 0.75,
+    overflow:                'hidden',
+  },
+  // Yoga defaults flexShrink to 0 (unlike web), so without this the ScrollView
+  // just grows past its bounded parent instead of capping and scrolling.
+  scrollArea: {
+    flexShrink: 1,
   },
   handle: {
     width:           38,

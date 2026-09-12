@@ -302,6 +302,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         body={REWARD_COPY.RP_BODY}
         bullets={[
           { label: REWARD_COPY.RP_BULLET_EARN_LABEL,  value: REWARD_COPY.RP_BULLET_EARN_VALUE  },
+          { label: REWARD_COPY.RP_BULLET_GOAL_LABEL,  value: REWARD_COPY.RP_BULLET_GOAL_VALUE  },
           { label: REWARD_COPY.RP_BULLET_LEVEL_LABEL, value: REWARD_COPY.RP_BULLET_LEVEL_VALUE },
         ]}
       />
@@ -314,6 +315,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         bullets={[
           { label: REWARD_COPY.EPC_BULLET_EARN_LABEL, value: REWARD_COPY.EPC_BULLET_EARN_VALUE },
           { label: REWARD_COPY.EPC_BULLET_SAVE_LABEL, value: REWARD_COPY.EPC_BULLET_SAVE_VALUE },
+          { label: REWARD_COPY.EPC_BULLET_GOAL_LABEL, value: REWARD_COPY.EPC_BULLET_GOAL_VALUE },
         ]}
       />
     </View>

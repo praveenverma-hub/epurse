@@ -8,95 +8,14 @@
 // `clearPendingCelebration` action.
 // =============================================================================
 
-import React, { useEffect, useMemo, useRef } from 'react';
-import {
-  Modal, View, Text, StyleSheet, TouchableOpacity,
-  Animated, Easing, Dimensions,
-} from 'react-native';
+import React, { useMemo } from 'react';
+import { Modal, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { formatCompact } from '../utils/format';
-
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-
-// Bright pastel palette for confetti pieces
-const CONFETTI_COLORS = [
-  '#FF5A1F', '#FBBF24', '#10B981', '#3B82F6',
-  '#8B5CF6', '#EC4899', '#06B6D4', '#F59E0B',
-];
-
-// ── A single confetti piece — falls from above with a slight drift ─────────
-const ConfettiPiece = ({ delay, color, startX, size, drift }) => {
-  const fall = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.sequence([
-      Animated.delay(delay),
-      Animated.timing(fall, {
-        toValue: 1,
-        duration: 2400 + Math.random() * 1200,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [delay, fall]);
-
-  const translateY = fall.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-40, SCREEN_H + 40],
-  });
-  const translateX = fall.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0, drift, drift * 1.5],
-  });
-  const rotate = fall.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', `${720 + Math.random() * 360}deg`],
-  });
-  const opacity = fall.interpolate({
-    inputRange: [0, 0.05, 0.85, 1],
-    outputRange: [0, 1, 1, 0],
-  });
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: startX,
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: color,
-        opacity,
-        transform: [{ translateY }, { translateX }, { rotate }],
-      }}
-    />
-  );
-};
-
-const Confetti = ({ active, count = 36 }) => {
-  // Generated once — random seeds stay stable for the modal's lifetime
-  const pieces = useMemo(() => {
-    return Array.from({ length: count }, (_, i) => ({
-      key: i,
-      delay: Math.random() * 800,
-      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-      startX: Math.random() * SCREEN_W,
-      size: 5 + Math.random() * 5,
-      drift: (Math.random() - 0.5) * 80,
-    }));
-  }, [count]);
-
-  if (!active) return null;
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {pieces.map(({ key, ...p }) => <ConfettiPiece key={key} {...p} />)}
-    </View>
-  );
-};
+import Confetti from './Confetti';
 
 // ── Modal ─────────────────────────────────────────────────────────────────
 const CelebrationModal = ({ visible, onClose, onPlanNext }) => {

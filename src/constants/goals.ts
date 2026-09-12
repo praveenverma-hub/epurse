@@ -7,9 +7,9 @@
 // Goal categories are deliberately their OWN namespace, not the two-tier spend
 // tree. "Emergency Fund" is not a sibling of "Food" — folding them together
 // would put savings buckets into the category picker every transaction uses.
-// The one crossing point is `autoParentId`, which names a spend parent whose
-// debits COUNT TOWARD a goal (a SIP debit funds the SIP goal) — a read, never a
-// merge.
+// The one crossing point is `GoalAutoRule`, which names the categories and
+// merchants whose debits COUNT TOWARD a goal (a SIP debit funds the SIP goal)
+// — a read, never a merge.
 // =============================================================================
 
 import type { Ionicons } from '@expo/vector-icons';
@@ -44,9 +44,55 @@ export const GOAL_KIND_META: Record<GoalKind, KindMeta> = {
     hint: 'SIPs, stocks, anything you expect to grow',
   },
   lending: {
-    label: 'To lend',
+    label: 'To Lend',
     icon: 'people-outline',
     hint: 'Set aside now to lend to someone later',
+  },
+};
+
+/**
+ * DURATION — a second, independent axis from `kind` (Sep-12-26). `kind` is
+ * what the money is FOR; `duration` is whether the goal has a FINISH LINE.
+ * It decides ONLY whether the Overall Target field exists — a Monthly
+ * Contribution is available on BOTH (revised same day: a one-time goal with
+ * a steady monthly rate toward it is the common case, not an edge case, and
+ * both kinds of goal live in the split bar and auto-carry their monthly
+ * figure at rollover the exact same way):
+ *
+ *   ONE_TIME  — has an Overall Target, and OPTIONALLY a Monthly Contribution
+ *               toward it. Can be "achieved" (a target is what achievement
+ *               is measured against); a Recurring goal never has one, so it
+ *               never achieves.
+ *   RECURRING — has ONLY a Monthly Contribution, no target — an ongoing
+ *               habit with no finish line, never "achieved".
+ *
+ * A goal's monthly figure — on EITHER duration — re-applies automatically at
+ * rollover rather than waiting for a monthly confirmation, unlike everything
+ * else in Goals; see `rolloverGoalPlanIfNeeded`.
+ */
+export const GOAL_DURATIONS = {
+  ONE_TIME: 'oneTime',
+  RECURRING: 'recurring',
+} as const;
+
+export type GoalDuration = typeof GOAL_DURATIONS[keyof typeof GOAL_DURATIONS];
+
+interface DurationMeta {
+  label: string;
+  icon: IonIcon;
+  hint: string;
+}
+
+export const GOAL_DURATION_META: Record<GoalDuration, DurationMeta> = {
+  oneTime: {
+    label: 'One-Time',
+    icon: 'flag-outline',
+    hint: 'A fixed amount to reach once, optionally funded monthly — a purchase, a deposit, a fund',
+  },
+  recurring: {
+    label: 'Recurring',
+    icon: 'repeat-outline',
+    hint: 'A monthly amount with no finish line — an ongoing habit',
   },
 };
 
@@ -66,6 +112,26 @@ export const GOAL_COLORS = [
   '#EC4899', // pink
 ];
 
+/**
+ * Which real spend COUNTS toward a goal. All three dimensions are ORed: a
+ * transaction funds the goal if its first-level category is listed, OR its
+ * flat category id is, OR its merchant contains one of the keywords.
+ *
+ * This is the one place the goal namespace touches the spend tree, and it is
+ * still a READ — a goal names categories, it never becomes one.
+ */
+export interface GoalAutoRule {
+  /** First-level (parent) category ids — e.g. `investments`. */
+  parentIds: string[];
+  /** Legacy flat category ids, for funding from ONE sub-category. */
+  categoryIds: string[];
+  /** Merchant keywords, matched case- and punctuation-insensitively. */
+  merchants: string[];
+}
+
+/** Merchant keywords a single goal may carry. Past this the rule is noise. */
+export const GOAL_MERCHANT_LIMIT = 10;
+
 export interface GoalTemplate {
   name: string;
   emoji: string;
@@ -76,6 +142,11 @@ export interface GoalTemplate {
   /** Spend parent whose debits auto-fund this goal, when one applies. */
   autoParentId?: string;
 }
+
+/** Every starter template suggests a MONTHLY share of salary, so all of them
+ *  are Recurring — none currently ship a target amount to make One-Time the
+ *  better fit. A future one-time template just needs its own duration. */
+export const TEMPLATE_DURATION: GoalDuration = GOAL_DURATIONS.RECURRING;
 
 /**
  * The empty state's launchpad. A blank "name your goal" form asks someone to

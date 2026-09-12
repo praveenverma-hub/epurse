@@ -41,13 +41,17 @@ import {
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
 } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID, THEMES } from '../constants/themes';
-import { GOAL_COLORS, DEFAULT_GOAL_EMOJI } from '../constants/goals';
+import { GOAL_COLORS, DEFAULT_GOAL_EMOJI, GOAL_MERCHANT_LIMIT } from '../constants/goals';
 import {
   snapAmount,
   allocationWithinSalary,
   freeAmount,
   fundedPct,
   paceStatus,
+  goalAutoRule,
+  hasAutoRule,
+  ruleMatchesTxn,
+  goalIsAchieved,
 } from '../utils/goalPlan';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed } from '../utils/messageParser';
@@ -82,6 +86,7 @@ import {
   canSplitTransaction,
   debitDisplayAmount,
   isGroupExcluded,
+  isMemoTxn,
   isRefundCredit,
   spendContribution,
   countsForSpend,
@@ -456,32 +461,79 @@ const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
 };
 
 /**
- * What a goal actually received in one month.
+ * What a goal actually received in one month, split by where it came from.
  *
- * Two sources, deliberately exclusive per goal:
- *   • `autoParentId` set → the goal is funded by REAL SPEND in that parent
- *     category (a SIP debit funds the SIP goal). Nothing to log by hand, which
- *     is the whole point — the goals people abandon are the ones that need
- *     manual upkeep.
- *   • otherwise → the sum of manual contributions dated in that month.
+ * Two sources, and they ADD (Sep-11-26):
+ *   • the goal's auto rule → REAL SPEND matching the parent categories,
+ *     sub-categories or merchant keywords it names. Categorising a SIP debit
+ *     funds the SIP goal with nothing to log, which is the whole point — the
+ *     goals people abandon are the ones that need manual upkeep.
+ *   • manual contributions dated in that month.
  *
- * An auto goal ignores manual contributions rather than adding them: counting
- * both would double up the moment a user logged the SIP they'd already paid.
+ * Phase 1 made these EXCLUSIVE (an auto goal ignored typed entries) to stop a
+ * user double-counting a SIP they'd already paid. The user asked for the
+ * opposite: SMS is not guaranteed to arrive, and a goal you cannot correct by
+ * hand is a goal that silently under-reports. So both count, and the UI names
+ * each part ("₹5,000 matched · ₹2,000 added") so a double entry is VISIBLE
+ * rather than prevented.
  */
-const goalFundedForMonth = (state, goal, mk) => {
-  if (goal?.autoParentId) {
-    return (state.transactions || []).reduce((sum, t) => {
-      if (t.isIgnored || !countsForSpend(t)) return sum;
-      if (monthKey(t.createdAt) !== mk) return sum;
-      if (parentCatId(t) !== goal.autoParentId) return sum;
-      return sum + spendContribution(t);
-    }, 0);
-  }
-  return (state.goalContributions || []).reduce(
+/**
+ * Which of THIS MONTH's transactions currently fund `goal` automatically —
+ * the list, not just the sum. Split out of `goalFundingForMonth` so the total
+ * and the "show me which ones" drill-down (`getGoalTransactions`) can never
+ * drift apart: one is `.reduce` over the other's array, not two separate
+ * scans that could disagree.
+ */
+const goalAutoTxns = (state, goal, mk) => {
+  if (!hasAutoRule(goal)) return [];
+  const rule = goalAutoRule(goal);
+  return (state.transactions || []).filter((t) => {
+    if (t.isIgnored || !countsForSpend(t)) return false;
+    // A memo is someone ELSE's money — nothing left this user's account, so
+    // it cannot be money they set aside no matter what it's categorised as.
+    if (isMemoTxn(t)) return false;
+    if (monthKey(t.createdAt) !== mk) return false;
+    return ruleMatchesTxn(rule, {
+      parentId: parentCatId(t),
+      categoryId: t.categoryId,
+      merchant: t.merchant || t.cleanMerchant || t.rawMerchant,
+    });
+  });
+};
+
+const goalFundingForMonth = (state, goal, mk) => {
+  const auto = goalAutoTxns(state, goal, mk).reduce((sum, t) => sum + spendContribution(t), 0);
+  const manual = (state.goalContributions || []).reduce(
     (sum, c) => (c.goalId === goal.id && monthKey(c.date) === mk ? sum + (Number(c.amount) || 0) : sum),
     0,
   );
+  return { auto, manual, total: auto + manual };
 };
+
+/**
+ * Fold whatever a caller passed into ONE stored rule shape. Phase 1's single
+ * `autoParentId` arrives as a loose argument from templates and older callers,
+ * so it is merged in here rather than left as a second field the readers would
+ * each have to remember.
+ */
+const normalizeAutoRule = (rule, legacyParentId = null) => {
+  const clean = (arr) => Array.from(new Set(
+    (Array.isArray(arr) ? arr : [])
+      .map((x) => String(x == null ? '' : x).trim())
+      .filter(Boolean),
+  ));
+  const parentIds = clean(rule?.parentIds);
+  if (legacyParentId && !parentIds.includes(String(legacyParentId))) parentIds.push(String(legacyParentId));
+  const out = {
+    parentIds,
+    categoryIds: clean(rule?.categoryIds),
+    merchants: clean(rule?.merchants).slice(0, GOAL_MERCHANT_LIMIT),
+  };
+  return (out.parentIds.length || out.categoryIds.length || out.merchants.length) ? out : null;
+};
+
+/** Total funded in one month. The breakdown is `goalFundingForMonth`. */
+const goalFundedForMonth = (state, goal, mk) => goalFundingForMonth(state, goal, mk).total;
 
 /**
  * Denormalise account type/mask/bank onto a transaction at write time — mirrors what
@@ -1026,8 +1078,10 @@ export const useEPurseStore = create(
       //
       // `goals` are the durable definitions the user manages:
       //   { id, name, emoji, color, kind: 'saving'|'investment'|'lending',
-      //     lifetimeTarget: number|null, autoParentId: string|null,
-      //     createdAt, archivedAt: string|null }
+      //     lifetimeTarget: number|null,
+      //     autoRule: { parentIds[], categoryIds[], merchants[] } | null,
+      //     createdAt, archivedAt: string|null,
+      //     achievedAt: string|null, bonusAwardedAt: string|null }
       goals: [],
       // The CURRENT month's plan. null until set — a new month starts empty and
       // must be confirmed, exactly like `budget`.
@@ -1035,8 +1089,9 @@ export const useEPurseStore = create(
       goalPlan: null,
       // Last confirmed plan, kept past rollover purely to prefill the next one.
       lastGoalPlan: null,
-      // Funding events. Auto-tracked kinds (a goal with `autoParentId`) derive
-      // their progress from real transactions instead and add nothing here.
+      // Funding events typed by hand. A goal with an `autoRule` ALSO derives
+      // progress from matching transactions; the two ADD (see
+      // `goalFundingForMonth`) so a missing bank SMS can always be corrected.
       //   { id, goalId, amount, date, source: 'manual' }
       goalContributions: [],
       // Closed months, snapshotted at rollover — mirrors `budgetHistory` and for
@@ -1476,10 +1531,23 @@ export const useEPurseStore = create(
       // ─── Goals actions ──────────────────────────────────────────────────────
 
       /** Create a goal definition. Returns its id so a caller can allocate to it. */
-      addGoal: ({ name, emoji, color, kind = 'saving', lifetimeTarget = null, autoParentId = null } = {}) => {
+      addGoal: ({
+        name, emoji, color, kind = 'saving', lifetimeTarget = null,
+        autoParentId = null, autoRule = null, duration = null,
+      } = {}) => {
         const clean = (name || '').trim();
         if (!clean) return null;
         const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        // Which single field applies (Overall Target vs Monthly Contribution)
+        // and whether the goal joins the split bar at all — see GOAL_DURATIONS
+        // in constants/goals.ts. An explicit `duration` always wins (this is
+        // what GoalFormScreen's Duration chips pass); a caller that doesn't
+        // pass one (templates, older tests) gets it inferred from whether a
+        // lifetime target was given, so a pre-existing `addGoal({ ...,
+        // lifetimeTarget })` call keeps working exactly as it did.
+        const dur = duration === 'oneTime' || duration === 'recurring'
+          ? duration
+          : (Number(lifetimeTarget) > 0 ? 'oneTime' : 'recurring');
         set((s) => ({
           goals: [
             ...s.goals,
@@ -1489,10 +1557,18 @@ export const useEPurseStore = create(
               emoji: emoji || DEFAULT_GOAL_EMOJI,
               color: color || GOAL_COLORS[s.goals.length % GOAL_COLORS.length],
               kind,
-              lifetimeTarget: Number(lifetimeTarget) > 0 ? Number(lifetimeTarget) : null,
-              autoParentId: autoParentId || null,
+              duration: dur,
+              lifetimeTarget: dur === 'oneTime' && Number(lifetimeTarget) > 0 ? Number(lifetimeTarget) : null,
+              // `autoParentId` is folded into the rule at creation; the loose
+              // field is still accepted so phase-1 callers (templates, tests)
+              // keep working unchanged.
+              autoRule: normalizeAutoRule(autoRule, autoParentId),
               createdAt: new Date().toISOString(),
               archivedAt: null,
+              // Set the moment a lifetime target is reached, and never unset —
+              // it is what makes the congratulation fire exactly once.
+              achievedAt: null,
+              bonusAwardedAt: null,
             },
           ],
         }));
@@ -1501,7 +1577,18 @@ export const useEPurseStore = create(
 
       updateGoal: (goalId, patch = {}) =>
         set((s) => ({
-          goals: s.goals.map((g) => (g.id === goalId ? { ...g, ...patch, id: g.id } : g)),
+          goals: s.goals.map((g) => {
+            if (g.id !== goalId) return g;
+            const next = { ...g, ...patch, id: g.id };
+            // A rule always lands in its stored shape, whichever field the
+            // caller used. `autoParentId` never survives on the goal — the
+            // matcher would then read the same parent from two places.
+            if ('autoRule' in patch || 'autoParentId' in patch) {
+              next.autoRule = normalizeAutoRule(patch.autoRule ?? g.autoRule, patch.autoParentId);
+              delete next.autoParentId;
+            }
+            return next;
+          }),
         })),
 
       /**
@@ -1547,16 +1634,20 @@ export const useEPurseStore = create(
         }),
 
       /**
-       * Set ONE goal's allocation, clamped so the plan can never exceed salary.
-       * The bar's drag rebalances a pair itself (rebalancePair) and commits via
-       * setGoalPlan; this is the steppers' path.
+       * Set ONE goal's monthly allocation, clamped to what's actually free —
+       * salary minus the locked spending cap minus every OTHER goal's share.
+       * The bar itself is view-only (Sep-12-26: editing a goal's own amount
+       * moved into its form, see GoalFormScreen); this is that form's write
+       * path, so the clamp has to account for spending itself now, the same
+       * room `setOne` used to compute locally when the bar still edited.
        */
       updateGoalAllocation: (goalId, amount) =>
         set((s) => {
           if (!s.goalPlan) return s;
-          const next = allocationWithinSalary(
-            s.goalPlan.salary, s.goalPlan.allocations, goalId, amount,
-          );
+          const budgetCap = Number(s.budget?.totalCap) || 0;
+          const salary = Number(s.goalPlan.salary) || 0;
+          const room = Math.max(0, salary - (budgetCap > 0 ? Math.min(budgetCap, salary) : 0));
+          const next = allocationWithinSalary(room, s.goalPlan.allocations, goalId, amount);
           const allocations = { ...s.goalPlan.allocations };
           if (next > 0) allocations[goalId] = next;
           else delete allocations[goalId];
@@ -1581,32 +1672,86 @@ export const useEPurseStore = create(
 
           const prev = s.goalPlan.monthKey;
           const perGoal = {};
-          Object.entries(s.goalPlan.allocations || {}).forEach(([goalId, planned]) => {
-            const goal = s.goals.find((g) => g.id === goalId);
-            perGoal[goalId] = {
-              planned,
-              funded: goal ? goalFundedForMonth(s, goal, prev) : 0,
-            };
+          // EVERY goal is checked here, not just ones with a plan allocation
+          // that month. This used to iterate `s.goalPlan.allocations` alone,
+          // so a pure auto-fund goal — no monthly figure ever set, only
+          // matched spend — got NO row in this snapshot. `getGoalLifetimeSaved`
+          // only ever adds the live current month plus what's IN goalHistory,
+          // never re-reads old raw transactions, so that month's real funded
+          // amount was gone the moment the month rolled over — not aged out,
+          // never recorded. A goal that did nothing this month (no plan, no
+          // funding) still gets no row, so history doesn't bloat with zeros.
+          s.goals.forEach((goal) => {
+            const planned = Number(s.goalPlan.allocations?.[goal.id]) || 0;
+            const funded = goalFundedForMonth(s, goal, prev);
+            if (planned <= 0 && funded <= 0) return;
+            perGoal[goal.id] = { planned, funded };
           });
+
+          // A goal's monthly figure re-applies HERE, automatically — on
+          // EITHER duration (Sep-12-26, revised same day: a one-time goal
+          // funded monthly toward its target gets the exact same treatment
+          // as a recurring one, not a lesser one) — unlike everything else
+          // on this screen (salary), it does not wait for "Keep Last Month's
+          // Plan" or an Edit+Save. Salary still carries forward only as a
+          // STARTING figure (the sole number we have), freely correctable
+          // via the existing Edit flow — this does NOT reintroduce silently
+          // reading salary from anywhere; it is the same last-known number
+          // the draft already pre-filled with, just committed immediately
+          // instead of held in an unconfirmed draft.
+          const nowIso = new Date().toISOString();
+          const carriedAllocations = {};
+          s.goals.forEach((goal) => {
+            if (goal.archivedAt) return;
+            const amt = Number(s.goalPlan.allocations?.[goal.id]) || 0;
+            if (amt > 0) carriedAllocations[goal.id] = amt;
+          });
+          const hasCarry = Object.keys(carriedAllocations).length > 0;
 
           return {
             goalHistory: {
               ...s.goalHistory,
-              [prev]: { salary: s.goalPlan.salary, perGoal, closedAt: new Date().toISOString() },
+              [prev]: { salary: s.goalPlan.salary, perGoal, closedAt: nowIso },
             },
-            goalPlan: null,
+            goalPlan: hasCarry
+              ? {
+                  monthKey: currentMonth,
+                  salary: s.goalPlan.salary,
+                  allocations: carriedAllocations,
+                  createdAt: nowIso,
+                  lastEditedAt: nowIso,
+                }
+              : null,
             lastGoalPlan: s.goalPlan,
           };
         }),
 
       /** Log money put into a goal by hand. Auto-tracked goals don't need this. */
-      addGoalContribution: (goalId, amount, dateIso) => {
+      /**
+       * `sourceTxnId` is optional — set it when a contribution was logged FROM
+       * a specific transaction (a review-queue quick-add, say), so the entry
+       * remembers where it came from. Nothing in the app writes it yet; it
+       * exists so that caller can exist without a migration later.
+       *
+       * When it IS set, the same (goalId, sourceTxnId) pair can only ever
+       * produce ONE contribution — logging from the same transaction twice
+       * (a double-tap, a re-opened sheet) returns null instead of a second
+       * entry, since two records from one transaction would double-count
+       * money that only moved once.
+       */
+      addGoalContribution: (goalId, amount, dateIso, sourceTxnId = null) => {
         const amt = Number(amount) || 0;
         if (!goalId || amt <= 0) return null;
+        if (sourceTxnId && get().goalContributions.some(
+          (c) => c.goalId === goalId && c.sourceTxnId === sourceTxnId,
+        )) return null;
         const id = `gc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         set((s) => ({
           goalContributions: [
-            { id, goalId, amount: amt, date: dateIso || new Date().toISOString(), source: 'manual' },
+            {
+              id, goalId, amount: amt, date: dateIso || new Date().toISOString(),
+              source: 'manual', sourceTxnId: sourceTxnId || null,
+            },
             ...s.goalContributions,
           ],
         }));
@@ -1616,6 +1761,41 @@ export const useEPurseStore = create(
       deleteGoalContribution: (id) =>
         set((s) => ({ goalContributions: s.goalContributions.filter((c) => c.id !== id) })),
 
+      /**
+       * Mark a lifetime target as reached. Idempotent and one-directional: a
+       * goal that dips back under target (a contribution deleted, a month's
+       * snapshot corrected) stays achieved, because the user has already been
+       * congratulated and un-congratulating them would be worse than a stale
+       * badge.
+       */
+      markGoalAchieved: (goalId, { bonusAwarded = false } = {}) =>
+        set((s) => ({
+          goals: s.goals.map((g) => {
+            if (g.id !== goalId) return g;
+            const nowIso = new Date().toISOString();
+            return {
+              ...g,
+              achievedAt: g.achievedAt || nowIso,
+              bonusAwardedAt: bonusAwarded ? (g.bonusAwardedAt || nowIso) : (g.bonusAwardedAt ?? null),
+            };
+          }),
+        })),
+
+      /**
+       * Goals that have just crossed their lifetime target and not yet been
+       * celebrated. Returns them WITHOUT mutating — the caller shows the modal
+       * and calls `markGoalAchieved` once the bonus is actually credited, so a
+       * crash between the two costs the user nothing.
+       */
+      getNewlyAchievedGoals: () => {
+        const s = get();
+        return s.goals
+          .filter((g) => !g.archivedAt && !g.achievedAt && Number(g.lifetimeTarget) > 0)
+          .map((g) => ({ goal: g, saved: get().getGoalLifetimeSaved(g.id) }))
+          .filter(({ goal, saved }) => goalIsAchieved(goal.lifetimeTarget, saved))
+          .map(({ goal, saved }) => ({ goalId: goal.id, name: goal.name, emoji: goal.emoji, color: goal.color, target: goal.lifetimeTarget, saved }));
+      },
+
       // ─── Goals selectors ────────────────────────────────────────────────────
 
       /** What this goal actually received in `date`'s month. */
@@ -1624,6 +1804,69 @@ export const useEPurseStore = create(
         const goal = s.goals.find((g) => g.id === goalId);
         if (!goal) return 0;
         return goalFundedForMonth(s, goal, monthKey(date));
+      },
+
+      /** The same figure split into matched spend vs typed entries. */
+      getGoalFunding: (goalId, date = new Date()) => {
+        const s = get();
+        const goal = s.goals.find((g) => g.id === goalId);
+        if (!goal) return { auto: 0, manual: 0, total: 0 };
+        return goalFundingForMonth(s, goal, monthKey(date));
+      },
+
+      /**
+       * This month's transactions currently funding `goal` automatically —
+       * the goal-side half of the auto-fund LINK. Nothing is stored to
+       * produce this: it re-runs the exact same rule match `getGoalFunding`
+       * sums, which is what makes it self-correcting — edit the rule, or
+       * recategorise one of these transactions, and the list is right again
+       * on the next read. No backfill, no stale link to invalidate.
+       */
+      /**
+       * Everything this goal's total for the month is made of: auto-matched
+       * spend, PLUS any real transaction a manual top-up linked itself to via
+       * `sourceTxnId` (Sep-12-26 — a top-up used to be a bare number with
+       * nothing to show here at all). A contribution with no `sourceTxnId`
+       * (an older entry, or one entered before this existed) has no
+       * transaction to show and is left out, same as before.
+       */
+      getGoalTransactions: (goalId, date = new Date()) => {
+        const s = get();
+        const goal = s.goals.find((g) => g.id === goalId);
+        if (!goal) return [];
+        const mk = monthKey(date);
+        const auto = goalAutoTxns(s, goal, mk);
+        const manualTxnIds = new Set(
+          (s.goalContributions || [])
+            .filter((c) => c.goalId === goalId && c.sourceTxnId && monthKey(c.date) === mk)
+            .map((c) => c.sourceTxnId),
+        );
+        if (manualTxnIds.size === 0) return auto;
+        const seen = new Set(auto.map((t) => t.id));
+        const manual = s.transactions.filter((t) => manualTxnIds.has(t.id) && !seen.has(t.id));
+        return [...auto, ...manual];
+      },
+
+      /**
+       * The transaction-side half of the same link: which goals (if any)
+       * this ONE transaction currently counts toward. Ignores month — a
+       * goal's rule is asked "does this match, right now", not "was this
+       * summed into some specific month's total" — so an old transaction
+       * still shows what it would fund under today's rule.
+       *
+       * Same guards `goalAutoTxns` applies (ignored / non-spend / memo txns
+       * never fund anything), so this agrees with the total by construction
+       * rather than by two independent lists happening to match.
+       */
+      getGoalsForTxn: (txn) => {
+        const s = get();
+        if (!txn || txn.isIgnored || !countsForSpend(txn) || isMemoTxn(txn)) return [];
+        const parentId = parentCatId(txn);
+        const merchant = txn.merchant || txn.cleanMerchant || txn.rawMerchant;
+        return s.goals
+          .filter((g) => !g.archivedAt && hasAutoRule(g))
+          .filter((g) => ruleMatchesTxn(goalAutoRule(g), { parentId, categoryId: txn.categoryId, merchant }))
+          .map((g) => ({ id: g.id, name: g.name, emoji: g.emoji, color: g.color }));
       },
 
       /**
@@ -1644,17 +1887,33 @@ export const useEPurseStore = create(
 
         s.goals.forEach((goal) => {
           const p = Number(s.goalPlan.allocations?.[goal.id]) || 0;
-          if (p <= 0) return;
-          const f = goalFundedForMonth(s, goal, mk);
+          const parts = goalFundingForMonth(s, goal, mk);
+          const f = parts.total;
+          // A goal with nothing planned can still have REAL money this month —
+          // a manual top-up, or auto-matched spend — most commonly a One-Time
+          // goal, which isn't required to carry a monthly figure the way a
+          // Recurring one effectively always does. Skipping it here (the
+          // original guard was `if (p <= 0) return`) made that money invisible
+          // in `funded`/`perGoal` until a plan slot existed, so `GoalCard`'s
+          // "This month" stat silently read ₹0 — then jumped to the true
+          // figure the moment an allocation was set, reading as though SETTING
+          // the plan had added the money. Only skip a goal with truly nothing
+          // to show either way.
+          if (p <= 0 && f <= 0) return;
           planned += p;
           funded += f;
           perGoal.push({
             goalId: goal.id,
             planned: p,
             funded: f,
+            // Named parts, so the row can say WHERE the money came from. A goal
+            // that matches spend AND takes typed entries needs both visible for
+            // the user to spot a double entry.
+            autoFunded: parts.auto,
+            manualFunded: parts.manual,
             pct: fundedPct(f, p),
             status: paceStatus(f, p, dayOfMonth, daysInMonth),
-            auto: !!goal.autoParentId,
+            auto: hasAutoRule(goal),
           });
         });
 
@@ -3443,6 +3702,12 @@ export const useEPurseStore = create(
               transactions: s.transactions.filter((t) => !dropIds.has(t.id)),
               accounts: s.accounts,
               lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
+              // A goal top-up logged as a real transaction (Sep-12) links back via
+              // `sourceTxnId` on its `goalContributions` row — same shape as an LB
+              // row's own `sourceTxnId`, cleaned up here for the same reason: leaving
+              // it behind would keep crediting a goal for money whose transaction no
+              // longer exists.
+              goalContributions: s.goalContributions.filter((c) => c.sourceTxnId !== id),
               ...(txn.smsId
                 ? {
                     suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
@@ -3461,6 +3726,7 @@ export const useEPurseStore = create(
             accounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
             lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
+            goalContributions: s.goalContributions.filter((c) => c.sourceTxnId !== id),
             ...(txn.smsId
               ? {
                   suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
@@ -3489,6 +3755,7 @@ export const useEPurseStore = create(
             accounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
             lentBorrowed: s.lentBorrowed.filter((l) => l.sourceTxnId !== id),
+            goalContributions: s.goalContributions.filter((c) => c.sourceTxnId !== id),
             ...(txn.smsId
               ? {
                   suppressedSmsIds: appendSuppressedSmsIds(s.suppressedSmsIds || [], [
@@ -4926,7 +5193,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 29,
+      version: 31,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -5503,6 +5770,51 @@ export const useEPurseStore = create(
             lastGoalPlan: state.lastGoalPlan ?? null,
             goalContributions: Array.isArray(state.goalContributions) ? state.goalContributions : [],
             goalHistory: state.goalHistory ?? {},
+          };
+        }
+
+        // v30: Goals learn to fund themselves from any category or merchant, not
+        // just one parent. The single `autoParentId` becomes `autoRule.parentIds`
+        // so there is ONE place the matcher reads from; `goalAutoRule` still
+        // tolerates the old field for anything restored from an older backup.
+        // Achievement fields are seeded null so the congratulation can only fire
+        // on a target crossed from here on, never retroactively for a goal that
+        // was already complete before the feature existed.
+        if (version < 30) {
+          state = {
+            ...state,
+            goals: (state.goals || []).map((g) => {
+              const parentIds = g.autoParentId ? [String(g.autoParentId)] : [];
+              const next = {
+                ...g,
+                autoRule: g.autoRule
+                  || (parentIds.length ? { parentIds, categoryIds: [], merchants: [] } : null),
+                achievedAt: g.achievedAt ?? null,
+                bonusAwardedAt: g.bonusAwardedAt ?? null,
+              };
+              delete next.autoParentId;
+              return next;
+            }),
+          };
+        }
+
+        // v31: Goals gain a DURATION — One-Time (an Overall Target, optionally
+        // ALSO a Monthly Contribution toward it) or Recurring (a Monthly
+        // Contribution only, no target, never "achieved"). See GOAL_DURATIONS
+        // in constants/goals.ts. Inferred from what a goal already had, since
+        // nothing restored from before this existed was ever asked which it
+        // was: a lifetime target means it was being used as a one-time goal;
+        // no target means it already behaved like a recurring monthly line.
+        // Existing allocations are left exactly as they were on EITHER kind —
+        // a one-time goal keeps taking part in the monthly bar just as it did
+        // before duration existed, nothing to strip.
+        if (version < 31) {
+          state = {
+            ...state,
+            goals: (state.goals || []).map((g) => ({
+              ...g,
+              duration: Number(g.lifetimeTarget) > 0 ? 'oneTime' : 'recurring',
+            })),
           };
         }
 

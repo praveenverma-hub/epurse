@@ -58,6 +58,7 @@ const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   aware_check_in:        'sparkles-outline',
   aware_streak_reset:    'refresh-circle-outline',
   aware_savings_claimed: 'gift-outline',
+  goal_achieved:         'flag-outline',
   level_up:              'trophy-outline',
 };
 
@@ -68,6 +69,7 @@ const KIND_TINT: Record<NotificationKind, string> = {
   aware_check_in:        '#06B6D4',
   aware_streak_reset:    '#9CA3AF',
   aware_savings_claimed: '#10B981',
+  goal_achieved:         '#14B8A6',
   level_up:              '#7C3AED',
 };
 

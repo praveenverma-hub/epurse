@@ -83,6 +83,14 @@ export interface ReviewResult {
   message?:     string;
 }
 
+/** What reaching a goal's lifetime target paid out. */
+export interface GoalBonusResult {
+  rpAwarded:  number;
+  epcAwarded: number;
+  /** Streak multiplier the bonus was scaled by — the modal shows it. */
+  multiplier: number;
+}
+
 export type PurchaseFailure =
   | 'unknown_item'
   | 'already_owned'
@@ -128,6 +136,8 @@ interface RewardState {
   /** Credits pendingSavingsReward balances and clears the pending state. */
   claimSavingsBonus:        () => void;
   recordReview:             () => ReviewResult;
+  /** Credit the one-off bonus for reaching a goal's lifetime target. */
+  awardGoalBonus:           (goalName: string) => GoalBonusResult;
   purchaseItem:             (id: WidgetId) => PurchaseResult;
   toggleItemActive:         (id: WidgetId) => void;
   setFirstLaunchDone:       () => void;
@@ -149,6 +159,7 @@ const initialState = (): Omit<
   | 'checkIn'
   | 'claimSavingsBonus'
   | 'recordReview'
+  | 'awardGoalBonus'
   | 'purchaseItem'
   | 'toggleItemActive'
   | 'setFirstLaunchDone'
@@ -410,6 +421,46 @@ export const useRewardStore = create<RewardState>()(
           epcAwarded,
           reviewedToday: nextCount,
         };
+      },
+
+      // ─── Goal completion bonus ───────────────────────────────────────
+      // Fired by GoalsScreen when a lifetime target is crossed. The store has
+      // no idea WHICH goal was completed and deliberately doesn't track it —
+      // the once-per-goal guard is `bonusAwardedAt` on the goal itself, in the
+      // finance store, so the two stores never need to agree on a goal id.
+      awardGoalBonus: (goalName) => {
+        const state      = get();
+        const multiplier = multiplierForStreak(state.awareStreak);
+        const rpAwarded  = Math.round(REWARD_CONFIG.GOAL_ACHIEVED_RP_BASE * multiplier);
+        const epcAwarded = Math.max(
+          1,
+          Math.round(REWARD_CONFIG.GOAL_ACHIEVED_EPC_BASE * multiplier),
+        );
+
+        const newRP   = state.totalRP + rpAwarded;
+        const prevLvl = levelFromRP(state.totalRP);
+        const nextLvl = levelFromRP(newRP);
+        set({ totalRP: newRP, epcBalance: state.epcBalance + epcAwarded });
+
+        useNotificationStore.getState().add({
+          kind:      'goal_achieved',
+          title:     `Goal reached — ${goalName}`,
+          body:      `+${rpAwarded} RP and +${epcAwarded} EPC credited for finishing it.`,
+          dedupeKey: `goal_achieved:${goalName}:${toCalendarDate()}`,
+          meta:      { rp: rpAwarded, epc: epcAwarded, goalName },
+        });
+
+        if (nextLvl > prevLvl) {
+          useNotificationStore.getState().add({
+            kind:      'level_up',
+            title:     `Level ${nextLvl} reached`,
+            body:      `You crossed ${nextLvl * REWARD_CONFIG.RP_PER_LEVEL} RP — new shop items may now be in reach.`,
+            dedupeKey: `level_up:${nextLvl}`,
+            meta:      { level: nextLvl },
+          });
+        }
+
+        return { rpAwarded, epcAwarded, multiplier };
       },
 
       // ─── Shop purchase ───────────────────────────────────────────────

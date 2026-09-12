@@ -94,6 +94,19 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, myName }: TxnDeta
     [categories, txn?.categoryId],
   );
 
+  // Which goal(s), if any, this transaction currently auto-funds — a pure
+  // read against the goal's own rule, nothing stored on the transaction (see
+  // `getGoalsForTxn`). Grab the FUNCTION via a stable selector and call it
+  // inline, same pattern the Goals screen uses for its getters: subscribing
+  // to the function's OUTPUT instead would re-render on every store change,
+  // since a fresh array is built on every call.
+  const getGoalsForTxn = useEPurseStore((s: any) => s.getGoalsForTxn);
+  const matchedGoals = useMemo(
+    () => (txn ? getGoalsForTxn(txn) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [txn?.id, txn?.categoryId, txn?.isIgnored, txn?.isSplitMemo, txn?.merchant, getGoalsForTxn],
+  );
+
   // Same row shape SplitDetailsModal computed — this sheet takes over its viewing
   // role, so a split transaction's card tap shows the SAME breakdown it always did,
   // just alongside the rest of the transaction instead of in place of it.
@@ -190,6 +203,20 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, myName }: TxnDeta
                 {category ? `${category.emoji} ${category.name}` : 'Uncategorized'}
               </Text>
             </View>
+            {/* Surfaces a link that already exists — a goal's auto-rule was
+                matching this transaction before this row existed, it just had
+                nowhere to say so. Nothing is stored here; it's a live check
+                against every goal's rule (see `getGoalsForTxn`), so editing a
+                goal's rule or this transaction's category changes what shows
+                here on the very next open, never a stale answer. */}
+            {matchedGoals.length > 0 ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Counts toward</Text>
+                <Text style={styles.detailValue} numberOfLines={2}>
+                  {matchedGoals.map((g: any) => `${g.emoji} ${g.name}`).join('  ·  ')}
+                </Text>
+              </View>
+            ) : null}
             {accountLabel ? (
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Account</Text>

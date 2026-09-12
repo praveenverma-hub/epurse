@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
@@ -8,7 +7,8 @@ import InfoSheet from './InfoSheet';
 import SheetCloseButton from './SheetCloseButton';
 import InfoIcon from './InfoIcon';
 import ProgressBar from './ProgressBar';
-import { progressTrack, radius, shadows } from '../constants/theme';
+import ProgressRing from './ProgressRing';
+import { radius, shadows } from '../constants/theme';
 
 // Essential (survival) categories — keyed by the first-level BUDGET parent ids
 // the plan actually uses (groceries rolls into food, utilities→bills,
@@ -29,64 +29,6 @@ const ringColor = (pct: number, daysElapsedPct: number, theme: any) => {
   if (pct > daysElapsedPct + 10) return theme.danger;
   if (pct > daysElapsedPct + 5) return theme.warning;
   return theme.success;
-};
-
-// ============================================================================
-// ANIMATED SVG CIRCLE
-// ============================================================================
-
-interface ProgressRingProps {
-  progress: number;
-  size: number;
-  strokeWidth: number;
-  color: string;
-}
-
-// Built to match the app's OTHER three rings (ClassicProgressRing, AnalyticsScreen's
-// ProgressRing, MiniRing): a static dashoffset with the rotation applied to the Circle
-// itself. It previously drove `strokeDashoffset` through `useAnimatedProps` inside a
-// `<G rotation>` wrapper — the only ring built that way, and the only one that rendered
-// EMPTY on device while the "%" label beside it read the correct number. Reanimated
-// props on an SVG child nested in a transformed <G> don't reliably reach the native
-// view (the same class of problem GaugeProgress documents for <Mask>), so the arc
-// stayed at its initial 0.
-//
-// This trades the 800ms fill animation for actually showing the value. The animated
-// ring that IS reliable is GaugeProgress — its per-segment-opacity technique exists
-// precisely because the straightforward approaches don't survive contact with the
-// device. Use that if this ever needs to animate again; don't reintroduce <G> + animatedProps.
-const ProgressRing: React.FC<ProgressRingProps> = ({ progress, size, strokeWidth, color }) => {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  // Guard non-finite input: a NaN dashoffset blanks the arc entirely rather than
-  // degrading to "empty" (the same guard ClassicProgressRing carries).
-  const safe = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
-  const dashOffset = circumference * (1 - safe);
-
-  return (
-    <Svg width={size} height={size}>
-      <Circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        stroke={progressTrack(color)}
-        strokeWidth={strokeWidth}
-        fill="none"
-      />
-      <Circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        stroke={color}
-        strokeWidth={strokeWidth}
-        fill="none"
-        strokeDasharray={`${circumference} ${circumference}`}
-        strokeDashoffset={dashOffset}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-      />
-    </Svg>
-  );
 };
 
 // ============================================================================

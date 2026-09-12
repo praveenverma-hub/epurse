@@ -2373,11 +2373,54 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     st().goalPlan.allocations[efId] === 75000, `${st().goalPlan.allocations[efId]}`);
   st().updateGoalAllocation(efId, 15000);
 
+  // `updateGoalAllocation` is the goal FORM's write path now (Sep-12-26) — the
+  // monthly amount moved out of this screen's bar/steppers into the goal's own
+  // form. Its clamp used to ignore the locked spending cap entirely (it read
+  // `s.goalPlan.salary` raw), which the bar's local `setOne` never did — this
+  // is the fix, isolated so it doesn't disturb the totalCap-less checks above
+  // or below.
+  {
+    const originalBudget = st().budget;
+    useStore.setState({ budget: { monthKey: monthKeyOf(new Date()), totalCap: 20000, perCategory: {} } });
+    // 85,000 salary − 20,000 spending − 10,000 already on the SIP leaves
+    // 55,000 of room, not 75,000 (salary − SIP alone).
+    st().updateGoalAllocation(efId, 90000);
+    check("a goal's monthly amount is clamped against room AFTER the spending cap, not raw salary",
+      st().goalPlan.allocations[efId] === 55000, `${st().goalPlan.allocations[efId]}`);
+    st().updateGoalAllocation(efId, 15000);
+    useStore.setState({ budget: originalBudget });
+  }
+
   // ── funding: manual ──────────────────────────────────────────────────────
   st().addGoalContribution(efId, 6000);
   st().addGoalContribution(efId, 3000);
   check('manual contributions add up for the month', st().getGoalFunded(efId) === 9000);
   check('a zero contribution is refused', st().addGoalContribution(efId, 0) === null);
+
+  // A contribution CAN carry the transaction it came from — nothing writes
+  // this yet, but the guard it enables (below) has to hold from day one.
+  // Isolated on a SCRATCH goal, deleted right after — these must not touch
+  // efId's or sipId's totals, which later assertions pin to exact numbers.
+  {
+    const scratchId = st().addGoal({ name: 'Scratch' });
+    check('a contribution with no source txn is untouched by the dedup guard',
+      !!st().addGoalContribution(scratchId, 500));
+    const firstFromTxn = st().addGoalContribution(scratchId, 1200, undefined, 'txn_abc');
+    check('a sourced contribution is created and remembers its source',
+      !!firstFromTxn && st().goalContributions.find((c) => c.id === firstFromTxn).sourceTxnId === 'txn_abc');
+    check('the SAME transaction cannot fund the SAME goal twice',
+      st().addGoalContribution(scratchId, 1200, undefined, 'txn_abc') === null);
+    check('…but the same transaction funding a DIFFERENT goal is a different pair',
+      !!st().addGoalContribution(efId, 1200, undefined, 'txn_abc'));
+    // Clean up: delete the scratch goal AND the cross-goal contribution this
+    // just proved is allowed, so nothing here leaks into efId's later totals.
+    st().deleteGoal(scratchId);
+    useStore.setState({
+      goalContributions: st().goalContributions.filter(
+        (c) => !(c.goalId === efId && c.sourceTxnId === 'txn_abc'),
+      ),
+    });
+  }
 
   // ── funding: automatic, from real spend ──────────────────────────────────
   // The point of an auto goal: a SIP debit the user already made funds it with
@@ -2398,33 +2441,239 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('…including one tagged only by its two-tier label',
     st().getGoalFunded(sipId) === 5000, `${st().getGoalFunded(sipId)}`);
 
+  // An auto goal STILL takes typed money (Sep-11-26). Phase 1 refused it to
+  // stop a double count; the user's call was the opposite — bank SMS is not
+  // guaranteed to arrive, so a goal that cannot be corrected by hand quietly
+  // under-reports for ever. The two sources add, and the UI names each part.
   st().addGoalContribution(sipId, 5000);
-  check('an auto goal ignores manual logs, so the same SIP is never counted twice',
-    st().getGoalFunded(sipId) === 5000, `${st().getGoalFunded(sipId)}`);
+  check('an auto goal ALSO takes money logged by hand, for the SMS that never came',
+    st().getGoalFunded(sipId) === 10000, `${st().getGoalFunded(sipId)}`);
+  const split = st().getGoalFunding(sipId);
+  check('…and the two sources stay separately reportable',
+    split.auto === 5000 && split.manual === 5000, JSON.stringify(split));
+
+  // ── auto rules beyond a single parent ───────────────────────────────────
+  // A goal names the spend it is made of: parents, ONE sub-category, or a
+  // merchant keyword. All three are ORed, so filing a row under any of them
+  // funds the goal.
+  const gymId = st().addGoal({
+    name: 'Gym fund', emoji: '🏋️',
+    autoRule: { parentIds: [], categoryIds: ['groceries'], merchants: ['cult fit'] },
+  });
+  st().addTransaction({ amount: 700, type: 'debit', categoryId: 'groceries', merchant: 'DMart', accountId: acc });
+  check('a sub-category rule funds the goal', st().getGoalFunded(gymId) === 700, `${st().getGoalFunded(gymId)}`);
+
+  st().addTransaction({ amount: 1500, type: 'debit', categoryId: 'other', merchant: 'UPI-CULT.FIT*MEMBERSHIP', accountId: acc });
+  check('…and a merchant keyword matches through punctuation and case',
+    st().getGoalFunded(gymId) === 2200, `${st().getGoalFunded(gymId)}`);
+
+  st().addTransaction({ amount: 900, type: 'debit', categoryId: 'food', merchant: 'Swiggy', accountId: acc });
+  check('…while spend matching nothing in the rule is left alone',
+    st().getGoalFunded(gymId) === 2200, `${st().getGoalFunded(gymId)}`);
+
+  // A memo is someone else's money — it can never be money YOU set aside, so
+  // it must not fund a goal however it is categorised.
+  // Flagged directly: `addTransaction` builds its own row and doesn't take the
+  // memo flag, which is set by the split flow.
+  st().addTransaction({
+    id: 'memo_row', amount: 2000, type: 'debit', categoryId: 'groceries',
+    merchant: 'DMart', accountId: acc,
+  });
+  useStore.setState({
+    transactions: st().transactions.map((t) => (t.id === 'memo_row' ? { ...t, isSplitMemo: true } : t)),
+  });
+  check('…and a memo (someone else paid) never funds a goal',
+    st().getGoalFunded(gymId) === 2200, `${st().getGoalFunded(gymId)}`);
+
+  // Migrating a rule must not leave the old field behind for the matcher to
+  // read a second time.
+  st().updateGoal(gymId, { autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] } });
+  check('replacing a rule replaces it — the old sub-category stops counting',
+    st().getGoalFunded(gymId) === 5000, `${st().getGoalFunded(gymId)}`);
+  st().deleteGoal(gymId);
 
   // ── the usage selector ───────────────────────────────────────────────────
   const usage = st().getGoalPlanUsage();
   check('usage totals the plan', usage.planned === 25000, `${usage.planned}`);
-  check('usage totals what actually landed', usage.funded === 14000, `${usage.funded}`);
+  check('usage totals what actually landed', usage.funded === 19000, `${usage.funded}`);
+  check('…and a row names where its money came from',
+    usage.perGoal.find((r) => r.goalId === sipId).autoFunded === 5000 &&
+    usage.perGoal.find((r) => r.goalId === sipId).manualFunded === 5000);
   check('usage reports the free remainder', usage.free === 60000, `${usage.free}`);
   check('usage carries a row per funded goal', usage.perGoal.length === 2);
   check('…and marks which rows track themselves',
     usage.perGoal.find((r) => r.goalId === sipId).auto === true &&
     usage.perGoal.find((r) => r.goalId === efId).auto === false);
 
+  // ── the auto-fund LINK, surfaced from both sides (Sep-12) ─────────────────
+  // The total and the drill-down must never disagree — one is a sum over the
+  // other's exact list, not two independent scans that could drift apart.
+  {
+    const sipTxns = st().getGoalTransactions(sipId);
+    check('the drill-down lists exactly what the total summed',
+      sipTxns.length === 2 && sipTxns.reduce((s, t) => s + t.amount, 0) === 5000);
+    check('…and nothing outside its rule leaks in',
+      sipTxns.every((t) => ['Groww SIP', 'Zerodha'].includes(t.merchant)));
+    check('a goal with no auto rule has nothing to drill into',
+      st().getGoalTransactions(efId).length === 0);
+
+    const growwTxn = st().transactions.find((t) => t.merchant === 'Groww SIP');
+    const matches = st().getGoalsForTxn(growwTxn);
+    check('the transaction side finds the SAME goal back',
+      matches.length === 1 && matches[0].id === sipId);
+    check('an unrelated transaction matches nothing',
+      st().getGoalsForTxn({ type: 'debit', categoryId: 'food', merchant: 'Swiggy' }).length === 0);
+    check('an ignored transaction never counts as linked, whatever it matches',
+      st().getGoalsForTxn({ ...growwTxn, isIgnored: true }).length === 0);
+    check('a memo (someone else paid) is never linked either',
+      st().getGoalsForTxn({ ...growwTxn, isSplitMemo: true }).length === 0);
+  }
+
+  // ── real money on an UNPLANNED goal must still show up (Sep-12) ──────────
+  // `getGoalPlanUsage` used to skip any goal with no plan allocation this
+  // month — `if (p <= 0) return` — even when it had real funded money (a
+  // manual top-up, or auto-matched spend). Most commonly hit by a One-Time
+  // goal, which isn't required to carry a monthly figure the way a Recurring
+  // one effectively always does: "This month" on its `GoalCard` silently read
+  // ₹0 until a plan slot existed, then jumped to the true figure the moment
+  // one was set — reading as though SETTING the allocation had added the
+  // money. Isolated on a scratch goal, never given an allocation.
+  {
+    const unplannedId = st().addGoal({ name: 'UnplannedScratch', emoji: '🎯' });
+    st().addGoalContribution(unplannedId, 7000);
+    check('no allocation was ever set for it', !(unplannedId in st().goalPlan.allocations));
+    const row = st().getGoalPlanUsage().perGoal.find((r) => r.goalId === unplannedId);
+    check('…yet its real funded money still gets a usage row', !!row, JSON.stringify(row));
+    check('…planned is honestly zero', row.planned === 0);
+    check('…and funded is the real contribution, not masked to zero',
+      row.funded === 7000, `${row?.funded}`);
+    st().deleteGoal(unplannedId);
+  }
+
+  // ── a manual top-up is a REAL transaction now, not a bare number (Sep-12) ──
+  // `goalContributions` used to be written directly from a typed amount, with
+  // no account, no trace in Activity, and no effect on any balance — money
+  // that supposedly left an account with nothing to show which one. The
+  // screen now runs it through `addTransaction` like any other manual spend
+  // and links `sourceTxnId` back to it, so deleting (or ignoring) that
+  // transaction must also drop the credit it gave the goal — same cleanup
+  // `lentBorrowed` already gets via its own `sourceTxnId`.
+  {
+    const accBalanceBefore = st().accounts.find((a) => a.id === acc).balance;
+    const tripId = st().addGoal({ name: 'TripScratch', emoji: '🗾' });
+    const txnId = 'txn_goal_scratch_1';
+    st().addTransaction({
+      id: txnId, amount: 4000, type: 'debit', accountId: acc,
+      categoryId: 'other', merchant: 'TripScratch',
+    });
+    st().addGoalContribution(tripId, 4000, new Date().toISOString(), txnId);
+    check('the top-up left the account like any other spend',
+      st().accounts.find((a) => a.id === acc).balance === accBalanceBefore - 4000);
+    check('…and the goal counts it', st().getGoalLifetimeSaved(tripId) === 4000);
+
+    st().deleteTransaction(txnId);
+    check('deleting the linked transaction restores the balance',
+      st().accounts.find((a) => a.id === acc).balance === accBalanceBefore);
+    check('…and un-credits the goal — no phantom money left behind',
+      st().getGoalLifetimeSaved(tripId) === 0);
+    check('…the contribution row itself is gone, not just outweighed',
+      !st().goalContributions.some((c) => c.sourceTxnId === txnId));
+    st().deleteGoal(tripId);
+  }
+
+  // ── the drill-down shows a manually-linked top-up too ────────────────────
+  // `getGoalTransactions` used to be ONLY auto-matched spend — a manual
+  // top-up wasn't a real transaction, so there was nothing of it to show.
+  // Now that one exists (linked via `sourceTxnId`), it belongs in the same
+  // "what is this total made of" list the auto-matched ones already appear
+  // in — otherwise the drill-down would silently under-list its own total.
+  {
+    const jarId = st().addGoal({ name: 'JarScratch', emoji: '🫙' });
+    const linkedTxnId = 'txn_goal_scratch_2';
+    st().addTransaction({
+      id: linkedTxnId, amount: 1200, type: 'debit', accountId: acc,
+      categoryId: 'other', merchant: 'JarScratch',
+    });
+    st().addGoalContribution(jarId, 1200, new Date().toISOString(), linkedTxnId);
+    const jarTxns = st().getGoalTransactions(jarId);
+    check('the linked transaction shows up in the drill-down',
+      jarTxns.length === 1 && jarTxns[0].id === linkedTxnId);
+    // An OLDER-style contribution with no sourceTxnId has nothing to show —
+    // unchanged from before this feature (covered above by sipId's own
+    // no-sourceTxnId contribution still summing to exactly 2 auto txns).
+    st().addGoalContribution(jarId, 300); // no sourceTxnId
+    check('…and a contribution with nothing to link stays invisible here, not double-listed',
+      st().getGoalTransactions(jarId).length === 1);
+    st().deleteGoal(jarId);
+  }
+
   // ── rollover ─────────────────────────────────────────────────────────────
   // Snapshot BEFORE clearing: raw transactions age out at RAW_RETENTION_MS, so
   // a lifetime total recomputed from them later would quietly shrink.
+  //
+  // A goal with NO plan allocation that month — pure auto-fund, never given a
+  // monthly figure — used to get NO row in this snapshot at all (the loop
+  // only walked `goalPlan.allocations`), so its real funded money for the
+  // month was gone the instant it rolled over: not aged out, never recorded.
+  // Isolated on scratch goals so their transactions/rule don't touch efId's
+  // or sipId's pinned totals above.
+  // Dated INTO '2020-01' up front — the plan's monthKey is about to be forced
+  // to that same month below, and `goalFundedForMonth` matches a transaction
+  // by ITS OWN month, not the plan's, so a today-dated transaction would
+  // silently compute as 0 funded for the forced-past month and this test
+  // would prove nothing.
+  const autoOnlyId = st().addGoal({ name: 'AutoOnlyScratch', autoRule: { merchants: ['RolloverAutoTest'] } });
+  st().addTransaction({
+    amount: 777, type: 'debit', categoryId: 'other', merchant: 'RolloverAutoTest',
+    createdAt: '2020-01-15T00:00:00Z',
+  });
+  const idleScratchId = st().addGoal({ name: 'IdleScratch' });
+  check('a goal with no plan can still be funded by its auto rule',
+    st().getGoalFunded(autoOnlyId, new Date('2020-01-15')) === 777,
+    `${st().getGoalFunded(autoOnlyId, new Date('2020-01-15'))}`);
+  check('…and is NOT in this month\'s plan allocations', !(autoOnlyId in (st().goalPlan.allocations || {})));
+
+  // efId has a lifetime target → inferred ONE-TIME; sipId has none → inferred
+  // RECURRING (Sep-12-26 DURATION feature — see constants/goals.ts).
+  check('duration was inferred correctly for both pre-existing goals',
+    st().goals.find((g) => g.id === efId).duration === 'oneTime' &&
+    st().goals.find((g) => g.id === sipId).duration === 'recurring');
+
   useStore.setState({ goalPlan: { ...st().goalPlan, monthKey: '2020-01' } });
   st().rolloverGoalPlanIfNeeded();
-  check('rollover clears the plan so the new month must be confirmed', st().goalPlan === null);
   check('…keeps it as the prefill', st().lastGoalPlan.allocations[efId] === 15000);
   check('…and snapshots the closed month', !!st().goalHistory['2020-01']);
   check('the snapshot records what was planned',
     st().goalHistory['2020-01'].perGoal[efId].planned === 15000);
+  check('a PLAN-LESS but auto-funded goal is ALSO snapshotted now',
+    st().goalHistory['2020-01'].perGoal[autoOnlyId]?.funded === 777,
+    JSON.stringify(st().goalHistory['2020-01'].perGoal[autoOnlyId]));
+  check('…with a planned figure of 0, not missing/undefined',
+    st().goalHistory['2020-01'].perGoal[autoOnlyId]?.planned === 0);
+  check('a goal that did NOTHING this month (no plan, no funding) gets no row — no bloat',
+    !(idleScratchId in st().goalHistory['2020-01'].perGoal));
 
+  // A goal's monthly amount re-applies AUTOMATICALLY at rollover — no "Keep
+  // Last Month's Plan" tap needed, unlike everything else in Goals. This
+  // applies on EITHER duration now (revised same day: a one-time goal funded
+  // monthly toward its target gets the same treatment as a recurring one) —
+  // BOTH sipId (recurring) and efId (one-time, but WAS given a monthly
+  // allocation earlier in this test) carry forward untouched.
+  check('a goal with a monthly amount auto-carries — the plan is NOT cleared', st().goalPlan !== null);
+  check('…stamped with the CURRENT month, not the forced-past one',
+    st().goalPlan.monthKey === monthKeyOf(new Date()));
+  check("…carrying the recurring goal's amount forward untouched",
+    st().goalPlan.allocations[sipId] === 10000, `${st().goalPlan.allocations[sipId]}`);
+  check("…and the one-time goal's too — duration no longer gates auto-carry",
+    st().goalPlan.allocations[efId] === 15000, `${st().goalPlan.allocations[efId]}`);
+
+  st().deleteGoal(autoOnlyId);
+  st().deleteGoal(idleScratchId);
+
+  const carriedPlan = st().goalPlan;
   st().rolloverGoalPlanIfNeeded();
-  check('rollover with no plan is a no-op, not a crash', st().goalPlan === null);
+  check('rollover is a no-op once the plan is already the current month',
+    st().goalPlan === carriedPlan);
 
   // ── lifetime ─────────────────────────────────────────────────────────────
   useStore.setState({
@@ -2434,6 +2683,37 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('lifetime saved sums closed months plus the live one',
     st().getGoalLifetimeSaved(efId) === 36000, `${st().getGoalLifetimeSaved(efId)}`);
   check('an unknown goal has no lifetime', st().getGoalLifetimeSaved('nope') === 0);
+
+  // ── achievement ──────────────────────────────────────────────────────────
+  // The congratulation fires on a LIFETIME target crossed, once. Everything
+  // here guards the "once": a goal that is already marked, or has no finish
+  // line, must never surface again.
+  check('a goal still short of its target is NOT reported',
+    st().getNewlyAchievedGoals().length === 0);
+
+  st().updateGoal(efId, { lifetimeTarget: 30000 });   // 36,000 already saved
+  check('a goal past its lifetime target is reported as newly achieved',
+    st().getNewlyAchievedGoals().some((a) => a.goalId === efId));
+  check('…carrying what the modal needs to render',
+    st().getNewlyAchievedGoals().find((a) => a.goalId === efId).saved === 36000);
+
+  const openEnded = st().addGoal({ name: 'Open ended', emoji: '🛟' });
+  st().addGoalContribution(openEnded, 99999);
+  check('a goal with NO target is never "achieved" — there is no line to cross',
+    !st().getNewlyAchievedGoals().some((a) => a.goalId === openEnded));
+  st().deleteGoal(openEnded);
+
+  st().markGoalAchieved(efId, { bonusAwarded: true });
+  check('marking it records when', !!st().goals.find((g) => g.id === efId).achievedAt);
+  check('…and that the bonus was paid', !!st().goals.find((g) => g.id === efId).bonusAwardedAt);
+  check('an achieved goal is not reported again, so the bonus can only pay once',
+    st().getNewlyAchievedGoals().length === 0);
+
+  const firstMark = st().goals.find((g) => g.id === efId).achievedAt;
+  st().markGoalAchieved(efId);
+  check('marking twice keeps the FIRST timestamp',
+    st().goals.find((g) => g.id === efId).achievedAt === firstMark);
+  check('…and does not un-pay the bonus', !!st().goals.find((g) => g.id === efId).bonusAwardedAt);
 
   // ── reference cleanup ────────────────────────────────────────────────────
   // An allocation left behind after its goal is gone would count toward the
@@ -2462,6 +2742,47 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   const existing = migrate({ goals: [{ id: 'g1' }], goalPlan: { monthKey: '2026-09' } }, 28);
   check('an existing goals list survives the migration', existing.goals.length === 1);
   check('an existing plan survives the migration', existing.goalPlan.monthKey === '2026-09');
+
+  // ── v30: one auto-funding rule, not a loose parent field ──────────────────
+  const v30 = migrate({
+    goals: [
+      { id: 'g1', name: 'SIP', autoParentId: 'investments' },
+      { id: 'g2', name: 'Fund' },
+    ],
+  }, 29);
+  check('v30 folds the old single parent into the rule',
+    v30.goals[0].autoRule.parentIds[0] === 'investments');
+  check('…and removes the loose field, so the matcher reads ONE place',
+    !('autoParentId' in v30.goals[0]));
+  check('…leaving a hand-funded goal with no rule at all', v30.goals[1].autoRule === null);
+  check('v30 seeds the achievement fields',
+    v30.goals[0].achievedAt === null && v30.goals[0].bonusAwardedAt === null);
+
+  // ── v31: goals gain a DURATION (One-Time vs Recurring) ────────────────────
+  // Inferred from what a goal already had, since nothing restored from before
+  // this existed was ever asked which it was: a lifetime target → one-time
+  // (that's the field its form shows now); no target → recurring.
+  const v31 = migrate({
+    goals: [
+      { id: 'oneTime1', name: 'Laptop', lifetimeTarget: 80000 },
+      { id: 'recurring1', name: 'SIP', autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] } },
+    ],
+    goalPlan: { monthKey: '2026-09', salary: 50000, allocations: { oneTime1: 5000, recurring1: 3000 } },
+    lastGoalPlan: { monthKey: '2026-08', salary: 50000, allocations: { oneTime1: 5000, recurring1: 3000 } },
+  }, 30);
+  check('v31 infers ONE-TIME for a goal with a lifetime target',
+    v31.goals.find((g) => g.id === 'oneTime1').duration === 'oneTime');
+  check('v31 infers RECURRING for a goal with none',
+    v31.goals.find((g) => g.id === 'recurring1').duration === 'recurring');
+  // A one-time goal can ALSO carry a monthly allocation (revised same day as
+  // this shipped — see the Goals memory file) — nothing about an existing
+  // allocation is stripped on migration, on EITHER duration.
+  check("v31 leaves a one-time goal's existing allocation untouched",
+    v31.goalPlan.allocations.oneTime1 === 5000);
+  check('…and its recurring sibling too',
+    v31.goalPlan.allocations.recurring1 === 3000);
+  check('lastGoalPlan is untouched by this migration entirely',
+    v31.lastGoalPlan.allocations.oneTime1 === 5000 && v31.lastGoalPlan.allocations.recurring1 === 3000);
 }
 
 // ── The Zero-Transaction bonus must not fire on a day you SPENT ──────────────

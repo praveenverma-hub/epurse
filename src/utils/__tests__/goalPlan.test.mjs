@@ -22,6 +22,12 @@ import {
   paceStatus,
   fundedPct,
   rescaleAllocations,
+  merchantKey,
+  goalAutoRule,
+  hasAutoRule,
+  ruleMatchesTxn,
+  goalIsAchieved,
+  lifetimePct,
 } from '../goalPlan.js';
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', dim: '\x1b[2m', reset: '\x1b[0m', bold: '\x1b[1m' };
@@ -135,6 +141,57 @@ check('an unknown previous salary is left alone', rescaleAllocations(ALLOC, 0, 8
   ok('a rescaled plan still fits the new salary', allocatedTotal(cut) <= 40000,
     `${allocatedTotal(cut)} of 40000`);
 }
+
+// ── auto-funding rules ──────────────────────────────────────────────────────
+section('merchantKey — both sides folded before they are compared');
+check('punctuation becomes a space', merchantKey('UPI-ZERODHA*BROKING'), 'upi zerodha broking');
+check('case is folded', merchantKey('Cult.Fit'), 'cult fit');
+check('edges are trimmed', merchantKey('  Groww  '), 'groww');
+check('nothing in, nothing out', merchantKey(null), '');
+
+section('goalAutoRule — one shape, whatever it was stored as');
+check('the phase-1 single parent is still read',
+  goalAutoRule({ autoParentId: 'investments' }).parentIds, ['investments']);
+check('…and is not duplicated when the rule already names it',
+  goalAutoRule({ autoParentId: 'investments', autoRule: { parentIds: ['investments'] } }).parentIds,
+  ['investments']);
+check('merchant keywords are normalised at read time',
+  goalAutoRule({ autoRule: { merchants: ['Cult.Fit'] } }).merchants, ['cult fit']);
+ok('a goal with nothing named has no rule', !hasAutoRule({ name: 'Emergency Fund' }));
+ok('a goal naming one merchant has one', hasAutoRule({ autoRule: { merchants: ['lic'] } }));
+
+section('ruleMatchesTxn — the three dimensions are ORed, never ANDed');
+{
+  const rule = goalAutoRule({ autoRule: {
+    parentIds: ['investments'], categoryIds: ['groceries'], merchants: ['cult fit'],
+  } });
+  ok('a parent match counts', ruleMatchesTxn(rule, { parentId: 'investments', categoryId: 'other' }));
+  ok('a sub-category match counts on its own',
+    ruleMatchesTxn(rule, { parentId: 'food', categoryId: 'groceries' }));
+  ok('a merchant match counts on its own',
+    ruleMatchesTxn(rule, { parentId: 'other', merchant: 'UPI-CULT.FIT MEMBERSHIP' }));
+  ok('a partial keyword is enough — real merchant strings carry prefixes',
+    ruleMatchesTxn(goalAutoRule({ autoRule: { merchants: ['zerodha'] } }),
+      { merchant: 'UPI/ZERODHA BROKING LTD/9988' }));
+  ok('a row matching none of the three is left alone',
+    !ruleMatchesTxn(rule, { parentId: 'food', categoryId: 'food', merchant: 'Swiggy' }));
+  // A goal that names nothing must match NOTHING. Matching everything would
+  // silently fund every hand-made goal from the whole month's spend.
+  ok('an empty rule matches nothing at all',
+    !ruleMatchesTxn(goalAutoRule({}), { parentId: 'food', categoryId: 'food', merchant: 'Swiggy' }));
+}
+
+section('goalIsAchieved / lifetimePct — only a real finish line counts');
+ok('saved past the target is achieved', goalIsAchieved(300000, 300000));
+ok('…and beyond it', goalIsAchieved(300000, 412000));
+ok('short of it is not', !goalIsAchieved(300000, 299999));
+// An open-ended goal has no line to cross, so it can never fire the
+// congratulation no matter how much goes in.
+ok('no target is never achieved', !goalIsAchieved(null, 999999));
+ok('a zero target is never achieved', !goalIsAchieved(0, 999999));
+check('lifetime progress is a clamped percentage', lifetimePct(300000, 150000), 50);
+check('…capped at 100 when overshot', lifetimePct(300000, 400000), 100);
+check('…and 0 with no target, rather than NaN', lifetimePct(0, 5000), 0);
 
 // ── summary ─────────────────────────────────────────────────────────────────
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);
