@@ -211,15 +211,19 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.card }]} edges={['top']}>
         <PlainScreenHeader
           title={isEdit ? 'Edit reminder' : 'New reminder'}
           onBack={() => { hapticLight(); navigation.goBack(); }}
           tint={theme.textPrimary}
           titleColor={theme.textPrimary}
+          bordered
+          surfaceColor={theme.card}
+          dividerColor={theme.divider}
         />
 
         <ScrollView
+          style={{ backgroundColor: theme.background }}
           contentContainerStyle={styles.body}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -377,7 +381,7 @@ export default ReminderFormScreen;
 const styles = StyleSheet.create({
   root:      { flex: 1 },
   container: { flex: 1 },
-  body:      { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, gap: spacing.sm },
+  body:      { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl, gap: spacing.sm },
 
   bannerWrap: { borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.sm },
   bannerOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', padding: spacing.md },

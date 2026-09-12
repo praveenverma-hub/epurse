@@ -639,6 +639,19 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   and the body/bullets sit in a `ScrollView` (`flexShrink: 1` — Yoga defaults flexShrink to 0,
   unlike web, so without it the ScrollView just grows past its bounded parent instead of
   scrolling) so the title stays put and the CTA stays reachable regardless of content length.
+- **`GoalFormScreen`/`GoalDetailScreen` headers given a white fill, matching `AddTransactionScreen`'s
+  pattern.** Flagged directly: "the second level n beyond screen have the header bg white; as in
+  add form." Both are pushed from `GoalsScreen` (itself pushed from Profile), so they're the
+  "second level and beyond" — same depth as `AddTransactionScreen`, whose header is explicitly
+  `colors.card` over a `colors.background` body. `PlainScreenHeader` already had a `bordered` prop
+  for exactly this (card fill + hairline) but it paints the STATIC `colors.card`/`colors.divider` —
+  wrong for these two screens, which are theme-adaptive (`theme.darkMode`-aware `StatusBar`
+  already). Gave `PlainScreenHeader` two new optional props, `surfaceColor`/`dividerColor`, that
+  override the static bordered fill/hairline when passed; both goal screens now pass
+  `bordered surfaceColor={theme.card} dividerColor={theme.divider}`. `GoalDetailScreen` also
+  gained `tint`/`titleColor={theme.textPrimary}` on its header (it hadn't had either before,
+  unlike `GoalFormScreen`) so the title/back-chevron ink stays theme-correct now that the bar
+  itself is themed rather than transparent-over-background.
 
 **Open**
 - Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block.
@@ -908,8 +921,118 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   custom categories, Budget Plan. Wires into `GradientButton`'s existing but previously
   unused `loading` prop for a real spinner + auto-disable. WhatsApp reminder screen and
   the Daily Queue's review-award path still remain — lower risk, not yet done.
+- **Depth-2+ header/status-bar sweep (Sep-13-26).** Flagged directly (via Goals, then
+  widened app-wide): "the status bar color need to be in sync as well and we are talking
+  about all screens... 2. and beyond." A screen is "depth 2+" if it's only reachable by
+  navigating through ANOTHER already-pushed (non-tab) screen — e.g. `Settings`/`Goals`/
+  `Shop`/`Reminders`/`Backup` (pushed from `Profile`, itself pushed from a tab) and
+  `Categories`/`SpendRules`/`SmsDiagnostic`/`GoalForm`/`GoalDetail` (pushed one level
+  deeper still, from `Settings`/`Goals`). An Explore-agent audit of the full
+  `AppNavigator.js` reachability graph (19 pushed screens, 6 at depth 1 / 13 at depth 2+)
+  found two separate gaps across the depth-2+ set:
+  1. **10 of 13 depth-2+ screens had a `PlainScreenHeader` with no `bordered`**, so the
+     header had no fill of its own and simply showed through to the page's gray/themed
+     background — only `LbPersonScreen` (hand-rolled), `GoalFormScreen` and
+     `GoalDetailScreen` (both already fixed the same day, see Goals above) painted a real
+     white/card bar. Fixed the other 9 the same way: `SettingsScreen.js`,
+     `BackupScreen.js`, `SpendRulesScreen.js`, `CategoriesScreen.js` get plain `bordered`
+     (they're static-palette screens, so the component's built-in `colors.card`/
+     `colors.divider` default is correct); `RemindersScreen.tsx`, `GoalsScreen.tsx`,
+     `ShopScreen.tsx`, `ReminderFormScreen.tsx`, `WhatsAppReminderScreen.js` get
+     `bordered surfaceColor={theme.card} dividerColor={theme.divider}` (or `D.card`/
+     `D.border` on Shop, which uses `useRewardPalette`'s `D` alias for the same theme
+     tokens) since they're theme-adaptive screens whose `StatusBar` already branches on
+     `theme.darkMode`.
+  2. **3 screens had NO owned `<StatusBar>` at all** — `CategoriesScreen.js`,
+     `GoalDetailScreen.tsx` (both branches — the "goal not found" empty state and the
+     main render), and `SmsDiagnosticScreen.js`. Since `expo-status-bar` is a
+     last-mounted-wins global and native-stack never unmounts the screen behind it, each
+     of these was silently inheriting whichever style its PARENT screen happened to set
+     — `CategoriesScreen`/`GoalDetailScreen` got lucky (parent's dark-icon choice happens
+     to match their own light/card surface), but `SmsDiagnosticScreen` (a fixed gradient
+     `CollapsingHeaderScreen`, `collapsible={false}`) was inheriting `Settings`' dark
+     icons on top of its own saturated gradient header — the actual invisible-icon bug
+     the sweep was meant to catch. Fixed: `CategoriesScreen` gets a bare
+     `<StatusBar style="dark" />` (matches its sibling static screens), `GoalDetailScreen`
+     gets `<StatusBar style={theme.darkMode ? 'light' : 'dark'} />` in both branches
+     (matches `GoalFormScreen`'s existing pattern), `SmsDiagnosticScreen` gets a bare
+     `<StatusBar style="light" />` (matches every other fixed-gradient `CollapsingHeaderScreen`
+     screen, e.g. `GroupsScreen.tsx`).
+  `PlainScreenHeader` gained two new optional props to make fix #1 possible without
+  hardcoding a static colour onto a theme-adaptive screen: `surfaceColor`/`dividerColor`
+  override the `bordered` fill/hairline when passed, so `bordered` alone still means "the
+  static default" for a non-theme screen and `bordered` + the two overrides means "the
+  live theme's card/divider" for one that isn't. Depth-1 screens (`Profile`,
+  `AddTransaction`, `AddGroupExpense`, `LentBorrowed`, `AccountDetails`, `BudgetPlan`)
+  were explicitly OUT of scope for this pass and were left untouched even where the audit
+  incidentally found a gap there too (`AccountDetails` has no header fill; `LentBorrowed`
+  has no owned `StatusBar` on its gradient `CollapsingHeaderScreen` at all) — flagged
+  below, not fixed, since the ask was depth 2 and beyond.
+- **iOS follow-up: the safe-area TOP INSET itself wasn't white (Sep-13-26).** Flagged
+  directly: "in ios the status bar color is not white... we are specifying the color not
+  using default." The depth-2+ sweep above painted the HEADER white via `bordered`, but on
+  every one of those 11 screens the `SafeAreaView` (or hand-rolled equivalent) wrapping the
+  header was ITSELF still filled with the page's gray/themed background — and on iOS the
+  safe-area top inset (behind the notch/Dynamic Island, where the clock/battery sit) is
+  real screen area painted by whatever's directly behind it, not by the header row nested
+  inside it. So the actual status-bar strip stayed gray while a white header started only
+  just below it — a visible seam, and the literal "specifying [a] color [instead of
+  leaving it to] default" the report described (the `SafeAreaView`'s own style explicitly
+  set `backgroundColor: colors.background`/`theme.background`). Confirmed the working
+  counter-example already existed: `AddTransactionScreen`'s `headerSafe` and
+  `LbPersonScreen`'s `root` both paint the SafeAreaView ITSELF `colors.card`, which is why
+  neither ever showed the bug. Fixed the same way on all 11 screens the depth-2+ sweep
+  touched: `SettingsScreen.js`, `BackupScreen.js`, `SpendRulesScreen.js`,
+  `CategoriesScreen.js`, `GoalsScreen.tsx`, `GoalFormScreen.tsx`, `GoalDetailScreen.tsx`
+  (both branches), `RemindersScreen.tsx`, `ReminderFormScreen.tsx`,
+  `WhatsAppReminderScreen.js`, `ShopScreen.tsx` — the SafeAreaView now carries the header's
+  own white/card fill, and the scrollable body below it (a `ScrollView`'s `style`, or a
+  wrapping `View` where the body isn't a single ScrollView, as on `ShopScreen`) repaints
+  the page's gray/themed background explicitly, so the "white header over gray body" look
+  is unbroken — just with the white now correctly starting at the very top of the screen
+  instead of below the notch. `WhatsAppReminderScreen` needed no body repaint since its
+  own body (`sheet`) was already `theme.card`, matching the header. Caused a real ratchet
+  bump on the 4 static screens (`colors.card`/`colors.background` +4 net after removing one
+  phantom match from a code comment that happened to contain the literal string
+  "colors.card") — `docs/DARK_MODE.md`'s recorded budget updated 945→949 with a note
+  explaining it's a legitimate fix, not new code choosing the static palette over
+  `useTheme()`.
+- **Two more polish fixes on the same set of screens (Sep-13-26).** Flagged directly: "check
+  we have proper padding for the first item we render below header as in some it no padding
+  like in goal screen[; and] the month [line] at top has the separation line visible[,]
+  correct that." (1) `GoalsScreen.tsx`, `GoalFormScreen.tsx`, `RemindersScreen.tsx` and
+  `ReminderFormScreen.tsx` were each missing `paddingTop` on their scroll body
+  (`paddingHorizontal`/`paddingBottom`/`gap` only) — the first card/field sat flush against
+  the header with no breathing room, unlike `SettingsScreen`/`BackupScreen`/`SpendRulesScreen`/
+  `CategoriesScreen` (which use the `padding: spacing.lg` shorthand, covering top too) and
+  `GoalDetailScreen`/`WhatsAppReminderScreen` (already fine for the same reason). Added
+  `paddingTop: spacing.lg` to the four. (2) `GoalsScreen`'s month line (`"September 2026 ·
+  plan set"`) sits BELOW the header as its own `<Text>`, and the header's `bordered` hairline
+  was drawing between the TITLE ROW and that line — the wrong boundary; the one dividing
+  hairline belongs between the whole white chrome block (title + month line) and the gray
+  scrollable body below, i.e. under the month line, not above it. `PlainScreenHeader` gained
+  a `hairline` prop (default `true`) that suppresses just the border while keeping `bordered`'s
+  fill; `GoalsScreen` now passes `hairline={false}` and draws its own `borderBottomWidth:
+  StyleSheet.hairlineWidth` on the month line's own style instead. No other screen touched
+  this session renders content directly below the header outside the ScrollView, so no other
+  caller needed this axis.
+- **`ShopScreen` was missed by the paddingTop pass above (Sep-13-26 follow-up: "shop still
+  misses").** Its first item below the header isn't inside the `ScrollView` either — it's
+  `balanceStrip`, a bordered card rendered as a sibling right after the header (same shape as
+  `GoalsScreen`'s month line, which is why the earlier sweep's "check the scroll body's
+  `paddingTop`" framing missed it: `balanceStrip` had `marginHorizontal`/`marginBottom` but no
+  `marginTop`, so it sat flush against the header with zero top spacing). Added
+  `marginTop: spacing.lg` directly on `balanceStrip`'s own style. General lesson: "does the
+  scroll body have `paddingTop`" isn't the full check — the real question is "does whatever
+  renders FIRST below the header (in or out of the ScrollView) have top spacing", and a card
+  rendered outside the ScrollView needs its OWN margin, not a contentContainerStyle fix.
 
 **Open**
+- Depth-1 gaps found incidentally during the depth-2+ sweep, NOT fixed (out of scope):
+  `AccountDetailsScreen.tsx`'s header (`styles.navBar`) has no `backgroundColor` at all,
+  so it shows through to the page background rather than a distinct bar; and
+  `LentBorrowedScreen.js` (gradient `CollapsingHeaderScreen`) has no owned `<StatusBar>`
+  anywhere in the file, relying entirely on whatever the Dashboard tab last set.
 - `align="bottom"` in `RecapModalShell.tsx` is dead code (no live caller) — flagged, not
   removed, in case a future recap variant wants it.
 - Double-submit guard not yet applied to `WhatsAppReminderScreen.js` (`handleSend`) or

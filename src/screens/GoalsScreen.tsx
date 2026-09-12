@@ -326,12 +326,16 @@ const GoalsScreen = ({ navigation }: any) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={styles.root} edges={['top']}>
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
         <PlainScreenHeader
           title="Goals"
           onBack={() => { hapticLight(); navigation.goBack(); }}
           tint={theme.textPrimary}
           titleColor={theme.textPrimary}
+          bordered
+          hairline={false}
+          surfaceColor={theme.card}
+          dividerColor={theme.divider}
           right={
             <TouchableOpacity
               onPress={() => { hapticLight(); setInfoOpen(true); }}
@@ -344,11 +348,25 @@ const GoalsScreen = ({ navigation }: any) => {
             </TouchableOpacity>
           }
         />
-        <Text style={[styles.monthLine, { color: theme.textMuted }]}>
+        {/* The one hairline between the white header block and the gray
+            scrollable body belongs HERE, under the month line — not between
+            the title row and this line (that's why the header itself is
+            `hairline={false}`). Both are part of the same "screen chrome"
+            block; only what follows is the body. */}
+        <Text
+          style={[
+            styles.monthLine,
+            { color: theme.textMuted, borderBottomColor: theme.divider },
+          ]}
+        >
           {MONTH_LABEL(thisMonth)} · {planIsCurrent ? 'plan set' : 'not set yet'}
         </Text>
 
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={{ backgroundColor: theme.background }}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+        >
 
           {/* ── nothing yet ──────────────────────────────────────────────── */}
           {activeGoals.length === 0 ? (
@@ -748,11 +766,21 @@ const GoalsScreen = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  monthLine: { ...typography.tiny, textAlign: 'center', paddingBottom: spacing.sm },
+  monthLine: {
+    ...typography.tiny,
+    textAlign: 'center',
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   // Clears the floating + (60pt button + its bottom inset), so the last card
   // isn't parked under it.
-  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + 72, gap: spacing.lg },
+  body: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl + 72,
+    gap: spacing.lg,
+  },
   flex1: { flex: 1 },
 
   card: { borderRadius: radius.lg, padding: spacing.lg, ...shadows.card },

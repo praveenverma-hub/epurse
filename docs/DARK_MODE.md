@@ -105,9 +105,15 @@ was written. **The migration unblocks both** — same code path — so this can 
 before. WhatsApp-style suggests the toggle: *Settings → Appearance → Light / Dark / System*, with
 the accent orthogonal to it. Carbon would then be the accent that also *defaults* to dark.
 
-## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06)
+## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13)
 
-**53 files · 945 references.** `useTheme?` = already has the hook. `subs` = module-scope
+**53 files · 949 references.** Sep-13: +4 static refs (945→949) on `SettingsScreen.js`,
+`BackupScreen.js`, `SpendRulesScreen.js`, `CategoriesScreen.js` — a real iOS fix (the
+`SafeAreaView`'s own fill has to match the header's `colors.card`, or the safe-area TOP
+inset behind the notch/status bar shows the page's `colors.background` instead; see
+APP_LOG's UI Consistency section, Sep-13). Legitimate growth, not drift — these are
+already-static screens getting a correctness fix, not new code choosing the static
+palette over `useTheme()`. `useTheme?` = already has the hook. `subs` = module-scope
 sub-components touching `styles` (the gotcha in §4.1) — bold means it needs the prop-passing fix.
 
 | File | `colors.*` refs | useTheme? | sheets | subs |
@@ -119,7 +125,7 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `components/SplitConfigModal.js` | 46 | **no** | 1 | 1 |
 | `screens/AddTransactionScreen.tsx` | 42 | yes | 1 | **2** |
 | `components/LinkContactModal.js` | 40 | **no** | 1 | 1 |
-| `screens/BackupScreen.js` | 34 | yes | 1 | 1 |
+| `screens/BackupScreen.js` | 35 | yes | 1 | 1 |
 | `screens/BudgetPlanScreen.js` | 34 | yes | 1 | 1 |
 | `components/TransactionItem.js` | 34 | **no** | 1 | 1 |
 | `screens/GroupsScreen.tsx` | 31 | yes | 1 | 1 |
@@ -128,19 +134,19 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `components/CreateGroupModal.tsx` | 28 | yes | 1 | 1 |
 | `components/LbEntryForm.js` | 26 | **no** | 1 | 1 |
 | `components/TxnDetailSheet.tsx` | 24 | yes | 1 | 0 |
+| `screens/CategoriesScreen.js` | 24 | yes | 1 | 1 |
 | `screens/AnalyticsScreen.js` | 23 | yes | 1 | **6** |
-| `screens/CategoriesScreen.js` | 23 | yes | 1 | 1 |
 | `components/ExportSheet.tsx` | 21 | yes | 1 | 1 |
 | `screens/WhatsAppReminderScreen.js` | 17 | yes | 1 | 1 |
 | `components/GroupTxnDetailSheet.tsx` | 20 | yes | 1 | 0 |
 | `components/HabitLeakMatrix.js` | 17 | **no** | 1 | **2** |
 | `screens/LentBorrowedScreen.js` | 16 | yes | 1 | **2** |
+| `screens/SpendRulesScreen.js` | 16 | yes | 1 | 1 |
 | `screens/SmsDiagnosticScreen.js` | 15 | **no** | 3 | 1 |
-| `screens/SpendRulesScreen.js` | 15 | yes | 1 | 1 |
 | `components/FormField.tsx` | 15 | **no** | 1 | 0 |
 | `components/GroupExpenseForm.tsx` | 15 | yes | 1 | 1 |
 | `components/AddAccountModal.js` | 14 | yes | 1 | 1 |
-| `screens/SettingsScreen.js` | 11 | yes | 1 | 1 |
+| `screens/SettingsScreen.js` | 12 | yes | 1 | 1 |
 | `components/CelebrationModal.js` | 10 | yes | 1 | 1 |
 | `screens/AddGroupExpenseScreen.tsx` | 9 | **no** | 1 | 1 |
 | `components/GhostLineChart.js` | 9 | **no** | 1 | 1 |

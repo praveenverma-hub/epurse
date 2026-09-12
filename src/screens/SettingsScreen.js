@@ -69,9 +69,9 @@ const SettingsScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Light header painted from the static palette → dark glyphs (status-bar skill). */}
       <StatusBar style="dark" />
-      <PlainScreenHeader title="Settings" onBack={() => navigation.goBack()} />
+      <PlainScreenHeader title="Settings" onBack={() => navigation.goBack()} bordered />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Appearance ─────────────────────────────────────────────────── */}
         <View style={styles.card}>
           <SectionHeader icon="color-palette-outline" title="Appearance" accentColor={theme.primary} />
@@ -180,7 +180,13 @@ const SettingsScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  // The SafeAreaView itself paints the safe-area TOP inset (behind the notch/
+  // status bar) — on iOS that's real screen area, not just padding, so it has
+  // to match the header's own white fill or the status bar sits on a stray
+  // gray strip above a white header. The scroll body repaints gray itself,
+  // via `scrollBody` below.
+  container: { flex: 1, backgroundColor: colors.card },
+  scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card,

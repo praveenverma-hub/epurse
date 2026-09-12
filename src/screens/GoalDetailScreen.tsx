@@ -17,6 +17,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -137,9 +138,20 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (!goal) {
     return (
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]} edges={['top']}>
-        <PlainScreenHeader title="Goal" onBack={() => navigation.goBack()} />
-        <EmptyState icon="flag-outline" title="Goal not found" subtitle="This goal may have been removed." />
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
+        <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
+        <PlainScreenHeader
+          title="Goal"
+          onBack={() => navigation.goBack()}
+          tint={theme.textPrimary}
+          titleColor={theme.textPrimary}
+          bordered
+          surfaceColor={theme.card}
+          dividerColor={theme.divider}
+        />
+        <View style={{ flex: 1, backgroundColor: theme.background }}>
+          <EmptyState icon="flag-outline" title="Goal not found" subtitle="This goal may have been removed." />
+        </View>
       </SafeAreaView>
     );
   }
@@ -153,13 +165,23 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
-      <SafeAreaView style={styles.root} edges={['top']}>
+      <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
       <PlainScreenHeader
         title={goal.name}
         onBack={() => { hapticLight(); navigation.goBack(); }}
+        tint={theme.textPrimary}
+        titleColor={theme.textPrimary}
+        bordered
+        surfaceColor={theme.card}
+        dividerColor={theme.divider}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={{ backgroundColor: theme.background }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
         {/* ── hero: ring + headline sit SIDE BY SIDE (Sep-12-26) ──────────
             First shipped as one centred column — ring, then value, then sub,
             then caption, then badges, then chips, each on its own row — which

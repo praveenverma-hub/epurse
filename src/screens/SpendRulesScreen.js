@@ -59,9 +59,9 @@ const SpendRulesScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style="dark" />
-      <PlainScreenHeader title="Counts as expense" onBack={() => navigation.goBack()} />
+      <PlainScreenHeader title="Counts as expense" onBack={() => navigation.goBack()} bordered />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <Text style={styles.hint}>
             Turn a category off and its transactions stop adding to Spent, your category
@@ -135,7 +135,11 @@ const SpendRulesScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  // SafeAreaView paints the safe-area top inset (the notch/status-bar strip on
+  // iOS is real screen area, not padding) — must match the header's `bordered`
+  // fill or the status bar sits on a stray gray sliver above a white header.
+  container: { flex: 1, backgroundColor: colors.card },
+  scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card,

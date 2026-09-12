@@ -42,6 +42,22 @@ type Props = {
    * Default is flat — the bar shares the screen's background.
    */
   bordered?: boolean;
+  /**
+   * Override the `bordered` fill/hairline with theme colours (`theme.card` /
+   * `theme.divider`) instead of the static default — for a theme-adaptive
+   * screen, where the static colour would ignore dark mode. No effect
+   * without `bordered`.
+   */
+  surfaceColor?: string;
+  dividerColor?: string;
+  /**
+   * Suppress `bordered`'s hairline while keeping its fill — for a screen that
+   * renders its own content (e.g. a subtitle line) directly below the header
+   * and wants the ONE dividing hairline to sit under THAT instead, rather than
+   * between the title row and the subtitle. No effect without `bordered`.
+   * Default true (the hairline `bordered` has always drawn).
+   */
+  hairline?: boolean;
   /** Tint for the back chevron. Defaults to the static ink (light bar). */
   tint?: string;
   /** Colour for the title. Defaults to the static ink. */
@@ -50,9 +66,18 @@ type Props = {
 };
 
 const PlainScreenHeader = ({
-  title, onBack, right, bordered = false, tint, titleColor, style,
+  title, onBack, right, bordered = false, surfaceColor, dividerColor, hairline = true, tint, titleColor, style,
 }: Props) => (
-  <View style={[styles.header, bordered && styles.bordered, style]}>
+  <View
+    style={[
+      styles.header,
+      bordered && styles.bordered,
+      bordered && surfaceColor ? { backgroundColor: surfaceColor } : null,
+      bordered && dividerColor ? { borderBottomColor: dividerColor } : null,
+      bordered && !hairline ? { borderBottomWidth: 0 } : null,
+      style,
+    ]}
+  >
     {onBack ? (
       <TouchableOpacity
         onPress={onBack}

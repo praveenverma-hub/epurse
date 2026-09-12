@@ -101,12 +101,15 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.card }]} edges={['top']}>
         <PlainScreenHeader
           title="Reminders"
           onBack={() => { hapticLight(); navigation.goBack(); }}
           tint={theme.textPrimary}
           titleColor={theme.textPrimary}
+          bordered
+          surfaceColor={theme.card}
+          dividerColor={theme.divider}
           right={
             <TouchableOpacity
               onPress={() => openForm()}
@@ -119,7 +122,11 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
           }
         />
 
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={{ backgroundColor: theme.background }}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+        >
           {/* ── Upcoming ─────────────────────────────────────────────────── */}
           {upcoming.length === 0 ? (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -223,7 +230,7 @@ export default RemindersScreen;
 const styles = StyleSheet.create({
   root:      { flex: 1 },
   container: { flex: 1 },
-  body:      { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  body:      { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
   card: {
     borderRadius: radius.lg,

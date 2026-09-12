@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { PermissionsAndroid } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import {
@@ -191,6 +192,7 @@ export default function SmsDiagnosticScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
+      <StatusBar style="light" />
       <CollapsingHeaderScreen
         collapsible={false}
         gradientColors={gradient}

@@ -89,7 +89,7 @@ const ShopScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.root}>
       <StatusBar barStyle={D.dark ? 'light-content' : 'dark-content'} backgroundColor={D.bg} />
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: D.card }]} edges={['top']}>
         <PlainScreenHeader
           title="Shop"
           onBack={() => {
@@ -98,8 +98,15 @@ const ShopScreen: React.FC<Props> = ({ navigation }) => {
           }}
           tint={D.white}
           titleColor={D.white}
+          bordered
+          surfaceColor={D.card}
+          dividerColor={D.border}
         />
 
+        {/* SafeAreaView now matches the header (see above, for the safe-area
+            top inset on iOS) — this wrapper repaints everything below the
+            header back to the page background. */}
+        <View style={{ flex: 1, backgroundColor: D.bg }}>
         {/* Balance strip — the answer to "can I afford this", kept on screen. */}
         <View style={styles.balanceStrip}>
           <View style={styles.balanceIcon}>
@@ -153,6 +160,7 @@ const ShopScreen: React.FC<Props> = ({ navigation }) => {
             ))
           )}
         </ScrollView>
+        </View>
       </SafeAreaView>
     </View>
   );
@@ -358,6 +366,7 @@ function makeStyles(D: RewardPalette) {
       alignItems: 'center',
       gap: spacing.sm,
       marginHorizontal: spacing.lg,
+      marginTop: spacing.lg,
       marginBottom: spacing.lg,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,

@@ -10,6 +10,7 @@ import {
   Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -135,9 +136,10 @@ const CategoriesScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <PlainScreenHeader title="Categories" onBack={() => navigation.goBack()} />
+      <StatusBar style="dark" />
+      <PlainScreenHeader title="Categories" onBack={() => navigation.goBack()} bordered />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Category tree ───────────────────────────────────────────── */}
         <View style={styles.card}>
           <SectionHeader
@@ -347,7 +349,11 @@ const CategoriesScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  // SafeAreaView paints the safe-area top inset (the notch/status-bar strip on
+  // iOS is real screen area, not padding) — must match the header's `bordered`
+  // fill or the status bar sits on a stray gray sliver above a white header.
+  container: { flex: 1, backgroundColor: colors.card },
+  scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card,

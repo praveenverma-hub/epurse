@@ -246,9 +246,10 @@ const BackupScreen = ({ navigation, route }) => {
       <PlainScreenHeader
         title={fromOnboarding ? 'Restore' : 'Backup'}
         onBack={() => navigation.goBack()}
+        bordered
       />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Not configured in this build ────────────────────────────────── */}
         {!configured ? (
           <View style={styles.card}>
@@ -472,7 +473,11 @@ const BackupScreen = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  // SafeAreaView paints the safe-area top inset (the notch/status-bar strip on
+  // iOS is real screen area, not padding) — must match the header's `bordered`
+  // fill or the status bar sits on a stray gray sliver above a white header.
+  container: { flex: 1, backgroundColor: colors.card },
+  scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   card: {
     backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg,

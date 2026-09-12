@@ -249,15 +249,19 @@ const GoalFormScreen = ({ navigation, route }: any) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={styles.root} edges={['top']}>
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
         <PlainScreenHeader
           title={isEdit ? 'Edit Goal' : 'New Goal'}
           onBack={() => { hapticLight(); navigation.goBack(); }}
           tint={theme.textPrimary}
           titleColor={theme.textPrimary}
+          bordered
+          surfaceColor={theme.card}
+          dividerColor={theme.divider}
         />
 
         <ScrollView
+          style={{ backgroundColor: theme.background }}
           contentContainerStyle={styles.body}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -632,7 +636,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
+  body: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
   flex1: { flex: 1 },
 
   label: {

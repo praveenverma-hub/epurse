@@ -500,12 +500,15 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.card }]} edges={['top']}>
         <PlainScreenHeader
           title="Send Reminder"
           onBack={onClose}
           tint={theme.textPrimary}
           titleColor={theme.textPrimary}
+          bordered
+          surfaceColor={theme.card}
+          dividerColor={theme.divider}
         />
 
         <View style={[styles.sheet, {
