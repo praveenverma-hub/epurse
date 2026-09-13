@@ -96,6 +96,14 @@ export interface AllocationSegment {
   value: number;
   /** Spending: visible because it's true, immovable because Budget owns it. */
   locked?: boolean;
+  /** The floor this segment's divider can be dragged down to — enforced
+   *  LIVE inside the gesture (`onUpdate`), not corrected after release. The
+   *  same rule for every caller: what's already funded this month, whatever
+   *  that means for the segment (a completed goal briefly floored at its
+   *  own current value instead — a ratchet — reverted when rollover made it
+   *  permanent across months; see the caller's own comment). Defaults to
+   *  0 — a bare floor, same as before this existed. */
+  minValue?: number;
 }
 
 interface Props {
@@ -106,6 +114,13 @@ interface Props {
   /** Id used for the implicit remainder segment in `onChangePair`. */
   freeId?: string;
   disabled?: boolean;
+  /** The drag hit `minValue` and refused to go lower — fired AT MOST ONCE per
+   *  gesture (not once per frame while pinned there), so the caller can
+   *  surface WHY without spamming a toast for every pixel of an ongoing drag.
+   *  Optional and decoupled on purpose (dependency inversion, ui-consistency
+   *  §0) — this component has no opinion on HOW that's shown; the caller
+   *  decides (a toast here, nothing at all elsewhere). */
+  onFloorHit?: (segmentId: string) => void;
 }
 
 type Part = AllocationSegment;
@@ -116,6 +131,7 @@ const AllocationBar: React.FC<Props> = ({
   onChangePair,
   freeId = '__free__',
   disabled = false,
+  onFloorHit,
 }) => {
   const theme = useTheme();
   const [barWidth, setBarWidth] = useState(0);
@@ -197,6 +213,7 @@ const AllocationBar: React.FC<Props> = ({
               tint={theme.card}
               freeId={freeId}
               onCommit={commit}
+              onFloorHit={onFloorHit}
             />
           );
         })}
@@ -297,10 +314,12 @@ interface DividerProps {
   tint: string;
   freeId: string;
   onCommit: (leftId: string, leftValue: number, rightId: string, rightValue: number, filled: boolean) => void;
+  onFloorHit?: (segmentId: string) => void;
 }
 
 const Divider: React.FC<DividerProps> = ({
   index, left, freeIndex, freeValue, values, draggingAt, salary, barWidth, disabled, tint, freeId, onCommit,
+  onFloorHit,
 }) => {
   /** `left` + free totals captured on `onBegin`, so each frame is measured
    *  from where the finger LANDED. Accumulating against the live value
@@ -308,8 +327,28 @@ const Divider: React.FC<DividerProps> = ({
   const startLeft = useSharedValue(0);
   const startFree = useSharedValue(0);
 
+  // The floor, mirrored onto the UI thread so `onUpdate` can clamp to it on
+  // every frame — enforced LIVE, not corrected after release. A commit-time-
+  // only version of this floor was tried first and was the actual bug
+  // ("sometimes it comes back sometimes it's able to decrease"): nothing
+  // stopped the drag from settling below the floor while it was live, so
+  // whether it visibly snapped back depended on exactly where the finger let
+  // go relative to the pool's own snap points — a race, not a rule.
+  const minValueShared = useSharedValue(left.minValue ?? 0);
+  useEffect(() => {
+    minValueShared.value = left.minValue ?? 0;
+  }, [left.minValue, minValueShared]);
+
   /** Haptic per snapped step, and only that — nothing here touches React. */
   const stepped = useRef(() => hapticLight()).current;
+
+  /** Whether THIS gesture has already told the caller it hit the floor — one
+   *  notification per drag, not one per frame while pinned there. Reset in
+   *  `onBegin` below, so the very next drag can notify again. */
+  const notifiedFloor = useSharedValue(false);
+  const notifyFloor = useCallback(() => {
+    onFloorHit?.(left.id);
+  }, [left.id, onFloorHit]);
 
   const finish = useCallback(
     (leftValue: number, freeValue: number) => {
@@ -328,16 +367,42 @@ const Divider: React.FC<DividerProps> = ({
       Gesture.Pan()
         .enabled(!disabled)
         .activeOffsetX([-4, 4])          // let a vertical scroll win
+        // `activeOffsetX` alone only DELAYS this gesture's own activation —
+        // it says nothing about yielding to the ScrollView above it, which is
+        // a plain RN `ScrollView`, not gesture-handler's own. Without an
+        // explicit failure condition, an ordinary vertical swipe that has any
+        // incidental horizontal jitter can still cross the 4px activeOffsetX
+        // threshold before the scroll takes over, so the divider visibly
+        // nudges mid-scroll ("the scroll bar still moves by scrolling").
+        // `failOffsetY` makes the intent in the comment above actually true:
+        // once vertical movement crosses this band, the gesture FAILS
+        // outright and the touch is released back to the ScrollView, rather
+        // than staying in a pending state that can still claim it.
+        .failOffsetY([-10, 10])
         .onBegin(() => {
           startLeft.value = values.value[index] ?? 0;
           startFree.value = values.value[freeIndex] ?? 0;
           draggingAt.value = index;
+          notifiedFloor.value = false;
         })
         .onUpdate((e) => {
           if (barWidth <= 0 || salary <= 0) return;
           const pool = startLeft.value + startFree.value;
           const deltaValue = (e.translationX / barWidth) * salary;
-          const nextLeft = snapWithin(pool, startLeft.value + deltaValue, ALLOCATION_STEP);
+          const rawNextLeft = snapWithin(pool, startLeft.value + deltaValue, ALLOCATION_STEP);
+          const floor = Math.min(minValueShared.value, pool);
+          // The floor, live — clamped to the pool too as a safety net (it
+          // should never legitimately exceed it, but this guarantees the
+          // handle can't be dragged past a floor that momentarily disagrees
+          // with the pool it's being measured against).
+          const nextLeft = Math.max(rawNextLeft, floor);
+          // The finger asked to go BELOW the floor (the raw, unclamped
+          // value, not what actually got applied) — tell the caller once per
+          // gesture, not once per frame spent pinned there.
+          if (rawNextLeft < floor && !notifiedFloor.value) {
+            notifiedFloor.value = true;
+            runOnJS(notifyFloor)();
+          }
           const current = values.value;
           if (nextLeft === current[index]) return;   // still inside the step
           const out = [...current];
@@ -354,7 +419,10 @@ const Divider: React.FC<DividerProps> = ({
         // this, or the mirror above stops accepting props for the rest of the
         // session and the bar silently stops reflecting the plan.
         .onFinalize(() => { draggingAt.value = -1; }),
-    [disabled, index, freeIndex, barWidth, salary, values, draggingAt, startLeft, startFree, finish, stepped],
+    [
+      disabled, index, freeIndex, barWidth, salary, values, draggingAt, startLeft, startFree,
+      minValueShared, notifiedFloor, notifyFloor, finish, stepped,
+    ],
   );
 
   const posStyle = useAnimatedStyle(() => {
@@ -380,9 +448,25 @@ const Divider: React.FC<DividerProps> = ({
       onAccessibilityAction={(e) => {
         if (disabled) return;
         const dir = e.nativeEvent.actionName === 'increment' ? 1 : -1;
-        const next = rebalancePair(left.value, freeValue, left.value + dir * ALLOCATION_STEP);
-        onCommit(left.id, next.left, freeId, next.right, next.right === 0);
-        AccessibilityInfo.announceForAccessibility?.(`${left.label} ${Math.round(next.left)}`);
+        const requested = rebalancePair(left.value, freeValue, left.value + dir * ALLOCATION_STEP);
+        // The drag's live floor (`minValue`) never applied here at all — this
+        // is a SEPARATE, discrete path that skipped straight to `onCommit`,
+        // which only floors as a safety net one level up. That net still
+        // caught the WRITE, but the SPOKEN number didn't: a screen reader
+        // would have announced the requested value and then silently gotten
+        // something else, which reads as the control lying about what it did.
+        const floored = Math.max(requested.left, left.minValue ?? 0);
+        if (floored !== requested.left) {
+          // Plain JS callback, not a worklet — `onAccessibilityAction` runs
+          // entirely on the JS thread already, so this needs no `runOnJS`
+          // (that wrapper is only for calling JS FROM the UI thread, which
+          // is what the drag's `onFloorHit` call above actually needs).
+          onFloorHit?.(left.id);
+          AccessibilityInfo.announceForAccessibility?.(`${left.label} can't go below ${Math.round(floored)}`);
+          return;
+        }
+        onCommit(left.id, requested.left, freeId, requested.right, requested.right === 0);
+        AccessibilityInfo.announceForAccessibility?.(`${left.label} ${Math.round(requested.left)}`);
       }}
     >
       <View

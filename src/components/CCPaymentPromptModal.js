@@ -25,6 +25,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
+import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 // Short label for an account chip, e.g. "HDFC ••4521".
@@ -42,6 +43,7 @@ const CCPaymentPromptModal = () => {
   const dismissCCPaymentPrompt = useEPurseStore((s) => s.dismissCCPaymentPrompt);
 
   // Which reconciliation the user has picked. Defaults to the full true-up.
+  const topModal = useAutoModalQueue();
   const [choice, setChoice] = useState('trueup');
   // Which account paid the bill (null = "Not sure" → don't book a paying-side txn).
   const [sourceId, setSourceId] = useState(null);
@@ -79,7 +81,10 @@ const CCPaymentPromptModal = () => {
   // Reset the picked option each time a new payment surfaces.
   useEffect(() => { setChoice('trueup'); setSourceId(null); }, [current?.smsId, current?.accountId]);
 
-  if (!current) return null;
+  // Top of the auto-modal queue, so this is really only a guard against a
+  // future surface being added above it — and against this one stacking on a
+  // modal some other screen has open.
+  if (!current || topModal !== 'ccPayment') return null;
 
   const { amount, accountMask, bankName, accountId } = current;
   const cardLabel = [bankName, accountMask ? `••${accountMask}` : null]

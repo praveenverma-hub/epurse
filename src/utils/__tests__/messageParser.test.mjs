@@ -1633,6 +1633,56 @@ const CC_CARD_MASK_SEP26 = [
     expect: { accept: false, code: 'cc_bill_reminder', ccDueCardLast4: '7004' } },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Keyword SHADOWING (Sep-13-26)
+// -----------------------------------------------------------------------------
+// `categorise` returns the first category in `CATEGORY_KEYWORDS` order with a
+// keyword anywhere in the text. That made a keyword invisible whenever a SHORTER
+// keyword in an EARLIER category was a substring of it — the short one matched
+// first and the specific one never ran. Every merchant below was already listed
+// in its correct category; the collision was defeating the intent, not filling a
+// gap, so none of these needed a keyword added to fix.
+//
+// The last pair is the serious one: it inverted the DIRECTION of a debt.
+// ─────────────────────────────────────────────────────────────────────────────
+const KEYWORD_SHADOWING_SEP26 = [
+  { name: "AJIO is shopping, not bills ('jio' the telecom is inside 'ajio')",
+    sender: 'HDFCBK', sms: 'Rs.2,499.00 debited from A/c XX1234 on 13-09-25 to AJIO. UPI Ref 123456789012.',
+    expect: { accept: true, type: 'debit', amount: 2499, categoryId: 'shopping' } },
+  { name: "JIOCINEMA is entertainment, not bills",
+    sender: 'HDFCBK', sms: 'Rs.199.00 debited from A/c XX1234 on 13-09-25 to JIOCINEMA. UPI Ref 123456789013.',
+    expect: { accept: true, type: 'debit', amount: 199, categoryId: 'entertainment' } },
+  { name: "JIOSAAVN is entertainment, not bills",
+    sender: 'HDFCBK', sms: 'Rs.99.00 debited from A/c XX1234 on 13-09-25 to JIOSAAVN. UPI Ref 123456789016.',
+    expect: { accept: true, type: 'debit', amount: 99, categoryId: 'entertainment' } },
+  { name: "AMAZON PRIME is entertainment, not shopping ('amazon' swallowed it)",
+    sender: 'HDFCBK', sms: 'Rs.1,499.00 debited from A/c XX1234 on 13-09-25 to AMAZON PRIME. UPI Ref 123456789015.',
+    expect: { accept: true, type: 'debit', amount: 1499, categoryId: 'entertainment' } },
+  // A real JIO recharge must STILL be bills — the fix must not overshoot.
+  { name: 'a genuine JIO recharge is still bills',
+    sender: 'HDFCBK', sms: 'Rs.399.00 debited from A/c XX4412 for JIO PREPAID RECHARGE on 03-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 399, categoryId: 'bills' } },
+
+  // DIRECTION: 'paid back' (lent_settled, money IN) was swallowing the more
+  // specific 'paid back to' (borrow_repaid, money OUT and a real expense), so
+  // repaying a debt was booked as someone repaying YOU.
+  { name: "'paid back to X' is borrow_repaid — I paid THEM (money out)",
+    sender: 'HDFCBK', sms: 'Rs.5,000.00 debited from A/c XX1234 paid back to Rahul on 13-09-25. UPI Ref 123456789017.',
+    expect: { accept: true, type: 'debit', amount: 5000, categoryId: 'borrow_repaid' } },
+  { name: "…while a bare 'paid back' credit stays lent_settled — they paid ME",
+    sender: 'HDFCBK', sms: 'Rs.5,000.00 credited to A/c XX1234, Rahul paid back on 13-09-25. UPI Ref 123456789018.',
+    expect: { accept: true, type: 'credit', amount: 5000, categoryId: 'lent_settled' } },
+
+  // Independent keywords must keep obeying CATEGORY_KEYWORDS ORDER, which is
+  // load-bearing: this matches both `fastag` (travel) and `recharge` (bills) and
+  // neither contains the other. A "longest keyword wins" rule was tried here and
+  // sent every FASTag top-up to bills — length only tracks specificity among
+  // keywords that actually overlap.
+  { name: 'FASTag recharge stays travel (order decides, not length)',
+    sender: 'ICICIB', sms: 'Your FASTag linked to A/c XX5521 has been recharged with Rs.500.00 on 07-Aug-26.',
+    expect: { accept: true, type: 'debit', amount: 500, categoryId: 'travel' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1659,6 +1709,7 @@ const SUITES = [
   ['50-msg sweep: fees/reversals/rails/decoys (Aug-26)', AUG26_SWEEP],
   ['CC bill DUE DATE extraction (Aug-26)', CC_DUE_DATE_AUG26],
   ['CC card mask extraction (Sep-26)', CC_CARD_MASK_SEP26],
+  ['Keyword shadowing (Sep-13-26)', KEYWORD_SHADOWING_SEP26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

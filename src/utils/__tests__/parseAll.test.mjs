@@ -64,6 +64,35 @@ for (const f of files) {
 for (const { f, msg } of failures) console.log(`  ${C.red}✗ ${f}${C.reset}\n      ${msg}`);
 if (!failures.length) console.log(`  ${C.green}✓ every source file compiles${C.reset}`);
 
+// ── Rules of Hooks: never behind a short-circuit ────────────────────────────
+// A hook inside `a && useThing()` is SKIPPED whenever `a` is falsy, so the hook
+// COUNT changes between renders and React throws "rendered fewer hooks than
+// expected" — the whole screen white-screens. This shipped (Sep-13-26) in
+// `MonthlyRecapModal`/`WeeklyRecapModal` as
+// `const visible = pending && show && useAutoModalQueue() === 'x';`
+//
+// Nothing else here catches it: it compiles, it type-checks, and every unit test
+// passes, because the fault only exists at RENDER time with a particular value.
+// Parsing every file already happens above, so the scan is nearly free.
+const hookConditional = [];
+for (const f of files) {
+  const src = readFileSync(f, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  src.split('\n').forEach((line, i) => {
+    // a hook call appearing AFTER a && / || / ? on the same line
+    if (/(&&|\|\||\?)[^;\n]*\buse[A-Z]\w*\s*\(/.test(line)) {
+      hookConditional.push(`${f}:${i + 1}  ${line.trim().slice(0, 76)}`);
+    }
+  });
+}
+if (hookConditional.length) {
+  failures.push({ f: 'rules-of-hooks', msg: 'hook behind a short-circuit — see below' });
+  hookConditional.forEach((l) => console.log(`  ${C.red}✗ hook behind a conditional${C.reset}\n      ${l}`));
+} else {
+  console.log(`  ${C.green}✓ no hook sits behind a short-circuit${C.reset}`);
+  pass++;
+}
+
 console.log(`\n${'─'.repeat(34)}`);
-console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length} passed${C.reset}`);
+console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 1} passed${C.reset}`);
 process.exit(failures.length === 0 ? 0 : 1);

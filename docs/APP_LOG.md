@@ -677,6 +677,373 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   so there's no separate draft to reconcile and the row's summary is never a tap behind reality.
   Merchants keep their existing inline text-input + chip list (bounded by what the user has
   actually typed, so it never had this growth problem). `test:parse` 175 → 176 (new file).
+- **Sep-13-2026: "why can't I pick Restaurants?" — answered, and it turned up a dead option.**
+  Asked directly: "in goals add form we show categories, but dont see all sub categoriees under
+  it, like for food we have groceries and other 3 sub categories, i only see groceries, why,
+  check for others as well."
+
+  **Working as designed, and the design is right — but nothing said so.** A sub-category can only
+  be offered as a funding source when it has its OWN `legacyId`. Most don't: Food Delivery, Fast
+  Food & Cafes and Restaurants all resolve to legacy `food`, so a rule on "Restaurants" is
+  indistinguishable at match time from a rule on "Food & Dining". Measured across the tree: **only
+  4 of 29 built-in sub-categories carry their own legacy id** (`groceries`, plus `self`/`lent`/
+  `borrowed` under Transfers), so 8 of the 11 parents show no sub-categories at all. This is the
+  SAME constraint `SpendRulesScreen` documents and refuses for the same reasons, spelled out in
+  the store: sub-categories mostly have no legacy id, transactions don't always carry a
+  `childCategory` (only set when the merchant dictionary matched or the user picked one by hand),
+  and compaction keeps history as legacy `byCategory` — so a sub-category rule could not be
+  applied to un-enriched SMS rows or to anything past 90 days.
+
+  Matching on `t.childCategory` was considered and rejected: it would work for enriched rows and
+  silently miss the rest. For a goal that funds itself automatically that is the worst failure
+  mode available — the goal just under-funds, and the user has no way to see which rows were
+  skipped. Giving every child its own `legacyId` is the real fix and is a data migration that
+  would break aggregated history; not something to do in passing.
+
+  So the fix is that the sheet now EXPLAINS itself, since a list where Food opens to one lonely
+  chip and most parents have no chevron reads as broken rather than as deliberately limited: a
+  line under the hint ("Sub-categories are offered only where spending is recorded separately"),
+  plus, when a parent is expanded, the omitted children named outright — "Food Delivery, Fast Food
+  & Cafes, Restaurants all record as Food & Dining". Note custom sub-categories are unaffected:
+  `buildCategoryTree` gives every custom node `legacyId: c.legacyId ?? c.id`, so anything the user
+  creates themselves is always independently targetable.
+
+  **Checking "the others" turned up a real bug: Income was offered and could never fund anything.**
+  Goal funding counts SPEND (`countsForSpend` is debit-or-refund) and every Income row is a
+  credit, so an "Income" rule matched nothing, forever, silently. Verified empirically against
+  every parent rather than by reading. Now filtered out via a new `CREDIT_ONLY_PARENT_IDS` in
+  `twoTierCategories.ts` — deliberately NOT reusing `NON_BUDGETABLE_PARENT_IDS`, which answers a
+  different question ("can this hold a budget") and also covers Transfers: a self-transfer into
+  savings is a debit and is one of the more sensible things to fund a goal from.
+
+  `test:goals` 70 → 89: every parent is asserted to fund or never-fund, Income is pinned as the
+  only credit-only parent while Transfers is pinned as NOT one, and the 4-of-29 legacy-id count is
+  asserted so that adding a `legacyId` becomes a deliberate act with a test to update rather than
+  something that quietly widens the picker.
+- **Sep-13-2026: "so why don't we use id instead?" — and the answer turned up four parser bugs.**
+  Asked directly: "as we have distinct id for all, may be leagcy id are recurring values we can
+  ommit?"
+
+  **`legacyId` is not a duplicate of `id` — it is the PARSER'S OUTPUT NAMESPACE.** The keys of
+  `CATEGORY_KEYWORDS` are exactly `food travel fuel bills shopping groceries entertainment health
+  education investments salary transfer lent borrowed lent_settled borrow_repaid` — the same values
+  the tree carries as `legacyId`. So the two fields answer different questions: `id` is a node in
+  the DISPLAY tree (every node has a distinct one), while `legacyId` is a value the DETECTION layer
+  can actually produce and the key every stored transaction, budget and compacted aggregate uses.
+  They are many-to-one ON PURPOSE.
+
+  Which is also the real reason Groceries is the one pickable child under Food: it is the only one
+  the app can independently DETECT — `CATEGORY_KEYWORDS.groceries` carries bigbasket, blinkit,
+  zepto, instamart, dmart. No keyword set can tell "Restaurants" from "Fast Food & Cafes" in a bank
+  SMS; both are a UPI payment to a merchant name. A child gets a `legacyId` exactly where the app
+  can identify it — by keyword (groceries), by the self-transfer detector (self), or via the LB
+  flow (lent/borrowed). So switching to `id` would not produce finer data; it would rename coarse
+  data, and a row that is genuinely only known to be `food` would start claiming to be
+  `restaurants`.
+
+  **Four real bugs found while verifying that, all one root cause.** `categorise` returned the
+  first category in `CATEGORY_KEYWORDS` order with a keyword anywhere in the text, so a keyword was
+  silently swallowed whenever a SHORTER keyword in an EARLIER category was a substring of it:
+  - `AJIO` → **bills**, because 'jio' (the telecom) sits inside 'ajio'. Same for `JIOCINEMA`,
+    `jio cinema` and `JIOSAAVN`, all of which are entertainment.
+  - `AMAZON PRIME` → **shopping**, because 'amazon' swallowed 'amazon prime'.
+  - `"paid back to X"` → **lent_settled** (money IN, non-spend) instead of `borrow_repaid` (money
+    OUT, a real expense), because `lent_settled` carries 'paid back' and `borrow_repaid` the more
+    specific 'paid back to'. **That one inverted the direction of a debt.**
+
+  Every one of these merchants was ALREADY listed in its correct category, so the collision was
+  defeating the intent rather than filling a gap — no keyword edits were needed to fix any of them.
+  `categorise` now discards a matched keyword that another matched keyword contains outright, then
+  applies the existing first-category-wins rule to what remains.
+
+  **"Longest keyword wins" was tried first and is WRONG** — it broke FASTag, sending every top-up
+  to bills because 'recharge' (8) is longer than 'fastag' (6) and much less specific. Keyword length
+  only tracks specificity among keywords that actually OVERLAP; containment is the real relation.
+  Category ORDER stays load-bearing for independent matches (travel is listed before bills
+  precisely so a toll top-up is travel, not a utility bill).
+
+  `test:parser` 323 → 331 with a new `Keyword shadowing (Sep-13-26)` suite covering all four bugs,
+  plus the two cases the fix must NOT overshoot: a genuine JIO prepaid recharge is still bills, and
+  FASTag is still travel.
+- **Sep-13-2026: EVERY sub-category is now offered as a goal funding source.** The intent, stated
+  plainly: "we create new category and sub category, map it with any new goal, then that goal will
+  auto read it correctly when user categories them mannualy, as we never always be able to
+  categories transaction correctly that why we have this categorisation modal... so same i want for
+  existing subcategories."
+
+  That reframes the constraint, and correctly. The earlier refusal assumed a rule could only ever
+  see the FLAT category on a row — and since Food Delivery, Fast Food and Restaurants all collapse
+  to legacy `food`, a "Restaurants" rule was indistinguishable from a "Food & Dining" one. But a
+  transaction also carries the tree child the user actually filed it under, and **the review queue
+  exists precisely so the user fixes what the parser could not work out.** A goal reading that
+  correction is the whole point of having the correction.
+
+  `ruleMatchesTxn` now matches `categoryIds` against the resolved CHILD id as well as the flat
+  category id. **No new rule field and no migration**: where a child id and a legacy id are the
+  same string (`groceries`, `self`, `lent`, `borrowed`) they mean the same category, so a goal
+  saved as `categoryIds: ['groceries']` keeps matching parser-detected grocery rows exactly as
+  before — and now also matches ones hand-filed as Groceries. Supporting pieces: `childLabelToId`
+  in `buildLegacyMaps` (child labels are unique across the whole tree, which is what makes a flat
+  map safe) and `childCatIdForTxn`, mirroring the existing `parentCatIdForTxn` so callers resolve a
+  row's sub-category through the store's maps rather than poking at the raw label.
+
+  The picker drops its `legacyId` filter and its "sub-categories are offered only where spending is
+  recorded separately" note — nothing is withheld now. What the sheet says instead is what is
+  actually true of the mechanism: only spend you've filed under a sub-category counts toward it, so
+  anything re-categorised in the review queue is picked up.
+
+  The honest boundary, which the user named themselves and accepted: a row nobody has filed past
+  its parent (approve-swiped, no merchant-dictionary hit) does not match a CHILD rule — it is still
+  swept by a PARENT rule, unchanged. That is the correct split rather than a gap: "Restaurants"
+  meaning "all Food" would make the sub-category pointless.
+
+  `test:goals` 89 → 94 and `test:store` 496 → 500. The store suite proves it end-to-end rather than
+  through the pure matcher, because the funding path also filters on `countsForSpend`/memo/month
+  first: a goal mapped to Restaurants takes the row filed as Restaurants (₹1,200), leaves the
+  Food Delivery sibling and the unfiled row alone, and a parent-level Food goal still takes filed
+  and unfiled rows alike.
+- **Sep-13-2026: `DailyQueueSection.tsx` deleted — 700 lines of dead code.** Surfaced while
+  cross-checking the review-queue flow: the component had no importers at all, and the queue
+  actually mounted on the Dashboard is `DailyQueueStack.js`. It had been quietly collecting
+  maintenance anyway — the shadow/`overflow` sweep earlier the same day "fixed" it, on a component
+  that never renders.
+
+  Verified before deleting: one export, zero importers, no dynamic/lazy import, no barrel
+  re-export, and committed at `f70e855` so it stays recoverable. Stale references cleaned up in
+  the same pass — the store's `cleanMerchant` comment and the `ui-consistency` "adopted by" list
+  both pointed at it (a "keep current" list naming a deleted file is exactly how those lists rot),
+  plus two example citations in the skill and one in `elevationLadder.test.mjs`. Historical
+  narrative entries keep the file's name but are now marked as deleted.
+
+  `test:parse` 176 → 175 — that suite compiles every source file, so the count tracks the file
+  list; the drop IS the deletion.
+- **Sep-13-2026: a goal's funding rule is now FIXED AT CREATION, a category is REQUIRED, and
+  ONE-TIME goals re-derive closed months.** Three linked decisions, and the order matters —
+  freezing the rule is what makes the re-derive safe, so it isn't three features but one.
+
+  **1. The rule is ADD-ONLY, and an addition counts from the day it was added.** A goal's progress
+  IS the sum of what its rule matched, so an entry it has already been measured with can never be
+  removed or rewritten — that would restate what the goal has always been worth. Widening is fine
+  and useful though, so `updateGoal` keeps every existing entry, accepts new ones, and stamps each
+  new one into `autoRule.addedAt` (id/merchant-key → ISO date). `ruleMatchesTxn`'s new `activeAt`
+  then only counts a stamped entry for transactions dated on or after it, so **a goal's number can
+  only ever grow forwards from a rule edit, never change retroactively.** Entries from creation
+  carry no stamp and always apply, so nothing about existing goals changes.
+
+  This started as a hard freeze ("create a new goal instead"), which was right about the danger and
+  too blunt about the cost — you could never broaden a goal without losing its history. Flagged as
+  the cost of the decision, and the answer was the effective-from date: "yes we can have it like
+  this, specifing to user that these counts now on." The legacy `autoParentId` back door goes
+  through the same merge, so it can't sneak an unstamped entry in.
+
+  The form says exactly what an addition will and won't do — *"they count from today onward, so
+  this goal's progress so far stays as it is. What it already tracks can't be removed."* Without
+  that second half a user reasonably expects a newly added category to sweep up the spend already
+  sitting in it. Entries already in force show ticked but refuse to untick, and an
+  already-funding merchant chip loses its ✕ — a control that removed one would make Save look
+  like it did nothing, since the store keeps it regardless.
+
+  **2. A category is required.** Merchants alone no longer qualify: a goal exists to track money
+  moving into something and the category is what names it. Form-level validation only — the store
+  stays tolerant so goals created before this keep working.
+
+  **3. One-time goals re-derive a closed month.** Raised directly: "for a one time goals person
+  might change in previous transactions, should we not consider it?" Correct, and the duration is
+  the right axis. A RECURRING goal's month is a closed unit ("I put ₹5,000 in during August") and
+  stays frozen; a ONE-TIME goal's number is a lifetime total against a target, so a category
+  corrected in the review queue afterwards has to move it.
+
+  Bounded by compaction, which drops transactions individually at `now - RAW_RETENTION_MS`
+  (90 days). `getGoalLifetimeSaved` re-derives a closed month only when the WHOLE month is still
+  inside that window (new `monthStartMs` helper) — a month straddling the line is already half
+  gone, and re-deriving it would silently UNDERCOUNT, which is the exact failure the snapshot
+  exists to prevent. Past the window the snapshot stays authoritative.
+
+  Also fixed in passing: `GoalFormScreen`'s category summary still read `c.legacyId` only, left
+  over from when that was the picker's key — so a sub-category without one was selectable but
+  invisible in the form's summary row. It now reads the same `legacyId ?? id` the picker writes.
+
+  `test:store` 500 → 510 and `test:goals` 94 → 102. The widening tests are dated EXPLICITLY rather
+  than leaning on wall-clock ordering — the stamp and a transaction added moments earlier land in
+  the same millisecond in a fast run, which is exactly the false pass a timing-dependent test
+  gives you. They prove all four corners: an added category takes spend from after the stamp,
+  never from before it, the original entry keeps counting from before the edit, and a removal
+  attempt leaves the original in place.
+- **Sep-13-2026: the goal congratulation was being spent on a screen nobody was looking at.**
+  Reported as "not seeing the congratulations banner when goal value reached". The store was fine
+  — `getNewlyAchievedGoals` returns the goal correctly, verified directly. The bug was entirely in
+  the UI, and the mechanism is worth remembering: **claiming an achievement is DESTRUCTIVE.**
+  `markGoalAchieved` stamps `achievedAt`, which is the exact field `getNewlyAchievedGoals` filters
+  on, so a goal can only ever be celebrated once.
+
+  `GoalAchievedModal` lived only on `GoalsScreen`, and its effect had no focus gate — while the
+  "Add money" FAB that usually tips a goal over its target is on `GoalDetailScreen`. So funding a
+  goal from the detail screen ran the effect on the LIST screen still mounted underneath: the
+  bonus was awarded and the goal marked, against a screen the user wasn't on, and the
+  congratulation was consumed without ever being seen. Nothing failed, nothing logged.
+
+  Fixed by extracting `useGoalAchievement` (ui-consistency §0 — needed on two screens, so it
+  becomes one hook) which is **focus-gated**, so only the screen the user is actually on can claim
+  an achievement, and the two screens can't race for the same goal. `GoalDetailScreen` now renders
+  the modal too, which is where the money usually goes in. The bonus is still credited BEFORE the
+  goal is marked, so a crash between the two can only ever under-award.
+- **Sep-13-2026: `GoalFundModal` had no idea a goal had a target.** Reported as "am able to add
+  more than the goal value". It never read `lifetimeTarget`, so there was no "still needed" figure
+  anywhere and nothing marked an overshoot.
+
+  Overfunding stays **allowed**, deliberately: the contribution mirrors a transfer that has already
+  happened, so refusing it would leave the goal disagreeing with the money. It just stops being a
+  surprise — the same reasoning the funding split already uses ("a double entry is VISIBLE rather
+  than prevented"). The modal now shows `₹X left to reach ₹Y`, offers it as a one-tap "Use this",
+  and switches to `₹N more than the ₹X still needed` in `theme.warning` when the typed amount goes
+  past it. A goal with no target (Recurring) has no finish line, so none of it renders.
+
+  `test:goals` 102 → 112 — the focus gate and the award-then-mark ordering, both screens claiming
+  through the shared hook rather than their own effect, and the fund modal knowing the remaining
+  amount while explicitly NOT capping the submitted one.
+- **Sep-13-2026: audited every OTHER self-opening modal — found a second data-losing bug, and gave
+  them all a priority order.** Asked for after the goal congratulation fix: "do and priortise
+  things which modal to be shown first and make note so any new we add we check first for
+  existing once."
+
+  **The audit.** Five surfaces on the Dashboard open themselves from a store flag, each unaware of
+  the others: `MonthlyRecapModal`, `WeeklyRecapModal`, `CCPaymentPromptModal`,
+  `EpcClaimBottomSheet` and the `CheckInBanner` (a banner, so it can coexist). **There was no
+  sequencing between them at all** — on a first open after a month rolls over, with a card bill to
+  reconcile and coins to claim, several could be `visible` simultaneously, which is precisely the
+  stacking §8b already documents.
+
+  **The second bug, and this one loses data.** `maybeQueueWeeklyRecap` writes `pendingWeeklyRecap`
+  AND `weeklyRecapHandled` in ONE `set`, where the guard is what stops it queuing again — but the
+  persist `partialize` kept the GUARD and dropped the QUEUE. So closing the app before the modal
+  was seen threw that week's recap away permanently: claimed, never shown, no way back. Same for
+  the monthly one. Notably `pendingCelebration`/`pendingCCPayment` were already persisted
+  correctly, so this was drift inside one file rather than a missing idea. Both pending flags are
+  persisted now — which is also what makes deferring one behind a higher-priority modal safe
+  rather than destructive.
+
+  **The order**, in `constants/autoModals.ts` (pure and dependency-free so the test can pin it
+  headlessly, same as `constants/carousel.ts`): `ccPayment` → `monthlyRecap` → `weeklyRecap` →
+  `epcClaim`. The card-payment question comes first because it is a question about the user's own
+  money — answering it changes stored balances, so every number the other surfaces would show is
+  only correct afterwards, and it has a real deadline. Monthly beats weekly because it is rarer and
+  tied to a boundary that will not come round again. The coin claim is last because nothing about
+  it expires. Each flag folds in the user's own "show me this" setting, so a switched-off recap
+  can't block the queue behind a modal that was never going to appear.
+
+  Also found dead while auditing: **`CelebrationModal.js` is imported nowhere** (superseded by
+  `MonthlyRecapModal` — "one popup, not two"), and `pendingCelebration` is written by the store but
+  read only by that dead file, so it is queued and never shown. Left in place pending a decision.
+
+  `npm run test:modals` (new, 17 assertions) pins the order, that each surface consults the queue,
+  and the invariant that actually bit: **every persisted "already handled" guard has its queue
+  persisted alongside it.** Rule written up as ui-consistency §8a-i.
+- **Sep-13-2026: the goal congratulation is now claimed on DISMISS, not on render — which fixes it
+  properly and heals the goals the earlier attempt stranded.** Reported again after the focus fix:
+  "again when i added from goals screen, did not see the celebration modal on goal amount, for
+  monthly one i did."
+
+  The focus gate was a real fix but only half the problem. The second cause: the money almost
+  always arrives through `GoalFundModal`, which is itself a native `<Modal>` (via `CenterModal`).
+  Closing it and presenting `GoalAchievedModal` in the same commit is exactly the stack §8b calls
+  unreliable — and the ARRIVING modal is the one that silently loses. That is also why the monthly
+  recap worked: nothing is dismissing when it opens.
+
+  **Both causes have one shape: SHOWING the modal was what consumed it.** `markGoalAchieved`
+  stamped `achievedAt`, and `getNewlyAchievedGoals` filtered on exactly that — so anything that
+  stopped the modal reaching the screen destroyed the congratulation permanently. Patching each
+  cause in turn would have left the next one to find.
+
+  So the state is split. **`achievedAt` records a fact about the money** (and still drives the
+  "achieved" badge on the card); **new `celebratedAt` records that the user was actually TOLD**,
+  and only that gates the modal, stamped when the modal is DISMISSED. A congratulation that never
+  arrives simply comes back. Goals stranded by the old behaviour — achieved and paid, never
+  celebrated — **heal themselves on the next open**, and `getNewlyAchievedGoals` now reports
+  `bonusAlreadyAwarded` so a re-show can never credit the bonus twice.
+
+  The hook also takes `blocked`, and waits ~400ms past it (a dismissing `<Modal>` is still on
+  screen for its fade), so the congratulation is held — claim included — until the screen is clear.
+  `test:store` 510 → 519 and `test:goals` 112 → 117, including the case that matters most: a goal
+  marked achieved is still offered, is flagged as already paid, and only `markGoalCelebrated` ends
+  the offer.
+- **Sep-13-2026: a goal top-up was being filed under "Other" — a regression from widening the
+  category picker.** Reported as "the update button in goal card shows others category but i
+  selected mutual funds for that group".
+
+  `GoalFundModal.inferGoalTxnCategory` returned `rule.categoryIds[0]` verbatim. That was correct
+  while `categoryIds` only ever held FLAT legacy ids — but since the picker started offering every
+  sub-category it holds tree CHILD ids (`mf`, `restaurants`, …), and those are not flat categories
+  at all. So the modal wrote `categoryId: 'mf'` into a real transaction: its own hint looked it up
+  in `DEFAULT_CATEGORIES`, missed, and printed "Other" — and worse, every budget, chart and monthly
+  aggregate would bucket that row as unknown. **Exactly the "when a key's derivation changes, grep
+  every reader" trap noted two entries above, which I then walked into anyway** — the picker and
+  the form summary got updated, this third reader did not.
+
+  `inferGoalTxnCategory` now resolves through the tree and returns the flat `categoryId` PLUS the
+  two-tier labels, so the row is filed exactly as if it had been categorised by hand — which is
+  also what makes it satisfy the goal's own rule via `childCategory`.
+
+  **And the assumption underneath it is now CHECKED rather than trusted.** For an auto-tracked goal
+  the modal deliberately skips `addGoalContribution`, on the grounds that the transaction it just
+  wrote already matches the goal's rule. Any disagreement between the inference and the rule
+  therefore meant money left the account and the goal never moved, silently. It now asks the goal's
+  real matcher (`ruleMatchesTxn`) whether the row actually matches, and writes the explicit
+  contribution when it doesn't — so "Add money" always funds the goal.
+
+  `test:goals` 117 → 121.
+- **Sep-14-2026: the app was white-screening — a hook behind a short-circuit.** Reported as "app
+  breaking". Mine, from the auto-modal queue: both recap modals read
+
+  ```js
+  const visible = pending && show && useAutoModalQueue() === 'x';   // ← hook inside &&
+  ```
+
+  A hook after a `&&` is **skipped whenever the left side is falsy**, so the hook COUNT changes
+  between renders and React throws "rendered fewer hooks than expected" — and these sit on the
+  Dashboard, which re-renders constantly. Both now call the hook unconditionally and compare the
+  result afterwards.
+
+  **Nothing in the repo could have caught it**, which is the part worth fixing: it parses, it
+  type-checks, and all 2144 assertions passed, because the fault only exists at RENDER time with a
+  particular value. `test:parse` — which already reads every source file to compile it — now also
+  fails on a hook call appearing after a `&&`, `||` or `?` on the same line. Verified by
+  re-introducing the exact line, which the lint catches and names.
+
+  Also audited every other file touched in this session for the same shape and for hooks after an
+  early return; the two recap modals were the only real cases (the scan's other hits were all
+  module-level helper functions, not component bodies).
+- **Sep-14-2026: THE actual reason the goal congratulation never appeared — the goal was RECURRING,
+  and a recurring goal had no finish line to cross.** Reported four times ("i still dont see the
+  congrats goal banner"), and **none of the three preceding fixes could ever have helped**. They
+  were all real bugs (an unfocused screen claiming it, a modal stacking over it, claim-on-render
+  consuming it) but none of them was THIS bug.
+
+  `GoalFormScreen` force-clears `lifetimeTarget` on a Recurring goal — correctly, it has no target
+  — and `getNewlyAchievedGoals` required `Number(g.lifetimeTarget) > 0`. So for a recurring goal
+  the congratulation was **unreachable by construction**, no matter what the modal plumbing did.
+
+  **The lesson is on me and it is about method.** Four rounds went into fixing the mechanism that
+  shows the modal, because each round found a genuine defect there and that felt like progress.
+  Nobody checked whether the goal could ever QUALIFY. The question "what does this data have to
+  look like for the feature to fire at all?" should have come first, and one direct question to the
+  user settled it in one round after four of guessing.
+
+  **A recurring goal's finish line is THIS MONTH's committed amount**
+  (`goalPlan.allocations[goalId]` — which is exactly the "monthly" figure its own form writes),
+  celebrated once per month via a new `celebratedMonth` stamp (one field, cannot grow). The modal
+  says so rather than reusing the one-time copy: "THIS MONTH DONE", "this month's ₹5,000 is
+  covered", "It starts again next month" — "GOAL COMPLETE" on something that restarts in three
+  weeks reads as wrong the moment the user looks at the goal again.
+
+  **A monthly completion pays NO bonus, deliberately.** `awardGoalBonus` credits real RP and EPC on
+  a streak multiplier; a recurring goal would collect it every month forever, and a ₹1 monthly
+  commitment would farm it outright. The congratulation is the reward — the money stays tied to
+  finishing something. It is flagged `bonusAlreadyAwarded` so it reuses the existing
+  never-pay-twice path rather than adding a second one.
+
+  `test:store` 519 → 528, covering both directions: meeting the amount fires, being short of it
+  doesn't, no monthly amount means nothing to reach, celebrating stamps WHICH month, and the next
+  month is a fresh finish line.
 - **The "How goals work" explainer trimmed, and `InfoSheet` itself capped at 75% screen height.**
   Flagged directly: "too much content... used 75% height". Two separate fixes: (1) Goals' own
   copy went from 6 bullets to 3 — folded "recurring goals reapply automatically" into the body
@@ -703,15 +1070,293 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   unlike `GoalFormScreen`) so the title/back-chevron ink stays theme-correct now that the bar
   itself is themed rather than transparent-over-background.
 
+**Done — Sep-14-2026, a completed goal's Update button, target lock, and the monthly figure's bounds**
+- **"Update" on an already-achieved goal relabels to "Add Extra"**, muted grey instead of primary
+  blue (`GoalCard.tsx`) — it still opens the same fund modal (real money can still move in), it
+  just stops competing with the ribbon's own "GOAL COMPLETE" for attention. A permanent
+  congratulation banner in the button's place was considered and rejected: a congratulation is a
+  one-shot MOMENT, and parking it there would state completion twice while blocking legitimate
+  extra funding.
+- **A one-time goal's target LOCKS once reached** (`GoalFormScreen`) — shown as a static row with
+  a lock icon. Raising a target after it's already been hit would rewrite the finish line the
+  achievement was measured against, the same reasoning already applied to category/merchant at
+  creation.
+- **Found and fixed the actual mechanism bug behind a RECURRING goal's ribbon getting stuck on
+  "GOAL COMPLETE" forever**: `markGoalAchieved` was stamping `achievedAt` for monthly completions
+  too, with nothing ever clearing it. Now only a `kind: 'lifetime'` completion stamps it; a monthly
+  one is tracked entirely by `celebratedMonth`.
+- **A recurring goal's monthly figure can be RAISED mid-month and it takes effect immediately**
+  (the figure lives in `goalPlan.allocations`, already scoped to the current month) — but raising
+  it after this month was already celebrated needed the stale `celebratedMonth` stamp cleared, or
+  the banner would stay wrongly blocked even though funding no longer meets the new, higher
+  number. Both write paths onto that figure — `updateGoalAllocation` (the form) and `setGoalPlan`
+  (the split bar's whole-draft commit, which never goes through the other action) — got the reset.
+- **A typed monthly figure could exceed the actual room left (salary minus budget cap minus every
+  other goal's share) and get silently clamped down with NO feedback** — reported as "not
+  reflecting/persisting". The store has to stay silent there (it's also the bar-drag's write
+  path, and a drag can't pop a toast mid-gesture); fixed at the form layer instead: Save is now
+  blocked with a toast naming the true ceiling, matching the existing "pick a category" validation
+  pattern, rather than quietly saving less than what was typed.
+- **The monthly figure now has a real FLOOR and, for a completed goal, a full PIN — enforced in the
+  STORE itself, not just the screens that call it** (same reasoning as `autoRule` being add-only
+  enforced in `updateGoal` rather than only in a form): it can never read below money already
+  funded this month (`goalFundedForMonth`), and a completed ONE-TIME goal's figure can't move in
+  EITHER direction at all — there's nothing left to pace toward once its lifetime target is
+  reached. Both `updateGoalAllocation` and `setGoalPlan` carry the same bound; the form (toast +
+  red border) and the split bar (steppers `disabled` at the floor/for a completed goal; the drag
+  gesture corrected on the settled pair, since a LIVE worklet constraint isn't safe to add — see
+  the drag-crash trap above) layer clear messaging on top.
+- Considered and dropped: an "Archive" action for a completed goal — there's no archived-goals view
+  or undo mechanism anywhere in the app yet, and a one-way disappear button with no recovery would
+  be worse than the existing explicit Delete. Left as an open item, not built.
+
+`test:store` 519 → 542 across this run; `tsc` clean throughout; full suite 2159 → 2169/2169.
+
+**Done — Sep-14-2026, the split bar's divider still nudged mid-scroll**
+- Reported as "the scroll bar still moves by scrolling." The divider's `Gesture.Pan()`
+  (`AllocationBar.tsx`) had `.activeOffsetX([-4, 4])` with a comment claiming it "let a vertical
+  scroll win" — but that only delays the gesture's OWN activation past 4px of horizontal
+  movement; it never tells it to yield to the ScrollView above it (a plain RN `ScrollView`, not
+  gesture-handler's own). An ordinary vertical swipe with any incidental horizontal jitter could
+  still cross that 4px threshold before the scroll fully took over, nudging the divider mid-scroll.
+  Added `.failOffsetY([-10, 10])`: the gesture now fails outright once vertical movement crosses
+  that band, handing the touch back to the ScrollView instead of sitting in a pending state that
+  can still claim it. `activeOffsetX`/`failOffsetY` are a pair for any RNGH gesture nested in a
+  plain ScrollView — one alone isn't the yield it looked like. Component-level gesture fix with no
+  `.mjs` harness coverage possible; `tsc` clean, full suite unaffected (2169/2169), as expected.
+- **Still nudged after that fix ("still scrollable") — the gap was the ARENA, not the threshold.**
+  The enclosing container was a plain `ScrollView` from `'react-native'`, running on RN's old
+  responder system, a different arena entirely from `react-native-gesture-handler`. A gesture's
+  own offset thresholds only reliably resolve ambiguity against OTHER gesture-handler
+  gestures/components in that same arena — against a foreign responder it goes through a
+  compatibility shim, not a guarantee. Swapped `GoalsScreen.tsx`'s `ScrollView` import to
+  `'react-native-gesture-handler'` (API-identical, so the import line was the whole change).
+  `failOffsetY` stays — it still needed a real threshold, it just needed the right arena to
+  matter. Lesson: a gesture's own offset config only resolves conflicts within its OWN gesture
+  system — check what arena the thing it's yielding to actually runs on before trusting an offset
+  tweak alone. `tsc` clean, full suite unaffected (2169/2169).
+- **"still scrollable, once goal completed" named the ACTUAL bug — nothing to do with scrolling.**
+  An achieved one-time goal's divider was still a fully live `Gesture.Pan()` that tracked a finger
+  in real time; the store-level pin from earlier only corrected the committed value on release, so
+  the handle visibly slid freely and only snapped back after letting go — reads as "still
+  draggable," not a scroll conflict. Root cause: `AllocationSegment.locked` (already what makes
+  Spending's divider fully immovable, with no `GestureDetector` attached at all) was never set for
+  an achieved goal's own segment. Fixed: `locked: !!g.achievedAt` in `GoalsScreen`'s segment
+  builder, plus a new optional `lockedReason` on the segment (defaulting to Spending's existing
+  wording) since the accessibility label was hardcoded to "is set in Budget" — wrong for a goal
+  locked for an unrelated reason. The `failOffsetY`/gesture-handler-`ScrollView` fixes above were
+  real, independent gaps worth keeping (a still-open goal's divider genuinely could nudge during a
+  plain scroll) but were never what this report was about. `tsc` clean, full suite unaffected
+  (2169/2169).
+- **That full lock was itself wrong, on both counts ("sometimes it comes back sometimes it's able
+  to decrease... only allow to increase value for goal as in form").** Mechanism: the floor was
+  only ever enforced on COMMIT, never inside the live drag itself — the worklet had no floor at
+  all while a finger was down, so whether it visibly snapped back on release depended on exactly
+  where the finger let go. Fixed by flooring the drag LIVE: `AllocationSegment` gained `minValue`,
+  mirrored onto a `useSharedValue` the gesture's `onUpdate` clamps to every frame, the same
+  mechanism already used for the ceiling. Policy: a full pin (blocking increases too) was never
+  right — replaced with a RATCHET where a completed goal's floor is its OWN current value (rise
+  freely, never fall below it), distinct from an open goal's floor (funded-this-month, free to
+  move either way down to that number). Reverted the same day, same turn, across every place the
+  full pin had shipped to: the bar's segment builder, its steppers (the `+` re-enabled), the
+  form's Monthly Contribution field (back to an editable input with the tighter floor, not a
+  locked static row), and both store actions (`updateGoalAllocation`, `setGoalPlan`). The
+  lifetime TARGET field's full lock is UNCHANGED and still correct — a different field, a
+  different reason (raising a finish line after crossing it rewrites the achievement; a bigger
+  goal is a new goal). `test:store` 542 → 543, `tsc` clean, full suite 2169 → 2170/2170.
+- **A toast now explains why the drag stopped moving.** New optional `AllocationBar` prop
+  `onFloorHit`, fired from inside the same `onUpdate` worklet that enforces the live floor, the
+  instant the raw attempted value crosses below it — guarded to fire AT MOST ONCE per drag
+  gesture, not once per frame spent pinned there. Decoupled on purpose: the component only reports
+  the event, `GoalsScreen` decides to show a toast, with copy that differs for an achieved goal
+  ("can only go up from here, never down") vs an open one (names the actual amount already funded
+  this month).
+- **"N MONTHS TO GO" replaced with the actual calendar month.** "does not provides much clarity" —
+  a bare count makes the reader do the arithmetic to find out what month that actually is, and its
+  text width grows with distance (it had already truncated once on a narrow phone). New
+  `projectedMonthLabel` (`goalPlan.js`) turns the count into the month it lands on, flat-width
+  regardless of how far away: `GoalCard`'s ribbon now reads "DONE BY SEP '27" instead of "18
+  MONTHS TO GO"; `GoalDetailScreen`'s roomier caption reads "Done by September 2027 at this rate".
+  `test:goals` 122 → 128, `tsc` clean, full suite 2170 → 2176/2176.
+- **Production-readiness audit, asked for directly.** Found and fixed one real bug: the divider's
+  accessibility increment/decrement bypassed the drag's live floor entirely and announced a
+  requested value to screen readers even when it was about to be silently corrected by the
+  commit-time safety net — the write was never wrong, but the SPOKEN number was, which reads as
+  the control lying about what it did. Now floors the same way and announces "can't go below ₹X"
+  instead. Confirmed clean: migration already backfills the new goal fields for pre-v30 data;
+  every numeric write is NaN/undefined-guarded; no stray debug statements anywhere touched this
+  session.
+
+**Done — Sep-14-2026, the achieved-goal ratchet REMOVED (resolves the item above)**
+- Asked directly: "one time confirmation... or any better?" Chose better: instead of a monthly
+  prompt to manage the ratchet's permanence, removed the ratchet entirely. One rule now, for every
+  goal, achieved or not: the floor is money actually funded THIS month — nothing more. That resets
+  to 0 every new calendar month on its own, so the permanence problem is gone architecturally, with
+  no new UI. There was never an integrity reason for the stricter rule either — completing a goal
+  is fully decoupled from its monthly figure (confirmed the revision before this one), so an
+  achieved goal's unfunded plan number never needed more protection than an open goal already has.
+  Removed the special case everywhere it had landed: both store actions, the bar's segment/stepper
+  logic, and the form's floor/messaging — the Monthly Contribution field has zero achieved-specific
+  branches left in it. New test jumps the store into a fresh month with a stale carried-over figure
+  and confirms the floor is 0 there, not the old peak. `test:store` 543 → 544, `tsc` clean, full
+  suite 2176 → 2177/2177.
+
+**Done — Sep-14-2026, completed one-time goals get their own "Completed" section**
+- "where do we show completed one time goals?" surfaced a real capacity bug while checking: the
+  main grid's `MAX_ACTIVE_GOALS` cap (8) counted a finished one-time goal FOREVER — complete 8 over
+  the years and creating a 9th is permanently blocked, even though several of the "8" are just
+  trophies. Hiding them was rejected outright (same reasoning as dropping "Archive" the same day:
+  a one-way disappear with no way to see them again is worse than the clutter). Split into
+  `gridGoals` (in progress) and `completedGoals` (done) — the cap and the main grid now only count
+  `gridGoals`; a new "Completed" section (trophy icon, success-green accent) renders
+  `completedGoals` right below it, in the same card style. Both still fully participate in the
+  monthly split bar below (unchanged) — a completed goal can keep taking "extra" via its monthly
+  figure, which is the entire reason that stayed editable at all. `tsc` clean, full suite
+  unaffected (2177/2177) — UI-only, no `.mjs` harness path.
+
+**Done — Sep-14-2026, section moved to the bottom + recurring goals can now be Discontinued**
+- Reordering: "Your Goals" (in progress, including a recurring goal that's fully funded this
+  month — it never earns `achievedAt`, so it's still active) stays at the TOP; the split card sits
+  in the middle; "Completed" — renamed **"No Longer Active"** and broadened — moved to the very
+  BOTTOM, since a genuinely finished or stopped goal is a look-back, not something to plan around.
+- New: "what if a recurring monthly goal user now wants to discontinue, we don't give option for
+  that." A "Discontinue this goal" action in `GoalFormScreen` (any time, not gated to a month-start
+  prompt — that would reintroduce the exact interruption pattern just avoided for a different
+  problem the same day), confirmed via a non-destructive modal. Discontinuing clears the goal's
+  current allocation and stops its AUTOMATIC funding — a manual top-up still works, an explicit
+  action always wins. History (contributions, lifetime totals) is untouched, unlike Delete. A
+  "Resume" action on the card in "No Longer Active" brings it straight back to the active grid.
+  Store bumped to v32 (migration backfills the new field); `backupService.ts`'s own version
+  constant caught by its own sync test and bumped alongside it.
+- One subtlety worth remembering: the stop is a LIVE gate off the goal's current state, not a
+  recorded "paused window" — resuming lets a transaction that matched WHILE discontinued count
+  too. Building true period-exclusion was judged not worth the complexity for a distinction users
+  would find confusing to explain.
+- `test:store` 544 → 553, `tsc` clean, full suite 2177 → 2186/2186.
+
+**Done — Sep-14-2026, three UI polish requests**
+- Discontinue moved from a quiet text row into the footer, beside Delete and Save — same shape as
+  Delete's icon button, muted border instead of danger-red (nothing is lost, unlike Delete).
+- `GoalCard` gets a neutral treatment for any inactive (done or discontinued) goal. **Superseded
+  the same day** ("can't see any update on inactive goals") — a flat scrim was tried first and was
+  invisible, because the medallion's glow and the progress ring draw straight from `color` and
+  render ON TOP of any background layer, unaffected by one. Fixed for real: a new `accentColor`
+  (the goal's hue when active, `theme.textMuted` when not) now feeds every accent use — the wash,
+  the ring, the glow, both borders — so an inactive card is genuinely grey everywhere it matters,
+  not just behind a layer that couldn't reach the parts that actually catch the eye. Identity
+  (emoji, name) stays untouched.
+- "This Month's Split" heading moved OUTSIDE its bordered card, matching "Your Goals" and "No
+  Longer Active" — it had drifted into being the only one of the three with its `SectionHeader`
+  nested inside the card box instead of sitting above it as a plain heading.
+- Spacing: more room BETWEEN sections, less room BETWEEN a heading and its own content — both were
+  the same distance before. `body.gap` 16 → 24, `secHead.marginBottom` 12 → 8, one shared style so
+  all three sections picked it up identically.
+- UI-only, `tsc` clean, full suite unaffected (2186/2186).
+
+**Done — Sep-14-2026, goal-completion reward audit**
+- User asked to review the RP/EPC bonus paid on a goal's lifetime target being reached
+  (`awardGoalBonus` in `useRewardStore.ts`, fired from `useGoalAchievement`). Traced the whole
+  path: detection (`getNewlyAchievedGoals`) → claim (focus-gated effect, credits RP/EPC then
+  stamps `achievedAt`) → seen (`celebratedAt`, stamped on modal dismiss). Confirmed correct:
+  flat 250 RP / 25 EPC base scaled by the Aware Run streak multiplier, paid at most once ever
+  per goal (`bonusAwardedAt`), monthly (recurring-goal) completions are congratulated but
+  deliberately never paid, and the target field genuinely locks in the form once achieved — so
+  the "can't farm by editing the target down and up" claim in `rewardConfig.ts`'s comment holds
+  in two independent ways, not just the store-side guard.
+- **Fixed one real bug found along the way**: `awardGoalBonus`'s notification `dedupeKey` was
+  `goal_achieved:${goalName}:${date}` — keyed on the goal's NAME, which the app never requires
+  to be unique. Two goals sharing a name (nothing stops that — "Vacation" is a plausible name to
+  reuse) both crossing their lifetime target on the same calendar day would collide, and
+  `useNotificationStore.add()` REPLACES an existing dedupeKey rather than keeping both — so the
+  first goal's bell notification would be silently overwritten by the second's. The RP/EPC
+  itself was never at risk (that guard is `bonusAwardedAt` on the goal, keyed by id already) —
+  only the bell-feed entry could be lost. `awardGoalBonus` now takes `(goalId, goalName)` and
+  keys on `goal_achieved:${goalId}` — no date suffix needed, since this event can only ever
+  fire once per goal ever (same permanent-key pattern the store already uses for `level_up`).
+- `tsc` clean, full suite unaffected (2186/2186 unrelated tests, no reward-store unit tests
+  existed to update since none called `awardGoalBonus` directly).
+
+**Done — Sep-14-2026, goal-completion reward REWORK (amount-aware, both durations paid, one formula)**
+- Follow-up to the audit above. Three real asks: (1) the flat 250 RP/25 EPC ignored the goal's own
+  amount — a ₹500 goal and a ₹5,00,000 goal paid identically; (2) a recurring goal never paid
+  anything, congratulation only; (3) keep the anti-grind posture the audit already confirmed
+  ("not awarded too much too early"), and put the formula in exactly one place.
+- **One formula, in `rewardConfig.ts`**: `computeGoalReward({durationKind, amount, streakDay})`
+  wraps a NEW `bandForGoalAmount` — four fixed bands (Small/Medium/Large/Very Large) classifying
+  an amount, ascending, first match wins (mirrors `MULTIPLIER_TIERS`' own shape). Both durations
+  are classified by the SAME bands (the "common determination factor for amount" asked for) but
+  pay a DIFFERENT scale per band — one-time pays more per band since it's a single permanent
+  achievement, recurring pays less since it can repeat every month. Deliberately BANDED, not a raw
+  proportion of the amount — a straight percentage would mean a big enough goal pays 50-100x a
+  small one, which is exactly the "buys everything" risk; the top band is a hard ceiling
+  (350 RP/35 EPC one-time, 40 RP/4 EPC recurring, pre-multiplier) no amount can exceed.
+- **Recurring goals now genuinely pay**, up to once per calendar month per goal. New goal field
+  `bonusAwardedMonth` (store v33) is the monthly twin of `bonusAwardedAt` — same crash-safety
+  ordering (credit first, stamp second), same "paid vs seen are different facts" split that
+  `achievedAt`/`celebratedAt` already established, just at monthly grain instead of once-ever. New
+  store action `markGoalMonthlyBonusAwarded`; `getNewlyAchievedGoals`'s monthly branch no longer
+  hardcodes `bonusAlreadyAwarded: true` — it now reads `goal.bonusAwardedMonth === mk`.
+- **The actual "not too much too early" backstop**: a NEW hard ceiling on TOTAL goal-derived
+  RP/EPC per calendar month, across every goal (one-time + recurring combined) —
+  `GOAL_REWARD_MONTHLY_CAP_RP`/`_EPC` (1000/100), mirroring `DAILY_REVIEW_CAP`'s shape at a
+  monthly grain instead of daily. Set comfortably above a single Very-Large completion at the top
+  streak multiplier (~525 RP/53 EPC) so one legitimate big completion is never clipped — it only
+  bites once SEVERAL goals land in the same month, the actual abuse shape (create many goals,
+  fund them all at once; at `MAX_ACTIVE_GOALS`=8 all completing Very-Large in one month that would
+  otherwise be ~4,200 RP, bounded to 1,000). Tracked in `useRewardStore` via
+  `goalRewardMonthKey`/`goalRpEarnedThisMonth`/`goalEpcEarnedThisMonth`, reset lazily whenever the
+  calendar month changes — additive persisted fields, no store version bump needed there (zustand
+  `persist`'s own `merge` already spreads fresh defaults under old persisted state).
+- **A clamped-to-zero result is never thrown away** — `awardGoalBonus` always returns what it
+  actually paid, even ₹0, so the caller can tell "already paid earlier" (`reward === null`, a
+  re-show) apart from "attempted, but this month's budget was already spent" (`reward` present but
+  all-zero). `GoalAchievedModal` now has three states instead of two and never renders "+0 RP" —
+  the zero case gets its own honest copy instead ("this month's goal-reward budget is already
+  spent... nothing paid this time").
+- **Explicitly deferred, on the user's own call**: a deadline field for one-time goals (would let
+  a self-set aggressive date bump a goal's band up a notch) — ships as a follow-up once the
+  banded system has been felt in practice, not bundled into this schema/migration pass. A
+  time-elapsed anti-farm guard for a suspiciously fast completion was also considered and
+  deliberately NOT built — the banded ceiling + the new monthly ceiling were judged sufficient,
+  same shape as every other anti-grind mechanism already in this economy (`DAILY_REVIEW_CAP`,
+  level-gated shop items), with no new heuristic about a goal's age to tune or explain.
+- Store v32 → v33 (`bonusAwardedMonth` seeded null), `backupService.ts` `STORE_VERSION` bumped in
+  lockstep (the same trap this session already hit once — an existing test catches any future
+  drift). `REWARD_COPY`'s goal bullets in the RP/EPC info sheets rewritten to describe the scaling
+  rule instead of a now-wrong flat number.
+- New `npm run test:rewards` (`rewardConfig.test.mjs`, 42 cases): real, executable tests for
+  `bandForGoalAmount`/`computeGoalReward` (band boundaries, the top band's ceiling, one-time vs
+  recurring ordering on every band, the multiplier ladder) — these are dependency-free pure
+  functions, unlike `useRewardStore.ts` itself, which can't run in this headless harness at all
+  (zustand's `persist` middleware calls `AsyncStorage.setItem` synchronously inside `set()`, and
+  the RN AsyncStorage shim has no `setItem` outside a real app) — so the monthly-ceiling clamp and
+  the hook's call-site wiring are covered as source-text assertions instead, the same convention
+  already used for every other RN-coupled store/hook file in this suite. `test:store` 553 → 558
+  (the stale "recurring never pays" assertion rewritten, new coverage for the monthly paid/eligible
+  transition added). `tsc` clean, full suite 2186 → 2233/2233 (+5 in `test:store`, +42 new file).
+
+**Done — Sep-14-2026, GoalAchievedModal copy fix**
+- The reward row's third cell showed `×1.2 Aware Run` beside the RP/EPC numbers — user flagged
+  this is misleading: the Aware Run streak multiplier isn't something being AWARDED for the goal,
+  it's the same counting/tracking value that scales daily review earnings — it shouldn't get its
+  own line item as if it were a third payout. Removed the cell; the multiplier still scales the
+  RP/EPC numbers the modal DOES show (that logic is unchanged), it just no longer has its own
+  visible chip. CTA also renamed from the flat "Nice" to "Yay!" — a celebration modal deserves a
+  celebrating word, not an acknowledgement.
+- UI-only, `tsc` clean, full suite unaffected (2233/2233 — no test asserted on either the removed
+  cell or the old button text).
+
 **Open**
 - Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block.
 - The liquid-fill visual from the prototype was deliberately NOT used — `DailyBudgetLiquidWave`
   is a PAID shop widget (`liquid_wave`, 600 EPC), so reusing it free here would undercut the
   shop. Goal progress uses a plain track/fill instead; a distinct Goals visual is open.
 - Income-aware suggestions and goal feasibility warnings are still open.
-- Sub-category rules only bite where a child has its OWN flat category id — in the built-in
-  tree that's Groceries and the Transfers children; every USER-created sub-category has one.
-  The editor only offers the ones it can actually enforce.
+- **Superseded (Sep-13-26): every sub-category is now offered in the auto-fund picker**, matched
+  against the resolved CHILD id (`ruleMatchesTxn`/`childLabelToId`), not only ones with their own
+  flat legacy id — see the parser-sweep memory for the reasoning.
+- An "archived goals" view + undo mechanism, so a completed goal can eventually get an "Archive"
+  action without being a one-way disappear.
 - Not yet manually verified in a running app (no UI test infrastructure exists) — the usual
   caveat for a UI change this size.
 

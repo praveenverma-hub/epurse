@@ -21,6 +21,7 @@
 import React from 'react';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import MonthlyRecapCard from './MonthlyRecapCard';
 import RecapModalShell from './RecapModalShell';
 
@@ -29,7 +30,16 @@ const MonthlyRecapModal: React.FC = () => {
   const showMonthlyRecap         = useEPurseStore((s) => s.showMonthlyRecap);
   const clearPendingMonthlyRecap = useEPurseStore((s) => s.clearPendingMonthlyRecap);
 
-  const visible = !!pendingMonthlyRecap && showMonthlyRecap;
+  // Only when this is the top of the auto-modal queue — otherwise it would
+  // stack on whatever is already open (§8b). Held back, not dropped: the pending
+  // flag is persisted, so it shows on the next open.
+  // HOOK FIRST, unconditionally. Putting `useAutoModalQueue()` inside the `&&`
+  // chain below skipped the call whenever the left side was falsy, so the hook
+  // COUNT changed between renders and React threw "rendered fewer hooks than
+  // expected" — on the Dashboard, which re-renders constantly. Hooks can never
+  // sit behind a short-circuit.
+  const topAutoModal = useAutoModalQueue();
+  const visible = !!pendingMonthlyRecap && showMonthlyRecap && topAutoModal === 'monthlyRecap';
   const close = () => clearPendingMonthlyRecap();
 
   return (

@@ -201,6 +201,13 @@ export interface CategoryMaps {
   parentLabelToLegacy: Record<string, string>;
   childLabelToLegacy:  Record<string, string>;
   legacyToParentId:    Record<string, string>;
+  /**
+   * Child LABEL -> child `id`. A transaction stores `childCategory` as a label
+   * (that is what the picker writes), so this is what turns a stored row back
+   * into the tree node the user actually chose. Child labels are unique across
+   * the whole tree, which is what makes a flat map safe here.
+   */
+  childLabelToId:      Record<string, string>;
 }
 
 /** Build the two-tier ↔ legacy lookup maps for a given tree. */
@@ -209,6 +216,7 @@ export const buildLegacyMaps = (tree: ParentCat[]): CategoryMaps => {
   const parentLabelToLegacy: Record<string, string> = {};
   const childLabelToLegacy: Record<string, string>  = {};
   const legacyToParentId: Record<string, string>    = {};
+  const childLabelToId: Record<string, string>      = {};
 
   for (const p of tree) {
     parentLabelToId[p.label]     = p.id;
@@ -218,6 +226,7 @@ export const buildLegacyMaps = (tree: ParentCat[]): CategoryMaps => {
       const legacy = c.legacyId ?? p.legacyId;
       childLabelToLegacy[c.label] = legacy;
       legacyToParentId[legacy]    = p.id;
+      childLabelToId[c.label]     = c.id;
     }
   }
   // Aliases / flat categories that don't live in the tree.
@@ -234,7 +243,7 @@ export const buildLegacyMaps = (tree: ParentCat[]): CategoryMaps => {
     cc_bill:       'bills',
     other:         'other',
   });
-  return { parentLabelToId, parentLabelToLegacy, childLabelToLegacy, legacyToParentId };
+  return { parentLabelToId, parentLabelToLegacy, childLabelToLegacy, legacyToParentId, childLabelToId };
 };
 
 /** Default maps for the built-in tree (no custom categories). */
@@ -261,6 +270,17 @@ export const SPLIT_BLOCKED_CHILD_LABELS = new Set(['Lent', 'Borrowed']);
 // Money-movement parents (Transfers, Income) can't hold a budget; everything else
 // can. Derived from the tree so a new built-in spend parent is budgetable for free.
 export const NON_BUDGETABLE_PARENT_IDS = new Set(['transfers', 'income']);
+
+// ─── Money-IN parents ────────────────────────────────────────────────────────
+// Parents whose transactions are CREDITS. Anything that counts spend — Goals'
+// auto-funding is the current caller — can never match one of these, because
+// `countsForSpend` is debit-or-refund. Offering such a parent as a funding
+// source is offering a switch that is wired to nothing.
+//
+// NOT the same question as `NON_BUDGETABLE_PARENT_IDS`, which is "can this hold
+// a budget" and also covers Transfers. Transfers ARE debits, so a self-transfer
+// into savings genuinely can fund a goal — keep the two sets apart.
+export const CREDIT_ONLY_PARENT_IDS = new Set(['income']);
 export const BUDGETABLE_PARENT_IDS: string[] = PARENT_CATEGORIES
   .filter((p) => !NON_BUDGETABLE_PARENT_IDS.has(p.id))
   .map((p) => p.id);
@@ -285,6 +305,19 @@ export const twoTierToLegacyCatId = (
 };
 
 /** Resolve a transaction to its first-level (parent) category id — used for budget grouping. */
+/**
+ * txn -> the tree CHILD id the user (or the merchant dictionary) put it in, or
+ * '' when the row was never resolved past its parent.
+ *
+ * Mirrors `parentCatIdForTxn`: the store owns the maps, so callers that need to
+ * reason about a transaction's sub-category resolve it here rather than poking
+ * at the raw `childCategory` label.
+ */
+export const childCatIdForTxn = (
+  t: { childCategory?: string },
+  maps: CategoryMaps = DEFAULT_MAPS,
+): string => (t.childCategory ? maps.childLabelToId[t.childCategory] || '' : '');
+
 export const parentCatIdForTxn = (
   t: { parentCategory?: string; categoryId?: string },
   maps: CategoryMaps = DEFAULT_MAPS,

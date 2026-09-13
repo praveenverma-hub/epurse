@@ -176,10 +176,9 @@ check('every other rung DOES spill upward (that is what reads as lifted)',
 
 // A GENERIC scan for this is not possible and shouldn't be faked: `top: 0` is
 // relative to whatever parent a view sits in, so static analysis cannot tell
-// screen chrome from a badge pinned inside a chart (ConcentricSpendingRings)
-// or a card at the top of a stacked deck (DailyQueueSection) — both of which a
-// `position:'absolute' + top:0` heuristic flags, and for both of which an
-// upward spill is perfectly correct. So the rule is enforced where it bit:
+// screen chrome from a badge pinned inside a chart — `ConcentricSpendingRings`'s
+// `tipBadge` sits at top:0 of the RINGS, not of the screen, and its upward spill
+// is perfectly correct. So the rule is enforced where it bit:
 {
   const txn = read('screens/TransactionsScreen.js');
   const block = (k) => (txn.match(new RegExp(`\\n  ${k}: \\{([\\s\\S]*?)\\n  \\},`)) || [])[1] || '';

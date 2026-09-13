@@ -7,10 +7,15 @@
 // no finish line to cross — and neither does a monthly allocation being met,
 // which happens every month and would turn the modal into noise.
 //
-// It carries a real reward (RP + EPC on the Aware Run multiplier, see
-// `awardGoalBonus`). The once-per-goal guard is `bonusAwardedAt` on the goal
-// itself, written by the caller AFTER the bonus is credited — so a crash
-// between the two costs the user nothing and re-shows the modal.
+// It carries a real reward — RP + EPC, scaled internally by the Aware Run
+// streak multiplier (see `awardGoalBonus`) but never shown as its OWN line
+// here (Sep-14-26: "that's not we are awarding, it's a counting value for the
+// user's daily review basis"). The multiplier moves the RP/EPC numbers this
+// modal DOES show; it just isn't a distinct thing being handed out for the
+// goal, so it doesn't get its own cell. The once-per-goal guard is
+// `bonusAwardedAt` on the goal itself, written by the caller AFTER the bonus
+// is credited — so a crash between the two costs the user nothing and
+// re-shows the modal.
 // =============================================================================
 
 import React from 'react';
@@ -47,6 +52,10 @@ export interface GoalAchievement {
   color: string;
   target: number;
   saved: number;
+  /** 'lifetime' = the target is done for good. 'monthly' = this month's commitment is met. */
+  kind?: 'lifetime' | 'monthly';
+  /** The month a recurring goal was celebrated FOR; null for a one-time goal. */
+  monthKey?: string | null;
 }
 
 interface Props {
@@ -62,9 +71,37 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
   if (!visible || !achievement) return null;
 
   const accent = achievement.color || theme.primary;
+  // A recurring goal has no finish line — it met THIS MONTH's commitment, and
+  // says so, because "GOAL COMPLETE" on something that restarts in three weeks
+  // reads as wrong the moment the user looks at the goal again.
+  const monthly = achievement.kind === 'monthly';
   // The medallion is a solid fill of the goal's colour, so its ink is measured
   // on that colour and not on the card behind it.
   const medallionInk = readableOn(accent, '#FFFFFF', 3);
+
+  // `reward` is now THREE states, not two (Sep-14-26 reward rework):
+  //   • a real amount        — paid this time, show the numbers.
+  //   • present but all-zero — a payment was ATTEMPTED but the monthly reward
+  //     ceiling had nothing left (`useRewardStore.awardGoalBonus` clamps to
+  //     zero rather than refusing outright, so this can legitimately happen
+  //     when several goals complete in the same busy month) — never render
+  //     "+0 RP", say so instead.
+  //   • null                 — nothing was attempted THIS time because it was
+  //     already paid earlier (a re-show of an unseen congratulation) — still
+  //     true to say "credited", just not just now.
+  const rewardIsZero  = !!reward && reward.rpAwarded === 0 && reward.epcAwarded === 0;
+  const showRewardRow = !!reward && !rewardIsZero;
+  const noteText = monthly
+    ? (rewardIsZero
+        ? "This month's goal-reward budget is already spent — nothing paid this time, but it starts fresh again next month."
+        : reward
+          ? 'It starts again next month — anything more you put in this month still counts.'
+          : 'Already credited for this month — it starts fresh again next month.')
+    : (rewardIsZero
+        ? "This month's goal-reward budget was already spent by the time this one landed — nothing paid this time. The goal stays on your list."
+        : reward
+          ? 'Credited to your balance. The goal stays on your list — keep it, retarget it, or remove it whenever you like.'
+          : 'Already credited to your balance earlier. The goal stays on your list — keep it, retarget it, or remove it whenever you like.');
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -86,40 +123,36 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
             </View>
           </View>
 
-          <Text style={[styles.eyebrow, { color: theme.textMuted }]}>GOAL COMPLETE</Text>
+          <Text style={[styles.eyebrow, { color: theme.textMuted }]}>
+            {monthly ? 'THIS MONTH DONE' : 'GOAL COMPLETE'}
+          </Text>
           <Text style={[styles.title, { color: theme.textPrimary }]} numberOfLines={2}>
             {achievement.name}
           </Text>
           <Text style={[styles.sub, { color: theme.textSecondary }]}>
-            You set aside {formatCurrency(achievement.saved)} — your {formatCurrency(achievement.target)}{' '}
-            target is done.
+            {monthly
+              ? `You set aside ${formatCurrency(achievement.saved)} — this month's ${formatCurrency(achievement.target)} is covered.`
+              : `You set aside ${formatCurrency(achievement.saved)} — your ${formatCurrency(achievement.target)} target is done.`}
           </Text>
 
-          {reward ? (
+          {showRewardRow ? (
             <View style={[styles.rewardRow, { borderColor: theme.divider, backgroundColor: theme.cardAlt }]}>
               <View style={styles.rewardCell}>
-                <Text style={[styles.rewardV, { color: theme.primary }]}>+{reward.rpAwarded}</Text>
+                <Text style={[styles.rewardV, { color: theme.primary }]}>+{reward!.rpAwarded}</Text>
                 <Text style={[styles.rewardK, { color: theme.textMuted }]}>RP</Text>
               </View>
               <View style={[styles.rewardCell, { borderLeftColor: theme.divider, borderLeftWidth: StyleSheet.hairlineWidth }]}>
-                <Text style={[styles.rewardV, { color: theme.success }]}>+{reward.epcAwarded}</Text>
+                <Text style={[styles.rewardV, { color: theme.success }]}>+{reward!.epcAwarded}</Text>
                 <Text style={[styles.rewardK, { color: theme.textMuted }]}>EPC</Text>
               </View>
-              {reward.multiplier > 1 ? (
-                <View style={[styles.rewardCell, { borderLeftColor: theme.divider, borderLeftWidth: StyleSheet.hairlineWidth }]}>
-                  <Text style={[styles.rewardV, { color: theme.textPrimary }]}>×{reward.multiplier}</Text>
-                  <Text style={[styles.rewardK, { color: theme.textMuted }]}>Aware Run</Text>
-                </View>
-              ) : null}
             </View>
           ) : null}
 
           <Text style={[styles.note, { color: theme.textMuted }]}>
-            Credited to your balance. The goal stays on your list — keep it, retarget it, or
-            remove it whenever you like.
+            {noteText}
           </Text>
 
-          <GradientButton title="Nice" onPress={onClose} style={styles.cta} />
+          <GradientButton title="Yay!" onPress={onClose} style={styles.cta} />
         </View>
         </View>
 

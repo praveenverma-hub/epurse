@@ -83,6 +83,7 @@ import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { canSplitTransaction, countsForSpend, debitDisplayAmount } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
+import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
@@ -184,6 +185,9 @@ const DashboardScreen = ({ navigation }) => {
   const checkIn            = useRewardStore((s) => s.checkIn);
   const claimSavingsBonus  = useRewardStore((s) => s.claimSavingsBonus);
   const pendingSavingsReward = useRewardStore(selectPendingSavings);
+  // One auto-opening modal at a time, in a fixed order — see the hook. The claim
+  // sheet is LAST: nothing about it expires, so it can always wait.
+  const topAutoModal = useAutoModalQueue();
   const vaultTier        = vaultTierForStreak(awareStreak);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const budget              = useEPurseStore((s) => s.budget);
@@ -1216,7 +1220,7 @@ const DashboardScreen = ({ navigation }) => {
           bonus is detected. User must consciously claim; crediting is deferred
           to claimSavingsBonus() so the balance only changes on explicit tap. */}
       <EpcClaimBottomSheet
-        visible={!!pendingSavingsReward}
+        visible={!!pendingSavingsReward && topAutoModal === 'epcClaim'}
         epcAmount={pendingSavingsReward?.epcAmount ?? 0}
         rpAmount={pendingSavingsReward?.rpAmount ?? 0}
         onClaim={claimSavingsBonus}

@@ -24,7 +24,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase, withAlpha, mix, readableOn } from '../constants/theme';
 import { formatCurrency, formatCompact, monthKey } from '../utils/format';
-import { monthsToTarget, goalAutoRule } from '../utils/goalPlan';
+import { monthsToTarget, projectedMonthLabel, goalAutoRule } from '../utils/goalPlan';
 import { GOAL_KIND_META, GOAL_DURATION_META, GOAL_DURATIONS } from '../constants/goals';
 import { DEFAULT_CATEGORIES } from '../constants/categories';
 import PlainScreenHeader from '../components/PlainScreenHeader';
@@ -33,6 +33,8 @@ import EditIcon from '../components/EditIcon';
 import ProgressRing from '../components/ProgressRing';
 import EmptyState from '../components/EmptyState';
 import GoalFundModal from '../components/GoalFundModal';
+import GoalAchievedModal from '../components/GoalAchievedModal';
+import { useGoalAchievement } from '../hooks/useGoalAchievement';
 import TransactionItemRaw from '../components/TransactionItem';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import FAB from '../components/FAB';
@@ -74,6 +76,11 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const [fundGoal, setFundGoal] = useState<any | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
+  // Held until every other modal on this screen is gone — two native <Modal>s
+  // changing over in one commit is the §8b stack, and the arriving one loses.
+  const { achievement, reward, clear: clearAchievement } = useGoalAchievement({
+    blocked: !!fundGoal || !!detailTxn,
+  });
 
   const goal = useMemo(() => goals.find((g: any) => g.id === goalId), [goals, goalId]);
 
@@ -95,11 +102,15 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       ? Math.max(0, Math.min(100, Math.round((funded / planned) * 100)))
       : 0;
 
+  // A bare month COUNT ("6 months to go") makes the reader do the arithmetic
+  // themselves to find out what month that actually is — the same gap
+  // `GoalCard`'s ribbon had ("does not provide much clarity", Sep-14-26).
+  // This screen has the room to say the calendar month outright.
   const heroCaption = achieved
     ? 'Goal complete'
     : isOneTime
       ? (monthsLeft && monthsLeft > 0
-          ? `${monthsLeft} month${monthsLeft === 1 ? '' : 's'} to go at this rate`
+          ? `Done by ${projectedMonthLabel(monthsLeft)} at this rate`
           : planned > 0 ? 'No pace yet — nothing saved this month' : 'No monthly amount set')
       : (row?.status ? PACE_LABEL[row.status] : 'Nothing planned this month');
 
@@ -343,6 +354,18 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
       <GoalFundModal goal={fundGoal} onClose={() => setFundGoal(null)} />
       <TxnDetailSheet txn={detailTxn} onClose={() => setDetailTxn(null)} />
+
+      {/* The congratulation belongs HERE as much as on the list: the "Add money"
+          FAB above is what usually tips a goal over its target, and claiming is
+          one-shot, so a celebration shown only on GoalsScreen was spent against
+          a screen the user wasn't looking at. The hook is focus-gated, so the
+          two screens can't both claim the same goal. */}
+      <GoalAchievedModal
+        visible={!!achievement}
+        achievement={achievement}
+        reward={reward}
+        onClose={clearAchievement}
+      />
     </View>
   );
 };

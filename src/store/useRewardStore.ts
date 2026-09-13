@@ -32,6 +32,7 @@ import {
   type ShopItemConfig,
   type WidgetId,
   calendarDaysBetween,
+  computeGoalReward,
   levelFromRP,
   multiplierForStreak,
   toCalendarDate,
@@ -116,6 +117,18 @@ interface RewardState {
   inventory:            InventoryItem[];
   isFirstLaunch:        boolean;
 
+  /**
+   * The calendar month (`YYYY-MM`, local time) `goalRpEarnedThisMonth` /
+   * `goalEpcEarnedThisMonth` are counting FOR — the anti-grind backstop on
+   * goal completions (Sep-14-26). Mirrors `lastCapResetDate`'s shape but at a
+   * monthly grain: once this stops matching the current month, both counters
+   * are treated as zero again by `awardGoalBonus` (reset lazily, not by a
+   * separate rollover action — nothing else depends on the boundary).
+   */
+  goalRewardMonthKey:     string | null;
+  goalRpEarnedThisMonth:  number;
+  goalEpcEarnedThisMonth: number;
+
   // ── Transient (NOT persisted) ─────────────────────────────────────────
   lastCheckInResult:  CheckInResult | null;
 
@@ -136,8 +149,16 @@ interface RewardState {
   /** Credits pendingSavingsReward balances and clears the pending state. */
   claimSavingsBonus:        () => void;
   recordReview:             () => ReviewResult;
-  /** Credit the one-off bonus for reaching a goal's lifetime target. */
-  awardGoalBonus:           (goalName: string) => GoalBonusResult;
+  /**
+   * Credit the bonus for a goal completion — a one-time goal's lifetime
+   * target, or a recurring goal's committed amount for the current month.
+   * `amount` is whatever the caller measured that against (the target, or
+   * this month's planned figure) — see `computeGoalReward` in
+   * `rewardConfig.ts`, the single place the actual payout math lives.
+   */
+  awardGoalBonus:           (
+    goalId: string, goalName: string, durationKind: 'oneTime' | 'recurring', amount: number,
+  ) => GoalBonusResult;
   purchaseItem:             (id: WidgetId) => PurchaseResult;
   toggleItemActive:         (id: WidgetId) => void;
   setFirstLaunchDone:       () => void;
@@ -177,6 +198,9 @@ const initialState = (): Omit<
   inventory:            buildDefaultInventory(),
   isFirstLaunch:        true,
   lastCheckInResult:  null,
+  goalRewardMonthKey:     null,
+  goalRpEarnedThisMonth:  0,
+  goalEpcEarnedThisMonth: 0,
 });
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -424,31 +448,68 @@ export const useRewardStore = create<RewardState>()(
       },
 
       // ─── Goal completion bonus ───────────────────────────────────────
-      // Fired by GoalsScreen when a lifetime target is crossed. The store has
-      // no idea WHICH goal was completed and deliberately doesn't track it —
-      // the once-per-goal guard is `bonusAwardedAt` on the goal itself, in the
-      // finance store, so the two stores never need to agree on a goal id.
-      awardGoalBonus: (goalName) => {
-        const state      = get();
+      // Fired by both goal durations now (Sep-14-26 rework): a one-time goal
+      // crossing its lifetime target, or a recurring goal meeting this
+      // month's committed amount. The store still doesn't TRACK which goal
+      // was completed beyond this call (the once-per-goal / once-per-month
+      // guard is `bonusAwardedAt` / `bonusAwardedMonth` on the goal itself,
+      // in the finance store) — `goalId` is only threaded through for a
+      // stable dedupeKey (keying on `goalName` alone let two identically
+      // named goals collide, since `add()` REPLACES an existing dedupeKey
+      // rather than keeping both — the first goal's bell notification would
+      // be silently overwritten by the second's, even though both were
+      // correctly paid).
+      //
+      // `amount` decides the BAND (`computeGoalReward`, the single formula
+      // both durations share) — a lifetime target for `oneTime`, this
+      // month's planned figure for `recurring`. What actually gets paid is
+      // then clamped against `GOAL_REWARD_MONTHLY_CAP_RP`/`_EPC`, THE
+      // backstop against "too much too early": no matter how large a single
+      // goal is, or how many land in the same calendar month, total
+      // goal-derived RP/EPC that month cannot exceed this ceiling. A
+      // clamped-to-zero result is still returned, never thrown away — the
+      // caller decides how to present "nothing left to pay this month"
+      // versus a genuine amount.
+      awardGoalBonus: (goalId, goalName, durationKind, amount) => {
+        const state = get();
+        const { rpAwarded: quotedRp, epcAwarded: quotedEpc, band } = computeGoalReward({
+          durationKind, amount, streakDay: state.awareStreak,
+        });
         const multiplier = multiplierForStreak(state.awareStreak);
-        const rpAwarded  = Math.round(REWARD_CONFIG.GOAL_ACHIEVED_RP_BASE * multiplier);
-        const epcAwarded = Math.max(
-          1,
-          Math.round(REWARD_CONFIG.GOAL_ACHIEVED_EPC_BASE * multiplier),
-        );
+
+        const mk = toCalendarDate().slice(0, 7); // YYYY-MM, local time
+        const sameMonth = state.goalRewardMonthKey === mk;
+        const rpUsed  = sameMonth ? state.goalRpEarnedThisMonth  : 0;
+        const epcUsed = sameMonth ? state.goalEpcEarnedThisMonth : 0;
+        const rpRoom  = Math.max(0, REWARD_CONFIG.GOAL_REWARD_MONTHLY_CAP_RP  - rpUsed);
+        const epcRoom = Math.max(0, REWARD_CONFIG.GOAL_REWARD_MONTHLY_CAP_EPC - epcUsed);
+        const rpAwarded  = Math.min(quotedRp, rpRoom);
+        const epcAwarded = Math.min(quotedEpc, epcRoom);
 
         const newRP   = state.totalRP + rpAwarded;
         const prevLvl = levelFromRP(state.totalRP);
         const nextLvl = levelFromRP(newRP);
-        set({ totalRP: newRP, epcBalance: state.epcBalance + epcAwarded });
-
-        useNotificationStore.getState().add({
-          kind:      'goal_achieved',
-          title:     `Goal reached — ${goalName}`,
-          body:      `+${rpAwarded} RP and +${epcAwarded} EPC credited for finishing it.`,
-          dedupeKey: `goal_achieved:${goalName}:${toCalendarDate()}`,
-          meta:      { rp: rpAwarded, epc: epcAwarded, goalName },
+        set({
+          totalRP:                newRP,
+          epcBalance:             state.epcBalance + epcAwarded,
+          goalRewardMonthKey:     mk,
+          goalRpEarnedThisMonth:  rpUsed + rpAwarded,
+          goalEpcEarnedThisMonth: epcUsed + epcAwarded,
         });
+
+        // Nothing to announce when the monthly ceiling left nothing to pay —
+        // "+0 RP and +0 EPC credited" isn't worth a bell entry, and the
+        // modal (GoalAchievedModal) has its own copy for that case rather
+        // than relying on the feed to explain it.
+        if (rpAwarded > 0 || epcAwarded > 0) {
+          useNotificationStore.getState().add({
+            kind:      'goal_achieved',
+            title:     `Goal reached — ${goalName}`,
+            body:      `+${rpAwarded} RP and +${epcAwarded} EPC credited for finishing it.`,
+            dedupeKey: `goal_achieved:${goalId}`,
+            meta:      { rp: rpAwarded, epc: epcAwarded, goalName, band },
+          });
+        }
 
         if (nextLvl > prevLvl) {
           useNotificationStore.getState().add({
@@ -546,6 +607,9 @@ export const useRewardStore = create<RewardState>()(
         lastCapResetDate:     state.lastCapResetDate,
         inventory:            state.inventory,
         isFirstLaunch:        state.isFirstLaunch,
+        goalRewardMonthKey:     state.goalRewardMonthKey,
+        goalRpEarnedThisMonth:  state.goalRpEarnedThisMonth,
+        goalEpcEarnedThisMonth: state.goalEpcEarnedThisMonth,
       }) as any,
     },
   ),

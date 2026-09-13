@@ -692,12 +692,51 @@ const isLikelyNonFinancialDltSender = (sender) => {
   return NON_FINANCIAL_DLT_KEYS.some((k) => entity.includes(k));
 };
 
+/**
+ * Text -> flat legacy category id.
+ *
+ * Base rule is unchanged and deliberate: the FIRST category (in
+ * `CATEGORY_KEYWORDS` order) with a keyword anywhere in the text wins. That
+ * ordering is load-bearing — "Your FASTag ... has been recharged" matches both
+ * `fastag` (travel) and `recharge` (bills), and travel is listed first because a
+ * toll top-up is travel, not a utility bill.
+ *
+ * The one thing added here: a matched keyword that is a proper SUBSTRING of
+ * another matched keyword is discarded first, so the more specific one decides.
+ * Without that step, a keyword could be silently swallowed by a shorter one
+ * sitting in an earlier category, and money went to the wrong place:
+ *
+ *   AJIO             -> `bills`, because 'jio' (the telecom) is inside 'ajio'.
+ *                       JIOCINEMA and JIOSAAVN went the same way. Every one of
+ *                       these merchants is ALREADY listed in its correct
+ *                       category — the collision defeated the intent rather
+ *                       than filling a gap.
+ *   AMAZON PRIME     -> `shopping`, because 'amazon' swallowed 'amazon prime'.
+ *   "paid back to X" -> `lent_settled` (money IN, non-spend), because that list
+ *                       carries 'paid back' while `borrow_repaid` carries the
+ *                       more specific 'paid back to'. That inverted the
+ *                       DIRECTION of a debt: repaying someone was booked as
+ *                       someone repaying you.
+ *
+ * Note this is NOT "longest keyword wins" — that was tried and is wrong, because
+ * keyword LENGTH is a proxy for specificity only among keywords that actually
+ * overlap. `recharge` (8) is longer than `fastag` (6) and much less specific, and
+ * a length rule sent every FASTag top-up to bills. Containment is the real
+ * relation: it fixes precisely the keywords that were shadowing each other and
+ * leaves independent matches to the category order, as before.
+ */
 export const categorise = (text) => {
   const lower = ` ${(text || '').toLowerCase()} `;
+  const hits = [];
   for (const [catId, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some((k) => lower.includes(k))) return catId;
+    for (const k of keywords) if (lower.includes(k)) hits.push([catId, k]);
   }
-  return null;
+  if (hits.length === 0) return null;
+  // Drop any keyword that another matched keyword contains outright.
+  const specific = hits.filter(
+    ([, k]) => !hits.some(([, other]) => other.length > k.length && other.includes(k)),
+  );
+  return (specific[0] ?? hits[0])[0];
 };
 
 // =============================================================================

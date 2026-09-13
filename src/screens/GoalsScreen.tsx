@@ -38,15 +38,25 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
 } from 'react-native';
 import type { TextStyle } from 'react-native';
+// `ScrollView` comes from gesture-handler, NOT plain react-native (Sep-14-26
+// follow-up to the `failOffsetY` fix below) — `AllocationBar`'s divider is a
+// `Gesture.Pan()`, and a plain RN `ScrollView` runs on React Native's OLD
+// responder system, a different arena entirely from gesture-handler's. Its
+// own `activeOffsetX`/`failOffsetY` thresholds only resolve ambiguity against
+// gestures IN THAT SAME ARENA — against a foreign responder they're a
+// best-effort compatibility shim, not a guarantee, which is exactly why the
+// divider could still be nudged by an ordinary scroll after that fix. This
+// `ScrollView` is API-identical to react-native's; swapping the import is the
+// whole change.
+import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { useRewardStore } from '../store/useRewardStore';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase, shadows, withAlpha } from '../constants/theme';
 import { formatCurrency, monthKey } from '../utils/format';
@@ -67,7 +77,8 @@ import FAB from '../components/FAB';
 import InfoIcon from '../components/InfoIcon';
 import EditIcon from '../components/EditIcon';
 import InfoSheet from '../components/InfoSheet';
-import GoalAchievedModal, { type GoalAchievement } from '../components/GoalAchievedModal';
+import GoalAchievedModal from '../components/GoalAchievedModal';
+import { useGoalAchievement } from '../hooks/useGoalAchievement';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import { hapticLight } from '../utils/haptics';
@@ -137,10 +148,7 @@ const GoalsScreen = ({ navigation }: any) => {
   const rolloverGoalPlanIfNeeded = useEPurseStore((s: any) => s.rolloverGoalPlanIfNeeded);
   const getGoalPlanUsage = useEPurseStore((s: any) => s.getGoalPlanUsage);
   const getGoalLifetimeSaved = useEPurseStore((s: any) => s.getGoalLifetimeSaved);
-  const getNewlyAchievedGoals = useEPurseStore((s: any) => s.getNewlyAchievedGoals);
-  const markGoalAchieved = useEPurseStore((s: any) => s.markGoalAchieved);
-
-  const awardGoalBonus = useRewardStore((s) => s.awardGoalBonus);
+  const resumeGoal = useEPurseStore((s: any) => s.resumeGoal);
 
   const { submit, submitting } = useSubmitGuard();
   const toast = useToast();
@@ -169,12 +177,10 @@ const GoalsScreen = ({ navigation }: any) => {
   // picker, category inference, the actual `addTransaction` write) lives in
   // `GoalFundModal` — shared with `GoalDetailScreen`, not reinvented here.
   const [fundGoal, setFundGoal] = useState<any | null>(null);
-  const [achievement, setAchievement] = useState<GoalAchievement | null>(null);
   const openForm = useCallback(
     (id?: string) => { hapticLight(); navigation.navigate('GoalForm', id ? { goalId: id } : undefined); },
     [navigation],
   );
-  const [reward, setReward] = useState<{ rpAwarded: number; epcAwarded: number; multiplier: number } | null>(null);
 
   const seed = useCallback(() => {
     const src = planIsCurrent ? goalPlan : lastGoalPlan;
@@ -187,7 +193,39 @@ const GoalsScreen = ({ navigation }: any) => {
   const salary = parseAmount(salaryText);
   const budgetCap = Number(budget?.totalCap) || 0;
 
-  const activeGoals = useMemo(() => goals.filter((g: any) => !g.archivedAt), [goals]);
+  // Non-archived AND not discontinued — the split bar, its steppers, and the
+  // FLOOR-hit toast all still need a COMPLETED (one-time, achieved) goal in
+  // scope, because it keeps fully participating in the monthly plan (that's
+  // the entire point of "Add Extra" via the split bar, built earlier this
+  // session). A DISCONTINUED goal is excluded here at the source instead —
+  // it isn't being planned for at all any more (`discontinueGoal` already
+  // cleared its allocation and stopped its auto-match), so it has no
+  // business in the split bar, its legend rows, or the floor-hit toast.
+  const activeGoals = useMemo(
+    () => goals.filter((g: any) => !g.archivedAt && !g.discontinuedAt),
+    [goals],
+  );
+  // "where do we show completed one-time goals... keep them in a new
+  // section?" then "what if a recurring goal user wants to discontinue?"
+  // (Sep-14-26) — split into two grids: this one is for goals still being
+  // worked toward, `inactiveGoals` gets its own section at the very bottom.
+  // Fixes a real capacity bug this surfaced along the way: `MAX_ACTIVE_GOALS`
+  // was being checked against every non-archived goal, which counted a
+  // finished (or a discontinued) goal forever — complete or stop a few over
+  // the years and you'd be permanently blocked from ever adding another,
+  // even though several of your count were just sitting there inert.
+  const gridGoals = useMemo(() => activeGoals.filter((g: any) => !g.achievedAt), [activeGoals]);
+  // Built from `goals` directly, not `activeGoals` — a discontinued goal was
+  // already filtered OUT of `activeGoals` above, so it has to be found here
+  // from the full list instead. "Inactive" covers both reasons a goal isn't
+  // part of active planning any more: it's DONE (one-time, `achievedAt`) or
+  // it was STOPPED (recurring, `discontinuedAt`) — one section, one mental
+  // model, same as the confirmed design ("join the bottom section,
+  // relabeled... a Resume action brings it back to the top grid").
+  const inactiveGoals = useMemo(
+    () => goals.filter((g: any) => !g.archivedAt && (g.achievedAt || g.discontinuedAt)),
+    [goals],
+  );
 
   // A month with no confirmed plan has nothing to VIEW, so it opens straight
   // into editing rather than showing an empty read-only card with a button.
@@ -199,6 +237,13 @@ const GoalsScreen = ({ navigation }: any) => {
     if (!planIsCurrent && activeGoals.length > 0) setEditing(true);
   }, [planIsCurrent, activeGoals.length]);
 
+  const usage = planIsCurrent ? getGoalPlanUsage() : null;
+  const usageByGoal = useMemo(() => {
+    const map = new Map<string, any>();
+    (usage?.perGoal || []).forEach((r: any) => map.set(r.goalId, r));
+    return map;
+  }, [usage]);
+
   /** Spending rides in the same bar so savings and spending read as one split.
    *  EVERY goal can carry a monthly figure now (Sep-12-26: a one-time goal
    *  funded steadily toward its target uses the same bar a recurring goal
@@ -209,68 +254,129 @@ const GoalsScreen = ({ navigation }: any) => {
       rows.push({ id: SPEND_ID, label: 'Spending', emoji: '🔒', color: theme.textMuted, value: Math.min(budgetCap, salary), locked: true });
     }
     activeGoals.forEach((g: any) => {
-      rows.push({ id: g.id, label: g.name, emoji: g.emoji, color: g.color, value: Number(alloc[g.id]) || 0 });
+      const value = Number(alloc[g.id]) || 0;
+      // The floor for THIS drag — enforced LIVE inside the gesture itself
+      // (see `AllocationBar`'s `minValue`), not corrected after the fact.
+      // ONE rule for every goal, achieved or not: can't read below money
+      // actually funded this month. A completed goal briefly had its own
+      // stricter version (a ratchet on the PLAN figure itself — raise-only,
+      // never down) — reverted (Sep-14-26): `rolloverGoalPlanIfNeeded`
+      // carries a goal's figure forward verbatim, so that ratchet's floor
+      // became effectively PERMANENT across every future month, not just the
+      // one it was raised in ("what we can have is one time confirmation...
+      // or any better?" — the better answer was removing the trap, not
+      // adding a prompt to manage it). Funded-this-month resets to 0 every
+      // new month on its own, so the permanence problem disappears with no
+      // new UI at all. There was never an integrity reason for the stricter
+      // version either — `achievedAt` is fully decoupled from this number
+      // already (editing it can't un-achieve or fake-achieve a goal), so an
+      // achieved goal's UNFUNDED plan figure has no more reason to be locked
+      // than an open goal's does.
+      const minValue = usageByGoal.get(g.id)?.funded ?? 0;
+      rows.push({
+        id: g.id, label: g.name, emoji: g.emoji, color: g.color, value, minValue,
+      });
     });
     return rows;
-  }, [activeGoals, alloc, budgetCap, salary, theme.textMuted]);
+  }, [activeGoals, alloc, budgetCap, salary, theme.textMuted, usageByGoal]);
 
   const goalTotal = allocatedTotal(alloc);
   const committed = goalTotal + (budgetCap > 0 ? Math.min(budgetCap, salary) : 0);
   const free = Math.max(0, salary - committed);
   const over = committed > salary;
 
-  const usage = planIsCurrent ? getGoalPlanUsage() : null;
-  const usageByGoal = useMemo(() => {
-    const map = new Map<string, any>();
-    (usage?.perGoal || []).forEach((r: any) => map.set(r.goalId, r));
-    return map;
-  }, [usage]);
-
   // ── the congratulation ───────────────────────────────────────────────────
-  // Ordered so a crash can only ever UNDER-award: credit the bonus, then mark
-  // the goal. Marking first would silently swallow the reward.
-  useEffect(() => {
-    if (achievement) return;                 // one at a time
-    const list = getNewlyAchievedGoals();
-    if (list.length === 0) return;
-    const next = list[0];
-    const paid = awardGoalBonus(next.name);
-    markGoalAchieved(next.goalId, { bonusAwarded: true });
-    setReward(paid);
-    setAchievement(next);
-  }, [goals, transactions, goalContributions, achievement, getNewlyAchievedGoals, awardGoalBonus, markGoalAchieved]);
+  // Shared + FOCUS-GATED in `useGoalAchievement` — GoalDetailScreen shows it too,
+  // and claiming is destructive (see the hook's own comment).
+  // Held until every other modal on this screen is gone — two native <Modal>s
+  // changing over in one commit is the §8b stack, and the arriving one loses.
+  const { achievement, reward, clear: clearAchievement } = useGoalAchievement({
+    blocked: !!fundGoal || infoOpen,
+  });
 
   // ── editing ──────────────────────────────────────────────────────────────
   // The steppers' path — mirrors the same clamp `updateGoalAllocation` runs in
   // the store (room = salary minus the locked spending cap minus every OTHER
   // goal's share), but against the local DRAFT, not the live plan, since a
   // stepper here doesn't commit until Save.
+  //
+  // ONE floor for every goal, achieved or not: what's actually been funded
+  // this month. A completed goal briefly floored at its OWN current PLAN
+  // value instead (a ratchet: raise-only, never down) — reverted (Sep-14-26):
+  // `rolloverGoalPlanIfNeeded` carries that figure forward verbatim, so the
+  // ratchet's floor became PERMANENT across every future month, not just the
+  // one it was raised in, with no way back short of deleting the goal.
+  // Funded-this-month resets to 0 every new month on its own, so the
+  // permanence problem disappears with no new confirmation UI needed at all.
+  // Same formula `AllocationBar`'s `minValue` enforces LIVE inside the drag
+  // itself (segment-building `useMemo` above); this is the belt to that
+  // suspenders for the paths that skip the gesture entirely (the steppers,
+  // via `setOne`).
+  const floorFor = useCallback((goalId: string) => (
+    usageByGoal.get(goalId)?.funded ?? 0
+  ), [usageByGoal]);
+
   const setOne = useCallback((goalId: string, value: number) => {
     setAlloc((prev) => {
       const room = Math.max(0, salary - (budgetCap > 0 ? Math.min(budgetCap, salary) : 0));
-      const next = allocationWithinSalary(room, prev, goalId, value);
-      if (next === (prev[goalId] || 0)) return prev;
+      const currentValue = prev[goalId] || 0;
+      let next = allocationWithinSalary(room, prev, goalId, value);
+      next = Math.max(next, floorFor(goalId));
+      if (next === currentValue) return prev;
       const out = { ...prev };
       if (next > 0) out[goalId] = next; else delete out[goalId];
       return out;
     });
-  }, [salary, budgetCap]);
+  }, [salary, budgetCap, floorFor]);
 
   const onChangePair = useCallback(
     (leftId: string, leftValue: number, rightId: string, rightValue: number) => {
       setAlloc((prev) => {
+        // The drag itself now floors LIVE (see `minValue` above and the
+        // worklet's own comment) — this is a safety net for whatever reaches
+        // here from a settled pair, not the sole enforcement. It USED TO be
+        // the only enforcement, which is exactly why it was flaky
+        // ("sometimes it comes back sometimes it's able to decrease"):
+        // nothing stopped the live drag from settling below the floor before
+        // this ever ran, so the outcome depended on where the finger let go
+        // relative to the pool's own snap points.
+        const pool = leftValue + rightValue;
+        const bound = (id: string, incoming: number) => {
+          if (id === FREE_ID || id === SPEND_ID) return incoming;
+          return Math.max(incoming, floorFor(id));
+        };
+        let L = bound(leftId, leftValue);
+        let R = bound(rightId, rightValue);
+        if (L !== leftValue) R = Math.max(0, pool - L);
+        else if (R !== rightValue) L = Math.max(0, pool - R);
         const out = { ...prev };
         const put = (id: string, v: number) => {
           if (id === FREE_ID || id === SPEND_ID) return;
           if (v > 0) out[id] = v; else delete out[id];
         };
-        put(leftId, leftValue);
-        put(rightId, rightValue);
+        put(leftId, L);
+        put(rightId, R);
         return out;
       });
     },
-    [],
+    [floorFor],
   );
+
+  // "can we show a toast with message when user tries to decrese value by
+  // scrolling?" — `AllocationBar` fires this AT MOST ONCE per drag, the
+  // moment the finger asks to go below the floor (see `onFloorHit`'s own
+  // comment there), so this only ever shows once per gesture, not once per
+  // frame spent pinned at the floor.
+  const onFloorHit = useCallback((goalId: string) => {
+    const g = activeGoals.find((x: any) => x.id === goalId);
+    if (!g) return;
+    hapticLight();
+    const funded = usageByGoal.get(goalId)?.funded ?? 0;
+    toast.warning(
+      "Can't go below what's already in",
+      `${formatCurrency(funded)} has already gone into ${g.name} this month.`,
+    );
+  }, [activeGoals, usageByGoal, toast]);
 
   const startEditing = () => { hapticLight(); setEditing(true); };
 
@@ -369,7 +475,10 @@ const GoalsScreen = ({ navigation }: any) => {
         >
 
           {/* ── nothing yet ──────────────────────────────────────────────── */}
-          {activeGoals.length === 0 ? (
+          {/* True first-run only — a user with nothing but an inactive
+              (completed or discontinued) goal still has something to see,
+              just not here in the launchpad. */}
+          {activeGoals.length === 0 && inactiveGoals.length === 0 ? (
             <>
               <View style={[styles.card, { backgroundColor: theme.card }]}>
                 <EmptyState
@@ -434,55 +543,61 @@ const GoalsScreen = ({ navigation }: any) => {
                   icon="flag-outline"
                   title="Your Goals"
                   subtitle={
-                    activeGoals.length >= MAX_ACTIVE_GOALS
+                    gridGoals.length >= MAX_ACTIVE_GOALS
                       ? `That's the most goals you can run at once (${MAX_ACTIVE_GOALS}).`
-                      : usage
-                        ? `${formatCurrency(usage.funded)} saved of ${formatCurrency(usage.planned)} planned this month`
-                        : 'Set a plan below to start tracking them'
+                      : gridGoals.length === 0
+                        ? (inactiveGoals.length > 0
+                            ? 'Nothing active right now — add a new one whenever you\'re ready.'
+                            : 'Set a plan below to start tracking them')
+                        : usage
+                          ? `${formatCurrency(usage.funded)} saved of ${formatCurrency(usage.planned)} planned this month`
+                          : 'Set a plan below to start tracking them'
                   }
                   accentColor={theme.primary}
                   style={styles.secHead}
                 />
-                <View style={styles.grid}>
-                  {activeGoals.map((g: any) => {
-                    const row = usageByGoal.get(g.id);
-                    const planned = row?.planned ?? Number(alloc[g.id]) ?? 0;
-                    const lifetime = getGoalLifetimeSaved(g.id);
-                    return (
-                      <GoalCard
-                        key={g.id}
-                        name={g.name}
-                        emoji={g.emoji}
-                        color={g.color}
-                        planned={planned}
-                        funded={row?.funded ?? 0}
-                        status={row?.status}
-                        lifetimeSaved={lifetime}
-                        lifetimeTarget={g.lifetimeTarget}
-                        monthsLeft={
-                          g.lifetimeTarget ? monthsToTarget(g.lifetimeTarget, lifetime, planned) : null
-                        }
-                        achieved={!!g.achievedAt}
-                        // The body opens the goal's own detail screen — full
-                        // stats plus the same transactions drill-down that
-                        // used to live in a sheet here — while the pencil
-                        // stays the only way into the EDIT form. They used to
-                        // be the SAME tap, so opening a form you hadn't asked
-                        // for was the only thing the body did.
-                        onPress={() => { hapticLight(); navigation.navigate('GoalDetail', { goalId: g.id }); }}
-                        onEdit={() => openForm(g.id)}
-                        onAddMoney={() => openFund(g)}
-                        style={styles.gridItem}
-                      />
-                    );
-                  })}
-                  {/* An odd goal count would leave the last tile double-width. */}
-                  {activeGoals.length % 2 === 1 ? <View style={styles.gridItem} /> : null}
-                </View>
+                {gridGoals.length > 0 ? (
+                  <View style={styles.grid}>
+                    {gridGoals.map((g: any) => {
+                      const row = usageByGoal.get(g.id);
+                      const planned = row?.planned ?? Number(alloc[g.id]) ?? 0;
+                      const lifetime = getGoalLifetimeSaved(g.id);
+                      return (
+                        <GoalCard
+                          key={g.id}
+                          name={g.name}
+                          emoji={g.emoji}
+                          color={g.color}
+                          planned={planned}
+                          funded={row?.funded ?? 0}
+                          status={row?.status}
+                          lifetimeSaved={lifetime}
+                          lifetimeTarget={g.lifetimeTarget}
+                          monthsLeft={
+                            g.lifetimeTarget ? monthsToTarget(g.lifetimeTarget, lifetime, planned) : null
+                          }
+                          achieved={false}
+                          // The body opens the goal's own detail screen — full
+                          // stats plus the same transactions drill-down that
+                          // used to live in a sheet here — while the pencil
+                          // stays the only way into the EDIT form. They used to
+                          // be the SAME tap, so opening a form you hadn't asked
+                          // for was the only thing the body did.
+                          onPress={() => { hapticLight(); navigation.navigate('GoalDetail', { goalId: g.id }); }}
+                          onEdit={() => openForm(g.id)}
+                          onAddMoney={() => openFund(g)}
+                          style={styles.gridItem}
+                        />
+                      );
+                    })}
+                    {/* An odd goal count would leave the last tile double-width. */}
+                    {gridGoals.length % 2 === 1 ? <View style={styles.gridItem} /> : null}
+                  </View>
+                ) : null}
               </View>
 
               {/* ── the plan: read-only until Edit ────────────────────────── */}
-              <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <View>
                 <SectionHeader
                   icon="pie-chart-outline"
                   title="This Month's Split"
@@ -517,181 +632,259 @@ const GoalsScreen = ({ navigation }: any) => {
                   style={styles.secHead}
                 />
 
-                <Text style={[styles.eyebrow, { color: theme.textMuted }]}>MONTHLY SALARY</Text>
-                {editing ? (
-                  <TextInput
-                    value={editingSalary ? salaryText : (salary > 0 ? formatCurrency(salary) : '')}
-                    onChangeText={(t) => setSalaryText(sanitizeAmount(t))}
-                    onFocus={() => setEditingSalary(true)}
-                    onBlur={commitSalary}
-                    placeholder="Enter your salary"
-                    placeholderTextColor={theme.textMuted}
-                    keyboardType="decimal-pad"
-                    maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
-                    style={[
-                      styles.salaryInput,
-                      {
-                        color: theme.textPrimary,
-                        borderColor: editingSalary ? theme.primary : 'transparent',
-                        backgroundColor: editingSalary ? withAlpha(theme.primary, 0.06) : 'transparent',
-                      },
-                    ]}
-                    accessibilityLabel="Monthly salary"
-                  />
-                ) : (
-                  <Text style={[styles.salaryRead, { color: theme.textPrimary }]}>
-                    {salary > 0 ? formatCurrency(salary) : '—'}
-                  </Text>
-                )}
-
-                {salary > 0 ? (
-                  <View style={styles.barWrap}>
-                    <AllocationBar
-                      salary={salary}
-                      segments={segments}
-                      onChangePair={onChangePair}
-                      freeId={FREE_ID}
-                      disabled={!editing}
+                <View style={[styles.card, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.eyebrow, { color: theme.textMuted }]}>MONTHLY SALARY</Text>
+                  {editing ? (
+                    <TextInput
+                      value={editingSalary ? salaryText : (salary > 0 ? formatCurrency(salary) : '')}
+                      onChangeText={(t) => setSalaryText(sanitizeAmount(t))}
+                      onFocus={() => setEditingSalary(true)}
+                      onBlur={commitSalary}
+                      placeholder="Enter your salary"
+                      placeholderTextColor={theme.textMuted}
+                      keyboardType="decimal-pad"
+                      maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
+                      style={[
+                        styles.salaryInput,
+                        {
+                          color: theme.textPrimary,
+                          borderColor: editingSalary ? theme.primary : 'transparent',
+                          backgroundColor: editingSalary ? withAlpha(theme.primary, 0.06) : 'transparent',
+                        },
+                      ]}
+                      accessibilityLabel="Monthly salary"
                     />
-                    <View style={styles.chipRow}>
-                      <View
-                        style={[
-                          styles.chip,
-                          {
-                            backgroundColor: over
-                              ? withAlpha(theme.danger, 0.12)
-                              : free === 0 ? withAlpha(theme.success, 0.12) : withAlpha(theme.textMuted, 0.12),
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.chipTxt,
-                            { color: over ? theme.danger : free === 0 ? theme.success : theme.textSecondary },
-                          ]}
-                        >
-                          {over
-                            ? `${formatCurrency(committed - salary)} Over Salary`
-                            : free === 0 ? 'Fully Allocated' : `${formatCurrency(free)} Unallocated`}
-                        </Text>
-                      </View>
-                    </View>
+                  ) : (
+                    <Text style={[styles.salaryRead, { color: theme.textPrimary }]}>
+                      {salary > 0 ? formatCurrency(salary) : '—'}
+                    </Text>
+                  )}
 
-                    {/* legend / steppers */}
-                    {budgetCap > 0 ? (
-                      <View style={styles.lrow}>
-                        <View style={[styles.swatch, { backgroundColor: withAlpha(theme.textMuted, 0.13) }]}>
-                          <Ionicons name="lock-closed" size={14} color={theme.textSecondary} />
-                        </View>
-                        <View style={styles.flex1}>
-                          <Text style={[styles.lname, { color: theme.textPrimary }]}>Spending</Text>
-                          <Text style={[styles.lmeta, { color: theme.textMuted }]}>set in Budget</Text>
-                        </View>
-                        <Text style={[styles.lamt, { color: theme.textSecondary }]}>
-                          {formatCurrency(Math.min(budgetCap, salary))}
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    {activeGoals.map((g: any, i: number) => {
-                      const value = Number(alloc[g.id]) || 0;
-                      const row = usageByGoal.get(g.id);
-                      return (
+                  {salary > 0 ? (
+                    <View style={styles.barWrap}>
+                      <AllocationBar
+                        salary={salary}
+                        segments={segments}
+                        onChangePair={onChangePair}
+                        freeId={FREE_ID}
+                        disabled={!editing}
+                        onFloorHit={onFloorHit}
+                      />
+                      <View style={styles.chipRow}>
                         <View
-                          key={g.id}
                           style={[
-                            styles.lrow,
+                            styles.chip,
                             {
-                              borderTopColor: theme.divider,
-                              borderTopWidth: i === 0 && !budgetCap ? 0 : StyleSheet.hairlineWidth,
+                              backgroundColor: over
+                                ? withAlpha(theme.danger, 0.12)
+                                : free === 0 ? withAlpha(theme.success, 0.12) : withAlpha(theme.textMuted, 0.12),
                             },
                           ]}
                         >
-                          <View style={[styles.swatch, { backgroundColor: withAlpha(g.color, 0.13) }]}>
-                            <Text style={styles.swatchEmoji} allowFontScaling={false}>{g.emoji}</Text>
-                          </View>
-
-                          <View style={styles.flex1}>
-                            <Text style={[styles.lname, { color: theme.textPrimary }]} numberOfLines={1}>
-                              {g.name}
-                            </Text>
-                            <Text style={[styles.lmeta, { color: theme.textMuted }]} numberOfLines={1}>
-                              {salary > 0 ? `${Math.round((value / salary) * 100)}% of salary` : ''}
-                              {/* Where the money came from, named. A goal that both
-                                  matches spend AND takes typed entries needs both
-                                  visible, or a double entry is invisible. */}
-                              {row && row.autoFunded > 0 ? ` · ${formatCurrency(row.autoFunded)} matched` : ''}
-                              {row && row.manualFunded > 0 ? ` · ${formatCurrency(row.manualFunded)} added` : ''}
-                            </Text>
-                          </View>
-
-                          {editing ? (
-                            <TouchableOpacity
-                              onPress={() => { hapticLight(); setOne(g.id, value - ALLOCATION_STEP); }}
-                              disabled={value <= 0}
-                              style={[styles.step, { borderColor: theme.inputBorder, opacity: value <= 0 ? 0.35 : 1 }]}
-                              accessibilityLabel={`Reduce ${g.name}`}
-                            >
-                              <Ionicons name="remove" size={13} color={theme.textSecondary} />
-                            </TouchableOpacity>
-                          ) : null}
-
-                          <Text style={[styles.lamt, { color: theme.textPrimary }]}>{formatCurrency(value)}</Text>
-
-                          {editing ? (
-                            <TouchableOpacity
-                              onPress={() => { hapticLight(); setOne(g.id, value + ALLOCATION_STEP); }}
-                              disabled={free <= 0}
-                              style={[styles.step, { borderColor: theme.inputBorder, opacity: free <= 0 ? 0.35 : 1 }]}
-                              accessibilityLabel={`Increase ${g.name}`}
-                            >
-                              <Ionicons name="add" size={13} color={theme.textSecondary} />
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
-                      );
-                    })}
-
-                    {/* Reconciliation — the line that ties Budget to Goals.
-                        Every one of these four is already ON this card (the
-                        salary figure above, Spending/each goal in the rows
-                        just above, Free as the chip's own text) — it used to
-                        be a SEPARATE bordered card after this one, restating
-                        numbers already on screen in a box of its own. Folded
-                        in as this card's closing row instead: a divider, then
-                        the same four cells, reading as this card's own
-                        summary rather than a second card competing for
-                        attention at the end of the scroll. */}
-                    <View style={[styles.reconRow, { borderTopColor: theme.divider }]}>
-                      {[
-                        { k: 'Salary', v: salary },
-                        { k: 'Spending', v: Math.min(budgetCap, salary) },
-                        { k: 'Goals', v: goalTotal },
-                        { k: 'Free', v: free },
-                      ].map((cell, i) => (
-                        <View
-                          key={cell.k}
-                          style={[
-                            styles.reconCell,
-                            { borderLeftColor: theme.divider, borderLeftWidth: i === 0 ? 0 : StyleSheet.hairlineWidth },
-                          ]}
-                        >
-                          <Text style={[styles.reconK, { color: theme.textMuted }]}>{cell.k.toUpperCase()}</Text>
-                          <Text style={[styles.reconV, { color: theme.textPrimary }]} numberOfLines={1}>
-                            {formatCurrency(cell.v)}
+                          <Text
+                            style={[
+                              styles.chipTxt,
+                              { color: over ? theme.danger : free === 0 ? theme.success : theme.textSecondary },
+                            ]}
+                          >
+                            {over
+                              ? `${formatCurrency(committed - salary)} Over Salary`
+                              : free === 0 ? 'Fully Allocated' : `${formatCurrency(free)} Unallocated`}
                           </Text>
                         </View>
-                      ))}
+                      </View>
+
+                      {/* legend / steppers */}
+                      {budgetCap > 0 ? (
+                        <View style={styles.lrow}>
+                          <View style={[styles.swatch, { backgroundColor: withAlpha(theme.textMuted, 0.13) }]}>
+                            <Ionicons name="lock-closed" size={14} color={theme.textSecondary} />
+                          </View>
+                          <View style={styles.flex1}>
+                            <Text style={[styles.lname, { color: theme.textPrimary }]}>Spending</Text>
+                            <Text style={[styles.lmeta, { color: theme.textMuted }]}>set in Budget</Text>
+                          </View>
+                          <Text style={[styles.lamt, { color: theme.textSecondary }]}>
+                            {formatCurrency(Math.min(budgetCap, salary))}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {activeGoals.map((g: any, i: number) => {
+                        const value = Number(alloc[g.id]) || 0;
+                        const row = usageByGoal.get(g.id);
+                        return (
+                          <View
+                            key={g.id}
+                            style={[
+                              styles.lrow,
+                              {
+                                borderTopColor: theme.divider,
+                                borderTopWidth: i === 0 && !budgetCap ? 0 : StyleSheet.hairlineWidth,
+                              },
+                            ]}
+                          >
+                            <View style={[styles.swatch, { backgroundColor: withAlpha(g.color, 0.13) }]}>
+                              <Text style={styles.swatchEmoji} allowFontScaling={false}>{g.emoji}</Text>
+                            </View>
+
+                            <View style={styles.flex1}>
+                              <Text style={[styles.lname, { color: theme.textPrimary }]} numberOfLines={1}>
+                                {g.name}
+                              </Text>
+                              <Text style={[styles.lmeta, { color: theme.textMuted }]} numberOfLines={1}>
+                                {salary > 0 ? `${Math.round((value / salary) * 100)}% of salary` : ''}
+                                {/* Where the money came from, named. A goal that both
+                                    matches spend AND takes typed entries needs both
+                                    visible, or a double entry is invisible. */}
+                                {row && row.autoFunded > 0 ? ` · ${formatCurrency(row.autoFunded)} matched` : ''}
+                                {row && row.manualFunded > 0 ? ` · ${formatCurrency(row.manualFunded)} added` : ''}
+                              </Text>
+                            </View>
+
+                            {/* Floors at what's already funded this month —
+                                the SAME rule for every goal, achieved or not
+                                (Sep-14-26: a completed goal briefly floored at
+                                its own PLAN value instead, which turned
+                                permanent across months once rollover carried
+                                it forward — reverted). */}
+                            {editing ? (() => {
+                              const atFloor = value <= (row?.funded ?? 0);
+                              return (
+                                <TouchableOpacity
+                                  onPress={() => { hapticLight(); setOne(g.id, value - ALLOCATION_STEP); }}
+                                  disabled={atFloor}
+                                  style={[styles.step, { borderColor: theme.inputBorder, opacity: atFloor ? 0.35 : 1 }]}
+                                  accessibilityLabel={`Reduce ${g.name}`}
+                                >
+                                  <Ionicons name="remove" size={13} color={theme.textSecondary} />
+                                </TouchableOpacity>
+                              );
+                            })() : null}
+
+                            <Text style={[styles.lamt, { color: theme.textPrimary }]}>{formatCurrency(value)}</Text>
+
+                            {editing ? (
+                              <TouchableOpacity
+                                onPress={() => { hapticLight(); setOne(g.id, value + ALLOCATION_STEP); }}
+                                disabled={free <= 0}
+                                style={[styles.step, { borderColor: theme.inputBorder, opacity: free <= 0 ? 0.35 : 1 }]}
+                                accessibilityLabel={`Increase ${g.name}`}
+                              >
+                                <Ionicons name="add" size={13} color={theme.textSecondary} />
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+
+                      {/* Reconciliation — the line that ties Budget to Goals.
+                          Every one of these four is already ON this card (the
+                          salary figure above, Spending/each goal in the rows
+                          just above, Free as the chip's own text) — it used to
+                          be a SEPARATE bordered card after this one, restating
+                          numbers already on screen in a box of its own. Folded
+                          in as this card's closing row instead: a divider, then
+                          the same four cells, reading as this card's own
+                          summary rather than a second card competing for
+                          attention at the end of the scroll. */}
+                      <View style={[styles.reconRow, { borderTopColor: theme.divider }]}>
+                        {[
+                          { k: 'Salary', v: salary },
+                          { k: 'Spending', v: Math.min(budgetCap, salary) },
+                          { k: 'Goals', v: goalTotal },
+                          { k: 'Free', v: free },
+                        ].map((cell, i) => (
+                          <View
+                            key={cell.k}
+                            style={[
+                              styles.reconCell,
+                              { borderLeftColor: theme.divider, borderLeftWidth: i === 0 ? 0 : StyleSheet.hairlineWidth },
+                            ]}
+                          >
+                            <Text style={[styles.reconK, { color: theme.textMuted }]}>{cell.k.toUpperCase()}</Text>
+                            <Text style={[styles.reconV, { color: theme.textPrimary }]} numberOfLines={1}>
+                              {formatCurrency(cell.v)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
-                  </View>
-                ) : (
-                  <Text style={[styles.secSub, { color: theme.textMuted, marginTop: spacing.sm }]}>
-                    {editing
-                      ? "Enter a figure to start splitting it. It's only used for this plan's maths — type a rough number if you'd rather."
-                      : 'Tap Edit to set your salary and see it split.'}
-                  </Text>
-                )}
+                  ) : (
+                    <Text style={[styles.secSub, { color: theme.textMuted, marginTop: spacing.sm }]}>
+                      {editing
+                        ? "Enter a figure to start splitting it. It's only used for this plan's maths — type a rough number if you'd rather."
+                        : 'Tap Edit to set your salary and see it split.'}
+                    </Text>
+                  )}
+                </View>
               </View>
+
+              {/* ── goals no longer part of active planning, at the very
+                  BOTTOM ────────────────────────────────────────────────────
+                  "should we not show them or keep them in a new section?"
+                  then "what if a recurring goal user wants to discontinue?"
+                  (Sep-14-26). Hiding either outright was rejected — same
+                  reasoning as dropping "Archive": a one-way disappear with
+                  nothing to see it again is worse than the clutter, and a
+                  finished goal is something to be proud of (GoalCard's own
+                  header comment: built like a trophy card on purpose).
+                  ONE section, ONE mental model, for BOTH reasons a goal
+                  isn't active any more: it's DONE (one-time, `achievedAt`)
+                  or it was STOPPED (recurring, `discontinuedAt`) — confirmed
+                  design: join the same section rather than a third grid.
+                  Separating either kind out ALSO fixes a real capacity bug:
+                  `MAX_ACTIVE_GOALS` used to count both forever.
+                  Placed AFTER the split card: a RECURRING goal that's fully
+                  funded this month stays in the main grid ABOVE — it never
+                  gets `achievedAt` (only a lifetime target does), so it's
+                  still ACTIVE, just well-paced this month. Only a genuinely
+                  finished or stopped goal moves down here. A completed goal
+                  still fully participates in the split card ABOVE (that's
+                  the entire point of "Add Extra"); a discontinued one does
+                  not — its allocation was already cleared and its auto-match
+                  already stopped the moment it was discontinued. */}
+              {inactiveGoals.length > 0 ? (
+                <View>
+                  <SectionHeader
+                    icon="trophy-outline"
+                    title="No Longer Active"
+                    subtitle={`${inactiveGoals.length} goal${inactiveGoals.length === 1 ? '' : 's'} — done, or paused for now`}
+                    accentColor={theme.success}
+                    style={styles.secHead}
+                  />
+                  <View style={styles.grid}>
+                    {inactiveGoals.map((g: any) => {
+                      const row = usageByGoal.get(g.id);
+                      const planned = row?.planned ?? Number(alloc[g.id]) ?? 0;
+                      const lifetime = getGoalLifetimeSaved(g.id);
+                      const isDiscontinued = !!g.discontinuedAt;
+                      return (
+                        <GoalCard
+                          key={g.id}
+                          name={g.name}
+                          emoji={g.emoji}
+                          color={g.color}
+                          planned={planned}
+                          funded={row?.funded ?? 0}
+                          status={row?.status}
+                          lifetimeSaved={lifetime}
+                          lifetimeTarget={g.lifetimeTarget}
+                          monthsLeft={null}
+                          achieved={!isDiscontinued}
+                          discontinued={isDiscontinued}
+                          onPress={() => { hapticLight(); navigation.navigate('GoalDetail', { goalId: g.id }); }}
+                          onEdit={() => openForm(g.id)}
+                          onAddMoney={isDiscontinued ? undefined : () => openFund(g)}
+                          onResume={isDiscontinued ? () => { hapticLight(); resumeGoal(g.id); toast.success('Resumed', `${g.name} is back in your active goals.`); } : undefined}
+                          style={styles.gridItem}
+                        />
+                      );
+                    })}
+                    {inactiveGoals.length % 2 === 1 ? <View style={styles.gridItem} /> : null}
+                  </View>
+                </View>
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -741,7 +934,7 @@ const GoalsScreen = ({ navigation }: any) => {
           corner, and starting a second, unrelated goal mid-edit is exactly
           the moment a floating + would be a false shortcut rather than a
           convenience. */}
-      {activeGoals.length < MAX_ACTIVE_GOALS && !editing ? (
+      {gridGoals.length < MAX_ACTIVE_GOALS && !editing ? (
         <FAB onPress={() => openForm()} bottomInset={insets.bottom} />
       ) : null}
 
@@ -758,7 +951,7 @@ const GoalsScreen = ({ navigation }: any) => {
         visible={!!achievement}
         achievement={achievement}
         reward={reward}
-        onClose={() => { setAchievement(null); setReward(null); }}
+        onClose={clearAchievement}
       />
     </View>
   );
@@ -779,12 +972,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xxl + 72,
-    gap: spacing.lg,
+    // MORE room between one section and the next, LESS between a heading
+    // and its own content (Sep-14-26) — the two were the same distance
+    // before, so a heading read as equally close to the section ABOVE it as
+    // to the content it was actually introducing. `gap` here is what
+    // separates SECTIONS; `secHead.marginBottom` below is what separates a
+    // heading from what it heads.
+    gap: spacing.xl,
   },
   flex1: { flex: 1 },
 
   card: { borderRadius: radius.lg, padding: spacing.lg, ...shadows.card },
-  secHead: { marginBottom: spacing.md },
+  secHead: { marginBottom: spacing.sm },
   secSub: { ...typography.small, marginTop: 2, lineHeight: 18 },
   eyebrow: { ...typography.tiny, fontWeight: '700', letterSpacing: 0.7 },
   heroTitle: { ...typography.h2 },

@@ -24,6 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase, withAlpha, mix, readableOn } from '../constants/theme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
+import { CREDIT_ONLY_PARENT_IDS } from '../constants/twoTierCategories';
 import { TILE_FILL_ALPHA } from './NavListRow';
 import SheetCloseButton from './SheetCloseButton';
 import { hapticLight } from '../utils/haptics';
@@ -37,18 +38,32 @@ interface Props {
   setParentIds: (ids: string[]) => void;
   categoryIds: string[];
   setCategoryIds: (ids: string[]) => void;
+  /**
+   * Entries the goal is ALREADY funded by. A rule edit is add-only (see
+   * `updateGoal`), so these show as selected but cannot be turned off — the
+   * store would keep them and Save would look like it did nothing.
+   */
+  lockedKeys?: Set<string>;
 }
 
 const GoalCategoryPickerModal: React.FC<Props> = ({
   visible, onClose, parentIds, setParentIds, categoryIds, setCategoryIds,
+  lockedKeys,
 }) => {
   const theme = useTheme();
-  const tree = useCategoryTree();
+  // Income is filtered out, not shown-and-ignored: goal funding counts SPEND
+  // (`countsForSpend` is debit-or-refund), and every Income row is a credit, so
+  // an "Income" rule silently matches nothing forever. A switch wired to nothing
+  // is worse than an absent one — the goal just quietly never funds.
+  const tree = useCategoryTree().filter((p: any) => !CREDIT_ONLY_PARENT_IDS.has(p.id));
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const countInk = readableOn(mix(theme.primary, TILE_FILL_ALPHA, theme.card), theme.primary, 4.5);
 
+  const isLocked = (id: string) => !!lockedKeys?.has(id);
   const toggle = (list: string[], set: (v: string[]) => void, id: string) => {
+    // Already funding the goal: selected and not removable.
+    if (isLocked(id)) return;
     hapticLight();
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   };
@@ -70,17 +85,42 @@ const GoalCategoryPickerModal: React.FC<Props> = ({
           <Text style={[styles.hint, { color: theme.textMuted }]}>
             Any spend in these categories counts toward this goal automatically.
           </Text>
+          {lockedKeys && lockedKeys.size > 0 ? (
+            <Text style={[styles.hint, styles.hintTight, { color: theme.textMuted }]}>
+              What this goal already tracks stays ticked — its progress was measured
+              with it. Anything you add counts from today onward.
+            </Text>
+          ) : null}
+          {/* Without this line the list looks broken: Food & Dining opens to a
+              single chip and most parents have no chevron at all, which reads as
+              missing sub-categories rather than as a deliberate limit. */}
+          <Text style={[styles.hint, styles.hintTight, { color: theme.textMuted }]}>
+            Pick a sub-category and only spend you've filed under it counts — so
+            anything you re-categorise in your review queue is picked up too.
+          </Text>
 
           <ScrollView showsVerticalScrollIndicator={false}>
             {tree.map((parent) => {
               const on = parentIds.includes(parent.id);
               const open = expanded === parent.id;
-              // Only children with their OWN legacy id can be offered: the rest
-              // resolve to the parent's flat category, so picking "Restaurants"
-              // would quietly match every Food row. Narrowing you can't actually
-              // enforce is worse than not offering it.
-              const pickable = parent.children.filter((c: any) => c.legacyId && c.legacyId !== parent.legacyId);
-              const childOn = pickable.filter((c: any) => categoryIds.includes(c.legacyId!));
+              // EVERY sub-category is offered. It used to be only those with their
+              // own legacy id (Groceries and the transfer children), because a
+              // rule is matched against the flat category on the row and the rest
+              // all collapse onto their parent's — so "Restaurants" could not be
+              // told apart from "Food & Dining".
+              //
+              // That reasoning only held while a rule could ONLY see the flat id.
+              // `ruleMatchesTxn` now also matches the tree child the row was
+              // actually categorised INTO, and the review queue exists precisely
+              // so the user fixes what the parser could not work out. So the rule
+              // reads the user's own correction, which is the whole point.
+              //
+              // A child keyed by its `id`; one that also owns a legacy id keeps
+              // using that, so goals saved before this still match unchanged
+              // (the two strings are equal for every such child anyway).
+              const pickable = parent.children;
+              const keyOf = (c: any) => c.legacyId ?? c.id;
+              const childOn = pickable.filter((c: any) => categoryIds.includes(keyOf(c)));
               return (
                 <View key={parent.id} style={[styles.ruleRow, { borderColor: theme.divider }]}>
                   {/* The chevron is a SIBLING in this row, not an absolutely
@@ -93,8 +133,12 @@ const GoalCategoryPickerModal: React.FC<Props> = ({
                       activeOpacity={0.75}
                       style={styles.ruleMain}
                       accessibilityRole="checkbox"
-                      accessibilityState={{ checked: on }}
-                      accessibilityLabel={`Fund from ${parent.label}`}
+                      accessibilityState={{ checked: on, disabled: isLocked(parent.id) }}
+                      accessibilityLabel={
+                        isLocked(parent.id)
+                          ? `${parent.label}, already funding this goal`
+                          : `Fund from ${parent.label}`
+                      }
                     >
                       <View
                         style={[
@@ -138,15 +182,17 @@ const GoalCategoryPickerModal: React.FC<Props> = ({
                   </View>
 
                   {open && !on ? (
+                    <>
                     <View style={styles.childWrap}>
                       {pickable.map((c: any) => {
-                        const legacy = c.legacyId!;
-                        const cOn = categoryIds.includes(legacy);
+                        const key = keyOf(c);
+                        const cOn = categoryIds.includes(key);
                         return (
                           <TouchableOpacity
                             key={c.id}
-                            onPress={() => toggle(categoryIds, setCategoryIds, legacy)}
-                            activeOpacity={0.75}
+                            onPress={() => toggle(categoryIds, setCategoryIds, key)}
+                            activeOpacity={isLocked(key) ? 1 : 0.75}
+                            accessibilityState={{ selected: cOn, disabled: isLocked(key) }}
                             style={[
                               styles.childChip,
                               {
@@ -166,6 +212,7 @@ const GoalCategoryPickerModal: React.FC<Props> = ({
                         );
                       })}
                     </View>
+                    </>
                   ) : null}
                 </View>
               );
@@ -192,6 +239,8 @@ const styles = StyleSheet.create({
   title: { ...typography.h2, fontWeight: '700' },
   doneTxt: { ...typography.body, fontWeight: '700' },
   hint: { ...typography.small, marginTop: spacing.xs, marginBottom: spacing.md },
+  hintTight: { marginTop: -spacing.xs },
+  childNote: { ...typography.tiny, lineHeight: 15, marginTop: spacing.sm, paddingLeft: 28 },
 
   ruleRow: {
     borderWidth: 1,

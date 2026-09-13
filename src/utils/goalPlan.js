@@ -97,6 +97,26 @@ export const monthsToTarget = (target, saved, perMonth) => {
 };
 
 /**
+ * `monthsToTarget`'s count turned into the actual calendar month it lands on
+ * — "does not provide much clarity" (Sep-14-26): a bare "18 MONTHS TO GO"
+ * makes the reader do the arithmetic themselves to find out what month that
+ * actually is, and its own text WIDTH grows with how far away the goal is (a
+ * tight tile ribbon already truncated it once). An absolute month needs no
+ * mental math, reads the same whether checked today or six months from now,
+ * and is flat-width regardless of distance — "Sep '27" is no longer than
+ * "Sep '26".
+ *
+ * `short: true` gives the tile-ribbon grain ("Sep '27"); the default gives
+ * the full-room grain a detail screen can afford ("September 2027").
+ */
+export const projectedMonthLabel = (monthsLeft, { short = false, from = new Date() } = {}) => {
+  const d = new Date(from.getFullYear(), from.getMonth() + Math.max(0, Math.round(num(monthsLeft))), 1);
+  if (!short) return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const mon = d.toLocaleDateString('en-IN', { month: 'short' });
+  return `${mon} '${String(d.getFullYear()).slice(-2)}`;
+};
+
+/**
  * Pace for ONE goal this month, judged against how far through the month we
  * are — funding ₹5,000 of ₹10,000 is fine on the 14th and behind on the 28th.
  *
@@ -190,7 +210,31 @@ export const goalAutoRule = (goal) => {
     parentIds,
     categoryIds: list(rule.categoryIds).map(String),
     merchants: list(rule.merchants).map(merchantKey).filter(Boolean),
+    // id/merchant-key -> ISO date it was ADDED to an existing goal. An entry
+    // that was there from creation has none and always applies; see `activeAt`.
+    addedAt: (rule.addedAt && typeof rule.addedAt === 'object') ? rule.addedAt : {},
   };
+};
+
+/**
+ * Is this rule entry in force for a transaction dated `at`?
+ *
+ * Entries the goal was CREATED with have no `addedAt` and always apply. Entries
+ * added to an existing goal carry the date they were added and only count from
+ * then on — which is what makes widening a live goal safe: the goal's past stays
+ * exactly what it was measured as, and the user is told the new category counts
+ * from today rather than silently gaining months of backdated spend.
+ *
+ * A transaction with no usable date is treated as in force, so a malformed row
+ * can never be silently dropped from a goal it genuinely matches.
+ */
+const activeAt = (rule, key, at) => {
+  const from = rule?.addedAt?.[key];
+  if (!from) return true;
+  const fromMs = Date.parse(from);
+  const atMs = typeof at === 'number' ? at : Date.parse(at);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(atMs)) return true;
+  return atMs >= fromMs;
 };
 
 /** True when the goal funds itself from real spend rather than typed entries. */
@@ -200,16 +244,43 @@ export const hasAutoRule = (goal) => {
 };
 
 /**
- * Does this transaction fund this rule? `parentId` is the caller's resolved
- * first-level category (the store owns that mapping), so this stays pure.
+ * Does this transaction fund this rule? `parentId` and `childId` are the
+ * caller's RESOLVED tree ids (the store owns those mappings), so this stays pure.
+ *
+ * `categoryIds` is matched against two things, and deliberately holds both kinds
+ * of id rather than growing a second field:
+ *
+ *   • `categoryId` — the flat legacy category on the row. This is how a
+ *     sub-category that the PARSER can detect on its own matches (Groceries has
+ *     its own legacy id, so a grocery SMS lands on it with no help).
+ *   • `childId` — the tree child the row was actually categorised into, from its
+ *     `childCategory`. This is how every OTHER sub-category matches: the app
+ *     cannot tell Restaurants from Food Delivery in an SMS, but the user can, and
+ *     the review queue exists precisely so they do. Once they pick, the goal
+ *     reads that choice.
+ *
+ * `at` is the transaction's date, and gates entries ADDED to a live goal: they
+ * count only from the day they were added (see `activeAt`), so widening a goal
+ * never backdates spend into it.
+ *
+ * The two id spaces don't collide in a harmful way — where a child id and a
+ * legacy id are the same string (`groceries`, `self`, `lent`, `borrowed`) they
+ * mean the same category, so a rule holding it matches a row tagged either way.
+ * That is also why no migration was needed: a goal saved as
+ * `categoryIds: ['groceries']` keeps working exactly as before.
  */
-export const ruleMatchesTxn = (rule, { parentId, categoryId, merchant } = {}) => {
+export const ruleMatchesTxn = (rule, { parentId, categoryId, childId, merchant, at } = {}) => {
   if (!rule) return false;
-  if (parentId && rule.parentIds.includes(String(parentId))) return true;
-  if (categoryId && rule.categoryIds.includes(String(categoryId))) return true;
+  const on = (key) => activeAt(rule, key, at);
+  const p = parentId && String(parentId);
+  if (p && rule.parentIds.includes(p) && on(p)) return true;
+  const c = categoryId && String(categoryId);
+  if (c && rule.categoryIds.includes(c) && on(c)) return true;
+  const ch = childId && String(childId);
+  if (ch && rule.categoryIds.includes(ch) && on(ch)) return true;
   if (rule.merchants.length > 0) {
     const m = merchantKey(merchant);
-    if (m && rule.merchants.some((k) => m.includes(k))) return true;
+    if (m && rule.merchants.some((k) => m.includes(k) && on(k))) return true;
   }
   return false;
 };

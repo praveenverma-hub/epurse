@@ -37,6 +37,7 @@ import {
   radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn, mix,
 } from '../constants/theme';
 import { formatCompact } from '../utils/format';
+import { projectedMonthLabel } from '../utils/goalPlan';
 import ProgressRing from './ProgressRing';
 import EditIcon from './EditIcon';
 
@@ -96,6 +97,19 @@ export interface GoalCardProps {
   /** Set once the lifetime target has been reached. */
   achieved?: boolean;
   /**
+   * Set for a RECURRING goal the user has explicitly stopped, without
+   * deleting it (`discontinueGoal`, Sep-14-26) — distinct from `achieved`:
+   * a one-time goal crossed a real finish line, a discontinued goal just
+   * isn't being actively planned for right now. Mutually exclusive with
+   * `achieved` by construction (only a recurring goal can be discontinued,
+   * only a one-time goal can be achieved), but never assumed — both are
+   * checked explicitly below.
+   */
+  discontinued?: boolean;
+  /** Bring a discontinued goal back into active planning. Only meaningful
+   *  (and only rendered) when `discontinued` is true. */
+  onResume?: () => void;
+  /**
    * Tapping the card BODY — opens the goal's own detail screen
    * (`GoalDetailScreen`, Sep-12-26): full stats, its history, and what this
    * total is MADE of (its matching + linked transactions). A bottom sheet did
@@ -114,6 +128,14 @@ export interface GoalCardProps {
 
 /** Label on the tile's one action. "Add" read as "add a goal" beside the FAB. */
 const ACTION_LABEL = 'Update';
+/**
+ * A ONE-TIME goal that's already reached its target still opens the same
+ * fund modal (real money can still move — see GoalFundModal's overshoot
+ * note), but "Update" beside a ribbon that already says GOAL COMPLETE reads
+ * as if the goal is still open. Muted rather than primary-coloured too, so
+ * it doesn't compete with the ribbon for "this is the interesting bit".
+ */
+const ACTION_LABEL_DONE = 'Add Extra';
 
 /**
  * What each pace state SAYS. Deliberately verbose: these sat at 6–8 characters
@@ -133,7 +155,7 @@ const RIBBON_UNPLANNED = 'NOTHING PLANNED';
 
 const GoalCard: React.FC<GoalCardProps> = ({
   name, emoji, color, planned, funded, status, lifetimeSaved, lifetimeTarget,
-  monthsLeft, achieved, onPress, onEdit, onAddMoney, style,
+  monthsLeft, achieved, discontinued, onPress, onEdit, onAddMoney, onResume, style,
 }) => {
   const theme = useTheme();
   // SVG gradient ids are GLOBAL to the document, and a screen renders many of
@@ -150,6 +172,20 @@ const GoalCard: React.FC<GoalCardProps> = ({
   // exists at all; `planned0` (no monthly figure THIS month) applies the
   // same way to either duration.
   const isOneTime = !!(lifetimeTarget && lifetimeTarget > 0);
+  /** Either reason a goal isn't part of active planning any more. One flag,
+   *  not two `if`s scattered through the render — "feel them as non active"
+   *  (Sep-14-26) is ONE visual treatment regardless of which reason applies. */
+  const inactive = achieved || discontinued;
+  // "can't see any update on inactive goals" — a flat overlay was tried first
+  // and made almost no visible difference, because the card's most eye-
+  // catching colour (the medallion's glow, the progress ring) is drawn from
+  // `color` DIRECTLY and renders on TOP of any background layer, completely
+  // unaffected by one. The fix is neutralising the accent at its SOURCE
+  // instead: every place below that used to read `color` for wash/ring/glow/
+  // border now reads `accentColor`, which is the goal's own hue for an
+  // active card and a flat neutral for an inactive one. The emoji and name
+  // are untouched — identity stays, only the "this is alive" accent goes.
+  const accentColor = inactive ? theme.textMuted : color;
   // Whether a monthly FIGURE exists — read from `planned` itself, not from
   // `status` (Sep-12-26: `status` used to be undefined only because the store
   // skipped an unplanned goal's row entirely, so "no status" and "nothing
@@ -169,7 +205,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
   //   1. done            — the target has been reached
   //   2. % saved         — a target, but NOTHING monthly to project a date from
   //   3. not in the plan — NO target either, and nothing monthly (recurring, unset)
-  //   4. months to go     — a target AND a monthly rate together imply a finish date
+  //   4. done by <month>  — a target AND a monthly rate together imply a finish date
   //   5. this month's pace — FUNDED / AHEAD / ON TRACK / BEHIND
   //
   // Step 3 is load-bearing. `status` is undefined for a goal with no row in
@@ -181,26 +217,45 @@ const GoalCard: React.FC<GoalCardProps> = ({
   // is ever missing here — it shouldn't be, since every caller that reports
   // `planned > 0` also has a real plan row to read `status` off, but the type
   // is optional and a silent wrong pace is worse than the honest unplanned copy.
+  //
+  // Step 4 used to be a bare "N MONTHS TO GO" — "does not provide much
+  // clarity" (Sep-14-26): the reader has to do the arithmetic themselves to
+  // know what month that actually is, and the text WIDTH grows with distance
+  // (already truncated once on a narrow phone, see below). `projectedMonthLabel`
+  // turns the count into the calendar month it lands on — flat width
+  // regardless of how far away, no mental math needed.
+  // `discontinued` is its own state, checked BEFORE the usual ladder — a
+  // discontinued goal has nothing planned (its allocation was cleared the
+  // moment it stopped), so it would otherwise fall into "NOTHING PLANNED"
+  // and read as a goal that just hasn't been set up yet, not one the user
+  // deliberately stopped.
   const ribbonText = achieved
     ? 'GOAL COMPLETE'
-    : planned0
-      ? (isOneTime ? `${pct}% SAVED` : RIBBON_UNPLANNED)
-      : isOneTime && monthsLeft && monthsLeft > 0
-        ? `${monthsLeft} MONTH${monthsLeft === 1 ? '' : 'S'} TO GO`
-        : status ? RIBBON_COPY[status] : RIBBON_UNPLANNED;
+    : discontinued
+      ? 'DISCONTINUED'
+      : planned0
+        ? (isOneTime ? `${pct}% SAVED` : RIBBON_UNPLANNED)
+        : isOneTime && monthsLeft && monthsLeft > 0
+          ? `DONE BY ${projectedMonthLabel(monthsLeft, { short: true }).toUpperCase()}`
+          : status ? RIBBON_COPY[status] : RIBBON_UNPLANNED;
 
-  /** The state's colour. The band wears a TINT of it, not the solid. */
+  /** The state's colour. The band wears a TINT of it, not the solid. Muted
+   *  for `discontinued` — success-green is reserved for a real finish. */
   const ribbonHue = achieved
     ? theme.success
-    : planned0
-      ? (isOneTime ? color : theme.textMuted)
-      : status === 'behind' ? theme.warning : color;
+    : discontinued
+      ? theme.textMuted
+      : planned0
+        ? (isOneTime ? color : theme.textMuted)
+        : status === 'behind' ? theme.warning : color;
 
   // A translucent band has no colour of its own to measure against, so the ink
   // is measured on what it will actually COMPOSITE to: the goal wash over the
   // card, then the band's tint over that. Measuring on the raw hue instead
-  // would be measuring a colour that never appears on screen.
-  const washedCard = mix(color, theme.darkMode ? 0.22 : 0.16, theme.card);
+  // would be measuring a colour that never appears on screen — `accentColor`,
+  // not `color`, since that's what the wash gradient below actually paints
+  // with once a card goes inactive.
+  const washedCard = mix(accentColor, theme.darkMode ? 0.22 : 0.16, theme.card);
   const ribbonSurface = mix(ribbonHue, RIBBON_TINT, washedCard);
   const ribbonInk = readableOn(ribbonSurface, ribbonHue, 4.5);
   // The arc is the GOAL's own colour — same hue as the wash and the medallion
@@ -210,7 +265,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
   // colours pass as-is, but a few (teal, sky, amber, pink) sit at ~3.1–3.2:1 on
   // the LIGHT track unboosted and need a touch darkened to hold the floor —
   // dark mode's track already clears it for every one.
-  const ringInk = readableOn(theme.divider, color, 3);
+  const ringInk = readableOn(theme.divider, accentColor, 3);
 
   // A goal with NOTHING set up yet — no target, no plan, nothing ever saved —
   // used to print "₹0" three times over (the pill, both footer cells). Every
@@ -255,15 +310,17 @@ const GoalCard: React.FC<GoalCardProps> = ({
         styles.card,
         {
           backgroundColor: theme.card,
-          borderColor: withAlpha(color, 0.25),
+          borderColor: withAlpha(accentColor, 0.25),
           opacity: pressed && onPress ? 0.92 : 1,
         },
       ]}
     >
       {/* A wash of the goal's own colour, strongest under the ribbon — the tile
-          is tinted by the goal rather than decorated with it. */}
+          is tinted by the goal rather than decorated with it. Uses
+          `accentColor`, not the raw `color` — see its own comment: an
+          inactive card washes in NEUTRAL grey instead of the goal's hue. */}
       <LinearGradient
-        colors={[withAlpha(color, theme.darkMode ? 0.22 : 0.16), withAlpha(color, 0.02)]}
+        colors={[withAlpha(accentColor, theme.darkMode ? 0.22 : 0.16), withAlpha(accentColor, 0.02)]}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
@@ -341,11 +398,11 @@ const GoalCard: React.FC<GoalCardProps> = ({
                   circle. Alphas are deliberately low: at tile size this sits
                   behind a 26pt emoji and only has to lift it off the card. */}
               <RadialGradient id={glowId} cx="50%" cy="50%" r="38%">
-                <Stop offset="0" stopColor={color} stopOpacity={theme.darkMode ? 0.4 : 0.3} />
-                <Stop offset="0.55" stopColor={color} stopOpacity={theme.darkMode ? 0.16 : 0.11} />
+                <Stop offset="0" stopColor={accentColor} stopOpacity={theme.darkMode ? 0.4 : 0.3} />
+                <Stop offset="0.55" stopColor={accentColor} stopOpacity={theme.darkMode ? 0.16 : 0.11} />
                 {/* Fully transparent at the end — any alpha left here draws a
                     visible rim and the fade stops reading as one. */}
-                <Stop offset="1" stopColor={color} stopOpacity={0} />
+                <Stop offset="1" stopColor={accentColor} stopOpacity={0} />
               </RadialGradient>
             </Defs>
             <Circle cx={MEDALLION / 2} cy={MEDALLION / 2} r={MEDALLION / 2} fill={`url(#${glowId})`} />
@@ -354,7 +411,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
         </View>
       </View>
 
-      <View style={[styles.pill, { backgroundColor: theme.card, borderColor: withAlpha(color, 0.3) }]}>
+      <View style={[styles.pill, { backgroundColor: theme.card, borderColor: withAlpha(accentColor, 0.3) }]}>
         <Text style={[styles.pillLabel, { color: theme.textMuted }]} allowFontScaling={false}>
           {headlineLabel}
         </Text>
@@ -383,20 +440,46 @@ const GoalCard: React.FC<GoalCardProps> = ({
       </View>
 
       {/* One centred action. Whether the goal also fills itself is said in the
-          sheet this opens, not crowded in beside the button. */}
-      {onAddMoney ? (
+          sheet this opens, not crowded in beside the button. A discontinued
+          goal gets a DIFFERENT verb entirely — funding it doesn't apply (its
+          auto-match already stopped, and the card that got it here has no
+          plan to add toward), only bringing it back does. Primary-coloured,
+          not muted like the ribbon: resuming is a re-engagement action, not
+          a passive fact about the goal's state. */}
+      {discontinued && onResume ? (
         <Pressable
-          onPress={onAddMoney}
+          onPress={onResume}
           hitSlop={6}
           accessibilityRole="button"
-          accessibilityLabel={`Update how much you've put into ${name}`}
+          accessibilityLabel={`Resume ${name} — bring it back into active planning`}
           style={({ pressed }) => [
             styles.addBtn,
             { borderColor: withAlpha(theme.primary, 0.45), opacity: pressed ? 0.6 : 1 },
           ]}
         >
-          <Ionicons name="add" size={13} color={theme.primary} />
-          <Text style={[styles.addTxt, { color: theme.primary }]}>{ACTION_LABEL}</Text>
+          <Ionicons name="play" size={13} color={theme.primary} />
+          <Text style={[styles.addTxt, { color: theme.primary }]}>Resume</Text>
+        </Pressable>
+      ) : onAddMoney ? (
+        <Pressable
+          onPress={onAddMoney}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={
+            achieved ? `Add more to ${name}, already at its target` : `Update how much you've put into ${name}`
+          }
+          style={({ pressed }) => [
+            styles.addBtn,
+            {
+              borderColor: withAlpha(achieved ? theme.textMuted : theme.primary, achieved ? 0.35 : 0.45),
+              opacity: pressed ? 0.6 : 1,
+            },
+          ]}
+        >
+          <Ionicons name="add" size={13} color={achieved ? theme.textMuted : theme.primary} />
+          <Text style={[styles.addTxt, { color: achieved ? theme.textMuted : theme.primary }]}>
+            {achieved ? ACTION_LABEL_DONE : ACTION_LABEL}
+          </Text>
         </Pressable>
       ) : null}
     </Pressable>

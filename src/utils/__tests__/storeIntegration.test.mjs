@@ -2511,11 +2511,35 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('…and a memo (someone else paid) never funds a goal',
     st().getGoalFunded(gymId) === 2200, `${st().getGoalFunded(gymId)}`);
 
-  // Migrating a rule must not leave the old field behind for the matcher to
-  // read a second time.
+  // A goal's funding rule is FIXED AT CREATION (Sep-13-26). Progress IS the sum
+  // of what the rule matched, so editing it later silently rewrites what the goal
+  // has always been worth — and it is what makes re-deriving a closed month safe
+  // for one-time goals (see getGoalLifetimeSaved). To fund a goal differently you
+  // create a new one.
+  const beforeEdit = st().getGoalFunded(gymId);
+  const originalCats = [...st().goals.find((g) => g.id === gymId).autoRule.categoryIds];
+  // A rule edit is ADD-ONLY: the patch drops the original categories and adds a
+  // parent. The originals must survive it — they are what the goal's progress
+  // was measured with — and the addition must not reach back over spend that
+  // already happened.
   st().updateGoal(gymId, { autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] } });
-  check('replacing a rule replaces it — the old sub-category stops counting',
-    st().getGoalFunded(gymId) === 5000, `${st().getGoalFunded(gymId)}`);
+  const editedRule = st().goals.find((g) => g.id === gymId).autoRule;
+  check('a rule edit cannot REMOVE what a goal was already measured with',
+    originalCats.every((c) => editedRule.categoryIds.includes(c)),
+    editedRule.categoryIds.join(','));
+  check('…an addition is accepted and stamped with the day it was added',
+    editedRule.parentIds.includes('investments') && !!editedRule.addedAt?.investments);
+  // (The "doesn't backdate" half is proved with explicit dates below, not by
+  //  wall-clock ordering inside one fast test run.)
+  // Everything that is NOT the rule stays editable.
+  st().updateGoal(gymId, { name: 'Gym renamed' });
+  check('…while the rest of the goal is still editable',
+    st().goals.find((g) => g.id === gymId).name === 'Gym renamed');
+  // `autoParentId` must not survive as a second place the matcher reads a parent.
+  st().updateGoal(gymId, { autoParentId: 'travel' });
+  check('…and a legacy autoParentId goes through the same add-only path',
+    st().goals.find((g) => g.id === gymId).autoParentId === undefined
+    && !!st().goals.find((g) => g.id === gymId).autoRule.addedAt?.travel);
   st().deleteGoal(gymId);
 
   // ── the usage selector ───────────────────────────────────────────────────
@@ -2714,8 +2738,11 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   // The congratulation fires on a LIFETIME target crossed, once. Everything
   // here guards the "once": a goal that is already marked, or has no finish
   // line, must never surface again.
+  // Scoped to THIS goal, not a global length: a recurring goal meeting its
+  // monthly commitment is now also reported (see the recurring block below), so
+  // "nothing at all is reported" stopped being what this check meant.
   check('a goal still short of its target is NOT reported',
-    st().getNewlyAchievedGoals().length === 0);
+    !st().getNewlyAchievedGoals().some((a) => a.goalId === efId));
 
   st().updateGoal(efId, { lifetimeTarget: 30000 });   // 36,000 already saved
   check('a goal past its lifetime target is reported as newly achieved',
@@ -2732,8 +2759,15 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   st().markGoalAchieved(efId, { bonusAwarded: true });
   check('marking it records when', !!st().goals.find((g) => g.id === efId).achievedAt);
   check('…and that the bonus was paid', !!st().goals.find((g) => g.id === efId).bonusAwardedAt);
-  check('an achieved goal is not reported again, so the bonus can only pay once',
-    st().getNewlyAchievedGoals().length === 0);
+  // Being MARKED no longer ends the offer — only the user seeing it does (see the
+  // claim-on-dismiss block below). What still holds is that the money is paid
+  // once: the goal comes back flagged as already awarded.
+  check('an achieved-but-uncelebrated goal is still offered…',
+    st().getNewlyAchievedGoals().some((a) => a.goalId === efId));
+  check('…flagged so the bonus can only ever pay once',
+    st().getNewlyAchievedGoals().find((a) => a.goalId === efId).bonusAlreadyAwarded === true);
+  check('…and celebrating it is what ends the offer',
+    (() => { st().markGoalCelebrated(efId); return !st().getNewlyAchievedGoals().some((a) => a.goalId === efId); })());
 
   const firstMark = st().goals.find((g) => g.id === efId).achievedAt;
   st().markGoalAchieved(efId);
@@ -3248,6 +3282,563 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   breach();
   check('a pref that was never written defaults to ON',
     notifCalls().includes('budgetBreach'), notifCalls().join(','));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GOAL AUTO-FUNDING FROM A SUB-CATEGORY (Sep-13-26)
+// -----------------------------------------------------------------------------
+// The user's framing, and the reason this works at all: "we never always be able
+// to categorise transaction correctly, that's why we have this categorisation
+// modal". An SMS gets a row only as far as `food`; the review queue is where the
+// user files it under Restaurants. A goal mapped to Restaurants must then read
+// THAT — the user's own correction — not the parser's coarser guess.
+//
+// Asserted through the real store (not just the pure matcher) because the funding
+// path also filters on countsForSpend / memo / month before it ever matches.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+
+  const diningOut = st().addGoal({
+    name: 'Eat Out Less', emoji: '🍽️', kind: 'saving',
+    autoRule: { parentIds: [], categoryIds: ['restaurants'], merchants: [] },
+  });
+
+  // Exactly what the queue produces: flat `food` from the parser, plus the child
+  // the user picked. Three rows, only ONE of them filed as Restaurants.
+  st().addTransaction({ amount: 1200, type: 'debit', merchant: 'Some Diner',
+    categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants' });
+  st().addTransaction({ amount: 800, type: 'debit', merchant: 'Swiggy',
+    categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Food Delivery' });
+  st().addTransaction({ amount: 500, type: 'debit', merchant: 'Unknown UPI',
+    categoryId: 'food' });
+
+  const funded = st().getGoalPlanUsage?.()?.perGoal?.[diningOut]?.funded
+    ?? st().getGoalTransactions(diningOut).reduce((n, t) => n + t.amount, 0);
+  check('a goal mapped to Restaurants funds from the row the USER filed there',
+    funded === 1200, `got ${funded}`);
+
+  const rows = st().getGoalTransactions(diningOut);
+  check('…and takes only that row — a sibling child must not leak in',
+    rows.length === 1 && rows[0].amount === 1200,
+    rows.map((r) => `${r.merchant}:${r.amount}`).join(','));
+  check('…so an unfiled Food row is left for a parent-level goal to claim',
+    !rows.some((r) => r.merchant === 'Unknown UPI'));
+
+  // The parent rule is unchanged by any of this: it still sweeps everything.
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+  const allFood = st().addGoal({
+    name: 'Food budget', emoji: '🍔', kind: 'saving',
+    autoRule: { parentIds: ['food'], categoryIds: [], merchants: [] },
+  });
+  st().addTransaction({ amount: 1200, type: 'debit', merchant: 'Some Diner',
+    categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants' });
+  st().addTransaction({ amount: 500, type: 'debit', merchant: 'Unknown UPI', categoryId: 'food' });
+  check('a parent-level goal still takes filed AND unfiled rows alike',
+    st().getGoalTransactions(allFood).length === 2);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WIDENING A LIVE GOAL COUNTS FROM THE DAY IT WAS WIDENED (Sep-13-26)
+// -----------------------------------------------------------------------------
+// "yes we can have it like this, specifing to user that these counts now on."
+// A rule edit is ADD-ONLY and each addition is stamped, so a goal's number can
+// only grow FORWARDS from the edit — never restate what it was already worth.
+//
+// Dated explicitly rather than leaning on wall-clock ordering: both the stamp and
+// a transaction added moments earlier land in the same millisecond in a fast run.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+
+  const id = st().addGoal({
+    name: 'Wheels', emoji: '🚗', kind: 'saving', duration: 'oneTime', lifetimeTarget: 200000,
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().updateGoal(id, { autoRule: { parentIds: ['fuel'], categoryIds: [], merchants: [] } });
+  const stamp = st().goals.find((g) => g.id === id).autoRule.addedAt.fuel;
+  check('widening a live goal keeps the original entry and stamps the new one',
+    st().goals.find((g) => g.id === id).autoRule.parentIds.join(',') === 'investments,fuel' && !!stamp);
+
+  // One fuel row BEFORE the widening, one AFTER — same category, same month.
+  const before = new Date(Date.parse(stamp) - 60 * 60 * 1000).toISOString();
+  const after  = new Date(Date.parse(stamp) + 60 * 60 * 1000).toISOString();
+  useStore.setState({
+    transactions: [
+      { id: 'fuel_before', amount: 3000, type: 'debit', merchant: 'HP', categoryId: 'fuel', createdAt: before },
+      { id: 'fuel_after',  amount: 2000, type: 'debit', merchant: 'HP', categoryId: 'fuel', createdAt: after  },
+    ],
+  });
+  check('an added category counts spend from the day it was added…',
+    st().getGoalFunded(id) === 2000, `${st().getGoalFunded(id)}`);
+  check('…and never reaches back over spend from before it',
+    !st().getGoalTransactions(id).some((t) => t.id === 'fuel_before'));
+
+  // The entry the goal was CREATED with has no stamp, so it still applies to
+  // everything — widening must not retro-limit what was already being counted.
+  useStore.setState({
+    transactions: [{
+      id: 'sip_old', amount: 7000, type: 'debit', merchant: 'Groww', categoryId: 'investments',
+      createdAt: before,
+    }],
+  });
+  check('…while the original entry keeps counting from before the edit',
+    st().getGoalFunded(id) === 7000, `${st().getGoalFunded(id)}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ONE-TIME GOALS RE-DERIVE A CLOSED MONTH (Sep-13-26)
+// -----------------------------------------------------------------------------
+// "for a one time goals person might change in previous transactions, should we
+// not consider it?" — yes. A recurring goal's month is a closed unit ("I put
+// ₹5,000 in during August"), but a one-time goal's number is a LIFETIME total
+// against a target, so a category corrected in the review queue afterwards has
+// to move it.
+//
+// Bounded by compaction, which drops transactions individually at
+// `now - RAW_RETENTION_MS` (90 days): only a month still ENTIRELY inside that
+// window can be re-derived, or the rescan silently undercounts a half-compacted
+// month — the very failure the snapshot exists to prevent.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  const mkOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const now = new Date();
+  // Previous month: closed, but well inside the 90-day raw window.
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+  const prevMk = mkOf(prev);
+
+  const seed = (duration) => {
+    reset();
+    useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+    const id = st().addGoal({
+      name: 'New laptop', emoji: '💻', kind: 'saving', duration,
+      lifetimeTarget: 100000,
+      autoRule: { parentIds: [], categoryIds: ['electronics'], merchants: [] },
+    });
+    // The snapshot says the month closed at 0 — nothing was filed under
+    // Electronics at the time.
+    useStore.setState({
+      goalHistory: { [prevMk]: { salary: 0, perGoal: { [id]: { planned: 0, funded: 0 } }, closedAt: prev.toISOString() } },
+      // …but the raw row is still there, and the user has since corrected it in
+      // the review queue: parser said `shopping`, they filed it as Electronics.
+      transactions: [{
+        id: 'late_fix', amount: 42000, type: 'debit', merchant: 'Croma',
+        categoryId: 'shopping', parentCategory: 'Shopping', childCategory: 'Electronics',
+        createdAt: prev.toISOString(), source: 'sms', isReviewed: true,
+      }],
+    });
+    return id;
+  };
+
+  const oneTime = seed('oneTime');
+  check('a ONE-TIME goal re-derives a closed month, so a late correction counts',
+    st().getGoalLifetimeSaved(oneTime) === 42000, `${st().getGoalLifetimeSaved(oneTime)}`);
+
+  const recurring = seed('recurring');
+  check('…while a RECURRING goal keeps its closed month frozen at the snapshot',
+    st().getGoalLifetimeSaved(recurring) === 0, `${st().getGoalLifetimeSaved(recurring)}`);
+
+  // Past the raw window the snapshot is the only record left, so even a one-time
+  // goal must trust it — re-deriving a half-compacted month undercounts.
+  const old = new Date(now.getFullYear(), now.getMonth() - 6, 15);
+  const oldMk = mkOf(old);
+  const stale = seed('oneTime');
+  useStore.setState({
+    goalHistory: { [oldMk]: { salary: 0, perGoal: { [stale]: { planned: 0, funded: 9000 } }, closedAt: old.toISOString() } },
+    transactions: [],
+  });
+  check('…and a month past the raw window still trusts its snapshot',
+    st().getGoalLifetimeSaved(stale) === 9000, `${st().getGoalLifetimeSaved(stale)}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE GOAL CONGRATULATION IS CLAIMED ON DISMISS, NOT ON RENDER (Sep-13-26)
+// -----------------------------------------------------------------------------
+// Reported twice: "not seeing the congratulations banner when goal value
+// reached", then "again when i added from goals screen, did not see the
+// celebration modal". Two different causes (an unfocused screen; another modal
+// animating over it) with ONE shape — showing the modal was what consumed it, so
+// anything that stopped it reaching the screen destroyed it permanently.
+//
+// Split in two: `achievedAt` is a fact about the money (and drives the badge),
+// `celebratedAt` records that the user was actually TOLD, and only that gates the
+// modal. A congratulation that never arrives simply comes back.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+  const id = st().addGoal({
+    name: 'Laptop', emoji: '💻', kind: 'saving', duration: 'oneTime', lifetimeTarget: 50000,
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().addGoalContribution(id, 60000, new Date().toISOString());
+
+  check('a goal past its target is offered for celebration',
+    st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+
+  // What the OLD code did on render. It must NOT consume the celebration.
+  st().markGoalAchieved(id, { bonusAwarded: true });
+  check('marking it achieved does NOT use up the congratulation',
+    st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+  check('…and it reports the bonus as already paid, so a re-show cannot pay twice',
+    st().getNewlyAchievedGoals().find((g) => g.goalId === id).bonusAlreadyAwarded === true);
+  check('…while the goal still counts as achieved for the badge',
+    !!st().goals.find((g) => g.id === id).achievedAt);
+
+  // Only the user actually seeing it ends the offer.
+  st().markGoalCelebrated(id);
+  check('dismissing the modal is what ends it',
+    !st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+  check('…and that is one-directional, so it cannot re-fire later',
+    (() => {
+      st().markGoalCelebrated(id);
+      return st().getNewlyAchievedGoals().length === 0;
+    })());
+
+  // A goal STRANDED by the old behaviour — achieved and paid, never celebrated —
+  // heals itself rather than staying silent forever.
+  useStore.setState({
+    goals: st().goals.map((g) => (g.id === id ? { ...g, celebratedAt: null } : g)),
+  });
+  check('a goal stranded by the old mark-on-render behaviour is offered again',
+    st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A RECURRING GOAL CELEBRATES ITS MONTHLY AMOUNT (Sep-14-26)
+// -----------------------------------------------------------------------------
+// "i still dont see the congrats goal banner" — reported four times, and none of
+// the modal-plumbing fixes could ever have helped, because the goal was
+// RECURRING. `GoalFormScreen` force-clears `lifetimeTarget` on a recurring goal,
+// and `getNewlyAchievedGoals` required `lifetimeTarget > 0`: there was no finish
+// line to cross, so the banner was unreachable BY CONSTRUCTION.
+//
+// A recurring goal's finish line is THIS MONTH's committed amount
+// (`goalPlan.allocations[goalId]`), celebrated once a month.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  const thisMk = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+
+  const id = st().addGoal({
+    name: 'Rainy day', emoji: '☔', kind: 'saving', duration: 'recurring',
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  check('a recurring goal genuinely has no lifetime target',
+    !st().goals.find((g) => g.id === id).lifetimeTarget);
+
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 5000 } });
+  check('…so before this it could never be congratulated at all',
+    !!st().goalPlan && st().getNewlyAchievedGoals().length === 0);
+
+  st().addGoalContribution(id, 5000, new Date().toISOString());
+  const hit = st().getNewlyAchievedGoals().find((g) => g.goalId === id);
+  check('meeting the month\'s committed amount IS its finish line',
+    !!hit && hit.kind === 'monthly' && hit.target === 5000, JSON.stringify(hit));
+  // Recurring goals genuinely PAY now (Sep-14-26 reward rework) — a fresh
+  // monthly completion is eligible, same as a lifetime one freshly reached.
+  check('…and a fresh monthly completion is eligible for its own bonus',
+    hit.bonusAlreadyAwarded === false);
+
+  st().markGoalMonthlyBonusAwarded(id, hit.monthKey);
+  check('…paying it stamps bonusAwardedMonth for THIS month',
+    st().goals.find((g) => g.id === id).bonusAwardedMonth === hit.monthKey);
+  check('…so re-showing the SAME month never re-pays it',
+    st().getNewlyAchievedGoals().find((g) => g.goalId === id).bonusAlreadyAwarded === true);
+  check('…while the goal still counts as met for the badge/modal',
+    st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+
+  st().markGoalCelebrated(id, { monthKey: hit.monthKey });
+  check('…celebrated once for the month, not once per render',
+    !st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+  check('…and the stamp records WHICH month, so next month is a fresh one',
+    st().goals.find((g) => g.id === id).celebratedMonth === thisMk);
+
+  // Next month's commitment is its own finish line.
+  useStore.setState({ goals: st().goals.map((g) => (g.id === id ? { ...g, celebratedMonth: '2000-01' } : g)) });
+  check('a new month can be celebrated again',
+    st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+  // A goal STRANDED the same way `achievedAt`/`bonusAwardedAt` can be (paid,
+  // never seen) still must not re-pay — `bonusAwardedMonth` is untouched by
+  // faking `celebratedMonth` alone, so the re-offered congratulation still
+  // reports itself as already paid for THIS real month.
+  check('…but a re-offered (unseen) congratulation for the SAME real month still reports itself paid',
+    st().getNewlyAchievedGoals().find((g) => g.goalId === id).bonusAlreadyAwarded === true);
+  // A genuinely NEW month resets eligibility on both counts.
+  useStore.setState({ goals: st().goals.map((g) => (g.id === id ? { ...g, bonusAwardedMonth: '2000-01' } : g)) });
+  check('…while a genuinely new month is eligible for its own bonus again',
+    st().getNewlyAchievedGoals().find((g) => g.goalId === id).bonusAlreadyAwarded === false);
+
+  // Under the commitment it is not done, and no plan means no commitment at all.
+  useStore.setState({ goalPlan: { ...st().goalPlan, allocations: { [id]: 9000 } } });
+  check('short of the month\'s amount is not a finish line',
+    !st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+  useStore.setState({ goalPlan: { ...st().goalPlan, allocations: { [id]: 0 } } });
+  check('…and a goal with no monthly amount has nothing to reach',
+    !st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RAISING A RECURRING GOAL'S MONTHLY AMOUNT RESETS THIS MONTH'S CELEBRATION
+// (Sep-14-26)
+// -----------------------------------------------------------------------------
+// A recurring goal's finish line is `goalPlan.allocations[goalId]` — raise it
+// after the OLD amount was already celebrated this month and the stamp would
+// keep blocking the modal even though the goal is no longer actually funded
+// up to its (now higher) commitment. Lowering it needs no reset: the goal
+// already cleared a bar at least as high as the new one.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  const thisMk = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+
+  const id = st().addGoal({
+    name: 'Rainy day', emoji: '☔', kind: 'saving', duration: 'recurring',
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 5000 } });
+  st().markGoalCelebrated(id, { monthKey: thisMk });
+  check('a celebrated month starts out blocking the modal',
+    !st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+
+  st().updateGoalAllocation(id, 8000);
+  check('raising the monthly figure clears this month\'s celebration…',
+    st().goals.find((g) => g.id === id).celebratedMonth == null);
+  check('…so a goal short of the NEW amount is correctly not-yet-done',
+    !st().getNewlyAchievedGoals().some((g) => g.goalId === id));
+
+  st().markGoalCelebrated(id, { monthKey: thisMk });
+  st().updateGoalAllocation(id, 3000);
+  check('lowering it does NOT reset the celebration — already cleared a higher bar',
+    st().goals.find((g) => g.id === id).celebratedMonth === thisMk);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ALLOCATION BAR'S OWN COMMIT PATH GETS THE SAME RESET (Sep-14-26)
+// -----------------------------------------------------------------------------
+// The stepper/drag bar on GoalsScreen never calls `updateGoalAllocation` — it
+// edits a LOCAL draft and commits the whole allocations map in one
+// `setGoalPlan` on Save. The celebratedMonth reset added there for the form's
+// path does nothing here unless `setGoalPlan` does its own version.
+//
+// One-time goals need no special case: their completion reads lifetime
+// contributions, never `goalPlan.allocations`, so `celebratedMonth` is never
+// set on one and this whole reset is a no-op for them by construction.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  const thisMk = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+
+  const id = st().addGoal({
+    name: 'Rainy day', emoji: '☔', kind: 'saving', duration: 'recurring',
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  const oneTimeId = st().addGoal({
+    name: 'Laptop', emoji: '💻', kind: 'saving', duration: 'oneTime', lifetimeTarget: 50000,
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 5000, [oneTimeId]: 2000 } });
+  st().markGoalCelebrated(id, { monthKey: thisMk });
+
+  // The bar raises it in ONE commit (a whole new allocations map), not the
+  // single-goal call `updateGoalAllocation` gets.
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 9000, [oneTimeId]: 2000 } });
+  check('the bar\'s own commit clears a stale celebration on a raise',
+    st().goals.find((g) => g.id === id).celebratedMonth == null);
+
+  st().markGoalCelebrated(id, { monthKey: thisMk });
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 4000, [oneTimeId]: 2000 } });
+  check('…but not on a lower amount — already cleared a higher bar',
+    st().goals.find((g) => g.id === id).celebratedMonth === thisMk);
+
+  check('a one-time goal is untouched by any of this — it has no celebratedMonth to begin with',
+    st().goals.find((g) => g.id === oneTimeId).celebratedMonth == null);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A GOAL'S MONTHLY FIGURE CAN'T READ LESS THAN MONEY ALREADY IN — OR MOVE AT
+// ALL ONCE COMPLETE (Sep-14-26)
+// -----------------------------------------------------------------------------
+// "am able to edit the monthly goal when goal achieved, it should be not
+// allowed to lower its value below whats already contributed or if already
+// completed". Enforced in the STORE (not just the screens that call it) —
+// the same reason `autoRule` is add-only enforced in `updateGoal` rather than
+// only in the form: a caller that skips a screen's validation must still
+// land on a valid number, from EITHER write path onto this data
+// (`updateGoalAllocation`, the form's single-goal call, and `setGoalPlan`,
+// the bar's whole-draft commit).
+//
+// Revised TWICE the same day. First: a completed ONE-TIME goal was PINNED
+// outright (no direction could move it) — reverted after "only allow to
+// increase value for goal as in form" and a report that a full lock, applied
+// only via a post-commit correction, was flaky in the BAR's live drag
+// ("sometimes it comes back sometimes it's able to decrease": nothing
+// floored the gesture WHILE it was live). Second: replaced with a RATCHET
+// (floor = its own current value, raise-only) — reverted AGAIN after "what
+// we can have is one time confirmation... or any better?": `rolloverGoalPlanIfNeeded`
+// carries a goal's figure forward verbatim, so that ratchet's floor became
+// PERMANENT across every future month, not just the one it was raised in,
+// with no way back short of deleting the goal.
+//
+// Landed on ONE rule for every goal, achieved or not: the floor is simply
+// what's actually been funded THIS month. That resets to 0 every new month
+// on its own, so the permanence problem disappears with no new confirmation
+// UI needed — and there was never an integrity reason for a stricter rule on
+// an achieved goal anyway: `achievedAt` is fully decoupled from this number
+// already (editing it can't un-achieve or fake-achieve a goal).
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+
+  const id = st().addGoal({
+    name: 'Rainy day', emoji: '☔', kind: 'saving', duration: 'recurring',
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 5000 } });
+  st().addGoalContribution(id, 4000, new Date().toISOString());
+
+  // updateGoalAllocation — the form's write path
+  st().updateGoalAllocation(id, 1000);
+  check('updateGoalAllocation refuses to read below what\'s already funded this month',
+    st().goalPlan.allocations[id] === 4000, String(st().goalPlan.allocations[id]));
+  st().updateGoalAllocation(id, 9000);
+  check('…but rising above it is unaffected',
+    st().goalPlan.allocations[id] === 9000);
+
+  // setGoalPlan — the bar's whole-draft commit path
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 500 } });
+  check('setGoalPlan enforces the same floor on a wholesale commit',
+    st().goalPlan.allocations[id] === 4000, String(st().goalPlan.allocations[id]));
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 7000 } });
+  check('…and does not interfere with a raise',
+    st().goalPlan.allocations[id] === 7000);
+
+  // A completed ONE-TIME goal gets the SAME rule — no special case, no
+  // ratchet on its own value, just what's funded this month (0 here, since
+  // nothing has been contributed toward it yet in THIS month).
+  const oneTimeId = st().addGoal({
+    name: 'Laptop', emoji: '💻', kind: 'saving', duration: 'oneTime', lifetimeTarget: 50000,
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 7000, [oneTimeId]: 3000 } });
+  st().markGoalAchieved(oneTimeId, { bonusAwarded: true });
+
+  st().updateGoalAllocation(oneTimeId, 0);
+  check('a completed one-time goal CAN be lowered — no ratchet on its own value',
+    (st().goalPlan.allocations[oneTimeId] ?? 0) === 0, String(st().goalPlan.allocations[oneTimeId]));
+  st().updateGoalAllocation(oneTimeId, 9000);
+  check('…and can still be raised, same as any goal',
+    (st().goalPlan.allocations[oneTimeId] ?? 0) === 9000, String(st().goalPlan.allocations[oneTimeId]));
+
+  // Fund it for real THIS month — now even a completed goal has an actual
+  // floor, same as any goal would from real money moved.
+  st().addGoalContribution(oneTimeId, 4000, new Date().toISOString());
+  st().updateGoalAllocation(oneTimeId, 1000);
+  check('once real money has moved this month, THAT is the floor — same as any goal',
+    (st().goalPlan.allocations[oneTimeId] ?? 0) === 4000, String(st().goalPlan.allocations[oneTimeId]));
+
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 7000, [oneTimeId]: 500 } });
+  check('setGoalPlan enforces the identical floor on a wholesale commit',
+    (st().goalPlan.allocations[oneTimeId] ?? 0) === 4000, String(st().goalPlan.allocations[oneTimeId]));
+
+  // The permanence bug this whole revision fixes: rolling into a NEW month
+  // must not carry the old figure forward as a floor — the point of dropping
+  // the ratchet was that a completed goal's number is free to move in either
+  // direction once the month itself is fresh, with zero funded so far.
+  useStore.setState({
+    goalPlan: { monthKey: '2099-01', salary: 100000, allocations: { [oneTimeId]: 9000 }, createdAt: new Date().toISOString(), lastEditedAt: new Date().toISOString() },
+  });
+  st().updateGoalAllocation(oneTimeId, 0);
+  check('a NEW month starts with NO carried-over floor for a completed goal — the permanence bug is gone',
+    (st().goalPlan.allocations[oneTimeId] ?? 0) === 0, String(st().goalPlan.allocations[oneTimeId]));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISCONTINUING A RECURRING GOAL (Sep-14-26)
+// -----------------------------------------------------------------------------
+// "what if a recurring monthly goal user now wants to discontinue, we don't
+// give option for that". Unlike `deleteGoal`, this keeps the goal and its
+// whole history — it just stops it from active planning: the current
+// month's allocation is cleared, and AUTOMATIC matching stops (a manual
+// top-up, a separate explicit path, is unaffected). `resumeGoal` undoes it.
+//
+// Scoped to RECURRING goals only — a one-time goal has `achievedAt` for
+// "genuinely done," and giving up on one before that is what Delete is
+// already for.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+
+  const id = st().addGoal({
+    name: 'SIP', emoji: '📈', kind: 'investment', duration: 'recurring',
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().setGoalPlan({ salary: 100000, allocations: { [id]: 5000 } });
+  check('(setup) the goal starts with an allocation this month',
+    st().goalPlan.allocations[id] === 5000);
+
+  st().discontinueGoal(id);
+  check('discontinuing clears its CURRENT allocation — no longer competing for room',
+    !(id in st().goalPlan.allocations));
+  check('…and stamps discontinuedAt',
+    !!st().goals.find((g) => g.id === id).discontinuedAt);
+
+  st().addTransaction({ amount: 4000, type: 'debit', categoryId: 'investments', merchant: 'Groww SIP' });
+  check('automatic matching STOPS once discontinued — real spend no longer funds it',
+    st().getGoalLifetimeSaved(id) === 0);
+
+  const before = st().goalContributions.length;
+  st().addGoalContribution(id, 2000, new Date().toISOString());
+  check('a MANUAL top-up still works — an explicit action always wins over an implicit one',
+    st().goalContributions.length === before + 1 && st().getGoalLifetimeSaved(id) === 2000);
+
+  st().resumeGoal(id);
+  check('resuming clears discontinuedAt — the goal is active again',
+    !st().goals.find((g) => g.id === id).discontinuedAt);
+
+  st().addTransaction({ amount: 1000, type: 'debit', categoryId: 'investments', merchant: 'Groww SIP' });
+  // `discontinuedAt` gates LIVE, off the goal's CURRENT state — not a
+  // recorded window excluding transactions from the paused period. Once
+  // resumed, the EARLIER 4000 transaction (which happened while paused)
+  // counts again too, same as the new 1000 one: 2000 manual + 4000 + 1000
+  // auto. The alternative — permanently excluding anything that happened
+  // during a pause — would need tracking discontinued PERIODS, not just a
+  // timestamp, for a distinction a user would find confusing to explain
+  // ("why doesn't Tuesday's SIP count just because I re-enabled this
+  // Wednesday?").
+  check('…and automatic matching resumes too, INCLUDING spend from the paused window',
+    st().getGoalLifetimeSaved(id) === 7000, String(st().getGoalLifetimeSaved(id)));
+
+  // A double-discontinue, or discontinuing a one-time goal, is a safe no-op.
+  const oneTimeId = st().addGoal({
+    name: 'Laptop', emoji: '💻', kind: 'saving', duration: 'oneTime', lifetimeTarget: 50000,
+    autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
+  });
+  st().discontinueGoal(oneTimeId);
+  check('discontinuing a ONE-TIME goal is a no-op — that duration never gets this field',
+    !st().goals.find((g) => g.id === oneTimeId).discontinuedAt);
+
+  st().discontinueGoal(id);
+  st().discontinueGoal(id);
+  check('discontinuing an already-discontinued goal does not error or double-stamp',
+    !!st().goals.find((g) => g.id === id).discontinuedAt);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

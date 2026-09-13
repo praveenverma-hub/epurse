@@ -35,6 +35,21 @@ export interface MultiplierTier {
   label:      string;
 }
 
+// ─── Goal reward band definition ─────────────────────────────────────────────
+
+export interface GoalRewardBand {
+  /** Inclusive upper bound on the goal's amount (lifetime target, or this
+   *  month's committed figure for a recurring goal). Ascending, first match
+   *  wins — mirrors `MultiplierTier`'s own convention. */
+  maxAmount:    number;
+  /** Short label for debugging/telemetry — not shown to the user. */
+  label:        string;
+  oneTimeRp:    number;
+  oneTimeEpc:   number;
+  recurringRp:  number;
+  recurringEpc: number;
+}
+
 // ─── Inventory item static definition ────────────────────────────────────────
 
 export interface ShopItemConfig {
@@ -80,14 +95,41 @@ export const REWARD_CONFIG = {
   SAVINGS_EPC_BASE: 5,
 
   // Goal completion ─────────────────────────────────────────────────────────
-  // A lifetime goal is months of work, so it pays like months of work: 25x a
-  // review, on the same multiplier ladder as everything else. It can fire at
-  // most once per goal (`bonusAwardedAt` on the goal), which is what keeps a
-  // big number from being farmable by editing the target down and up.
-  /** Base RP for reaching a goal's lifetime target (before multiplier). */
-  GOAL_ACHIEVED_RP_BASE:  250,
-  /** Base EPC for reaching a goal's lifetime target (before multiplier). */
-  GOAL_ACHIEVED_EPC_BASE: 25,
+  // Sep-14-26 rework: the payout used to be one FLAT number regardless of the
+  // goal's own size, and a recurring goal never paid at all (congratulation
+  // only) — the exact split the user flagged: a ₹500 goal and a ₹5,00,000
+  // goal shouldn't pay the same, and "keep saving every month" is exactly the
+  // habit this economy exists to reward, not exempt.
+  //
+  // Bands, not a raw percentage of the amount. A straight proportion would
+  // mean a big enough goal pays 50-100x a small one — instant top-level
+  // unlock the moment one large goal lands, which is the "buys everything"
+  // risk. Four fixed bands classify EITHER duration by the same amount
+  // thresholds (a one-time goal's lifetime target, or a recurring goal's
+  // committed amount for THIS month) — that's the "common determination
+  // factor" — but each duration has its OWN payout scale per band: one-time
+  // pays more per band because it's a single, permanent achievement;
+  // recurring pays less per band because it can repeat every month it's met.
+  // Ascending, first match wins (mirrors MULTIPLIER_TIERS' own convention).
+  GOAL_REWARD_BANDS: [
+    { maxAmount: 5_000,   label: 'Small',      oneTimeRp: 80,  oneTimeEpc: 8,  recurringRp: 12, recurringEpc: 1 },
+    { maxAmount: 25_000,  label: 'Medium',     oneTimeRp: 160, oneTimeEpc: 16, recurringRp: 20, recurringEpc: 2 },
+    { maxAmount: 100_000, label: 'Large',      oneTimeRp: 260, oneTimeEpc: 26, recurringRp: 30, recurringEpc: 3 },
+    { maxAmount: Infinity, label: 'Very Large', oneTimeRp: 350, oneTimeEpc: 35, recurringRp: 40, recurringEpc: 4 },
+  ] as readonly GoalRewardBand[],
+
+  // The actual backstop against "too much too early": a hard ceiling on TOTAL
+  // goal-derived RP/EPC per calendar month, across every goal (one-time AND
+  // recurring combined) — mirrors `DAILY_REVIEW_CAP`'s shape at a monthly
+  // grain, applied to goals instead of reviews. Set comfortably above a
+  // single Very-Large one-time completion at the top streak multiplier
+  // (350 × 1.5 = 525 RP, 35 × 1.5 ≈ 53 EPC) so one big legitimate completion
+  // is never clipped — it only bites once SEVERAL goals land in the same
+  // month, which is the actual abuse shape (create many goals, fund them all
+  // at once). At `MAX_ACTIVE_GOALS` (8) all completing Very-Large in one
+  // month that would otherwise be ~4,200 RP; the ceiling bounds it to this.
+  GOAL_REWARD_MONTHLY_CAP_RP:  1000,
+  GOAL_REWARD_MONTHLY_CAP_EPC: 100,
 
   // Level math ──────────────────────────────────────────────────────────────
   /** RP required to advance one level. Level = floor(RP / RP_PER_LEVEL) + 1. */
@@ -176,7 +218,9 @@ export const REWARD_COPY = {
   RP_BULLET_EARN_LABEL:  'How you earn it',
   RP_BULLET_EARN_VALUE:  '+10 RP per reviewed transaction · scales with your Aware Run multiplier.',
   RP_BULLET_GOAL_LABEL:  'The big one',
-  RP_BULLET_GOAL_VALUE:  '+250 RP when a savings goal reaches its target · once per goal.',
+  RP_BULLET_GOAL_VALUE:
+    'Reaching a goal pays RP scaled to its amount, bigger goals pay more, up to a cap. '
+    + 'A one-time goal pays once; a recurring goal pays every month it stays on target.',
   RP_BULLET_LEVEL_LABEL: 'Level math',
   RP_BULLET_LEVEL_VALUE: 'Level = floor(Total RP / 1 000) + 1.',
 
@@ -191,7 +235,9 @@ export const REWARD_COPY = {
   EPC_BULLET_SAVE_LABEL:  'Bonus path',
   EPC_BULLET_SAVE_VALUE:  '+5 EPC on Zero-Spending check-in days (no SMS queue means a mindful day).',
   EPC_BULLET_GOAL_LABEL:  'The big one',
-  EPC_BULLET_GOAL_VALUE:  '+25 EPC when a savings goal reaches its target · once per goal.',
+  EPC_BULLET_GOAL_VALUE:
+    'Same scaling as RP — and a monthly cap across all your goals keeps any single '
+    + 'month from paying out too much at once.',
 } as const;
 
 // ─── Derived helpers (pure, side-effect free) ────────────────────────────────
@@ -206,6 +252,44 @@ export const multiplierForStreak = (day: number): number => {
     if (safe >= tier.minDay && safe <= tier.maxDay) return tier.multiplier;
   }
   return 1.0;
+};
+
+/** Which amount band a goal's figure falls into. Ascending, first match wins. */
+export const bandForGoalAmount = (amount: number): GoalRewardBand => {
+  const safe = Math.max(0, amount || 0);
+  for (const band of REWARD_CONFIG.GOAL_REWARD_BANDS) {
+    if (safe <= band.maxAmount) return band;
+  }
+  // Unreachable — the top band's maxAmount is Infinity — but keeps this
+  // total for a type checker that can't see that.
+  return REWARD_CONFIG.GOAL_REWARD_BANDS[REWARD_CONFIG.GOAL_REWARD_BANDS.length - 1];
+};
+
+export interface GoalRewardQuote {
+  rpAwarded:  number;
+  epcAwarded: number;
+  band:       string;
+}
+
+/**
+ * THE single source of truth for what a goal completion is worth, before the
+ * monthly reward ceiling (a stateful, cross-goal concern — see
+ * `useRewardStore.awardGoalBonus`) gets a chance to clamp it. Both the
+ * one-time and the recurring payout path call this SAME function; the only
+ * per-duration difference is which band column it reads.
+ */
+export const computeGoalReward = (
+  { durationKind, amount, streakDay }: { durationKind: 'oneTime' | 'recurring'; amount: number; streakDay: number },
+): GoalRewardQuote => {
+  const band = bandForGoalAmount(amount);
+  const multiplier = multiplierForStreak(streakDay);
+  const baseRp  = durationKind === 'oneTime' ? band.oneTimeRp  : band.recurringRp;
+  const baseEpc = durationKind === 'oneTime' ? band.oneTimeEpc : band.recurringEpc;
+  return {
+    rpAwarded:  Math.round(baseRp * multiplier),
+    epcAwarded: Math.max(1, Math.round(baseEpc * multiplier)),
+    band:       band.label,
+  };
 };
 
 /**

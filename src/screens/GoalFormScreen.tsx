@@ -93,9 +93,11 @@ const GoalFormScreen = ({ navigation, route }: any) => {
   const addGoal = useEPurseStore((s: any) => s.addGoal);
   const updateGoal = useEPurseStore((s: any) => s.updateGoal);
   const deleteGoal = useEPurseStore((s: any) => s.deleteGoal);
+  const discontinueGoal = useEPurseStore((s: any) => s.discontinueGoal);
   const goalPlan = useEPurseStore((s: any) => s.goalPlan);
   const budget = useEPurseStore((s: any) => s.budget);
   const updateGoalAllocation = useEPurseStore((s: any) => s.updateGoalAllocation);
+  const getGoalPlanUsage = useEPurseStore((s: any) => s.getGoalPlanUsage);
 
   const existing = useMemo(
     () => (goalId ? goals.find((g: any) => g.id === goalId) : null),
@@ -155,6 +157,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
   });
   const [showError, setShowError] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDiscontinue, setConfirmDiscontinue] = useState(false);
 
   // Auto-funding rule, held as three independent lists because the match is an
   // OR: a parent, a single sub-category, or a merchant keyword each count on
@@ -174,6 +177,36 @@ const GoalFormScreen = ({ navigation, route }: any) => {
   const nameOk = isValidName(name);
   const ruleCount = parentIds.length + categoryIds.length + merchants.length;
 
+  // What's already moved toward this goal THIS month — a lower bound on the
+  // monthly figure, not just an upper one. The commitment is supposed to
+  // describe money that's really moving; it can never be edited below money
+  // that's already moved, achieved or not — that's not a smaller plan, it's
+  // pretending less was put in than actually was.
+  const monthUsage = planIsCurrent ? getGoalPlanUsage() : null;
+  const fundedThisMonth = existing
+    ? (monthUsage?.perGoal?.find((r: any) => r.goalId === existing.id)?.funded ?? 0)
+    : 0;
+  // ONE floor for every goal, achieved or not: money already moved this
+  // month. A completed goal briefly floored at its OWN current committed
+  // figure too (a ratchet: raise-only, never down) — reverted (Sep-14-26):
+  // `rolloverGoalPlanIfNeeded` carries a goal's figure forward verbatim, so
+  // that ratchet's floor became PERMANENT across every future month, not
+  // just the one it was raised in, with no way back short of deleting the
+  // goal. `fundedThisMonth` resets to 0 every new month on its own, so the
+  // permanence problem disappears with no new confirmation UI needed.
+  const monthlyFloor = fundedThisMonth;
+
+  // `updateGoalAllocation` clamps to `freeRoom` with NO feedback — it has to,
+  // since it's also the bar-drag's write path and a drag can't pop a toast
+  // mid-gesture. A typed amount is different: nothing stops someone typing
+  // more than the plan has room for, and the store would then silently save
+  // LESS than what's on screen — "I set it to 12000" but the goal keeps
+  // funding at whatever was left. Block Save instead of lying about it.
+  const requestedMonthly = monthly ? parseAmount(monthly) : 0;
+  const monthlyOverRoom = planIsCurrent && requestedMonthly > freeRoom;
+  const monthlyUnderFunded = planIsCurrent && requestedMonthly < monthlyFloor;
+  const monthlyOk = !monthlyOverRoom && !monthlyUnderFunded;
+
   // One line for the select row — every chosen parent's label, or a chosen
   // child's own label when only that child (not the whole parent) is picked.
   // `numberOfLines` on the row truncates it if it ever runs long; there is no
@@ -182,8 +215,11 @@ const GoalFormScreen = ({ navigation, route }: any) => {
     const names: string[] = [];
     tree.forEach((p) => {
       if (parentIds.includes(p.id)) { names.push(p.label); return; }
-      p.children.forEach((c) => {
-        if (c.legacyId && categoryIds.includes(c.legacyId)) names.push(c.label);
+      p.children.forEach((c: any) => {
+        // Same key the picker writes: a child's own legacy id where it has one,
+        // otherwise its plain `id`. Reading only `legacyId` here left every
+        // sub-category without one selected but INVISIBLE in this summary.
+        if (categoryIds.includes(c.legacyId ?? c.id)) names.push(c.label);
       });
     });
     return names.join(', ');
@@ -210,8 +246,48 @@ const GoalFormScreen = ({ navigation, route }: any) => {
     setMerchantText('');
   };
 
+  // At least one CATEGORY (a parent or a sub-category) — merchants alone are
+  // not enough. A goal exists to track money moving into something, and the
+  // category is what identifies that; without one the goal can only ever be
+  // topped up by hand, which reads as a broken auto-goal rather than a choice.
+  const categoryOk = parentIds.length > 0 || categoryIds.length > 0;
+
+  // A rule edit is ADD-ONLY — see `updateGoal`. Progress IS the sum of what the
+  // rule matched, so an entry already counted with can never be removed (that
+  // would restate what the goal has always been worth), but the goal can be
+  // WIDENED: a new entry is stamped and counts from the day it is added.
+  // These are the entries already in force; the form must not offer to drop one,
+  // because the store would keep it and Save would look like it did nothing.
+  const lockedKeys = useMemo(() => new Set<string>(
+    isEdit
+      ? [
+          ...(existing?.autoRule?.parentIds ?? []),
+          ...(existing?.autoRule?.categoryIds ?? []),
+        ]
+      : [],
+  ), [isEdit, existing]);
+  const lockedMerchants = useMemo(() => new Set<string>(
+    isEdit ? (existing?.autoRule?.merchants ?? []) : [],
+  ), [isEdit, existing]);
+  const isWidening = lockedKeys.size > 0 || lockedMerchants.size > 0;
+
   const handleSave = () => {
     if (!nameOk) { setShowError(true); return; }
+    if (!isWidening && !categoryOk) {
+      setShowError(true);
+      toast.warning('Pick a category', 'Choose what spending funds this goal.');
+      return;
+    }
+    if (!monthlyOk) {
+      setShowError(true);
+      toast.warning(
+        monthlyUnderFunded ? "Can't go below what's already in" : 'Lower the monthly amount',
+        monthlyUnderFunded
+          ? `${formatCurrency(monthlyFloor)} has already gone in this month — this can't read less than that.`
+          : `Only ${formatCurrency(freeRoom)} is free this month across your goals.`,
+      );
+      return;
+    }
     submit(() => {
       const patch = {
         name: name.trim(),
@@ -363,22 +439,44 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               <Text style={[styles.label, { color: theme.textSecondary }]}>
                 Overall target <Text style={{ color: theme.textMuted }}>· optional</Text>
               </Text>
-              <TextInput
-                value={target}
-                onChangeText={(t) => setTarget(sanitizeAmount(t))}
-                placeholder="e.g. 300000"
-                placeholderTextColor={theme.textMuted}
-                keyboardType="decimal-pad"
-                maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
-                style={[
-                  styles.input,
-                  { color: theme.textPrimary, backgroundColor: theme.cardAlt, borderColor: theme.inputBorder },
-                ]}
-              />
+              {/* LOCKED once reached. Raising a target after it's already been
+                  crossed (and celebrated) would rewrite the finish line the
+                  achievement was measured against — the same reasoning that
+                  fixes category+merchant at creation (see lockedKeys below).
+                  A goal that needs a bigger number is a new goal. */}
+              {existing?.achievedAt ? (
+                <View
+                  style={[
+                    styles.input,
+                    styles.targetLocked,
+                    { backgroundColor: theme.cardAlt, borderColor: theme.inputBorder },
+                  ]}
+                >
+                  <Text style={{ color: theme.textPrimary }} numberOfLines={1}>
+                    {formatCurrency(existing.lifetimeTarget)}
+                  </Text>
+                  <Ionicons name="lock-closed" size={13} color={theme.textMuted} />
+                </View>
+              ) : (
+                <TextInput
+                  value={target}
+                  onChangeText={(t) => setTarget(sanitizeAmount(t))}
+                  placeholder="e.g. 300000"
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="decimal-pad"
+                  maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
+                  style={[
+                    styles.input,
+                    { color: theme.textPrimary, backgroundColor: theme.cardAlt, borderColor: theme.inputBorder },
+                  ]}
+                />
+              )}
               <Text style={[styles.hint, { color: theme.textMuted }]}>
-                {monthly
-                  ? "We'll tell you the month you'll finish at this pace — and celebrate when you get there."
-                  : 'Set one, and optionally a monthly amount below to track your pace toward it.'}
+                {existing?.achievedAt
+                  ? `Reached ${new Date(existing.achievedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} — add a new goal to save more.`
+                  : monthly
+                    ? "We'll tell you the month you'll finish at this pace — and celebrate when you get there."
+                    : 'Set one, and optionally a monthly amount below to track your pace toward it.'}
               </Text>
             </>
           ) : null}
@@ -387,6 +485,14 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           <Text style={[styles.label, { color: theme.textSecondary }]}>
             Monthly Contribution <Text style={{ color: theme.textMuted }}>· optional</Text>
           </Text>
+          {/* A completed ONE-TIME goal stays fully EDITABLE — no special
+              case here at all. It briefly had one (full lock, then a
+              raise-only ratchet on its own current value) and both were
+              reverted: a lock refused legitimate extra pace toward a
+              finished goal for no reason, and the ratchet turned permanent
+              across every future month once rollover carried it forward
+              (Sep-14-26). `monthlyFloor` is just money already funded this
+              month, same as any goal — nothing left to branch on here. */}
           {planIsCurrent ? (
             <>
               <TextInput
@@ -398,13 +504,31 @@ const GoalFormScreen = ({ navigation, route }: any) => {
                 maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
                 style={[
                   styles.input,
-                  { color: theme.textPrimary, backgroundColor: theme.cardAlt, borderColor: theme.inputBorder },
+                  {
+                    color: theme.textPrimary,
+                    backgroundColor: theme.cardAlt,
+                    borderColor: showError && !monthlyOk ? theme.danger : theme.inputBorder,
+                  },
                 ]}
               />
-              <Text style={[styles.hint, { color: theme.textMuted }]}>
-                {freeRoom > 0
-                  ? `${formatCurrency(freeRoom)} unallocated this month. Reapplies automatically every month after.`
-                  : "This month is fully allocated — raising this takes room from what's already set."}
+              {/* `freeRoom` IS the ceiling — the store clamps to it with no
+                  feedback (it has to: it's also the split bar's drag path, and
+                  a drag can't pop a toast mid-gesture), so a number typed above
+                  it would be saved as something smaller with nothing on screen
+                  explaining why. `monthlyFloor` is the FLOOR for the same
+                  reason in the other direction — money already moved this
+                  month can't be edited into reading less than it does. Say
+                  both true bounds instead of implying (wrongly — nothing here
+                  reallocates a sibling's share) that going over just borrows
+                  the room back. */}
+              <Text style={[styles.hint, { color: showError && !monthlyOk ? theme.danger : theme.textMuted }]}>
+                {showError && monthlyUnderFunded
+                  ? `${formatCurrency(monthlyFloor)} has already gone in this month — this can't read less than that.`
+                  : showError && monthlyOverRoom
+                    ? `Only ${formatCurrency(freeRoom)} is free this month — lower this or free up room elsewhere.`
+                    : freeRoom > 0
+                      ? `${formatCurrency(freeRoom)} unallocated this month. Reapplies automatically every month after.`
+                      : 'This month is fully allocated — free up room on another goal first.'}
               </Text>
             </>
           ) : (
@@ -489,11 +613,14 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           {/* ── auto-funding rule ──────────────────────────────────────── */}
           {/* The one place the goal namespace READS the spend tree. A goal
               names categories; it never becomes one. */}
-          <Text style={[styles.label, { color: theme.textSecondary }]}>
-            Fund it automatically <Text style={{ color: theme.textMuted }}>· optional</Text>
-          </Text>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Fund it automatically</Text>
           <Text style={[styles.hint, { color: theme.textMuted, marginTop: 0, marginBottom: spacing.sm }]}>
-            Pick the categories or merchants this goal is made of. You can still add money by hand.
+            {isWidening
+              // Says exactly what adding one will and won't do. Without the second
+              // half a user reasonably expects a newly added category to sweep up
+              // the spend already sitting in it.
+              ? 'You can add more categories — they count from today onward, so this goal\'s progress so far stays as it is. What it already tracks can\'t be removed.'
+              : 'Pick the categories this goal is made of. Merchants are optional, and you can still add money by hand.'}
           </Text>
 
           <FormSelectRow
@@ -542,14 +669,24 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               {merchants.map((m) => (
                 <TouchableOpacity
                   key={m}
-                  onPress={() => { hapticLight(); setMerchants(merchants.filter((x) => x !== m)); }}
+                  // Already in force: the chip is a plain label. Leaving it
+                  // tappable would let the UI lie — it would vanish and Save
+                  // would then silently keep it, because the store won't remove
+                  // an entry the goal's progress was measured with. One added in
+                  // THIS session is still freely removable.
+                  disabled={lockedMerchants.has(m)}
+                  onPress={() => {
+                    if (lockedMerchants.has(m)) return;
+                    hapticLight();
+                    setMerchants(merchants.filter((x) => x !== m));
+                  }}
                   activeOpacity={0.75}
                   style={[styles.mChip, { borderColor: theme.inputBorder, backgroundColor: theme.cardAlt }]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${m}`}
+                  accessibilityRole={lockedMerchants.has(m) ? 'text' : 'button'}
+                  accessibilityLabel={lockedMerchants.has(m) ? m : `Remove ${m}`}
                 >
                   <Text style={[styles.mChipTxt, { color: theme.textPrimary }]} numberOfLines={1}>{m}</Text>
-                  <Ionicons name="close" size={12} color={theme.textMuted} />
+                  {lockedMerchants.has(m) ? null : <Ionicons name="close" size={12} color={theme.textMuted} />}
                 </TouchableOpacity>
               ))}
             </View>
@@ -574,8 +711,24 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               being reachable only after scrolling past the whole auto-funding
               list made it feel missing. Icon-only and outlined — the same
               height as its neighbour, a fraction of the width — so the
-              destructive action can never be mistaken for the primary one. */}
+              destructive action can never be mistaken for the primary one.
+              Discontinue (recurring goals only, Sep-14-26 follow-up: "add the
+              pause button... at the footer where delete n save lives") joins
+              it here for the same reason — same shape, same height, muted
+              border instead of danger-red so it never reads as destructive:
+              nothing is lost, unlike Delete right beside it. */}
           <View style={styles.footerRow}>
+            {isEdit && existing?.duration === 'recurring' && !existing?.discontinuedAt ? (
+              <TouchableOpacity
+                style={[styles.deleteBtn, { borderColor: theme.inputBorder }]}
+                onPress={() => { hapticLight(); setConfirmDiscontinue(true); }}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={`Discontinue ${existing.name}`}
+              >
+                <Ionicons name="pause-outline" size={19} color={theme.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
             {isEdit ? (
               <TouchableOpacity
                 style={[styles.deleteBtn, { borderColor: theme.danger + '55' }]}
@@ -622,6 +775,27 @@ const GoalFormScreen = ({ navigation, route }: any) => {
         onClose={() => setConfirmDelete(false)}
       />
 
+      {/* NOT `destructive` — it keeps everything (history, contributions,
+          lifetime saved), unlike Delete right above. It just stops actively
+          planning around this goal from here on; a "Resume" on its card in
+          the Goals screen's "No Longer Active" section undoes it. */}
+      <CenterModal
+        visible={confirmDiscontinue}
+        title="Discontinue this goal?"
+        message="It moves out of active planning and stops auto-funding — everything it's saved so far stays exactly as it is. You can resume it any time."
+        primaryText="Discontinue"
+        secondaryText="Keep it active"
+        onPrimary={() => {
+          setConfirmDiscontinue(false);
+          const stoppedName = existing?.name;
+          if (existing) discontinueGoal(existing.id);
+          navigation.goBack();
+          if (stoppedName) toast.success('Discontinued', `${stoppedName} moved to No Longer Active.`);
+        }}
+        onSecondary={() => setConfirmDiscontinue(false)}
+        onClose={() => setConfirmDiscontinue(false)}
+      />
+
       <GoalCategoryPickerModal
         visible={categoryPickerOpen}
         onClose={() => setCategoryPickerOpen(false)}
@@ -629,6 +803,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
         setParentIds={setParentIds}
         categoryIds={categoryIds}
         setCategoryIds={setCategoryIds}
+        lockedKeys={lockedKeys}
       />
     </View>
   );
@@ -656,6 +831,7 @@ const styles = StyleSheet.create({
   },
   err: { ...typography.tiny, marginTop: spacing.xs },
   hint: { ...typography.tiny, marginTop: spacing.xs, lineHeight: 16 },
+  targetLocked: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 
   kindRow: { flexDirection: 'row', gap: spacing.sm },
   kindChip: {
