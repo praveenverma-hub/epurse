@@ -38,6 +38,7 @@ import {
   type SharedValue,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { shadows } from '../constants/theme';
 
 // ─── Tier config ─────────────────────────────────────────────────────────────
 
@@ -438,7 +439,8 @@ const StreakFlameEmitter: React.FC<Props> = ({ streak, onTap }) => {
 
   return (
     <GestureDetector gesture={tapGesture}>
-      <View style={[styles.container, { borderColor: tierColor + '55' }]}>
+      <View style={styles.container}>
+      <View style={[styles.containerInner, { borderColor: tierColor + '55' }]}>
         <Canvas style={{ width: W, height: H }}>
           {/* Rotating aura (tier 3) — six shards arranged around the flame */}
           {cfg.hasRotatingAura ? (
@@ -514,6 +516,7 @@ const StreakFlameEmitter: React.FC<Props> = ({ streak, onTap }) => {
           </View>
         </View>
       </View>
+      </View>
     </GestureDetector>
   );
 };
@@ -523,18 +526,24 @@ export default StreakFlameEmitter;
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  // Shadow + sizing live here; `overflow: 'hidden'` (needed to clip the
+  // canvas/border to the rounded corner) moved to `containerInner` — on the
+  // SAME view it clipped this shadow to nothing (iOS) / a hard box (Android).
   container: {
     width: W,
     height: H,
     borderRadius: 22,
+    // In-flow widget, so the `card` rung. It shipped at black 0.22/e8 while
+    // `overflow:'hidden'` on this same view was clipping it away — the drama
+    // here is the flame, not a drop shadow under it.
+    ...shadows.card,
+  },
+  containerInner: {
+    flex: 1,
+    borderRadius: 22,
     backgroundColor: '#0B1220',
     borderWidth: 1.5,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
   },
   overlay: {
     position: 'absolute',

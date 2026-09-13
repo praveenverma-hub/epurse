@@ -26,7 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { radius } from '../constants/theme';
+import { radius, shadows } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';
 import {
   ParentCat,
@@ -282,11 +282,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: -6 },
-    elevation: 22,
+    // Bottom sheet -> `sheet` rung. These two shipped at elevation 22 and 18,
+    // the two heaviest in the app (the FAB is 10) — hand-rolled numbers that
+    // had drifted with nothing holding them to the ladder.
+    ...shadows.sheet,
   },
   handleRow: { alignItems: 'center', paddingTop: 12, paddingBottom: 2 },
   handle: {

@@ -29,7 +29,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import type { TextStyle } from 'react-native';
 
@@ -189,11 +189,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.divider,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 16,
-    elevation: 10,
+    // A popover floating over the content -> `elevated`.
+    ...shadows.elevated,
   },
   row: {
     flexDirection: 'row',

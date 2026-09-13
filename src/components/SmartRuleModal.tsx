@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import SheetCloseButton from './SheetCloseButton';
+import { shadows } from '../constants/theme';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -124,11 +125,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
     paddingBottom: 36,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 18,
+    // Bottom sheet -> `sheet` rung. These two shipped at elevation 22 and 18,
+    // the two heaviest in the app (the FAB is 10) — hand-rolled numbers that
+    // had drifted with nothing holding them to the ladder.
+    ...shadows.sheet,
   },
   pillRow: { alignItems: 'center', paddingVertical: 12 },
   pill: {

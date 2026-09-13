@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButtonBase from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   colorDotSelected: {
     borderWidth: 2, borderColor: '#fff',
     transform: [{ scale: 1.18 }],
-    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
+    ...shadows.pop,
   },
   colorCheck:   { color: '#fff', fontWeight: '900', fontSize: 15 },
   membersBox:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
@@ -448,8 +448,7 @@ const styles = StyleSheet.create({
   toggleThumb: {
     width: 20, height: 20, borderRadius: 10,
     backgroundColor: '#fff',
-    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 }, elevation: 2,
+    ...shadows.pop,
   },
   toggleThumbOn: { transform: [{ translateX: 18 }] },
   footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },

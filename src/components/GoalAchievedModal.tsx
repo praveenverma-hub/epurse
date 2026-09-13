@@ -71,7 +71,8 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
       <View style={styles.backdrop}>
         <Confetti active />
 
-        <View style={[styles.sheet, { backgroundColor: theme.card }]}>
+        <View style={styles.sheet}>
+        <View style={[styles.sheetInner, { backgroundColor: theme.card }]}>
           <LinearGradient
             colors={[withAlpha(accent, theme.darkMode ? 0.28 : 0.18), withAlpha(accent, 0.02)]}
             style={styles.wash}
@@ -120,6 +121,7 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
 
           <GradientButton title="Nice" onPress={onClose} style={styles.cta} />
         </View>
+        </View>
 
         <Pressable
           style={styles.dismiss}
@@ -135,14 +137,20 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: '#000000CC', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   dismiss: { ...StyleSheet.absoluteFillObject, zIndex: -1 },
+  // Shadow + sizing live here; `overflow: 'hidden'` (needed to clip `wash`'s
+  // gradient to the rounded corner) moved to `sheetInner` — on the SAME view
+  // it clipped this shadow to nothing (iOS) / a hard box (Android elevation).
   sheet: {
     width: '100%',
     maxWidth: 380,
     borderRadius: radius.xl,
+    ...shadows.elevated,
+  },
+  sheetInner: {
     padding: spacing.xl,
     alignItems: 'center',
+    borderRadius: radius.xl,
     overflow: 'hidden',
-    ...shadows.elevated,
   },
   wash: { ...StyleSheet.absoluteFillObject, height: 190 },
 

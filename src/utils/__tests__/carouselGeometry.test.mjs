@@ -11,8 +11,9 @@
 // testing. `GroupInsightCarousel` shipped with `- GUTTER / 2` in that expression
 // and was ~4pt short for months.
 // =============================================================================
+import { readFileSync } from 'node:fs';
 import {
-  CARD_GAP, NEIGHBOUR_OPACITY, NEIGHBOUR_SCALE, SIDE_PEEK,
+  CARD_GAP, CARD_SHADOW_PAD, NEIGHBOUR_OPACITY, NEIGHBOUR_SCALE, SIDE_PEEK,
   carouselMetrics, fullBleedCardW,
   CARD_BODY_MAX_CHARS, CARD_TITLE_MAX_CHARS_PER_LINE,
   listIndexFor, realIndexFor, wrapTarget,
@@ -152,6 +153,51 @@ console.log('\n── the strip must span the SCREEN, not the page gutter ──
     sliverAt(SIDE_PEEK) >= 8, `${sliverAt(SIDE_PEEK).toFixed(1)}pt`);
   // Don't shrink it "to gain width" without re-checking this: 26 is the floor.
   check('one point below the floor would fail', sliverAt(24) < 8, `${sliverAt(24).toFixed(1)}`);
+}
+
+// ── The shadow has to fit INSIDE the list ───────────────────────────────────
+// A FlatList is a scroll container: it clips content to its own bounds. A card
+// that fills the row therefore has its bottom edge exactly ON that boundary, so
+// its shadow — which reaches `shadowOffset.height + shadowRadius` BELOW the card
+// — is cut off completely. HomeCarousel shipped with no vertical padding at all
+// and its cards read as flat no matter what the shadow token said.
+//
+// This is invisible to every other check in the repo: the styles are correct,
+// tsc is happy, and the elevation-ladder suite passes because the SHADOW is
+// well-formed. Only the container's padding decides whether anyone sees it.
+{
+  const SRC = new URL('../../', import.meta.url).pathname;
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const read = (rel) => strip(readFileSync(`${SRC}${rel}`, 'utf8'));
+
+  const theme = read('constants/theme.js');
+  const cardRung = theme.match(/\bcard:\s*\{([^}]*\{[^}]*\}[^}]*)\}/);
+  const reach = (body) => {
+    const y = parseFloat((body.match(/height:\s*(-?[\d.]+)/) || [])[1] || 0);
+    const r = parseFloat((body.match(/shadowRadius:\s*([\d.]+)/) || [])[1] || 0);
+    return y + r;                                  // how far it spills BELOW
+  };
+  const cardReach = reach(cardRung[1]);
+  check(`CARD_SHADOW_PAD (${CARD_SHADOW_PAD}) covers shadows.card's ${cardReach}pt downward reach`,
+    CARD_SHADOW_PAD >= cardReach, `needs >= ${cardReach}`);
+
+  const gic = read('components/GroupInsightCarousel.tsx');
+  const gicCard = gic.match(/\bcard:\s*\{([\s\S]*?)\n\s{4}\},/);
+  const gicReach = reach(gicCard[1]);
+  check(`CARD_SHADOW_PAD covers GroupInsightCarousel's ${gicReach}pt reach too`,
+    CARD_SHADOW_PAD >= gicReach, `needs >= ${gicReach}`);
+
+  // Both carousels must actually RESERVE it, and must cancel it again with a
+  // negative margin — otherwise the fix silently pushes the page's sections
+  // apart, which is how a spacing regression gets shipped as a shadow fix.
+  for (const rel of ['components/HomeCarousel.tsx', 'components/GroupInsightCarousel.tsx']) {
+    const src = read(rel);
+    const name = rel.split('/').pop();
+    check(`${name}: content container reserves CARD_SHADOW_PAD vertically`,
+      /paddingVertical:\s*CARD_SHADOW_PAD/.test(src));
+    check(`${name}: cancels it with a negative margin, so layout height is unchanged`,
+      /marginVertical:\s*-\(?\s*CARD_SHADOW_PAD/.test(src));
+  }
 }
 
 console.log(`\n${'─'.repeat(34)}`);

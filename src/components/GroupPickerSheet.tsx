@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.sm,
     borderRadius: radius.md,
-    borderWidth: 1, borderStyle: 'dashed', borderColor: colors.divider,
+    borderWidth: 1, borderColor: colors.divider,
     marginTop: spacing.xs,
   },
   newLabel:  { ...typography.body, color: colors.textSecondary, fontWeight: '600' },

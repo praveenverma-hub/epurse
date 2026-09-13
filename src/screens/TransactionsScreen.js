@@ -1001,7 +1001,7 @@ const TransactionsScreen = ({ navigation, route }) => {
               top corners). The floating ✕ must live on the SHELL — inside the sheet
               its negative top offset gets clipped away and it vanishes. */}
           <GestureDetector gesture={panGesture}>
-            <Animated.View style={sheetStyle}>
+            <Animated.View style={[styles.sheetShell, sheetStyle]}>
               <SheetCloseButton onPress={closeSheet} variant="absolute" />
 
               <View style={styles.sheet}>
@@ -1389,9 +1389,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-    ...shadows.card,
+    // NO shadow and NO bottom divider — the SURFACE CHANGE is the separation.
+    // This bar is the white card surface and the list below it is the grey page
+    // background, so the edge is already drawn; a hairline on top of it was a
+    // second separator for a boundary that only needs one. It also read badly in
+    // the one
+    // state where it mattered: the sticky filter ribbon is white too, so when it
+    // slides in the hairline ended up squeezed between two white surfaces as a
+    // hard line across the top of the filter row.
+    //
+    // A shadow here would be wrong for a different reason — nothing ever passes
+    // beneath this bar (it is a SIBLING of the list container), and `shadows.card`
+    // spills 6pt UPWARD, straight into the status-bar inset above.
   },
   titleRow: {
     flexDirection: 'row',
@@ -1419,6 +1428,8 @@ const styles = StyleSheet.create({
   exportPillText: { fontSize: 13, fontWeight: '700' },
 
   // ── Search bar ─────────────────────────────────────────────────────────────
+  // No shadow: this sits INSIDE `headerSection`, which is already on the `card`
+  // rung. Its fill + radius are what separate it, not a second lift.
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1428,6 +1439,10 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md,
     paddingRight: spacing.xs,
     paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+    // The field's own edge against the white header — this is what makes it read
+    // as a control rather than as a gap in the bar. (Briefly removed as a nested
+    // shadow when `headerSection` still carried one; it doesn't any more, so
+    // there is nothing to nest inside.)
     ...shadows.card,
   },
   searchInput: {
@@ -1466,7 +1481,11 @@ const styles = StyleSheet.create({
     top: 0, left: 0, right: 0,
     zIndex: 10,
     backgroundColor: colors.card,
-    ...shadows.card,
+    // `topBar`, not `card`: the list scrolls UNDER this ribbon, so it does need
+    // a shadow — but pinned at `top: 0`, `card`'s 6pt of upward spill drew a
+    // line along its own top edge. `topBar` casts straight down onto the content
+    // it covers and nothing upward.
+    ...shadows.topBar,
   },
   chipRow: {
     paddingHorizontal: spacing.lg,
@@ -1554,13 +1573,23 @@ const styles = StyleSheet.create({
   // ── Sheet overlay ──────────────────────────────────────────────────────────
   sheetOverlay: { flex: 1, justifyContent: 'flex-end' },
   backdrop:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
+  // Shadow lives on the animated SHELL (see `sheetStyle`'s render comment
+  // above) — `overflow: 'hidden'` on `sheet` below, on the SAME view, would
+  // clip it to nothing (iOS) / a hard box (Android elevation).
+  sheetShell: {
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    // Bottom sheet -> `sheet` rung: its shadow has to cast UPWARD, toward
+    // the content it is covering. `elevated`'s downward offset threw it
+    // down into the sheet's own body, where nothing could ever see it.
+    ...shadows.sheet,
+  },
   sheet: {
     height: SHEET_H,
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     overflow: 'hidden',
-    ...shadows.elevated,
   },
   handleArea: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider },

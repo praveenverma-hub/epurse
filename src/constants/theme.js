@@ -105,7 +105,44 @@ export const typography = {
   tiny: { fontSize: 11, fontWeight: '500' },
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ELEVATION LADDER — five rungs, and a rung has to be EARNED
+// -----------------------------------------------------------------------------
+// A shadow answers exactly one question: "how far off the page is this?" If two
+// things sit at the same depth they take the same rung, and anything that isn't
+// actually lifted takes no rung at all — a border or a fill says "separate
+// object" far more cheaply, and spending a shadow on every block flattens the
+// hierarchy instead of building one.
+//
+//   (none)     content IN the page — list rows, a chip inside a card, inline
+//              tiles. Most surfaces live here.
+//   pop        a small control marked as selected / grabbable (swatch, colour
+//              dot, toggle thumb, drag grip). Tight radius, no real lift.
+//   card       a card resting ON the page background.
+//   elevated   a thing floating ABOVE the content — centred modals, a card
+//              being dragged or swiped, a popover.
+//   sheet      a panel rising from the BOTTOM edge. Casts UPWARD (negative
+//              height) — a downward offset on a bottom sheet throws the shadow
+//              into its own body, where it is invisible, which is why every
+//              hand-rolled bottom sheet in this app had drifted to its own
+//              made-up numbers.
+//   fab        the ONE floating action button on a screen.
+//
+// THE OPACITY RULE: a high opacity is only ever paid for with COLOUR. `fab`
+// gets 0.32 because it is the accent hue — it reads as light coming off the
+// button. Black above ~0.12 stops reading as elevation and starts reading as
+// grime. ProfileScreen's hero shipped at black 0.4 (Sep-13-26) purely because
+// an `overflow:'hidden'` on the same view had been clipping it away, so the
+// number was never once seen on a device.
+// ─────────────────────────────────────────────────────────────────────────────
 export const shadows = {
+  pop: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.22,
+    shadowRadius: 3,
+    elevation: 2,
+  },
   card: {
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 2 },
@@ -119,6 +156,31 @@ export const shadows = {
     shadowOpacity: 0.12,
     shadowRadius: 16,
     elevation: 6,
+  },
+  sheet: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  // A bar fixed to the TOP edge, with content scrolling beneath it. The mirror
+  // of `sheet`: `sheet` rises from the bottom and casts UP, `topBar` sits at the
+  // top and casts DOWN — each toward the content it covers.
+  //
+  // Note `shadowRadius <= shadowOffset.height`. A shadow spans `offsetY ± radius`
+  // vertically, so it spills ABOVE its own element by `radius - offsetY`; every
+  // other rung here spills upward on purpose (that's what makes a card look
+  // lifted rather than stuck down). On a top bar that spill has nowhere to go but
+  // the status-bar inset, where it reads as a dirty line under the clock — which
+  // is exactly what `shadows.card` on Activity's header was drawing. Keeping the
+  // radius at or under the offset makes the upward spill exactly ZERO.
+  topBar: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 4,
   },
   fab: {
     shadowColor: colors.primary,

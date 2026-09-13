@@ -46,7 +46,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import {
-  radius, spacing, typography as typographyBase, BUTTON_H,
+  radius, shadows, spacing, typography as typographyBase, BUTTON_H,
 } from '../constants/theme';
 import {
   INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount, parseAmount,
@@ -679,9 +679,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   emojiTxt: { fontSize: 20 },
-  // Dashed edge marks the "own emoji" tile as an input, not one more preset —
-  // the same cue CategoriesScreen uses.
-  emojiOwn: { fontSize: 20, textAlign: 'center', padding: 0, borderStyle: 'dashed' },
+  // A visible border marks the "own emoji" tile as an input, not one more
+  // preset (presets are transparent-bordered until selected) — the same cue
+  // CategoriesScreen uses.
+  emojiOwn: { fontSize: 20, textAlign: 'center', padding: 0 },
 
   swatch: {
     width: 36, height: 36, borderRadius: radius.pill,
@@ -694,11 +695,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
     transform: [{ scale: 1.18 }],
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 3,
+    ...shadows.pop,
   },
 
   // `stretch`, so the button is exactly as tall as the field beside it. It was

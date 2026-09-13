@@ -144,6 +144,56 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   fields at all 4 write paths (edit paths re-stamp from the newly chosen account, fixing a
   second bug where editing a txn's account left the OLD bank's mask showing). Store v28
   migration backfills already-persisted manual transactions.
+- **Sep-13-2026: fixed `setAccountAnchor` storing a Credit Card's anchored balance as a
+  positive number.** Reported directly: "when we update the balances for cc it adds as
+  balance not a outstanding amount." A CC's `balance` is a LIABILITY app-wide
+  (`AccountDetailsScreen`'s `Math.abs(rawBalance)` display, `selectEPurseNetWorth`'s
+  `Math.min(bal, 0)`), i.e. always stored NEGATIVE — but the anchor modal (tap the balance
+  on `AccountDetailsScreen` to correct it) only ever collects a plain non-negative "how much
+  is outstanding" figure, same shape as a bank account's balance, and `setAccountAnchor`
+  applied it verbatim regardless of account type. Anchoring a card to "8000" silently stored
+  `balance: 8000` (read everywhere else as ₹8,000 held IN the account) instead of `-8000`
+  (₹8,000 OWED). Fixed to negate for `ACCOUNT_TYPES.CREDIT_CARD` only; a bank/debit account
+  anchor is unaffected. Two knock-on UI fixes on the same modal (`BalanceAnchorModal` in
+  `OnboardingExperience.tsx`, shared but with only one live caller,
+  `AccountDetailsScreen`): (1) the caller now passes the already-computed positive
+  `summaryValue` as `initialValue`, not the raw signed `account.balance` — the field would
+  otherwise open pre-filled with e.g. `-8000` for a card even though the label above reads
+  "Total Outstanding ₹8,000", and since the field itself REJECTS negative input
+  (`valid = amount >= 0`), the Anchor button would stay disabled until the user deleted the
+  minus sign themselves; (2) a new `isCreditCard` prop swaps the modal's copy/button label to
+  "Update outstanding balance" / "Update" instead of "Anchor live balance" / "Anchor" —
+  the modal itself never negates anything, only the store does, keeping the sign rule in ONE
+  place. New regression tests in `storeIntegration.test.mjs` pin both the CC and non-CC
+  cases. Store suite 494 → 496.
+- **Sep-13-2026: the account-detail edit pencil moved off the header, onto the card, then to
+  its bottom-right corner (corrected same day).** The pencil added alongside
+  `ManageAccountModal` (Sep-6, above) lived in the nav header next to the balance-info ⓘ;
+  asked to move it "in the card we show in the top" instead — the same "manage this thing"
+  affordance belongs on the thing itself. The header now carries only the ⓘ (fixed-width
+  `navSide` slots keep the title centred whether the right side holds one icon or two, so
+  removing one needed no layout change). First landed in `cardTopRow` beside the bank
+  name/network badge (matching `GoalDetailScreen`'s top-right hero pencil), then asked to
+  move to the BOTTOM-right instead — placed in-flow beside the card number/holder block
+  (`cardBottomRow`, `justifyContent: 'space-between'`), not absolutely positioned: this card
+  already reserves its true bottom edge for the hidden pocket-sheet overlap
+  (`paddingBottom: POCKET_OVERLAP + 8`), so an in-flow sibling of the number/holder text
+  automatically stays clear of that seam the same way the text already does, with no
+  overlap math to get wrong. Translucent-white circular `cardEditBtn` (matching
+  `networkBadge`'s own `#FFFFFF26` ink convention for this bespoke gradient surface — not
+  `theme.card`/`textSecondary`, which would be invisible here) opens the same
+  `ManageAccountModal`.
+- **Sep-13-2026: the Balance Anchor pencil got the same chip treatment.** Flagged directly:
+  "adjust the pencil size n ui in balance ancor in account detail screen." The "tap to
+  correct the balance" affordance (`summaryBox`, the white card above the transaction list)
+  had its OWN pencil — a bare 20px `EditIcon` in a hardcoded `#94A3B8`, just floating beside
+  the balance value with `marginLeft: 8` and no chrome of its own, unlike every other pencil
+  this session (the card's `cardEditBtn`, `GoalCard`/`GoalDetailScreen`'s pencil). Now a
+  matching 26×26 circular chip (`summaryEditBtn`, `#F1F5F9` fill — this box is its own fully
+  static-hex surface, not theme-driven, so the chip stays in that same static palette rather
+  than mixing in `theme.*`) holding a smaller 13px icon in `#64748B` (matching the label's
+  own muted grey). Purely visual — `onPress`/`openAnchor` still lives on the outer
+  `TouchableOpacity`, the icon has never itself been a separate tap target.
 
 ---
 
@@ -775,6 +825,201 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   cancels every scheduled reminder for a card and drops it from the map; called from both
   `applyCCPayment` (automatic) and `markAsCCBillPayment` (manual) the moment a payment for
   that card is confirmed. Verified via a live-store repro covering both paths.
+- **Sep-13-2026: `HomeCarousel`'s card shadow was never actually visible.** Flagged directly:
+  "all cards we show has some shadow effect so can you check again this." `cardWrap` (the
+  `Pressable` wrapping each card) combined `...shadows.card` with `overflow: 'hidden'` on the
+  SAME view — the clip needed to keep the gradient/bubbles inside the rounded corner also
+  clips the view's OWN shadow layer (iOS `masksToBounds`; Android `elevation`), so the shadow
+  the file's own comment insists on ("every other card on the Dashboard is elevated... without
+  it the banner sat flat") was silently never rendering. Confirmed by checking `AccountCard.tsx`
+  (a card in a DIFFERENT carousel), which already does this correctly: shadow on an outer shell
+  with no `overflow`, rounding + clip on the inner `LinearGradient`. Fixed `HomeCarousel` to
+  match — moved `overflow: 'hidden'` off `cardWrap` onto `card` (which now also carries the
+  matching `borderRadius`), so the shadow renders and the rounded-corner clipping is unchanged.
+  Answering the standing "should it even have one" question directly: **yes** — the shadow
+  was always the intended design (per the file's own comment, and matching "every top-level
+  section card sits at `shadows.card`" elsewhere on Home), this was purely a rendering bug,
+  not a design call to revisit.
+- **Sep-13-2026: same bug swept app-wide — 11 more files had a shadow clipped by `overflow:
+  'hidden'` on the SAME view.** Since the HomeCarousel bug is a mechanical, greppable pattern
+  (any style combining a `shadows.*` spread or literal `shadowColor`/`elevation` with
+  `overflow: 'hidden'`), an Explore-agent audit checked every file in `src/screens`/
+  `src/components` that uses `overflow: 'hidden'` anywhere. Found and fixed 11 more genuine
+  conflicts, all via the same shell/visuals split (shadow on an outer view with no overflow,
+  rounding + clip moved to an inner view — copying the already-correct pattern in
+  `AccountCard.tsx`/`LentBorrowedWidget.js`/`GroupsScreen.tsx`'s own cards):
+  `GoalCard.tsx` (`card` → new `cardShell` outer, caller's `style` prop — GoalsScreen's grid
+  sizing — moved to the shell since it must land on the SIZING element), `DailyQueueSection.tsx`
+  and `DailyQueueStack.js` (both an absolutely-positioned, `Animated.View`-transformed swipe
+  card — new `cardInner`/inner `View` holds background/padding/overflow, the animated outer
+  keeps position + transform + shadow), `EpcClaimBottomSheet.tsx` (`claimBtnWrap` → `claimBtn`,
+  which already had the matching radius), `StreakFlameEmitter.tsx` (`container` → new
+  `containerInner`), `GoalAchievedModal.tsx` (`sheet` → new `sheetInner`), `ProfileScreen.tsx`
+  (`heroCard` → new `heroCardInner`), `ShopScreen.tsx` (`card` → new `cardClip`, also now
+  correctly wraps the frosted lock overlay so ITS tint respects the rounded corner too),
+  `LentBorrowedScreen.js` (`personCard`'s single child, `personCardHeader`, already fills it
+  exactly — moved the clip there instead of adding a new view), `TransactionsScreen.js`
+  (already had the correct shell/inner split for a DIFFERENT reason — §3bb's floating-✕
+  clipping rule — just needed the shadow moved from the inner `sheet` onto the existing outer
+  shell), `SmsDiagnosticScreen.js` (`runBtn` → `runBtnGradient`, already had the matching
+  radius). **Deliberately left alone:** `CollapsingHeaderScreen.tsx`'s 3 header/elevation
+  style keys — its own existing comments already document this EXACT trade-off as measured
+  and accepted ("the Android elevation shadow follows the squarer outline while expanded — a
+  corner's worth of difference"), and restructuring this specific, extremely fragile,
+  native-driver-constrained shared component without being asked risks breaking scrolling
+  headers across half the app; `TransactionItem.js`'s `groupBanner` ribbon (`elevation: 1`
+  alongside `zIndex: 3` — almost certainly there for Android z-STACKING against siblings, not
+  a meaningful visible shadow at that magnitude, so not worth the added nesting).
+
+- **Sep-13-2026: the elevation ladder — the un-clipping above is what made the app look
+  over-shadowed, so every shadow got re-judged.** Flagged directly: "we need to think through
+  that we don't unnecessarily add extra shadow... in profile screen it's too much shadow, not
+  required that much... understand which element needs what shadow." The key realisation is
+  that the sweep above did not ADD a single shadow — it made shadows *render* that had been
+  clipped away for their whole life, which means those numbers had never once been seen on a
+  device. Authored blind, they had drifted badly: `ProfileScreen.heroCard` was **black at 0.4
+  opacity** (6.7x the `card` token, 3.3x `elevated`) on a card that does not float;
+  `ShopScreen.card` was 0.3 on a whole scrolling LIST; `CheckInBanner.pill` was `elevation: 16`,
+  higher than the FAB.
+
+  `constants/theme.js` now states an explicit five-rung ladder, keyed to MEANING rather than
+  taste, with two new rungs: **`pop`** (a small control marked selected/grabbable) and
+  **`sheet`** (a panel rising from the bottom edge, casting UPWARD). The governing rule is
+  written down: **a high opacity is only ever paid for with COLOUR** — `fab` gets 0.32 because
+  it is the accent hue and reads as light coming off the button, whereas black past ~0.12 stops
+  reading as elevation and starts reading as grime.
+
+  Corrections made, grouped by what was actually wrong:
+  - **Over-elevated** — `ProfileScreen` `heroCard` 0.4 → `shadows.card` and `avatar` 0.45 → a
+    0.22 accent halo (it is nested inside the hero, and two lifts in one composite object read
+    as mush); `ShopScreen` `card` 0.3 → `shadows.card` and `cardActive` 0.35 → 0.22;
+    `CheckInBanner.pill` 0.35/e16 → matched to the shared `Toast` (0.16/e10), since they are the
+    same object; `StreakFlameEmitter` 0.22/e8 → `shadows.card`; `AccountDetailsScreen.card`
+    0.18/y8 → `shadows.elevated`; `SheetCloseButton` 0.18 → `shadows.pop`.
+  - **Two more clipped shadows the earlier sweep MISSED** — `Toast.toast` and
+    `CheckInBanner.pill` both still had `overflow:'hidden'` on the shadow's own view, so neither
+    had ever drawn. Both split into shell + inner.
+  - **Nested same-rung shadows** (a shadow inside a shadow reads as mush, not as two depths) —
+    `HomeCarousel.iconChip` (inside `cardWrap`) and `TransactionsScreen.searchBar` (inside
+    `headerSection`) both dropped to flat; their fill and border already separate them.
+  - **Bottom sheets all cast the wrong way** — nine sheets used `elevated`'s DOWNWARD offset,
+    which throws the shadow into the sheet's own body where it can never be seen. That is
+    exactly why every hand-rolled sheet had invented private numbers (`TwoTierCategorySheet` at
+    `elevation: 22` and `SmartRuleModal` at 18 — the two heaviest in the app). All now on
+    `shadows.sheet`.
+  - **Six copies of one small-control shadow** (0.2–0.3 / r2–r3 / y1 / e2–e4) across
+    `CategoriesScreen`, `GoalFormScreen`, `CreateGroupModal` (x2), `AllocationBar` and
+    `AccountCard` → one `shadows.pop`.
+  - **An iOS-only shadow** — `GaugeProgress.centerDisc` declared the iOS props but no
+    `elevation`, so it simply did not exist on Android. Android draws from `elevation` alone.
+    `ShopScreen.cardActive` had the same gap, leaving its owned-state glow invisible there.
+  - **In-flow cards at the overlay rung** — `BudgetScreen.heroCard` and `CategoriesScreen.formCard`
+    sat at `elevated` directly above `card`-rung lists; a hero earns prominence from size, fill
+    and type, not by out-shadowing its own list.
+
+  Deliberately NOT changed: the shared CTA convention (`GradientButton` is `elevated`, and
+  `EpcClaimBottomSheet`'s claim button matches it); the chart markers
+  (`ConcentricSpendingRings.tipBadge`, `GaugeProgress.pointer`) whose 0.45 is paid for with the
+  datum's own colour, injected at runtime; `AnimatedTabBar` and `AccountDetailsScreen`'s wallet
+  pocket, both bespoke upward-casting physical metaphors; and the two documented `overflow`
+  trade-offs from the earlier sweep.
+
+  **`npm run test:elevation`** (new, 14 assertions) holds the ladder: no neutral shadow above
+  0.16, none above 0.45 at all, no hand-rolled elevation above the FAB's 10, no shadow without
+  a matching `elevation`, no shadow sharing a view with `overflow:'hidden'` (4 documented
+  exceptions), no bottom sheet casting downward, and >60% of shadows coming from tokens. It
+  scans comment-STRIPPED source — the comments explaining these fixes quote the very numbers
+  being banned, so a raw scan would fail on its own documentation.
+
+- **Sep-13-2026: the Home carousel's shadow STILL wasn't visible — the clip was in the list, not
+  the card.** Flagged: "for the home features carousel it still does not show shadow or its
+  cutting at bottom of card so not visible." The card's styles had been correct since the
+  shell/inner split; the clip had simply moved one level out. **A `FlatList` is a scroll
+  container and clips its content to its own bounds**, and `cardWrap` is `flex: 1` (load-bearing
+  — it's what makes every card stretch to a uniform row height), so each card's bottom edge sat
+  exactly ON that boundary. `shadows.card` reaches `offsetY 2 + radius 8 = 10pt` BELOW the card,
+  and `contentContainerStyle` reserved `paddingHorizontal` only — no vertical room at all — so
+  the entire shadow was cut off.
+
+  Fixed by reserving vertical room in the content container and cancelling it again with an
+  equal negative margin on the list, so the shadow gets its space without pushing the
+  Dashboard's sections apart. The amount is a new shared `CARD_SHADOW_PAD` in
+  `constants/carousel.js` — **derived, not chosen**: the largest downward reach of the two
+  carousels' shadows (`shadows.card` = 10, GroupInsightCarousel's card = y4 + r8 = 12).
+
+  `GroupInsightCarousel` had the same defect in weaker form — it reserved `spacing.xs` (4) for a
+  shadow reaching 12, so its bottom two-thirds were clipped. Same fix, with the negative margin
+  sized to preserve its original 4pt of breathing room so its layout height is unchanged.
+
+  **This was invisible to every existing check**: the styles are correct, tsc is happy, and
+  `test:elevation` passes because the SHADOW is well-formed — only the container's padding
+  decides whether anyone can see it. `npm run test:carousel` (66, was 60) now pins it: the pad
+  covers both carousels' measured reach (parsed from the token and the component, so a shadow
+  that grows fails the test), both carousels reserve it, and both cancel it with a negative
+  margin — that last one specifically so a future spacing regression can't ship disguised as a
+  shadow fix. Verified it fails by restoring the old padding-free version.
+
+  **The general lesson, now in `ui-consistency` §6b-i: a correct shadow is only half of it — a
+  shadow also needs ROOM. Any scroll container, and any ancestor with `overflow: 'hidden'`, will
+  clip a child's shadow at its own edge.**
+
+- **Sep-13-2026: Activity's header drew a line under the status bar, and its pinned filter row
+  drew one on its own top edge.** Flagged: "in activity tab the header shows shadow or line below
+  the status bar. Also when the filter row comes in on scroll that also shows same on top side."
+  One cause for both. **A shadow spans `offsetY ± shadowRadius`, so it spills ABOVE its own
+  element by `radius − offsetY`** — for `shadows.card` that is 8 − 2 = **6pt of upward spill**.
+  Every card rung spills upward deliberately; that is what reads as "lifted". But `headerSection`
+  is the first child of `SafeAreaView edges={['top']}`, so its spill had nowhere to go but the
+  status-bar inset, and `stickyChipRibbon` pins at `top: 0`, so its spill drew along its own top
+  edge. Neither was a rendering bug — both were the wrong RUNG.
+
+  This was a real gap in the ladder: there was no rung for **top chrome**. Added
+  **`shadows.topBar`** — the mirror of `sheet`. `sheet` rises from the bottom and casts up;
+  `topBar` sits at the top and casts down, each toward the content it covers. It keeps
+  `shadowRadius <= shadowOffset.height`, which makes the upward spill exactly zero.
+
+  - `headerSection` → **no shadow at all**, hairline only. Nothing scrolls beneath it (it is a
+    SIBLING of the list container), so a shadow there separated it from nothing. This also puts
+    it back in line with `PlainScreenHeader`, the shared header on ~11 other screens, which has
+    never had a shadow — Activity was the outlier.
+  - `stickyChipRibbon` → **`shadows.topBar`**. This one genuinely does cover scrolling content,
+    so it keeps a shadow; it just casts straight down now.
+
+  `test:elevation` (19, was 14) asserts `topBar` has zero upward spill while every other rung
+  keeps its upward spill, plus the two Activity invariants directly. A GENERIC "nothing pinned to
+  the top may spill upward" scan was written, tried, and **deliberately thrown away**: `top: 0` is
+  relative to whatever parent a view sits in, so it cannot distinguish screen chrome from a badge
+  pinned inside a chart (`ConcentricSpendingRings.tipBadge`) or a card at the top of a stacked
+  deck (`DailyQueueSection.card`) — it flagged both, and an upward spill is correct for each.
+  Allowlisting them would have made a bad heuristic pass rather than tested anything.
+
+- **Sep-13-2026 (correction, same day): the line was the header's HAIRLINE, not its shadow — and
+  the search field's own edge should not have been removed.** Clarified: "have you removed the
+  search bar container border, revert it, i meant the bottom filter section that we hide n show
+  when scroll... that shows line at top bellow the search bar row remove that."
+
+  Two corrections:
+  1. **`searchBar`'s `...shadows.card` restored.** It had been dropped in the ladder pass as a
+     nested shadow (it sat inside a then-shadowed `headerSection`). That reasoning expired the
+     moment `headerSection` lost its own shadow — there was nothing left to nest inside — and the
+     edge is what makes the field read as a control rather than as a gap in the bar.
+  2. **`headerSection`'s bottom hairline removed.** THAT was the reported line, not the shadow.
+     The bar is the white card surface and the list below it is the grey page background, so the
+     boundary is already drawn by the surface change; the hairline was a second separator for it.
+     It only became obvious in the state the user described: the sticky filter ribbon is white
+     too, so when it slides in the hairline ends up squeezed between two white surfaces as a hard
+     line across the top of the filter row.
+
+  `stickyChipRibbon` keeps `shadows.topBar` — that part was right, it does cover scrolling
+  content. `test:elevation` (21, was 19) now asserts the header has neither a shadow nor a
+  divider, that the two surfaces it relies on actually differ (so the rule can't outlive its
+  premise), and that the search field keeps its edge.
+
+  Also re-learned, second time: **`themeContrast`'s static-palette ratchet greps RAW source, so a
+  comment containing the literal `colors.<name>` counts as a reference.** Explaining this fix in a
+  comment pushed the count 949 → 950 and failed the build; reworded to name the surfaces in prose
+  instead. (The ratchet would be better stripping comments the way `elevationLadder` does, but
+  changing it would rebase the budget — left alone deliberately.)
 
 ---
 
@@ -1026,6 +1271,28 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   scroll body have `paddingTop`" isn't the full check — the real question is "does whatever
   renders FIRST below the header (in or out of the ScrollView) have top spacing", and a card
   rendered outside the ScrollView needs its OWN margin, not a contentContainerStyle fix.
+- **Dashed borders removed app-wide, replaced with a plain thin solid edge (Sep-13-26).**
+  Flagged directly: "remove the dotted border wherever we have, just have the thin pure
+  line." Swept every `borderStyle: 'dashed'` on a plain RN View border (the classic "tap to
+  add" / "this is a custom input, not a preset" cue) — 8 occurrences across 7 files:
+  `BudgetPlanScreen.js` (`addCatBtn`), `BudgetScreen.js` (`unbudgetedCard`),
+  `CategoriesScreen.js` (`newParentBtn`, `emojiOwn`), `GoalFormScreen.tsx` (`emojiOwn`),
+  `AccountsScreen.js` (`addCardPlaceholder`), `BudgetSummary.tsx` (`emptyCard`),
+  `GroupPickerSheet.tsx` (`newRow`). Just deleted the `borderStyle` line each time — RN
+  defaults to solid, so no replacement value needed. The two "own emoji" tiles
+  (`CategoriesScreen`/`GoalFormScreen`) keep reading as an input rather than one more preset
+  WITHOUT the dash: presets carry no border (or a transparent one until selected), so the
+  tile's now-solid border is still the distinguishing cue on its own.
+  **Deliberately NOT touched — these are SVG `strokeDasharray`, a different mechanism for a
+  different purpose, not a `View` border:** `GhostLineChart.js`'s ghost (previous-month) line
+  — a named, documented "this month vs a ghost of last month" data encoding, already also
+  colour-differentiated from the hero line, but the dash itself carries the "faded/past"
+  connotation the component is named for; `HabitLeakMatrix.js`'s quadrant divider lines — a
+  threshold/reference-line convention, not an editable control; `ProgressRing.tsx`/
+  `CustomWidgetContainer.tsx`'s `strokeDasharray` — a progress-ring RENDERING TECHNIQUE (dash
+  length set to the full circumference so the ring draws as a plain solid arc; not visually
+  dashed at all); `WhatsAppReminderScreen.js`'s decorative "stamp/seal" SVG in a promotional
+  banner illustration (a real stamp's perforated edge is the whole point of the shape).
 
 **Open**
 - Depth-1 gaps found incidentally during the depth-2+ sweep, NOT fixed (out of scope):

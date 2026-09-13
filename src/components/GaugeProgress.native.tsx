@@ -11,6 +11,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { shadows } from '../constants/theme';
 
 /**
  * A 240° gauge with a CONTINUOUS colour sweep that fills from 0 → `value` on mount,
@@ -569,10 +570,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   centerDisc: {
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
+    // Was missing `elevation` entirely, so this shadow drew on iOS only.
+    ...shadows.card,
   },
   // Zero-size anchor at the gauge's centre; the knob is offset out from here so a
   // single translate positions it anywhere on the ring.

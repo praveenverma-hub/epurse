@@ -56,7 +56,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography as typographyBase } from '../constants/theme';
+import { radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
 import { ALLOCATION_STEP, rebalancePair } from '../utils/goalPlan';
 import { hapticLight, hapticSuccess } from '../utils/haptics';
 
@@ -428,11 +428,7 @@ const styles = StyleSheet.create({
     width: 4,
     height: 26,
     borderRadius: radius.pill,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.28,
-    shadowRadius: 3,
-    elevation: 2,
+    ...shadows.pop,
   },
   gripLocked: { height: 18, width: 3 },
 

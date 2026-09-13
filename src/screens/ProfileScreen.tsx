@@ -58,7 +58,7 @@ import InfoIcon from '../components/InfoIcon';
 import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useRewardPalette, type RewardPalette } from '../hooks/useRewardPalette';
-import { radius, spacing } from '../constants/theme';
+import { radius, shadows, spacing } from '../constants/theme';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -125,6 +125,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             entering={FadeInUp.springify().damping(22).stiffness(160)}
             style={styles.heroCard}
           >
+          <View style={styles.heroCardInner}>
             <LinearGradient
               colors={D.heroGradient}
               start={{ x: 0, y: 0 }}
@@ -235,6 +236,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
               </View>
             </View>
+          </View>
           </Animated.View>
 
           {/* ── Region C: destinations ───────────────────────────────── */}
@@ -379,18 +381,26 @@ function makeStyles(D: RewardPalette) {
     scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
 
     // ── Region B: hero card ────────────────────────────────────────────────
+    // Shadow + sizing live here; `overflow: 'hidden'` (needed to clip the
+    // gradient wash to the rounded corner) moved to `heroCardInner` — on the
+    // SAME view it clipped this shadow to nothing (iOS) / a hard box
+    // (Android elevation).
+    // This is a card sitting in a scroll, not something floating over the page,
+    // so it takes the `card` rung. It shipped at black 0.4/r18/y10 — 6.7x the
+    // card rung — but `overflow:'hidden'` sat on this same view and clipped it,
+    // so that number had never actually been seen. Un-clipping it (Sep-13-26)
+    // is what made the screen read as over-shadowed.
     heroCard: {
+      borderRadius: radius.xl,
+      ...shadows.card,
+      marginBottom: spacing.xl,
+    },
+    heroCardInner: {
       borderRadius: radius.xl,
       padding: 20,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: D.border,
-      shadowColor: '#000',
-      shadowOpacity: 0.4,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 8,
-      marginBottom: spacing.xl,
     },
 
     profileRow: {
@@ -406,11 +416,15 @@ function makeStyles(D: RewardPalette) {
       borderRadius: 32,
       alignItems: 'center',
       justifyContent: 'center',
+      // A soft halo in the accent hue, NOT a second drop shadow: the avatar is
+      // nested inside `heroCard`, and two lifts in one composite object read as
+      // mush rather than as depth. Kept colour-tinted (the opacity rule in
+      // theme.js) but taken well down from 0.45.
       shadowColor: D.primary,
-      shadowOpacity: 0.45,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 6,
+      shadowOpacity: 0.22,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 3,
     },
     avatarText: { fontSize: 28, fontWeight: '800' as const, color: '#FFFFFF' },
     levelChipWrap: { position: 'absolute', bottom: -4, right: -4 },

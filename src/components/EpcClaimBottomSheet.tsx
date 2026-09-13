@@ -277,7 +277,10 @@ const styles = StyleSheet.create<{
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,
     alignItems: 'center',
-    ...shadows.elevated,
+    // Bottom sheet -> `sheet` rung: its shadow has to cast UPWARD, toward
+    // the content it is covering. `elevated`'s downward offset threw it
+    // down into the sheet's own body, where nothing could ever see it.
+    ...shadows.sheet,
   },
   handle: {
     width: 40,
@@ -323,10 +326,11 @@ const styles = StyleSheet.create<{
   // Primary CTA — full-width, so `radius.lg` like every other full-width button
   // (GradientButton et al). A pill radius stretched edge-to-edge reads as a
   // stadium/capsule, not a button; the pill tier is for auto-width buttons only.
+  // `overflow: 'hidden'` moved to `claimBtn` — on the SAME view as
+  // `shadows.elevated` it clipped the shadow to nothing.
   claimBtnWrap: {
     width: '100%',
     borderRadius: radius.lg,
-    overflow: 'hidden',
     ...shadows.elevated,
   },
   claimBtn: {
@@ -334,6 +338,7 @@ const styles = StyleSheet.create<{
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.lg,
+    overflow: 'hidden',
   },
   claimBtnText: {
     color: '#1A1305',

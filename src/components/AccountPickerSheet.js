@@ -102,7 +102,10 @@ const makeStyles = (t) =>
       paddingTop: spacing.sm,
       paddingBottom: 36,
       maxHeight: '70%',
-      ...shadows.elevated,
+      // Bottom sheet -> `sheet` rung: its shadow has to cast UPWARD, toward
+      // the content it is covering. `elevated`'s downward offset threw it
+      // down into the sheet's own body, where nothing could ever see it.
+      ...shadows.sheet,
     },
     sheetBusy: { opacity: 0.7 },
     handle: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: t.divider, marginBottom: spacing.md },

@@ -70,7 +70,7 @@ import { BANNER_STYLES } from '../constants/bannerStyles';
 // Geometry + neighbour feel shared with GroupInsightCarousel so the two can't
 // drift into looking like different apps' carousels.
 import {
-  CARD_GAP, NEIGHBOUR_OPACITY, NEIGHBOUR_SCALE, SIDE_PEEK,
+  CARD_GAP, CARD_SHADOW_PAD, NEIGHBOUR_OPACITY, NEIGHBOUR_SCALE, SIDE_PEEK,
   carouselMetrics, fullBleedCardW,
   listIndexFor as listIndexOf, realIndexFor as realIndexOf, wrapTarget,
 } from '../constants/carousel';
@@ -491,7 +491,17 @@ const HomeCarousel: React.FC<Props> = ({ cards, onNavigate, loading = false, ble
             // makes the maths exact: max scroll offset lands precisely on the last
             // card's snap point, so the final card reaches dead centre instead of
             // parking short (see carouselMetrics).
-            contentContainerStyle={{ paddingHorizontal: sidePad }}
+            // `paddingVertical` is what makes the card's shadow VISIBLE. A
+            // FlatList clips to its own bounds, and `cardWrap` is `flex: 1` so
+            // each card fills the row exactly — its bottom edge sat right on
+            // that boundary and the whole shadow was cut off. The list carries
+            // an equal negative margin (below), so this buys the shadow room
+            // without pushing the Dashboard's sections apart.
+            contentContainerStyle={{
+              paddingHorizontal: sidePad,
+              paddingVertical: CARD_SHADOW_PAD,
+            }}
+            style={{ marginVertical: -CARD_SHADOW_PAD }}
             ItemSeparatorComponent={() => <View style={{ width: CARD_GAP }} />}
             // The parent ScrollView owns vertical; this owns horizontal.
             nestedScrollEnabled
@@ -541,9 +551,14 @@ const styles = StyleSheet.create({
   // WITHOUT costing legibility — pushing the wash darker instead makes the body
   // text worse, and at ~22% accent the surface matches the page background's
   // luminance exactly, which is the very thing that looked see-through.
+  // No `overflow: 'hidden'` here — combined with `shadows.card` on the SAME
+  // view, the clip removes the shadow layer too (iOS) or squares it into a
+  // hard-edged rectangle (Android elevation), on top of the rounded corner it
+  // was meant to draw. The rounding/clipping for CONTENT lives one level in,
+  // on `card` (the LinearGradient) instead — same radius, so nothing visibly
+  // changes except the shadow now actually renders.
   cardWrap: {
     borderRadius: radius.lg,
-    overflow: 'hidden',
     borderWidth: 1,
     backgroundColor: colors.card,   // opaque base under the wash
     // ── flex: 1 is LOAD-BEARING, don't remove it ────────────────────────────
@@ -573,7 +588,10 @@ const styles = StyleSheet.create({
     // opaque `colors.card` base shows through below it — the same gap, just a
     // different colour.
     flex: 1,
-    // Bubbles bleed past the edges; the wrapper clips them.
+    // Bubbles bleed past the edges; this is now the ONLY clipping view (see
+    // `cardWrap`'s own comment) — matching radius so it rounds to the exact
+    // same shape `cardWrap`'s border draws.
+    borderRadius: radius.lg,
     overflow: 'hidden',
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -585,7 +603,10 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.card,
     borderWidth: 1,
-    ...shadows.card,
+    // No shadow: this chip sits INSIDE `cardWrap`, which is already on the
+    // `card` rung, and a second lift at the same rung inside the first reads as
+    // mush rather than as depth. A light fill + border on the gradient is
+    // already all the separation it needs.
   },
   eyebrow: { ...typography.tiny, fontWeight: '800', letterSpacing: 0.9, marginBottom: 5 },
   title: { ...typography.h3, color: colors.textPrimary, fontWeight: '800', lineHeight: 22 },

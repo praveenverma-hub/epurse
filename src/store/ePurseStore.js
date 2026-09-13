@@ -2393,8 +2393,20 @@ export const useEPurseStore = create(
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== accountId) return a;
-            const next = { ...a, balance: newBalance, anchoredAt: Date.now() };
-            if (a.type === ACCOUNT_TYPES.CREDIT_CARD) next.ccPaymentsTracked = true;
+            const isCC = a.type === ACCOUNT_TYPES.CREDIT_CARD;
+            // A card's balance is a LIABILITY (selectEPurseNetWorth takes
+            // Math.min(bal, 0) — it's only ever a debt, never an asset), but the
+            // modal collects a plain non-negative "how much is outstanding"
+            // figure, same shape as a bank account's balance. Storing that
+            // verbatim silently flipped the sign: the card read as holding
+            // money instead of owing it. Force it negative here, once, rather
+            // than trusting every future caller to negate it themselves.
+            const next = {
+              ...a,
+              balance: isCC ? -Math.abs(newBalance) : newBalance,
+              anchoredAt: Date.now(),
+            };
+            if (isCC) next.ccPaymentsTracked = true;
             return next;
           }),
         })),

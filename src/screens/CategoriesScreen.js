@@ -412,8 +412,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
+    borderWidth: 1,
     borderRadius: radius.md,
     paddingVertical: spacing.md,
     marginTop: spacing.md,
@@ -431,7 +430,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.xl,
     padding: spacing.lg,
-    ...shadows.elevated,
+    // Inline in the page next to `card`-rung rows, not floating over them.
+    ...shadows.card,
   },
   formTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
   input: {
@@ -451,10 +451,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
-  // Dashed edge marks the "own emoji" tile as an input, not one more preset.
+  // A visible edge marks the "own emoji" tile as an input, not one more preset
+  // — presets carry no border at all (or a transparent/selected one).
   emojiOwn: {
     borderWidth: 1,
-    borderStyle: 'dashed',
     borderColor: colors.divider,
   },
   emojiOwnInput: {
@@ -469,7 +469,7 @@ const styles = StyleSheet.create({
   swatch: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   swatchSelected: {
     borderWidth: 2, borderColor: '#fff', transform: [{ scale: 1.18 }],
-    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
+    ...shadows.pop,
   },
   swatchCheck: { color: '#fff', fontWeight: '900', fontSize: 15 },
   formBtns: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg },

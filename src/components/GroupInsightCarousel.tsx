@@ -43,7 +43,7 @@ import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, typography as typographyBase } from '../constants/theme';
-import { carouselMetrics } from '../constants/carousel';
+import { CARD_SHADOW_PAD, carouselMetrics } from '../constants/carousel';
 import { formatCurrency, formatCompact, isSameMonth } from '../utils/format';
 import { countsForSpend, spendContribution } from '../utils/split';
 
@@ -351,7 +351,15 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
         snapToInterval={snap}
         decelerationRate="fast"
         disableIntervalMomentum
-        contentContainerStyle={{ paddingHorizontal: sidePad, paddingVertical: spacing.xs }}
+        // Same clip as HomeCarousel: this reserved `spacing.xs` (4) for a shadow
+        // that reaches 12 below the card, so its bottom third was cut off. The
+        // negative margin gives back all but the original 4pt, leaving this
+        // carousel's occupied height as it was.
+        contentContainerStyle={{
+          paddingHorizontal: sidePad,
+          paddingVertical: CARD_SHADOW_PAD,
+        }}
+        style={{ marginVertical: -(CARD_SHADOW_PAD - spacing.xs) }}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         onMomentumScrollEnd={onMomentumEnd}

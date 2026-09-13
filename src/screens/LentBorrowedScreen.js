@@ -521,13 +521,14 @@ const styles = StyleSheet.create({
   toggleText: { color: '#FFFFFFCC', ...typography.bodyBold },
 
 
-  // Per-person card
+  // Per-person card. `overflow: 'hidden'` moved onto `personCardHeader` below
+  // (its only child, filling it exactly) — on the SAME view as `shadows.card`
+  // it clipped the shadow to nothing (iOS) / a hard box (Android elevation).
   personCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     marginBottom: spacing.sm,
     ...shadows.card,
-    overflow: 'hidden',
   },
   personCardSettled: {
     opacity: 0.72,
@@ -539,6 +540,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacing.md,
     gap: spacing.sm,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
   },
   avatar: {
     width: 40,

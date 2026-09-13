@@ -37,6 +37,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { formatCurrency } from '../utils/format';
+import { shadows } from '../constants/theme';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -529,11 +530,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 1.5,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    // Same object as HabitLeakMatrix.detailCard, so same rung.
+    ...shadows.card,
   },
   detailHeader: {
     flexDirection: 'row',

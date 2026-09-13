@@ -402,7 +402,7 @@ const styles = StyleSheet.create({
 
   addCatBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderStyle: 'dashed',
+    borderWidth: 1,
     borderRadius: radius.md, paddingVertical: spacing.md,
     gap: spacing.sm,
   },

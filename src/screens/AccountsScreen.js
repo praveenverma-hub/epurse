@@ -662,7 +662,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 2,
     borderColor: colors.divider,
-    borderStyle: 'dashed',
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.card,
     marginRight: spacing.md,

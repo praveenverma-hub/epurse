@@ -211,6 +211,7 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
             cardAnimatedStyle,
           ]}
         >
+          <View style={styles.cardInner}>
           {/* ── Approve overlay ── */}
           <Animated.View style={[styles.overlay, styles.overlayApprove, approveOverlayStyle]}>
             <Text style={styles.overlayLabel}>✓  Looks good</Text>
@@ -267,6 +268,7 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
               </View>
             </>
           )}
+          </View>
         </Animated.View>
       </GestureDetector>
 
@@ -790,15 +792,22 @@ const styles = StyleSheet.create({
   },
 
   // ── Card ──
+  // Shadow + transform live here; `overflow: 'hidden'` moved to `cardInner`
+  // below — on the SAME view it clips this shadow to nothing (iOS) or a hard
+  // box (Android elevation). `borderRadius` alone still shapes the shadow.
   card: {
+    borderRadius: radius.lg,
+    height: CARD_H,
+    ...shadows.elevated,
+  },
+  cardInner: {
+    flex: 1,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    height: CARD_H,
     justifyContent: 'space-between',
     overflow: 'hidden',
-    ...shadows.elevated,
   },
 
   // Overlay (approve / reject)

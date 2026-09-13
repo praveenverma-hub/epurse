@@ -48,7 +48,7 @@ import { useToast } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useRewardPalette, type RewardPalette } from '../hooks/useRewardPalette';
-import { radius, spacing } from '../constants/theme';
+import { radius, shadows, spacing } from '../constants/theme';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -225,6 +225,7 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins, D
         item.isUnlocked && item.isActive && styles.cardActive,
       ]}
     >
+      <View style={styles.cardClip}>
       <LinearGradient
         colors={D.cardGradient}
         start={{ x: 0, y: 0 }}
@@ -292,6 +293,7 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins, D
           </View>
         </View>
       ) : null}
+      </View>
     </Animated.View>
   );
 };
@@ -422,23 +424,35 @@ function makeStyles(D: RewardPalette) {
     },
 
     // ── Shop card ──────────────────────────────────────────────────────────
+    // Shadow + border live here; `overflow: 'hidden'` (needed to clip the
+    // gradient background to the rounded corner) moved to `cardClip` — on
+    // the SAME view it clipped this shadow to nothing (iOS) / a hard box
+    // (Android elevation).
+    // A LIST of these scrolls past, so they take the `card` rung and nothing
+    // more — at the black 0.3 they shipped with, a dozen of them stack into a
+    // grey haze instead of a dozen distinct cards. (That 0.3 was never seen
+    // either: `overflow:'hidden'` on this same view had been clipping it.)
     card: {
       borderRadius: radius.lg,
-      overflow: 'hidden',
       borderWidth: 1.5,
       borderColor: D.border,
       marginBottom: 12,
-      shadowColor: '#000',
-      shadowOpacity: 0.3,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 4,
+      ...shadows.card,
     },
+    // Owned/active reads as a halo in the accent hue rather than a bigger drop
+    // shadow. `elevation` has to be restated: Android draws its shadow from
+    // elevation alone, so overriding only the iOS props left the active state
+    // completely invisible there.
     cardActive: {
       borderColor: D.borderActive,
       shadowColor: D.primary,
-      shadowOpacity: 0.35,
-      shadowRadius: 14,
+      shadowOpacity: 0.22,
+      shadowRadius: 12,
+      elevation: 5,
+    },
+    cardClip: {
+      borderRadius: radius.lg,
+      overflow: 'hidden',
     },
     cardContent: {
       flexDirection: 'row',

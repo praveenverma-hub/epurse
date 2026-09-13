@@ -956,12 +956,24 @@ export function BalanceAnchorModal({
   visible,
   accountLabel,
   initialValue,
+  isCreditCard,
   onCancel,
   onSave,
 }: {
   visible: boolean;
   accountLabel?: string;
+  /**
+   * The figure to show in the field. For a credit card this must already be
+   * the positive OUTSTANDING amount (`Math.abs(account.balance)`) — the
+   * field only ever collects a non-negative number, and the caller (via
+   * `setAccountAnchor`) is what turns it back into the card's negative
+   * liability balance. Never pass the raw signed `account.balance` for a CC.
+   */
   initialValue?: number;
+  /** Swaps the copy to "outstanding" language. Doesn't change validation or
+   * what's returned to `onSave` — the amount is always entered non-negative
+   * either way; only the STORE decides its sign. */
+  isCreditCard?: boolean;
   onCancel: () => void;
   onSave: (amount: number) => void;
 }) {
@@ -978,10 +990,14 @@ export function BalanceAnchorModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <Pressable style={styles.backdrop} onPress={onCancel}>
         <Pressable style={styles.sheet} onPress={() => {}}>
-          <Text style={styles.title}>Anchor live balance</Text>
+          <Text style={styles.title}>
+            {isCreditCard ? 'Update outstanding balance' : 'Anchor live balance'}
+          </Text>
           {!!accountLabel && <Text style={styles.label}>{accountLabel}</Text>}
           <Text style={styles.help}>
-            Enter the balance shown in your bank app right now. We&apos;ll keep it in sync from here.
+            {isCreditCard
+              ? "Enter how much you currently owe on this card. We'll keep it in sync from here."
+              : "Enter the balance shown in your bank app right now. We'll keep it in sync from here."}
           </Text>
 
           <View style={styles.amountRow}>
@@ -1010,7 +1026,9 @@ export function BalanceAnchorModal({
               {/* Mute text when disabled — white on the light `divider` fill is
                   unreadable; textSecondary keeps the disabled state legible in
                   both light and dark themes. */}
-              <Text style={[styles.btnText, { color: valid ? '#FFFFFF' : theme.textSecondary }]}>Anchor</Text>
+              <Text style={[styles.btnText, { color: valid ? '#FFFFFF' : theme.textSecondary }]}>
+                {isCreditCard ? 'Update' : 'Anchor'}
+              </Text>
             </Pressable>
           </View>
         </Pressable>
@@ -1311,11 +1329,14 @@ const toastStyles = (t: Theme) =>
       marginHorizontal: spacing.lg,
       paddingVertical: spacing.md,
       paddingHorizontal: spacing.lg,
+      // `elevated` numbers, matched to the shared Toast component — this is the
+      // same object. Colour stays `t.shadow`: the file is theme-aware and
+      // spreading the static token here would half-migrate it.
       shadowColor: t.shadow,
       shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.18,
-      shadowRadius: 16,
-      elevation: 6,
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 10,
     },
     toastTop: { marginTop: spacing.md },
     toastBottom: { marginBottom: spacing.md },
@@ -1338,11 +1359,13 @@ const modalStyles = (t: Theme) =>
       backgroundColor: t.card,
       borderRadius: radius.lg,
       padding: spacing.xl,
+      // A CENTRED modal (maxWidth 380, all four corners rounded), not a bottom
+      // sheet — so it takes the `elevated` numbers, not `sheet`'s upward cast.
       shadowColor: t.shadow,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.2,
-      shadowRadius: 24,
-      elevation: 12,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.12,
+      shadowRadius: 16,
+      elevation: 6,
     },
     title: { fontSize: 18, fontWeight: '800', color: t.textPrimary },
     label: { fontSize: 13, fontWeight: '600', color: t.textSecondary, marginTop: spacing.xs },

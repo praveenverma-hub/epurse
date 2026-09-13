@@ -321,8 +321,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: 16,
     gap: 12,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
+    borderWidth: 1,
     ...shadows.card,
   },
   emptyLeft: {

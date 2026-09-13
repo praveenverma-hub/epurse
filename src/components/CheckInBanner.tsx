@@ -228,6 +228,7 @@ const CheckInBanner: React.FC = () => {
           accessibilityLiveRegion="polite"
           style={[styles.pill, { borderColor: tone.border }]}
         >
+          <View style={styles.pillInner}>
           <LinearGradient
             colors={tone.cardGrad}
             start={{ x: 0, y: 0 }}
@@ -252,6 +253,7 @@ const CheckInBanner: React.FC = () => {
                 {earningsTail}
               </Text>
             ) : null}
+          </View>
           </View>
         </Pressable>
       </Animated.View>
@@ -423,20 +425,29 @@ const styles = StyleSheet.create({
   },
 
   // ── Pill ──
+  // Same class of object as the Toast — a notification pill floating at the top
+  // edge — so it carries the SAME shadow. It shipped at 0.35/r18/y10/e16, which
+  // made it the single heaviest shadow in the app (above even the FAB) while
+  // `overflow:'hidden'` on this same view was clipping it out of existence, so
+  // the number was never seen. Shell keeps the shadow; `pillInner` clips the
+  // gradient fill to the rounded corner.
   pill: {
+    borderRadius:      18,
+    borderWidth:       1.5,
+    width:             '100%',
+    shadowColor:       '#000',
+    shadowOpacity:     0.16,
+    shadowRadius:      12,
+    shadowOffset:      { width: 0, height: 6 },
+    elevation:         10,
+  },
+  pillInner: {
     flexDirection:     'row',
     alignItems:        'center',
     paddingHorizontal: 14,
     paddingVertical:   10,
     borderRadius:      18,
-    borderWidth:       1.5,
-    width:             '100%',
     overflow:          'hidden',
-    shadowColor:       '#000',
-    shadowOpacity:     0.35,
-    shadowRadius:      18,
-    shadowOffset:      { width: 0, height: 10 },
-    elevation:         16,
   },
 
   // ── Icon bubble + halo ──

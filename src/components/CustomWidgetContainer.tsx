@@ -26,7 +26,7 @@ import ConcentricSpendingRings, { type RingData } from './ConcentricSpendingRing
 import ProgressBar from './ProgressBar';
 import StreakFlameEmitter from './StreakFlameEmitter';
 import GaugeProgress, { gaugeColorAt } from './GaugeProgress.native';
-import { colors, progressTrack } from '../constants/theme';
+import { colors, progressTrack, shadows } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 
 // ─── Budget widget ───────────────────────────────────────────────────────────
@@ -401,11 +401,7 @@ const flatStyles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    ...shadows.card,
   },
   ringsHeader: {
     flexDirection: 'row',

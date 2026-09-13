@@ -27,6 +27,7 @@ import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
 import { TwoTierCategorySheet } from './TwoTierCategorySheet';
 import { SmartRuleModal, SmartRuleState } from './SmartRuleModal';
 import SectionHeader from './SectionHeader';
+import { shadows } from '../constants/theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -222,6 +223,7 @@ const QueueCard: React.FC<QueueCardProps> = ({
   return (
     <GestureDetector gesture={panGesture}>
       <Animated.View style={[styles.card, cardStyle]}>
+        <View style={styles.cardInner}>
         {/* Approve tint */}
         <Animated.View
           style={[styles.overlayApprove, approveOverlayStyle]}
@@ -289,6 +291,7 @@ const QueueCard: React.FC<QueueCardProps> = ({
             <Text style={styles.swipeHintRight}>Approve →</Text>
           </View>
         )}
+        </View>
       </Animated.View>
     </GestureDetector>
   );
@@ -516,21 +519,27 @@ const styles = StyleSheet.create({
     height: DECK_H,
     position: 'relative',
   },
+  // Shadow + position/transform live here; `overflow: 'hidden'` moved to
+  // `cardInner` below — on the SAME view it clips this shadow to nothing
+  // (iOS) or a hard box (Android elevation). `borderRadius` alone (no clip)
+  // is enough for the shadow to still follow the rounded shape.
   card: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     height: CARD_H,
+    borderRadius: 16,
+    // A swipeable card lifted off the deck -> `elevated`, the same rung its
+    // sibling DailyQueueStack.card already uses for the identical object.
+    ...shadows.elevated,
+  },
+  cardInner: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
     overflow: 'hidden',
   },
   cardRow: {
@@ -669,11 +678,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     gap: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
+    // Matches DailyQueueStack.inboxZero, which is the same empty state.
+    ...shadows.card,
   },
   inboxZeroCheck: {
     fontSize: 36,

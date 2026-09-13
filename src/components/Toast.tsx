@@ -226,6 +226,7 @@ const ToastHost: React.FC<{
             },
           ]}
         >
+          <View style={styles.toastInner}>
           <View style={[styles.stripe, { backgroundColor: tone.stripe }]} />
           <View style={styles.body}>
             <Text style={[styles.title, { color: theme.textPrimary }]} numberOfLines={2}>
@@ -237,6 +238,7 @@ const ToastHost: React.FC<{
                 {active.message}
               </Text>
             ) : null}
+          </View>
           </View>
         </Pressable>
       </Animated.View>
@@ -287,12 +289,13 @@ const styles = StyleSheet.create({
     width:             '100%',
     alignItems:        'center',
   },
+  // Shell/clip split: `overflow:'hidden'` (which clips the stripe to the
+  // rounded corner) must NOT share a view with the shadow — on the same view it
+  // erases the shadow on iOS and squares it on Android. The shell keeps the
+  // shadow, the border and the opaque backing; `toastInner` does the clipping.
   toast: {
-    flexDirection:    'row',
-    overflow:         'hidden',
     borderWidth:      1.5,
     borderRadius:     14,
-    minHeight:        56,
     width:            '100%',
     maxWidth:         520,
     shadowColor:      '#000',
@@ -300,6 +303,12 @@ const styles = StyleSheet.create({
     shadowRadius:     12,
     shadowOffset:     { width: 0, height: 6 },
     elevation:        10,
+  },
+  toastInner: {
+    flexDirection:    'row',
+    overflow:         'hidden',
+    borderRadius:     14,
+    minHeight:        56,
   },
   stripe: {
     width: 4,

@@ -245,6 +245,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
   ];
 
   return (
+    <View style={[styles.cardShell, style]}>
     <Pressable
       onPress={onPress}
       disabled={!onPress}
@@ -257,7 +258,6 @@ const GoalCard: React.FC<GoalCardProps> = ({
           borderColor: withAlpha(color, 0.25),
           opacity: pressed && onPress ? 0.92 : 1,
         },
-        style,
       ]}
     >
       {/* A wash of the goal's own colour, strongest under the ribbon — the tile
@@ -400,10 +400,21 @@ const GoalCard: React.FC<GoalCardProps> = ({
         </Pressable>
       ) : null}
     </Pressable>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  // Shadow lives on this OUTER shell, never on `card` itself — `overflow:
+  // 'hidden'` (needed below to keep the ribbon/wash inside the rounded
+  // corner) clips a view's own shadow layer too (invisible on iOS, a
+  // hard-edged box on Android's elevation), so the two can never share a
+  // view. Carries the caller's `style` (GoalsScreen's `gridItem` sizing),
+  // which must land on the sizing element, not one level in.
+  cardShell: {
+    borderRadius: radius.lg,
+    ...shadows.card,
+  },
   card: {
     flex: 1,
     borderRadius: radius.lg,
@@ -413,7 +424,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md - 2,
     alignItems: 'center',
     overflow: 'hidden',
-    ...shadows.card,
   },
 
   // Edge to edge across the top, INSIDE the card's 1pt border. Relying on

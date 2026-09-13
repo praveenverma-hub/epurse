@@ -511,7 +511,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.lg,
     marginBottom: spacing.lg,
-    ...shadows.elevated,
+    // In-flow card above `card`-rung catCards — same rung as them, it stands
+    // out by size and fill rather than by out-shadowing its own list.
+    ...shadows.card,
   },
   heroTop: {
     flexDirection: 'row',
@@ -580,7 +582,7 @@ const styles = StyleSheet.create({
   catCapLabel:  { ...typography.small, color: colors.textSecondary },
   catRemain:    { ...typography.tiny, fontWeight: '600' },
 
-  unbudgetedCard: { borderWidth: 1, borderColor: colors.divider, borderStyle: 'dashed' },
+  unbudgetedCard: { borderWidth: 1, borderColor: colors.divider },
   unbudgetedAmount: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '800' },
   unbudgetedNote: { ...typography.tiny, color: colors.textSecondary, marginTop: 6, lineHeight: 15 },
 

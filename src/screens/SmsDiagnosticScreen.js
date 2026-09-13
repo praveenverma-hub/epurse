@@ -347,7 +347,10 @@ const styles = StyleSheet.create({
   },
   infoText: { color: '#1D4ED8', ...typography.small, lineHeight: 18 },
 
-  runBtn: { borderRadius: radius.lg, overflow: 'hidden', ...shadows.card },
+  // `overflow: 'hidden'` moved to `runBtnGradient` — on the SAME view as
+  // `shadows.card` it clipped the shadow to nothing (iOS) / a hard box
+  // (Android elevation).
+  runBtn: { borderRadius: radius.lg, ...shadows.card },
   runBtnDisabled: { opacity: 0.6 },
   runBtnGradient: {
     // Was its own `minHeight: 52` — one of three button heights in the app.
@@ -355,6 +358,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: BUTTON_H,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
   },
   runBtnText: { color: '#fff', ...typography.body, fontWeight: '800', fontSize: 16 },
 

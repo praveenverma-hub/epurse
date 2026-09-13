@@ -36,7 +36,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { spacing, radius, typography as typographyBase } from '../constants/theme';
+import { spacing, radius, shadows, typography as typographyBase } from '../constants/theme';
 // The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { ACCOUNT_TYPES } from '../constants/categories';
@@ -354,26 +354,15 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
       <View style={[styles.navSide, styles.navSideRight]}>
         {account ? (
-          <>
-            <TouchableOpacity
-              onPress={() => setManageVisible(true)}
-              style={styles.navBtn}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityRole="button"
-              accessibilityLabel="Manage account"
-            >
-              <EditIcon size={20} color={theme.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setBalanceInfoVisible(true)}
-              style={styles.navBtn}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityRole="button"
-              accessibilityLabel="About balance & anchoring"
-            >
-              <InfoIcon size={22} color={theme.textSecondary} />
-            </TouchableOpacity>
-          </>
+          <TouchableOpacity
+            onPress={() => setBalanceInfoVisible(true)}
+            style={styles.navBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="About balance & anchoring"
+          >
+            <InfoIcon size={22} color={theme.textSecondary} />
+          </TouchableOpacity>
         ) : null}
       </View>
       </View>
@@ -446,7 +435,12 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <Text style={styles.summaryLabel}>{summaryLabel}</Text>
         <View style={styles.summaryRight}>
           <Text style={styles.summaryValue}>{formatMoney(summaryValue)}</Text>
-          <EditIcon size={20} color="#94A3B8" style={{ marginLeft: 8 }} />
+          {/* Same 26×26 chip as the card's own edit button (`cardEditBtn`) and
+              GoalCard/GoalDetailScreen's pencil — was a bare 20px glyph
+              floating beside the value with no chrome of its own. */}
+          <View style={styles.summaryEditBtn}>
+            <EditIcon size={13} color="#64748B" />
+          </View>
         </View>
       </TouchableOpacity>
       <SectionHeader icon="receipt-outline" title="Transactions" accentColor={theme.primary} />
@@ -485,13 +479,33 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={styles.chipLine} />
           </View>
 
-          <View>
-            <Text style={styles.cardNumber}>{`••••  ${last4(account)}`}</Text>
-            {userName ? (
-              <Text style={styles.cardHolder} numberOfLines={1}>
-                {userName.toUpperCase()}
-              </Text>
-            ) : null}
+          <View style={styles.cardBottomRow}>
+            <View style={styles.flex1}>
+              <Text style={styles.cardNumber}>{`••••  ${last4(account)}`}</Text>
+              {userName ? (
+                <Text style={styles.cardHolder} numberOfLines={1}>
+                  {userName.toUpperCase()}
+                </Text>
+              ) : null}
+            </View>
+            {/* Moved off the nav header (Sep-2026), then off the top row onto
+                this bottom-right corner — the header now carries only the
+                balance-info ⓘ, and "manage this account" lives on the thing
+                it manages. In-flow beside the card number (not absolute) so
+                it naturally respects the same space-between/paddingBottom
+                that already keeps this row clear of the hidden pocket seam.
+                White-on-translucent to match this card's own ink
+                (networkBadge), not theme.card/textSecondary — the gradient
+                card is a bespoke surface, not a themed one. */}
+            <TouchableOpacity
+              onPress={() => setManageVisible(true)}
+              hitSlop={10}
+              style={styles.cardEditBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Manage account"
+            >
+              <EditIcon size={14} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
         </LinearGradient>
       </View>
@@ -555,7 +569,12 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <BalanceAnchorModal
         visible={anchorVisible}
         accountLabel={`${deriveBankName(account)}${account.mask ? `  •••• ${account.mask}` : ''}`}
-        initialValue={account.balance}
+        // The card's own `balance` is stored NEGATIVE (a liability); the modal
+        // only ever collects a non-negative figure, so it has to be handed
+        // the same positive `summaryValue` the "Total Outstanding" label
+        // above already shows — not the raw signed balance.
+        initialValue={summaryValue}
+        isCreditCard={isCreditCard}
         onCancel={closeAnchor}
         onSave={commitAnchor}
       />
@@ -573,7 +592,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       />
 
-      {/* Header pencil → rename / change type / link / delete this account. */}
+      {/* Card pencil → rename / change type / link / delete this account. */}
       <ManageAccountModal
         accountId={accountId ?? null}
         visible={manageVisible}
@@ -624,11 +643,9 @@ const styles = StyleSheet.create({
     // the visible slice above the pocket seam (POCKET_OVERLAP px are hidden).
     paddingBottom: POCKET_OVERLAP + 8,
     justifyContent: 'space-between',
-    elevation:    6,
-    shadowColor:  '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
+    // The physical-card metaphor wants a real drop shadow, and `elevated` IS
+    // that — 0.18/y8 was a private number for the same intent.
+    ...shadows.elevated,
   },
   cardTopRow: {
     flexDirection:  'row',
@@ -655,6 +672,15 @@ const styles = StyleSheet.create({
     fontWeight:   '700',
     letterSpacing: 0.5,
   },
+  cardEditBtn: {
+    width:           26,
+    height:          26,
+    borderRadius:    13,
+    backgroundColor: '#FFFFFF26',
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginLeft:      spacing.sm,
+  },
   chip: {
     width:           40,
     height:          30,
@@ -679,6 +705,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop:    6,
   },
+  // Number/holder beside the pencil, bottom-right — `flex-end` so a short,
+  // one-line number+holder block still bottom-aligns the button against it.
+  cardBottomRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  flex1: { flex: 1 },
 
   // 3. Pocket sheet
   // zIndex 5 on iOS, elevation 10 on Android — both ensure this View renders over
@@ -728,6 +758,15 @@ const styles = StyleSheet.create({
     fontWeight:  '800',
     color:       '#0F172A',
     fontVariant: ['tabular-nums'],
+  },
+  summaryEditBtn: {
+    width:           26,
+    height:          26,
+    borderRadius:    13,
+    backgroundColor: '#F1F5F9',
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginLeft:      10,
   },
 
   listContent: { paddingBottom: spacing.xxl * 2, flexGrow: 1 },

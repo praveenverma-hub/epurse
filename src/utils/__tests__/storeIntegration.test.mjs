@@ -196,6 +196,32 @@ check('CC true-up: confirming zeroes the CC outstanding balance',
   Math.round(accts().find((a) => a.mask === '7890').balance) === 0,
   `bal ${accts().find((a) => a.mask === '7890').balance}`);
 
+// ── setAccountAnchor must store a CREDIT CARD's balance as NEGATIVE ───────────
+// The anchor modal only ever collects a non-negative "how much is outstanding"
+// figure (same shape for a bank account or a card) — `setAccountAnchor` used to
+// apply it verbatim, so anchoring a card to "5000" stored balance: 5000 (an
+// ASSET) instead of -5000 (the LIABILITY every other CC code path assumes:
+// AccountDetailsScreen's Math.abs(rawBalance), selectEPurseNetWorth's
+// Math.min(bal, 0)). Reported directly: "when we update the balance for cc it
+// adds as balance not a outstanding amount."
+reset();
+useStore.setState({ accounts: [
+  { id: 'cc-anchor', type: 'Credit Card', bankName: 'HDFC', mask: '1234', balance: 0, aliasMasks: [] },
+] });
+useStore.getState().setAccountAnchor('cc-anchor', 8000);
+check('setAccountAnchor: a CC anchored to 8000 stores balance -8000, not +8000',
+  accts().find((a) => a.id === 'cc-anchor').balance === -8000,
+  `bal ${accts().find((a) => a.id === 'cc-anchor').balance}`);
+
+// A plain bank/debit account is untouched by the CC-only negation.
+useStore.setState({ accounts: [
+  { id: 'bank-anchor', type: 'Bank', bankName: 'HDFC', mask: '4321', balance: 0, aliasMasks: [] },
+] });
+useStore.getState().setAccountAnchor('bank-anchor', 12000);
+check('setAccountAnchor: a bank account anchored to 12000 stays +12000',
+  accts().find((a) => a.id === 'bank-anchor').balance === 12000,
+  `bal ${accts().find((a) => a.id === 'bank-anchor').balance}`);
+
 // ── CC bill payment: the PAYER side is only ever RE-TAGGED, never invented ─────
 // The bank sends its own "Rs.X debited …" for the payment, and that message is what
 // moves the balance. Synthesising a debit in the true-up flow on top of it charged the

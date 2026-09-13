@@ -35,6 +35,28 @@ export const NEIGHBOUR_SCALE = 0.94;
 export const NEIGHBOUR_OPACITY = 0.82;
 
 /**
+ * Vertical room a carousel's content container must reserve so the CARDS' OWN
+ * SHADOW can actually draw.
+ *
+ * A FlatList is a scroll container and clips its content to its bounds. A
+ * horizontal card whose height fills the row therefore has its bottom edge
+ * exactly ON that boundary, so the shadow — which extends BELOW the card by
+ * `shadowOffset.height + shadowRadius` — is cut off entirely. HomeCarousel had
+ * no vertical padding at all, so its cards read as flat no matter what the
+ * shadow token said; reported as "it still does not show shadow or its cutting
+ * at bottom of card".
+ *
+ * DERIVED, not chosen: it's the largest downward reach of the two carousels'
+ * shadows — `shadows.card` is y2 + r8 = 10, GroupInsightCarousel's card is
+ * y4 + r8 = 12. If either shadow grows, this has to grow with it, which is why
+ * it lives beside the geometry rather than as a literal at each call site.
+ *
+ * Pair it with an equal NEGATIVE margin on the list itself, so the padding buys
+ * the shadow room without also pushing the surrounding layout apart.
+ */
+export const CARD_SHADOW_PAD = 12;
+
+/**
  * Where a snapped card sits and how far one swipe travels.
  *
  * `sidePad` is exactly `(boxW − cardW) / 2` — no gutter correction. That's what
