@@ -123,6 +123,18 @@ export const STATIC_CONFIG = {
      */
     periodSelector: 'segmented' as 'segmented' | 'original' | 'underline',
   },
+
+  /** `SmsDiagnosticScreen` — a debug tool, not a user feature. */
+  smsDiagnostic: {
+    /** false pulls the Settings row and the screen's reachability. */
+    enabled: true,
+  },
+
+  /** `ShopScreen` — the EPC widget catalogue. */
+  shop: {
+    /** false (MVP): catalogue shows "coming soon"; RP/EPC/level earn as normal. */
+    enabled: false,
+  },
 } as const;
 
 export default STATIC_CONFIG;

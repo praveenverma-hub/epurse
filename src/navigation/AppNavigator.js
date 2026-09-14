@@ -10,6 +10,8 @@ import AddTransactionScreen from '../screens/AddTransactionScreen';
 import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
+import MonthlyRecapSettingsScreen from '../screens/MonthlyRecapSettingsScreen';
 import SpendRulesScreen    from '../screens/SpendRulesScreen';
 import BackupScreen        from '../screens/BackupScreen';
 import AccountDetailsScreen from '../screens/AccountDetailsScreen';
@@ -64,6 +66,8 @@ export default function AppNavigator() {
         <Stack.Screen name="AddGroupExpense" component={AddGroupExpenseScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="Settings"       component={SettingsScreen} />
+        <Stack.Screen name="Notifications"  component={NotificationsScreen} />
+        <Stack.Screen name="MonthlyRecapSettings" component={MonthlyRecapSettingsScreen} />
         <Stack.Screen name="SpendRules"     component={SpendRulesScreen} />
         <Stack.Screen name="Backup"         component={BackupScreen} />
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />

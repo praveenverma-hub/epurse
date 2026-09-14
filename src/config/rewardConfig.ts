@@ -192,6 +192,12 @@ export const REWARD_COPY = {
     'Welcome to ePurse. Your spending awareness journey begins today. Keep ' +
     'your Review Queue clean every day to earn Reality Points (RP), level ' +
     'up your profile, and unlock beautiful live widgets and custom styles!',
+  // Used while STATIC_CONFIG.shop.enabled is false — same promise, minus the
+  // widget-unlock claim the shop can't back yet.
+  WELCOME_DESCRIPTION_SHOP_COMING_SOON:
+    'Welcome to ePurse. Your spending awareness journey begins today. Keep ' +
+    'your Review Queue clean every day to earn Reality Points (RP) and level ' +
+    'up your profile — dashboard widgets are coming soon!',
   WELCOME_CTA:         'Got it',
 
   CAP_HEADLINE:        '🏆 The Mindful Tracking Cap',

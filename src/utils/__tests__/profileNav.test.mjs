@@ -38,7 +38,8 @@ const nav      = read('navigation/AppNavigator.js');
 const profile  = read('screens/ProfileScreen.tsx');
 const shop     = read('screens/ShopScreen.tsx');
 const reminder = read('screens/RemindersScreen.tsx');
-const settings = read('screens/SettingsScreen.js');
+const settings = read('screens/SettingsScreen.tsx');
+const notifs   = read('screens/NotificationsScreen.tsx');
 const rowSrc   = read('components/NavListRow.tsx');
 const hdrSrc   = read('components/PlainScreenHeader.tsx');
 
@@ -128,46 +129,50 @@ console.log('\n── hub vs catalogue ──');
     !/bg: {12}theme\.background/.test(profile) && !/bg: {12}theme\.background/.test(shop));
 }
 
-// ── 5. Reminders — built, and every control really moves something ─────────
+// ── 5. Reminders — built, and shows the user's OWN reminders only ──────────
 // This block used to assert the OPPOSITE: that the screen shipped no controls
-// and the hub row was badged SOON. Both were true of the placeholder and are the
-// wrong thing to guard now the feature exists, so they were replaced rather than
-// deleted — the standard they encoded (never show a switch that moves nothing)
-// is still enforced below, just against the real screen.
+// and the hub row was badged SOON. That was true of the placeholder; then the
+// screen grew an "Automatic nudges" switches section; now (Sep-14-26) that
+// section moved to its own Settings → Notifications screen (see §5a below),
+// and Reminders goes back to being just the user's own list, blank by default.
 console.log('\n── reminders ──');
 {
-  const store = read('store/ePurseStore.js');
-  const form  = read('screens/ReminderFormScreen.tsx');
+  const form = read('screens/ReminderFormScreen.tsx');
 
   check('the Reminders route exists so the row is real', /name="Reminders"/.test(nav));
   check('…and the form is a REGISTERED SCREEN, not a modal', /name="ReminderForm"/.test(nav));
   check('the hub row no longer claims the feature is unbuilt',
     !/badge="SOON"[\s\S]{0,120}Reminders/.test(profile) && !/Reminders[\s\S]{0,120}badge="SOON"/.test(profile));
 
-  // The empty state stays — an empty list still has to say what it is.
+  // The empty state stays — an empty list still has to say what it is, and the
+  // screen must show a blank list by default now the nudges moved out.
   check('an empty list still explains itself via the shared EmptyState', /<EmptyState/.test(reminder));
-
-  // The switches are the whole point of the rewrite, so they must be wired to
-  // the store, not to local state that forgets on unmount.
-  check('every nudge switch writes to the store', /setNotificationPref/.test(reminder));
-  check('…and the store really exposes that action', /setNotificationPref:/.test(store));
-  check('…reading each value from notificationPrefs', /notificationPrefs\?\.\[key\]/.test(reminder));
-
-  // A switch that moves nothing is the failure this block has always guarded
-  // against: every pref row must have a matching GATE at a fire site.
-  const rowKeys = [...reminder.matchAll(/\{ key: '([A-Za-z]+)'/g)].map((m) => m[1]);
-  check(`the screen lists several nudges (${rowKeys.length})`, rowKeys.length >= 5, rowKeys.join(','));
-  for (const key of rowKeys) {
-    check(`"${key}" is actually gated in the store`,
-      new RegExp(`nudgeAllowed\\((?:get\\(\\)|s|state), '${key}'\\)`).test(store),
-      'a switch with no gate at the fire site moves nothing');
-  }
+  check('the automatic-nudges switches moved OUT of this screen',
+    !/setNotificationPref/.test(reminder) && !/notificationPrefs/.test(reminder),
+    'Reminders should list only the user\'s own reminders now — see Notifications');
 
   // The list must derive its times from the shared schedule util, or the row can
   // say one thing while a different moment is armed with the OS.
   check('the list derives "when" from the shared schedule util',
     /nextOccurrence/.test(reminder) && /describeRepeat/.test(reminder));
   check('…and so does the form', /nextOccurrence/.test(form));
+
+  // Deleting a reminder is destructive and irreversible (the OS notification is
+  // gone too) — found missing a confirm on BOTH delete paths (the list's ✕ and
+  // the form's own "Delete reminder"), so both must gate the real call behind a
+  // CenterModal rather than firing it straight from the row/button's onPress.
+  check('the list confirms before deleting', /<CenterModal/.test(reminder) && /destructive/.test(reminder));
+  check('…the ✕ opens the confirm, not cancelReminder directly',
+    !/onPress=\{\(\) => \{ hapticLight\(\); cancelReminder\(/.test(reminder),
+    'the ✕ must set a pending target and let the CenterModal call cancelReminder');
+  check('…and the confirm is what actually calls cancelReminder',
+    /onPrimary=\{\(\) => \{[\s\S]{0,80}cancelReminder\(/.test(reminder));
+
+  check('the form confirms before deleting too', /<CenterModal/.test(form) && /destructive/.test(form));
+  check('…"Delete reminder" opens the confirm, not the delete itself',
+    /setConfirmDelete\(true\)/.test(form) && !/onPress=\{handleDelete\}/.test(form));
+  check('…and the confirm\'s primary action IS the delete handler',
+    /onPrimary=\{handleDelete\}/.test(form));
 
   // The context line: a person-scoped reminder must SAY what it's about
   // ("Remind yourself to pay ₹1,200 to Rahul"), which the first cut demoted to a
@@ -215,6 +220,73 @@ console.log('\n── reminders ──');
     /reconcileReminders\(\)/.test(code(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/App.js', 'utf8'))));
 }
 
+// ── 5a. Notifications — the automatic-nudge switches, on their OWN screen ──
+// Split out of RemindersScreen (Sep-14-26): a reminder is something the user
+// asked for, a nudge is something the app already does on its own, and the
+// switches for the latter now live beside the rest of Settings. The standard
+// carried over unchanged: a switch that moves nothing can't ship.
+console.log('\n── notifications ──');
+{
+  const store = read('store/ePurseStore.js');
+
+  check('the Notifications route exists', /name="Notifications"/.test(nav));
+  check('…reachable from Settings, not just the router',
+    /route: 'Notifications'/.test(settings) || /navigate\('Notifications'/.test(settings));
+
+  // The switches must be wired to the store, not to local state that forgets
+  // on unmount.
+  check('every nudge switch writes to the store', /setNotificationPref/.test(notifs));
+  check('…and the store really exposes that action', /setNotificationPref:/.test(store));
+  check('…reading each value from notificationPrefs', /notificationPrefs\?\.\[key\]/.test(notifs));
+
+  // A switch that moves nothing is the failure this block has always guarded
+  // against: every pref row must have a matching GATE at a fire site.
+  const rowKeys = [...notifs.matchAll(/\{ key: '([A-Za-z]+)'/g)].map((m) => m[1]);
+  check(`the screen lists several nudges (${rowKeys.length})`, rowKeys.length >= 5, rowKeys.join(','));
+  for (const key of rowKeys) {
+    check(`"${key}" is actually gated in the store`,
+      new RegExp(`nudgeAllowed\\((?:get\\(\\)|s|state), '${key}'\\)`).test(store),
+      'a switch with no gate at the fire site moves nothing');
+  }
+
+  check('uses the shared header like every other pushed screen', /<PlainScreenHeader/.test(notifs));
+}
+
+// ── 5b. Settings — ONE consistent list, no inline sections (Sep-14-26) ─────
+// Flagged directly: some settings rendered their content on the page itself
+// (Appearance's theme grid, Monthly recap's toggle + sub-toggles) while others
+// were a nav row — inconsistent, for no reason a user could predict. Every row
+// on Settings now navigates: to a SHEET for a short, non-growing decision
+// (Appearance → ThemePickerSheet) or a SCREEN for anything with conditional/
+// growing rows (Monthly recap → MonthlyRecapSettingsScreen).
+console.log('\n── settings ──');
+{
+  const recap = read('screens/MonthlyRecapSettingsScreen.tsx');
+  const sheet = read('components/ThemePickerSheet.tsx');
+
+  check('the MonthlyRecapSettings route exists', /name="MonthlyRecapSettings"/.test(nav));
+  check('Settings navigates to it', /navigate\('MonthlyRecapSettings'\)/.test(settings));
+
+  // The old inline content must actually be GONE from Settings, not just
+  // duplicated alongside a new row — otherwise there are two places to keep
+  // the theme/recap state in sync.
+  check('Settings holds no inline theme grid', !/gradientStops/.test(settings) && !/LinearGradient/.test(settings));
+  check('…and no inline recap switches', !/setShowMonthlyRecap/.test(settings) && !/setRecapOption/.test(settings));
+  check('Settings is built from NavListRow, not a hand-rolled row', (settings.match(/<NavListRow/g) || []).length >= 5);
+
+  // The moved content must actually have landed somewhere, wired to the store.
+  check('the theme sheet writes the real store action', /setThemeId/.test(settings) && /onSelect/.test(sheet));
+  check('the recap screen still gates its sub-toggles on the parent switch',
+    /showMonthlyRecap \?/.test(recap) || /showMonthlyRecap\s*\?/.test(recap));
+  check('…reading/writing the same store fields as before',
+    /setShowMonthlyRecap/.test(recap) && /setRecapOption/.test(recap));
+  check('the recap screen uses the shared header', /<PlainScreenHeader/.test(recap));
+
+  // A sheet is picked deliberately (ui-consistency §2b), not just "whatever
+  // was easiest" — assert the actual mechanism (a Modal), not just the icon.
+  check('Appearance is a real sheet (Modal), not a second pushed screen', /<Modal/.test(sheet));
+}
+
 // ── 6. Shared chrome — one header, one row ──────────────────────────────────
 console.log('\n── shared components ──');
 {
@@ -233,7 +305,9 @@ console.log('\n── shared components ──');
     'screens/ProfileScreen.tsx',
     'screens/ShopScreen.tsx',
     'screens/RemindersScreen.tsx',
-    'screens/SettingsScreen.js',
+    'screens/SettingsScreen.tsx',
+    'screens/NotificationsScreen.tsx',
+    'screens/MonthlyRecapSettingsScreen.tsx',
     'screens/CategoriesScreen.js',
     'screens/SpendRulesScreen.js',
     'screens/BackupScreen.js',
@@ -324,12 +398,16 @@ console.log('\n── copy weight ──');
   check('the hub has no group labels above its two card groups',
     !/>PERKS</.test(profile) && !/>APP</.test(profile));
 
-  // Exactly one block of copy between the balance strip and the cards.
-  const body = shop.split('contentContainerStyle={styles.scroll}>')[1]?.split('shopItems.length === 0')[0] ?? '';
+  // Exactly one block of copy between the balance strip and the cards/coming-soon
+  // branch (STATIC_CONFIG.shop.enabled, Sep-14-26 — see project_shop_coming_soon).
+  const body = shop.split('contentContainerStyle={styles.scroll}>')[1]?.split('!SHOP_ENABLED ? (')[0] ?? '';
   const texts = (body.match(/<Text/g) || []).length;
   check(`exactly one line of intro copy before the cards (found ${texts})`, texts === 1,
     'a screen title plus three more tiers is a masthead, not a heading');
-  check('…and it is a single sentence', (body.match(/\./g) || []).length <= 2,
+  // Counted from the intro's OWN text, not the JSX comment above it explaining
+  // why there's only one line (that comment has periods of its own).
+  const introBody = body.match(/<Text style=\{styles\.intro\}>([\s\S]*?)<\/Text>/)?.[1] ?? '';
+  check('…and it is a single sentence', (introBody.match(/\./g) || []).length <= 2,
     'where EPC comes from is the EPC info sheet\'s job, not this screen\'s');
 }
 

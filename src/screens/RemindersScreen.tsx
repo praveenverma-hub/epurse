@@ -1,23 +1,31 @@
 // =============================================================================
-// RemindersScreen — everything the app will nudge you about, in one list.
+// RemindersScreen — the user's OWN reminders, and only those.
 //
-// Two halves, and the split is the point:
-//   • UPCOMING — real scheduled reminders from the store's `reminders` registry:
-//     the user's own, plus repayment nudges and credit-card bill dates, which
-//     used to be invisible once set. Each row can be edited or cancelled.
-//   • AUTOMATIC NUDGES — the notifications the app decides to send by itself
-//     (bill due, price hikes, budget, recap). These are now real switches backed
-//     by `notificationPrefs`. This screen previously LISTED them with no
-//     controls, and said so in its own header comment: a screen of switches that
-//     don't move anything is worse than an empty one. They move things now.
+// This used to be two halves: Upcoming (this list) plus an "Automatic nudges"
+// section of switches for notifications the app decides to send on its own
+// (bill due, price hikes, budget, recap). That second half moved to its own
+// screen — Settings → Notifications — because the two are different kinds of
+// thing: an entry here is something the USER asked to be reminded about
+// (custom, or a repayment/bill nudge scheduled on their behalf); a nudge is
+// something the APP already does automatically, and configuring whether it
+// fires belongs beside the app's other settings, not mixed into a list the
+// user is meant to be able to leave empty by default.
+//
+// So this screen shows a blank, unboxed EmptyState by default (Sep-14-26 —
+// the same shape every other empty screen in the app uses), same as before
+// the nudges section existed — a fresh install has nothing here until the
+// user actually sets a reminder. Once there's something to show, each
+// reminder is its OWN card under an "Upcoming" heading (was one shared card
+// with a hairline between rows) — a heading over a stack of cards, matching
+// how Goals/Groups list their own entries.
 //
 // Every row here reads its "when" through `utils/reminderSchedule`, so the listed
 // time is derived from the same anchor + repeat rule that was actually armed
 // with the OS — a label can't drift from the schedule.
 // =============================================================================
 
-import React, { useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -25,31 +33,16 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { colors, radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
 import { REPEAT, describeRepeat, nextOccurrence } from '../utils/reminderSchedule';
 import EmptyState from '../components/EmptyState';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
+import CenterModal from '../components/CenterModal';
 import { formatTimeLabel } from '../components/TimeField';
 import { hapticLight } from '../utils/haptics';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
-
-/**
- * The automatic nudges, in the order they matter to someone deciding what to
- * silence. `key` is the `notificationPrefs` key the store gates on — see
- * `nudgeAllowed` in ePurseStore. Adding a nudge means adding a row here AND a
- * gate at its fire site; nothing is inferred.
- */
-const NUDGE_ROWS = [
-  { key: 'ccBillDue',        icon: 'card-outline',        label: 'Credit-card bill due',  hint: 'The day before a bill is due' },
-  { key: 'ccCycleHeadsUp',   icon: 'calendar-outline',    label: 'Statement cycle closed', hint: 'When a new statement is due to arrive' },
-  { key: 'ccPayment',        icon: 'checkmark-done-outline', label: 'Card payment received', hint: 'Confirms a bill payment landed' },
-  { key: 'subscriptionHike', icon: 'repeat-outline',      label: 'Subscription price rises', hint: 'When a recurring charge goes up' },
-  { key: 'budgetBreach',     icon: 'pie-chart-outline',   label: 'Budget limits',          hint: 'When a category or the total goes over' },
-  { key: 'midmonthNudge',    icon: 'speedometer-outline', label: 'Mid-month check-in',     hint: 'How your pace looks halfway through' },
-  { key: 'monthlyRecap',     icon: 'bar-chart-outline',   label: 'Monthly recap ready',    hint: 'When last month\'s summary is available' },
-] as const;
 
 /** Per-kind chrome. `custom` is the user's own; the rest are app-created. */
 const KIND_META: Record<string, { icon: string; tag: string }> = {
@@ -78,9 +71,12 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
 
   const reminders = useEPurseStore((s: any) => s.reminders) as any[];
-  const notificationPrefs = useEPurseStore((s: any) => s.notificationPrefs) as Record<string, boolean>;
-  const setNotificationPref = useEPurseStore((s: any) => s.setNotificationPref);
   const cancelReminder = useEPurseStore((s: any) => s.cancelReminder);
+
+  // Deleting from the list is just as destructive as the form's own "Delete
+  // reminder" — a lone target (not a per-row boolean) since only one confirm
+  // is ever open at a time, and one shared CenterModal below serves all rows.
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
   // Sorted by when they actually fire NEXT, which for a repeat is not its anchor
   // — an old monthly anchored in March still belongs between tomorrow and next
@@ -124,31 +120,31 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
 
         <ScrollView
           style={{ backgroundColor: theme.background }}
-          contentContainerStyle={styles.body}
+          contentContainerStyle={[styles.body, upcoming.length === 0 && styles.bodyEmpty]}
           showsVerticalScrollIndicator={false}
         >
           {/* ── Upcoming ─────────────────────────────────────────────────── */}
           {upcoming.length === 0 ? (
-            <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <EmptyState
-                compact
-                icon="alarm-outline"
-                title="No reminders yet"
-                subtitle="Set one for a bill, a repayment, or anything you'd rather not keep in your head."
-                actionLabel="Add a reminder"
-                onAction={() => openForm()}
-              />
-            </View>
+            // Blank, not boxed — a fresh install (or a fully-cleared list) reads
+            // as "nothing here", the same shape every other empty screen in the
+            // app uses, not a card with nothing to separate it from.
+            <EmptyState
+              icon="alarm-outline"
+              title="No reminders yet"
+              subtitle="Set one for a bill, a repayment, or anything you'd rather not keep in your head."
+              actionLabel="Add a reminder"
+              onAction={() => openForm()}
+            />
           ) : (
-            <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <>
               <SectionHeader icon="alarm-outline" title="Upcoming" accentColor={theme.primary} />
-              {upcoming.map((r, i) => {
+              {upcoming.map((r) => {
                 const meta = KIND_META[r.kind] || KIND_META.custom;
                 const repeats = (r.repeat || REPEAT.ONCE) !== REPEAT.ONCE;
                 return (
                   <TouchableOpacity
                     key={r.id}
-                    style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.divider }]}
+                    style={[styles.card, styles.row, { backgroundColor: theme.card }]}
                     // A card bill isn't editable here — its date comes from the
                     // bank's message, not from us, so the only sensible action is
                     // to silence it (the ✕).
@@ -173,6 +169,13 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
                         <Text style={[styles.rowBody, { color: theme.textSecondary }]} numberOfLines={1}>
                           {r.body}
                         </Text>
+                      ) : r.person ? (
+                        // A custom reminder tagged to a person but with no amount has
+                        // no composed body (that wording needs both) — say who it's
+                        // about anyway, or the tag picked in the form is invisible here.
+                        <Text style={[styles.rowBody, { color: theme.textSecondary }]} numberOfLines={1}>
+                          {`For ${r.person}`}
+                        </Text>
                       ) : null}
                       <Text style={[styles.rowWhen, { color: theme.textSecondary }]} numberOfLines={1}>
                         {dayLabel(r.nextAt)} · {formatTimeLabel(new Date(r.nextAt))}
@@ -180,46 +183,37 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
                       </Text>
                     </View>
                     <TouchableOpacity
-                      onPress={() => { hapticLight(); cancelReminder(r.id); }}
+                      onPress={() => { hapticLight(); setDeleteTarget({ id: r.id, title: r.title }); }}
                       hitSlop={10}
                       accessibilityRole="button"
-                      accessibilityLabel={`Cancel reminder: ${r.title}`}
+                      accessibilityLabel={`Delete reminder: ${r.title}`}
                     >
                       <Ionicons name="close" size={18} color={theme.textMuted} />
                     </TouchableOpacity>
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </>
           )}
-
-          {/* ── Automatic nudges ─────────────────────────────────────────── */}
-          <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <SectionHeader icon="notifications-outline" title="Automatic nudges" accentColor={theme.primary} />
-            <Text style={[styles.hint, { color: theme.textSecondary }]}>
-              Sent by ePurse on its own, from what your messages already say. Turning one off
-              stops the notification — you'll still find it in the bell.
-            </Text>
-            {NUDGE_ROWS.map(({ key, icon, label, hint }) => (
-              <View key={key} style={styles.nudgeRow}>
-                <Ionicons name={icon as any} size={18} color={theme.primary} style={styles.nudgeIcon} />
-                <View style={styles.rowMid}>
-                  <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>{label}</Text>
-                  <Text style={[styles.rowBody, { color: theme.textSecondary }]}>{hint}</Text>
-                </View>
-                <Switch
-                  // Absent means ON — matches the store's `nudgeAllowed`, so an
-                  // upgrading user sees every nudge as enabled, which it is.
-                  value={notificationPrefs?.[key] ?? true}
-                  onValueChange={(v) => setNotificationPref(key, v)}
-                  trackColor={{ true: theme.primary, false: colors.divider }}
-                  thumbColor="#fff"
-                  ios_backgroundColor={colors.divider}
-                />
-              </View>
-            ))}
-          </View>
         </ScrollView>
+
+        {/* Same destructive action as the form's own "Delete reminder" — same
+            confirm, same verb (ui-consistency §8c), just reachable from the
+            list's ✕ too. */}
+        <CenterModal
+          visible={!!deleteTarget}
+          title="Delete this reminder?"
+          message={`"${deleteTarget?.title}" won't notify you any more. This cannot be undone.`}
+          primaryText="Delete"
+          secondaryText="Cancel"
+          destructive
+          onPrimary={() => {
+            if (deleteTarget) cancelReminder(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+          onSecondary={() => setDeleteTarget(null)}
+          onClose={() => setDeleteTarget(null)}
+        />
       </SafeAreaView>
     </View>
   );
@@ -231,19 +225,22 @@ const styles = StyleSheet.create({
   root:      { flex: 1 },
   container: { flex: 1 },
   body:      { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  // Only the empty state needs the scroll content to fill the viewport, so
+  // EmptyState's own `full` mode (flex:1, centred both axes) actually has
+  // room to centre in rather than collapsing to its content height.
+  bodyEmpty: { flexGrow: 1 },
 
+  // Each reminder is its OWN card now (was one shared card with a hairline
+  // between rows) — a heading above a stack of cards, not a list inside one.
   card: {
     borderRadius: radius.lg,
     padding: spacing.lg,
     ...shadows.card,
   },
-  hint: { ...typography.small, marginBottom: spacing.sm, lineHeight: 18 },
-
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.sm + 2,
   },
   rowIconWrap: {
     width: 34, height: 34, borderRadius: 17,
@@ -266,13 +263,4 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     flexShrink: 0,
   },
-
-  nudgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  // Fixed slot so every label starts at the same x, whatever the glyph.
-  nudgeIcon: { width: 22, textAlign: 'center' },
 });

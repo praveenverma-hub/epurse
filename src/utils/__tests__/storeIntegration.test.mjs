@@ -2163,9 +2163,9 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // 'amber' ("Gold", #FFD600) became 'carbon' (deep slate + carbon mint). The
 // colours would have fallen back on their own — `buildPalette` handles an
 // unknown id — so nothing would have LOOKED broken. What breaks is the picker:
-// SettingsScreen renders `Object.values(THEMES)` and compares each against the
-// stored id, so a Gold user would open Appearance and find a themed app with no
-// swatch selected and no way to tell why. Exactly the 'sky' bug v24 fixed, which
+// ThemePickerSheet (opened from Settings → Appearance) renders `Object.values(THEMES)`
+// and compares each against the stored id, so a Gold user would open it and find a
+// themed app with no swatch selected and no way to tell why. Exactly the 'sky' bug v24 fixed, which
 // is why v24's generic line doesn't help here: it only runs below version 24.
 {
   const migrate = useStore.persist.getOptions().migrate;

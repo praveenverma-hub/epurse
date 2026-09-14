@@ -59,6 +59,9 @@ import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useRewardPalette, type RewardPalette } from '../hooks/useRewardPalette';
 import { radius, shadows, spacing } from '../constants/theme';
+import { STATIC_CONFIG } from '../config/staticConfig';
+
+const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -259,10 +262,13 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               icon="bag-handle-outline"
               label="Shop"
               hint={
-                owned > 0
-                  ? `${owned} of ${inventory.length} widgets unlocked`
-                  : 'Spend EPC on dashboard widgets'
+                !SHOP_ENABLED
+                  ? 'Widgets are on their way'
+                  : owned > 0
+                    ? `${owned} of ${inventory.length} widgets unlocked`
+                    : 'Spend EPC on dashboard widgets'
               }
+              badge={SHOP_ENABLED ? undefined : 'SOON'}
               onPress={go('Shop')}
             />
             <NavListRow

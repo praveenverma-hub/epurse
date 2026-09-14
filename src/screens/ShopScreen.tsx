@@ -47,8 +47,35 @@ import { hapticLight, hapticSuccess, hapticError } from '../utils/haptics';
 import { useToast } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import PlainScreenHeader from '../components/PlainScreenHeader';
+import FaqAccordion, { type FaqItem } from '../components/FaqAccordion';
 import { useRewardPalette, type RewardPalette } from '../hooks/useRewardPalette';
 import { radius, shadows, spacing } from '../constants/theme';
+import { STATIC_CONFIG } from '../config/staticConfig';
+
+const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
+
+const COMING_SOON_FAQ: FaqItem[] = [
+  {
+    id: 'how-it-works',
+    question: 'How will the shop work once it launches?',
+    answer: 'Every widget needs a minimum profile level and an EPC cost to unlock. Once you meet both, you can buy it with your EPC balance — no separate real-money payment, ever.',
+  },
+  {
+    id: 'after-buying',
+    question: 'What can I do with a widget once I own it?',
+    answer: 'Switch it on to show it on your dashboard, or off to go back to the default view — owning it is permanent, only the display is your choice.',
+  },
+  {
+    id: 'earning',
+    question: 'Do I still earn EPC and RP right now?',
+    answer: 'Yes — reviewing transactions, Aware Run streaks and completed goals all earn EPC and RP exactly as before.',
+  },
+  {
+    id: 'carry-over',
+    question: 'Will my EPC carry over once the shop opens?',
+    answer: 'Yes, your balance stays exactly as it is — spend it the moment widgets go live.',
+  },
+];
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -130,10 +157,22 @@ const ShopScreen: React.FC<Props> = ({ navigation }) => {
               Where EPC comes from is explained by the EPC info sheet on the
               profile, so it doesn't need re-stating here. */}
           <Text style={styles.intro}>
-            Spend EPC to unlock widgets for your dashboard.
+            {SHOP_ENABLED
+              ? 'Spend EPC to unlock widgets for your dashboard.'
+              : 'Dashboard widgets are on their way — keep earning EPC in the meantime.'}
           </Text>
 
-          {shopItems.length === 0 ? (
+          {!SHOP_ENABLED ? (
+            <>
+              <EmptyState
+                compact
+                icon="sparkles-outline"
+                title="Coming soon"
+                subtitle="The widget catalogue isn't open yet, but your EPC and RP keep building either way."
+              />
+              <FaqAccordion title="FAQs" items={COMING_SOON_FAQ} style={styles.faqWrap} />
+            </>
+          ) : shopItems.length === 0 ? (
             <EmptyState
               compact
               icon="bag-handle-outline"
@@ -422,6 +461,7 @@ function makeStyles(D: RewardPalette) {
       marginBottom: 14,
       paddingHorizontal: 2,
     },
+    faqWrap: { marginTop: spacing.lg },
 
     // ── Shop card ──────────────────────────────────────────────────────────
     // Shadow + border live here; `overflow: 'hidden'` (needed to clip the

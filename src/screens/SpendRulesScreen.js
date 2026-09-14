@@ -19,22 +19,27 @@
 //   hidden exclusion is the worst kind of bug: if ₹8k of groceries stops counting,
 //   that has to be visible at a glance, not something you remember doing. The store
 //   persists the EXCLUDED ids so a newly added category defaults to counted.
+//
+// Rendered PLAIN (Sep-14-26), like the rest of the Settings tree — no card
+// fill/shadow; a hairline (`sectionSep`) separates the configurable list from
+// "Always Excluded" instead of a second card edge.
 // =============================================================================
 
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { NON_BUDGETABLE_PARENT_IDS } from '../constants/twoTierCategories';
 import InfoIcon from '../components/InfoIcon';
 import SectionHeader from '../components/SectionHeader';
 import PlainScreenHeader from '../components/PlainScreenHeader';
+import AppSwitch from '../components/AppSwitch';
 
 const SpendRulesScreen = ({ navigation }) => {
   const theme = useTheme();
@@ -59,55 +64,55 @@ const SpendRulesScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style="dark" />
-      <PlainScreenHeader title="Counts as expense" onBack={() => navigation.goBack()} bordered />
+      <PlainScreenHeader title="Expense Inclusions" onBack={() => navigation.goBack()} bordered />
 
       <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
-          <Text style={styles.hint}>
-            Turn a category off and its transactions stop adding to Spent, your category
-            breakdown and budget — they stay in your list, tagged{' '}
-            <Text style={styles.hintStrong}>EXCLUDED</Text>.
+        <Text style={styles.hint}>
+          Turn a category off and its transactions stop adding to Spent, your category
+          breakdown and budget — they stay in your list, tagged{' '}
+          <Text style={styles.hintStrong}>EXCLUDED</Text>.
+        </Text>
+
+        <View style={[styles.noteRow, { backgroundColor: theme.primary + '0F', borderColor: theme.primary + '33' }]}>
+          <InfoIcon size={14} color={theme.primary} />
+          <Text style={[styles.noteText, { color: theme.primary }]}>
+            Balances always update. This only changes what counts as spending.
           </Text>
-
-          <View style={[styles.noteRow, { backgroundColor: theme.primary + '0F', borderColor: theme.primary + '33' }]}>
-            <InfoIcon size={14} color={theme.primary} />
-            <Text style={[styles.noteText, { color: theme.primary }]}>
-              Balances always update. This only changes what counts as spending.
-            </Text>
-          </View>
-
-          {configurable.map((p, i) => {
-            const counted = !excludedSet.has(p.id);
-            return (
-              <View key={p.id} style={[styles.row, i > 0 && styles.rowDivided]}>
-                {/* The category's OWN emoji — data, not chrome (see §5). */}
-                <Text style={styles.rowEmoji}>{p.emoji}</Text>
-                <View style={styles.rowTextWrap}>
-                  <Text style={styles.rowLabel} numberOfLines={1}>{p.label}</Text>
-                  <Text
-                    style={[styles.rowState, !counted && { color: colors.warning }]}
-                    numberOfLines={1}
-                  >
-                    {counted ? 'Included in expenses' : 'Excluded'}
-                  </Text>
-                </View>
-                <Switch
-                  value={counted}
-                  onValueChange={(v) => setExpenseParentCounted(p.id, v)}
-                  trackColor={{ true: theme.primary, false: colors.divider }}
-                  thumbColor="#fff"
-                  ios_backgroundColor={colors.divider}
-                />
-              </View>
-            );
-          })}
         </View>
 
-        {/* Always-excluded, shown so their absence above isn't a mystery. */}
-        <View style={styles.card}>
+        {configurable.map((p, i) => {
+          const counted = !excludedSet.has(p.id);
+          return (
+            <View key={p.id} style={[styles.row, i > 0 && styles.rowDivided]}>
+              {/* The category's OWN emoji — data, not chrome (see §5). */}
+              <Text style={styles.rowEmoji}>{p.emoji}</Text>
+              <View style={styles.rowTextWrap}>
+                <Text style={styles.rowLabel} numberOfLines={1}>{p.label}</Text>
+                <Text
+                  style={[styles.rowState, !counted && { color: colors.warning }]}
+                  numberOfLines={1}
+                >
+                  {counted ? 'Included in expenses' : 'Excluded'}
+                </Text>
+              </View>
+              <AppSwitch
+                value={counted}
+                onValueChange={(v) => setExpenseParentCounted(p.id, v)}
+                trackColor={{ true: theme.primary, false: colors.divider }}
+                thumbColor="#fff"
+                ios_backgroundColor={colors.divider}
+              />
+            </View>
+          );
+        })}
+
+        {/* Always-excluded, shown so their absence above isn't a mystery. A
+            hairline separates the two groups — the card edge used to do this
+            on its own. */}
+        <View style={styles.sectionSep}>
           <SectionHeader
             icon="lock-closed-outline"
-            title="Always excluded"
+            title="Always Excluded"
             subtitle="These move money between places rather than spending it, so they're excluded everywhere and can't be switched on."
           />
           {rows.filter((r) => r.fixed).map((p, i) => (
@@ -141,12 +146,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.card },
   scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    ...shadows.card,
+  // The hairline is the section separator that used to be implicit in the
+  // card's own edge — a plain page needs it stated, not assumed.
+  sectionSep: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
   },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
   hintStrong: { fontWeight: '700', color: colors.textPrimary },

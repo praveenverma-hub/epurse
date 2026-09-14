@@ -141,15 +141,14 @@ const CategoriesScreen = ({ navigation }) => {
 
       <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Category tree ───────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <SectionHeader
-            icon="grid-outline"
-            title="Categories"
-            accentColor={theme.primary}
-            subtitle="Tap a category to see its sub-categories. Add your own sub-categories or a whole new parent — they work everywhere and stay saved across updates."
-          />
+        <SectionHeader
+          icon="grid-outline"
+          title="Categories"
+          accentColor={theme.primary}
+          subtitle="Tap a category to see its sub-categories. Add your own sub-categories or a whole new parent — they work everywhere and stay saved across updates."
+        />
 
-          {tree.map((parent) => {
+        {tree.map((parent) => {
             const isOpen = !!expanded[parent.id];
             const parentCustom = customParentIds.has(parent.id);
             return (
@@ -209,15 +208,14 @@ const CategoriesScreen = ({ navigation }) => {
             );
           })}
 
-          <TouchableOpacity
-            style={[styles.newParentBtn, { borderColor: theme.primary + '55' }]}
-            onPress={() => openAdd({ kind: 'parent' })}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="add-circle-outline" size={18} color={theme.primary} />
-            <Text style={[styles.newParentText, { color: theme.primary }]}>New parent category</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[styles.newParentBtn, { borderColor: theme.primary + '55' }]}
+          onPress={() => openAdd({ kind: 'parent' })}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add-circle-outline" size={18} color={theme.primary} />
+          <Text style={[styles.newParentText, { color: theme.primary }]}>New parent category</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.dangerBtn}
@@ -355,13 +353,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.card },
   scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
   sub: { ...typography.small, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs, fontWeight: '600' },
 

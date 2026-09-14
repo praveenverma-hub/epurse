@@ -20,7 +20,7 @@
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, shadows, spacing } from '../constants/theme';
+import { shadows, spacing } from '../constants/theme';
 
 interface SheetCloseButtonProps {
   onPress: () => void;
@@ -66,7 +66,7 @@ const SheetCloseButton: React.FC<SheetCloseButtonProps> = ({
       accessibilityRole="button"
       accessibilityLabel="Close"
     >
-      <Ionicons name="close" size={20} color={dark ? '#fff' : colors.textPrimary} />
+      <Ionicons name="close" size={20} color="#fff" />
     </TouchableOpacity>
   </View>
 );
@@ -81,13 +81,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18, // circle
-    backgroundColor: colors.card,
+    backgroundColor: '#4d494966', // canonical scrim (also ThemePickerSheet, AccountPickerSheet)
     alignItems: 'center',
     justifyContent: 'center',
-    // Lifts the circle off the dimmed backdrop. `pop` is the small-control
-    // rung; over a dim scrim the white fill does most of the separating anyway.
     ...shadows.pop,
     elevation: 4,
   },
-  btnDark: { backgroundColor: 'rgba(255,255,255,0.18)' },
+  btnDark: { backgroundColor: 'rgba(255,255,255,0.18)' }, // bespoke dark surfaces (WelcomeStreakModal)
 });

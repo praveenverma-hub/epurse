@@ -105,9 +105,44 @@ was written. **The migration unblocks both** — same code path — so this can 
 before. WhatsApp-style suggests the toggle: *Settings → Appearance → Light / Dark / System*, with
 the accent orthogonal to it. Carbon would then be the accent that also *defaults* to dark.
 
-## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13)
+## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×4)
 
-**53 files · 949 references.** Sep-13: +4 static refs (945→949) on `SettingsScreen.js`,
+**50 files · 923 references.** Sep-14 (4th pass): −2 static refs (925→923). `SheetCloseButton.tsx`
+lost its only two `colors.*` references (`colors.card` on the circle's fill, `colors.textPrimary`
+on the icon) while restyling the ✕ to sit as a translucent-dark "cut from the overlay" chip
+(`#00000066`, the app's existing canonical scrim tone) with a white icon always, rather than a
+white disc with a dark icon — shared by ~40 sheets app-wide, so the fix landed everywhere at
+once, and the file drops OUT of the table below entirely (0 refs now). The `dark` variant (for a
+close button sitting on a bespoke dark surface instead of the dim backdrop, e.g.
+`WelcomeStreakModal`) is unchanged.
+Sep-14 (3rd pass): −1 static ref (926→925). Flattened the
+Settings screens actually NESTED under `SettingsScreen` (`SettingsScreen`, `NotificationsScreen`,
+`MonthlyRecapSettingsScreen`, `SpendRulesScreen`, `CategoriesScreen`) onto a plain, card-free
+layout per user request — each section's `card` style (`backgroundColor: colors.card` +
+`shadows.card` + `radius.lg`) was deleted, replaced by a hairline `sectionSep` divider between
+groups where more than one exists on a screen. Net effect on the ratchet is small (most of these
+files already read `theme.*` for their card fill, not `colors.*`) — `CategoriesScreen.js` drops
+one row in the inventory below (24→23). **`BackupScreen.js` was mistakenly included in a first
+pass and reverted** — it's a Profile-hub SIBLING of Settings, not nested under it (no row in
+`SettingsScreen` points at it); its 35 static refs are untouched.
+Sep-14 (2nd pass): −8 static refs (934→926). Extracting the
+shared `components/ContactPickerSheet.tsx` (a `useTheme()`-only new file, zero static refs) out
+of `LbEntryForm.js`'s inline contact-search Modal — reused for the reminder form's new optional
+person picker, rather than writing a third copy — deleted `LbEntryForm.js`'s own contact-sheet
+styles/state along with it (26→15 static refs there). `ReminderFormScreen.tsx`'s new person +
+amount fields added a handful of `colors.textMuted`/`colors.inputBorder` refs, matching that
+file's own pre-existing convention (its title field's placeholder already read `colors.textMuted`
+the same way) — net still a shrink.
+Sep-14 (1st pass): −15 static refs (949→934). `SettingsScreen` was
+rewritten from scratch as a consistent NavListRow list (its Appearance/Monthly-recap sections
+moved to `ThemePickerSheet`/`MonthlyRecapSettingsScreen`) and `RemindersScreen.tsx` had its
+"Automatic nudges" section removed (moved to a new `NotificationsScreen.tsx`) — both landed as
+`useTheme()` + inline theme colours rather than the static palette, so both dropped OUT of this
+table entirely (`screens/SettingsScreen.js` no longer exists; `RemindersScreen.tsx` was already
+off `colors.*` and stayed that way). The three new files that work added
+(`NotificationsScreen.tsx`, `MonthlyRecapSettingsScreen.tsx`, `components/ThemePickerSheet.tsx`)
+are ALL `useTheme()`-only — zero new static refs, so the backlog only shrank.
+Sep-13: +4 static refs (945→949) on `SettingsScreen.js`,
 `BackupScreen.js`, `SpendRulesScreen.js`, `CategoriesScreen.js` — a real iOS fix (the
 `SafeAreaView`'s own fill has to match the header's `colors.card`, or the safe-area TOP
 inset behind the notch/status bar shows the page's `colors.background` instead; see
@@ -132,9 +167,9 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `components/DailyQueueStack.js` | 29 | yes | 1 | **3** |
 | `screens/LbPersonScreen.js` | 28 | yes | 1 | **2** |
 | `components/CreateGroupModal.tsx` | 28 | yes | 1 | 1 |
-| `components/LbEntryForm.js` | 26 | **no** | 1 | 1 |
+| `components/LbEntryForm.js` | 15 | **no** | 1 | 1 |
 | `components/TxnDetailSheet.tsx` | 24 | yes | 1 | 0 |
-| `screens/CategoriesScreen.js` | 24 | yes | 1 | 1 |
+| `screens/CategoriesScreen.js` | 23 | yes | 1 | 1 |
 | `screens/AnalyticsScreen.js` | 23 | yes | 1 | **6** |
 | `components/ExportSheet.tsx` | 21 | yes | 1 | 1 |
 | `screens/WhatsAppReminderScreen.js` | 17 | yes | 1 | 1 |
@@ -146,7 +181,6 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `components/FormField.tsx` | 15 | **no** | 1 | 0 |
 | `components/GroupExpenseForm.tsx` | 15 | yes | 1 | 1 |
 | `components/AddAccountModal.js` | 14 | yes | 1 | 1 |
-| `screens/SettingsScreen.js` | 12 | yes | 1 | 1 |
 | `components/CelebrationModal.js` | 10 | yes | 1 | 1 |
 | `screens/AddGroupExpenseScreen.tsx` | 9 | **no** | 1 | 1 |
 | `components/GhostLineChart.js` | 9 | **no** | 1 | 1 |
@@ -165,7 +199,6 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `components/AccountChip.js` | 3 | **no** | 1 | 1 |
 | `components/AppBrandFooter.tsx` | 2 | yes | 1 | 1 |
 | `components/EmptyState.tsx` | 2 | yes | 1 | 1 |
-| `components/SheetCloseButton.tsx` | 2 | **no** | 1 | 1 |
 | `components/NavListRow.tsx` | 1 | yes | 1 | 1 |
 
 Regenerate with:

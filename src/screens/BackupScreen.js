@@ -31,6 +31,7 @@ import SectionHeader from '../components/SectionHeader';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
 import GradientButton from '../components/GradientButton';
+import FaqAccordion from '../components/FaqAccordion';
 import { formatDateLabel } from '../utils/format';
 
 import { isBackupConfigured } from '../backup/config';
@@ -43,6 +44,29 @@ import {
 import PlainScreenHeader from '../components/PlainScreenHeader';
 
 const MIN_PASSWORD = 8;
+
+const BACKUP_FAQ = [
+  {
+    id: 'safe',
+    question: 'Is my data safe on Google Drive?',
+    answer: 'Yes — everything is encrypted on your device before it uploads, with a password only you know. ePurse and Google can only ever see the encrypted file, never its contents.',
+  },
+  {
+    id: 'lost-phone',
+    question: 'What happens if I lose my phone?',
+    answer: 'Sign in with the same Google account on your new device, open Backup, and restore your latest one with your password or recovery key.',
+  },
+  {
+    id: 'forgot-password',
+    question: 'What if I forget my password?',
+    answer: "It can't be recovered — not by ePurse, not by Google. That's what makes the encryption real, so store your password or recovery key somewhere safe the moment you create it.",
+  },
+  {
+    id: 'raw-sms',
+    question: 'Are my original SMS messages uploaded?',
+    answer: 'No — only the transactions ePurse already read from them. Your raw messages never leave your device.',
+  },
+];
 
 const prettySize = (bytes) => {
   const n = Number(bytes) || 0;
@@ -356,6 +380,8 @@ const BackupScreen = ({ navigation, route }) => {
                 </Text>
               </TouchableOpacity>
             ) : null}
+
+            <FaqAccordion title="FAQs" items={BACKUP_FAQ} style={styles.faqWrap} />
           </>
         )}
       </ScrollView>
@@ -510,6 +536,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
   },
   undoText: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
+  faqWrap: { marginTop: spacing.md },
 
   sheetBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   sheet: {

@@ -18,16 +18,12 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Contacts from 'expo-contacts';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 
@@ -42,8 +38,7 @@ import {
 } from '../utils/validation';
 import { formatCompact } from '../utils/format';
 import GradientButton from './GradientButton';
-import CenterModal from './CenterModal';
-import SheetCloseButton from './SheetCloseButton';
+import ContactPickerSheet from './ContactPickerSheet';
 import DateField from './DateField';
 import { FormChipRow, FormChip } from './FormField';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
@@ -89,59 +84,19 @@ const LbEntryForm = ({
   const [note, setNote] = useState('');
   const [alreadySettled, setAlreadySettled] = useState(false);
   const [formErr, setFormErr] = useState(null); // { person?, amount?, text }
-  const [confirm, setConfirm] = useState(null);
   const { submit, submitting } = useSubmitGuard();
 
   // ── Contact picker ─────────────────────────────────────────────────────────
-  // Lives here, not in a shell: linking a contact to the person you're naming is
-  // this form's own concern, and only the unlocked shell ever shows it.
+  // The sheet itself (search, permission, the list) is shared — `ContactPickerSheet`
+  // — so this form only owns WHEN it's open and what a pick does to its fields.
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
-  const [contactQuery, setContactQuery] = useState('');
-  const [allContacts, setAllContacts] = useState([]);
-  const [contactsLoading, setContactsLoading] = useState(false);
-
-  const pickContact = useCallback(async () => {
-    const { status } = await Contacts.requestPermissionsAsync();
-    if (status !== 'granted') {
-      setConfirm({
-        title: 'Permission needed',
-        message: 'Allow contacts access so you can pick a phone number from your list.',
-        primaryText: 'OK',
-      });
-      return;
-    }
-    setContactQuery('');
-    setContactSheetVisible(true);
-    setContactsLoading(true);
-    try {
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
-      });
-      setAllContacts(data.filter((c) => c.name && c.phoneNumbers?.length > 0));
-    } catch {
-      // permission revoked mid-flow or contacts unavailable
-    } finally {
-      setContactsLoading(false);
-    }
-  }, []);
-
-  const filteredContacts = useMemo(() => {
-    const q = contactQuery.trim().toLowerCase();
-    const base = q
-      ? allContacts.filter(
-          (c) =>
-            c.name?.toLowerCase().includes(q) ||
-            c.phoneNumbers?.some((p) => p.number?.includes(q)),
-        )
-      : allContacts;
-    return base.slice(0, 60);
-  }, [allContacts, contactQuery]);
+  const pickContact = useCallback(() => setContactSheetVisible(true), []);
 
   const handleSelectContact = useCallback((c) => {
-    if (c.phoneNumbers?.length) {
+    if (c.phones?.length) {
       // Contacts hand back "+91 98765 43210" — normalise to the local 10 digits or
       // the field's maxLength would clip the tail off the real number.
-      setPhone(normalizePhone(c.phoneNumbers[0].number));
+      setPhone(normalizePhone(c.phones[0]));
       setContactId(c.id ?? null);
     }
     if (!person.trim() && c.name) setPerson(c.name);
@@ -343,63 +298,10 @@ const LbEntryForm = ({
         style={{ marginTop: spacing.sm }}
       />
 
-      {/* ── Contact search sheet ── */}
-      <Modal
+      <ContactPickerSheet
         visible={contactSheetVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setContactSheetVisible(false)}
-      >
-        <View style={styles.contactBackdrop}>
-          <TouchableOpacity
-            style={styles.contactDismiss}
-            activeOpacity={1}
-            onPress={() => setContactSheetVisible(false)}
-          />
-          <View style={styles.contactSheet}>
-            <SheetCloseButton onPress={() => setContactSheetVisible(false)} variant="absolute" />
-            <View style={styles.contactHandle} />
-            <Text style={styles.contactTitle}>Pick a contact</Text>
-            <TextInput
-              autoFocus
-              value={contactQuery}
-              onChangeText={setContactQuery}
-              placeholder="Search name or number…"
-              placeholderTextColor={colors.textMuted}
-              style={styles.contactSearch}
-            />
-            {contactsLoading ? (
-              <ActivityIndicator style={{ marginVertical: 32 }} color={theme.primary} />
-            ) : (
-              <FlatList
-                data={filteredContacts}
-                keyExtractor={(c) => c.id}
-                keyboardShouldPersistTaps="handled"
-                style={styles.contactList}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.contactRow}
-                    onPress={() => handleSelectContact(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.contactName}>{item.name}</Text>
-                    <Text style={styles.contactPhone}>{item.phoneNumbers[0].number}</Text>
-                  </TouchableOpacity>
-                )}
-                ListEmptyComponent={<Text style={styles.contactEmpty}>No contacts found.</Text>}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      <CenterModal
-        visible={!!confirm}
-        title={confirm?.title}
-        message={confirm?.message}
-        primaryText={confirm?.primaryText || 'OK'}
-        onPrimary={() => setConfirm(null)}
-        onClose={() => setConfirm(null)}
+        onSelect={handleSelectContact}
+        onClose={() => setContactSheetVisible(false)}
       />
     </View>
   );
@@ -515,71 +417,6 @@ const styles = StyleSheet.create({
     ...typography.tiny,
     color: colors.textSecondary,
     fontWeight: '700',
-  },
-
-  // ── Contact search sheet ──
-  contactBackdrop: {
-    flex:            1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent:  'flex-end',
-  },
-  contactDismiss: { flex: 1 },
-  contactSheet: {
-    backgroundColor:      colors.card,
-    borderTopLeftRadius:  24,
-    borderTopRightRadius: 24,
-    paddingHorizontal:    20,
-    paddingBottom:        32,
-    maxHeight:            '75%',
-  },
-  contactHandle: {
-    width:           36,
-    height:          4,
-    borderRadius:    2,
-    backgroundColor: colors.divider,
-    alignSelf:       'center',
-    marginTop:       10,
-    marginBottom:    14,
-  },
-  contactTitle: {
-    ...typography.h2,
-    fontWeight:   '700',
-    color:        colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  contactSearch: {
-    ...typography.body,
-    color:           colors.textPrimary,
-    borderWidth:     1.5,
-    borderColor:     colors.divider,
-    borderRadius:    radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical:   10,
-    marginBottom:    spacing.sm,
-    backgroundColor: colors.background,
-  },
-  contactList: { maxHeight: 380 },
-  contactRow: {
-    paddingVertical:   12,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-  },
-  contactName: {
-    ...typography.bodyBold,
-    fontWeight: '600',
-    color:      colors.textPrimary,
-  },
-  contactPhone: {
-    ...typography.small,
-    color:     colors.textSecondary,
-    marginTop: 2,
-  },
-  contactEmpty: {
-    ...typography.body,
-    color:     colors.textMuted,
-    textAlign: 'center',
-    marginTop: spacing.lg,
   },
 });
 

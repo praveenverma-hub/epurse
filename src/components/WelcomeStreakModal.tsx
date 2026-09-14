@@ -36,8 +36,11 @@ import {
   selectFirstLaunch,
 } from '../store/useRewardStore';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
+import { STATIC_CONFIG } from '../config/staticConfig';
 import LiveFlame from './LiveFlame';
 import SheetCloseButton from './SheetCloseButton';
+
+const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
 import { hapticSuccess } from '../utils/haptics';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -154,7 +157,9 @@ const WelcomeStreakModal: React.FC = () => {
 
             <Text style={styles.headline}>{REWARD_COPY.WELCOME_HEADLINE}</Text>
 
-            <Text style={styles.description}>{REWARD_COPY.WELCOME_DESCRIPTION}</Text>
+            <Text style={styles.description}>
+              {SHOP_ENABLED ? REWARD_COPY.WELCOME_DESCRIPTION : REWARD_COPY.WELCOME_DESCRIPTION_SHOP_COMING_SOON}
+            </Text>
 
             <Pressable style={styles.cta} onPress={dismissEarly}>
               <Text style={styles.ctaText}>{REWARD_COPY.WELCOME_CTA}</Text>

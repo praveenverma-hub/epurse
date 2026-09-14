@@ -1425,6 +1425,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - RP/EPC dual currency, Aware Run streak + multiplier, daily review cap, shop widgets
   (Liquid Wave, Concentric Rings, Plasma Flame), zero-transaction check-in grace period.
 - Budget streak + category mastery (lives in the main store, not the reward store).
+- **Sep-14-26: Shop gated behind `STATIC_CONFIG.shop.enabled` (false for 1st MVP)** —
+  `ShopScreen` shows a "Coming soon" state + FAQ instead of the buyable widget cards;
+  RP/EPC/level keep earning and displaying exactly as before (only the catalogue is
+  held back). Profile's Shop row gets a `SOON` badge. New shared `FaqAccordion`
+  component for the FAQ, meant for reuse (Goals, other app FAQs).
 
 **Open**
 - No automated tests for this module (manual verification only) — noted as an accepted
@@ -1741,6 +1746,52 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   already there — `detectSubscriptions` returns merchant + amount + `dayOfMonth`), stale
   settle-up nudges, stale-balance nudges, quiet hours, snooze.
 
+- **Sep-14-2026: Reminders vs Notifications, separated.** Requested directly: a reminder is
+  something the user asked to be reminded about; the "Automatic nudges" section listed
+  notifications the app decides to send by itself, and the two had been living on one screen.
+  Moved the 7 nudge switches (bill due, cycle closed, payment received, subscription hikes,
+  budget limits, mid-month check-in, monthly recap) out to a new `NotificationsScreen`, reached
+  from a **Notifications** row in Settings → Manage. `RemindersScreen` goes back to showing only
+  the user's own `reminders` registry, blank via `EmptyState` by default — same shape as before
+  the nudges section was ever added. No mechanism changed: `notificationPrefs` /
+  `setNotificationPref` / `nudgeAllowed` still live in `ePurseStore.js` exactly as before, just
+  read from the new screen. `profileNav.test.mjs` was split to match: §5 now asserts Reminders
+  carries no nudge code at all, a new §5a re-asserts "every switch has a matching store gate"
+  against `NotificationsScreen.tsx` instead.
+- **Sep-14-2026 follow-up: Reminders' blank state un-boxed, one card per reminder.** The empty
+  state was a compact `EmptyState` inside a card; every other empty screen in the app (Groups,
+  Transactions, Accounts) shows unboxed centred text instead, so it's now the plain `full`
+  `EmptyState` with no card wrapper. The reminder list itself used to be one shared card with a
+  hairline between rows; each reminder is now its own card, stacked under a bare "Upcoming"
+  heading — the same shape Goals/Groups use for their own lists.
+- **Sep-14-2026, same-day: custom reminders can optionally be tied to a person + amount.**
+  Requested directly, clarified via a quick multiple-choice to confirm scope. A new "Who
+  (optional)" section on the reminder form (custom reminders only — an `lb_borrow` reminder keeps
+  its fixed context line, unchanged) lets you type a name or pick from contacts, then optionally
+  add an amount; when both are set it shows the same "Remind yourself to pay ₹X to Y" line and
+  notification wording an LB-bell reminder already used. Person and amount now persist
+  independently (a person tagged with no amount used to be silently dropped, since the store call
+  only ever wrote both-or-neither). New shared `components/ContactPickerSheet.tsx` — extracted
+  the same day out of `LbEntryForm.js`'s inline contact-search sheet (needed in >1 file, so one
+  component rather than a third copy) — also dropped `LbEntryForm.js`'s own permission-denied
+  dialog and ~90 lines / 11 static-colour references along the way.
+- **Sep-14-2026, same-day: deleting a reminder had NO confirmation — fixed on both paths, and
+  turned into a standing app-wide rule.** Flagged directly. The list's ✕ called `cancelReminder`
+  straight from its `onPress`, and the form's own "Delete reminder" button called its delete
+  handler directly — a single accidental tap permanently removed a reminder with no way back,
+  unlike every other delete flow in the app (accounts, goals, groups, transactions, LB entries),
+  which already gate the real call behind a `CenterModal`. Both now do too — the list holds one
+  shared confirm keyed by the tapped reminder's id, the form's confirm gates its existing delete
+  handler. Documented as a permanent rule (ui-consistency §8c-i): a destructive/irreversible
+  action's `onPress` may only set STATE, never call the store action itself — that happens in the
+  confirm's `onPrimary` alone. `profileNav.test.mjs` asserts both Reminders paths route through a
+  `CenterModal` rather than calling `cancelReminder` inline.
+- **Sep-14-2026, same-day follow-up: the form's Delete button moved to match every other edit
+  screen.** It was a full-width "Delete reminder" row at the end of the scroll; every other edit
+  form (`GoalFormScreen`, etc.) puts Delete in the pinned footer beside Save instead, icon-only
+  and the same height as Save but a fraction of the width. Moved and restyled to match exactly —
+  behaviour unchanged, only where it lives and how it looks.
+
 ---
 
 ## Backup (Google Drive)
@@ -1750,6 +1801,8 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   raw SMS never leaves the device), `drive.file` OAuth scope, onboarding restore entry point.
 - Password vs recovery-key normalisation (`toKeyMaterial`), Hermes-safe crypto (no
   TextEncoder/Buffer/atob dependency).
+- **Sep-14-26: FAQ section** (shared `FaqAccordion`) — encryption safety, lost-phone restore,
+  forgotten-password recovery, raw SMS never uploaded. Second adopter after Shop.
 
 **Open**
 - **Untested against a real Google account** — phases 1-6 (manual backup+restore,
@@ -1780,6 +1833,19 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - 5 accent themes incl. Carbon (replaced Gold — brand color rule: never put a bright
   color in a gradient, only in `primary`).
 - Dark theme base (most recent commit, `5f21246`) — landed but see Open below.
+- **Sep-14-2026: Settings destination tree — Title Case sweep + a rename.** Flagged directly:
+  headings across Settings and its nested screens read inconsistently (`SettingsScreen`'s own
+  row list mixed `Monthly recap` sentence-case beside `SMS Diagnostic` Title-case). Swept
+  `SettingsScreen` and the screens actually reachable ONLY by navigating through it
+  (`NotificationsScreen`, `SpendRulesScreen`) onto the standing Title Case rule — `SectionHeader`
+  titles, button labels, and (newly covered) `NavListRow` labels all fixed to Title Case;
+  hints/subtitles/EmptyState copy/confirm-dialog titles stayed sentence case, unaffected. Also
+  renamed "Counts as expense" → **"Expense Inclusions"** (the Settings row label and
+  `SpendRulesScreen`'s own screen title, kept in sync) — the underlying concept/predicate is
+  still `spendExcluded`/"counts as expense" everywhere in code, only the visible copy changed.
+  `BackupScreen` was swept too in a first pass, then reverted — it's a Profile-hub sibling of
+  Settings (its own top-level destination, not nested under it), caught on report ("why are you
+  changing in backup screen").
 
 **Open**
 - **Dark mode is planned but not fully built** — read `docs/DARK_MODE.md` before touching

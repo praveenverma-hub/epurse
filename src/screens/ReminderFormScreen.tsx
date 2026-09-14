@@ -37,7 +37,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
-import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidName } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
 import { REPEAT, describeRepeat, nextOccurrence } from '../utils/reminderSchedule';
 import { requestNotificationPermissions } from '../utils/notifications';
@@ -45,7 +45,9 @@ import PlainScreenHeader from '../components/PlainScreenHeader';
 import ReminderBanner from '../components/ReminderBanner';
 import DateField from '../components/DateField';
 import TimeField, { formatTimeLabel } from '../components/TimeField';
-import { FormField, FormTextInput, FormChipRow, FormChip } from '../components/FormField';
+import { FormField, FormTextInput, FormAmountInput, FormChipRow, FormChip } from '../components/FormField';
+import ContactPickerSheet from '../components/ContactPickerSheet';
+import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { hapticLight } from '../utils/haptics';
 
@@ -138,10 +140,27 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
   const [presetKey, setPresetKey] = useState<string | null>(isEdit ? null : 'tomorrow');
   const [saving, setSaving] = useState(false);
 
-  // The balance this reminder is about — from the route on a fresh one, from the
-  // record on an edit, so the context line reads identically in both modes.
-  const amount = existing?.amount ?? presetAmount;
-  const person = existing?.person ?? presetPerson;
+  // A lb_borrow reminder's balance is FIXED by the LB bell that opened it — not
+  // editable here, since retyping "who you owe" would let it drift from the
+  // actual debt. A custom reminder has no such balance, so it gets an editable
+  // (and entirely optional) person + amount instead, letting "pay rent" become
+  // "pay ₹12,000 to the landlord" without going through Lent/Borrowed at all.
+  const isLocked = kind !== 'custom';
+  const [personDraft, setPersonDraft] = useState<string>(existing?.person ?? presetPerson ?? '');
+  const [amountDraft, setAmountDraft] = useState<string>(
+    existing?.amount != null ? String(existing.amount) : presetAmount != null ? String(presetAmount) : '',
+  );
+  const [personSheetOpen, setPersonSheetOpen] = useState(false);
+
+  // The balance this reminder is about — from the route/record for a locked
+  // (lb_borrow) reminder, from the editable draft for a custom one. Either way
+  // the context line and the notification body read from these two values only,
+  // so what's shown and what's stored can't drift.
+  const person = isLocked ? (existing?.person ?? presetPerson) : (personDraft.trim() || undefined);
+  const draftAmountNum = parseFloat(amountDraft);
+  const amount = isLocked
+    ? (existing?.amount ?? presetAmount)
+    : (person && !Number.isNaN(draftAmountNum) && draftAmountNum > 0 ? draftAmountNum : undefined);
   const hasBalance = typeof amount === 'number' && !!person;
 
   // The notification body, composed from the SAME two values the context line
@@ -179,8 +198,11 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
       sourceKey: sourceKey ?? existing?.sourceKey ?? null,
       // Kept on the record so re-opening it can rebuild the same emphasised
       // context line rather than trying to un-compose `body` back into parts.
-      amount: hasBalance ? (amount as number) : undefined,
-      person: hasBalance ? person : undefined,
+      // Independent of each other — a custom reminder can be tagged to a person
+      // with NO amount (just "who" this is about), so persisting only ever
+      // when `hasBalance` (both present) would silently drop a person-only tag.
+      amount: typeof amount === 'number' ? amount : undefined,
+      person: person || undefined,
       replaceId: reminderId ?? null,
     });
     setSaving(false);
@@ -198,8 +220,13 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [canSave, kind, title, body, repeat, when, sourceKey, existing, reminderId, isEdit,
       hasBalance, amount, person, scheduleReminder, toast, navigation]);
 
+  // A destructive, irreversible action always confirms first — the "Delete
+  // reminder" tap only opens the dialog; this is what actually removes it,
+  // called from the dialog's own (same-verb) primary button.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const handleDelete = useCallback(async () => {
     if (!reminderId) return;
+    setConfirmDelete(false);
     await cancelReminder(reminderId);
     toast.success('Reminder removed', 'It won\'t notify you any more.');
     navigation.goBack();
@@ -259,9 +286,10 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           </View>
 
-          {/* What. For a person-scoped reminder the body is composed by the
-              caller (the amount + who), and shown read-only below the title —
-              editing it would let the text drift from the actual balance. */}
+          {/* What. The composed context line above (when there's a balance) is
+              the only place the amount + person ever get emphasised — there's
+              no separate body field to edit, for either kind, so it can't
+              drift from what's actually stored. */}
           <FormField label="Remind me to">
             <FormTextInput
               value={title}
@@ -272,6 +300,47 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
               returnKeyType="done"
             />
           </FormField>
+
+          {/* Who — optional, custom reminders only. A lb_borrow reminder's
+              person + amount are fixed by the debt it came from (shown above
+              as the context line); a custom one can OPTIONALLY be tied to a
+              person the same way, without going through Lent/Borrowed at all
+              — "pay rent" becomes "pay ₹12,000 to the landlord". */}
+          {!isLocked ? (
+            <>
+              <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>WHO (OPTIONAL)</Text>
+              <View style={styles.personRow}>
+                <FormTextInput
+                  value={personDraft}
+                  onChangeText={(t) => setPersonDraft(sanitizeName(t))}
+                  placeholder="Type a name"
+                  placeholderTextColor={colors.textMuted}
+                  maxLength={INPUT_LIMITS.NAME_MAX}
+                  style={styles.personInput}
+                />
+                <TouchableOpacity
+                  style={styles.personPickBtn}
+                  onPress={() => { hapticLight(); setPersonSheetOpen(true); }}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Pick a contact"
+                >
+                  <Ionicons name="people-outline" size={19} color={theme.primary} />
+                </TouchableOpacity>
+              </View>
+              {person ? (
+                <FormField label="Amount (optional)">
+                  <FormAmountInput
+                    compact
+                    value={amountDraft}
+                    onChangeText={(t) => setAmountDraft(sanitizeAmount(t))}
+                    placeholder="₹0"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                </FormField>
+              ) : null}
+            </>
+          ) : null}
 
           {/* When — presets first, then the exact pickers. Tapping a picker
               clears the preset highlight, because the two would otherwise
@@ -344,33 +413,61 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
               ? `Fires once — ${fullWhen(nextFire)}`
               : `${describeRepeat(when.getTime(), repeat)} · next on ${fullWhen(nextFire)}`}
           </Text>
-
-          {isEdit ? (
-            <TouchableOpacity
-              style={[styles.deleteBtn, { borderColor: theme.danger + '55' }]}
-              onPress={handleDelete}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="trash-outline" size={17} color={theme.danger} />
-              <Text style={[styles.deleteTxt, { color: theme.danger }]}>Delete reminder</Text>
-            </TouchableOpacity>
-          ) : null}
         </ScrollView>
 
         {/* Pinned below the scroll view, per the footer-CTA rule — a Save that
-            scrolls away is a Save you have to hunt for. */}
+            scrolls away is a Save you have to hunt for. Delete rides in the
+            SAME footer, beside Save, rather than at the end of the scroll —
+            matching every other edit form in the app (GoalFormScreen, etc.):
+            icon-only, outlined, the same height as Save but a fraction of the
+            width, so the destructive action can never be mistaken for the
+            primary one. */}
         <View style={[styles.footer, { borderTopColor: theme.divider, paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
-          <TouchableOpacity
-            style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.divider }]}
-            onPress={handleSave}
-            disabled={!canSave}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.saveTxt, { color: canSave ? '#fff' : theme.textMuted }]}>
-              {saving ? 'Setting…' : isEdit ? 'Save changes' : 'Set reminder'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.footerRow}>
+            {isEdit ? (
+              <TouchableOpacity
+                style={[styles.deleteBtn, { borderColor: theme.danger + '55' }]}
+                onPress={() => { hapticLight(); setConfirmDelete(true); }}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Delete reminder"
+              >
+                <Ionicons name="trash-outline" size={19} color={theme.danger} />
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.divider }]}
+              onPress={handleSave}
+              disabled={!canSave}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.saveTxt, { color: canSave ? '#fff' : theme.textMuted }]}>
+                {saving ? 'Setting…' : isEdit ? 'Save changes' : 'Set reminder'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        <ContactPickerSheet
+          visible={personSheetOpen}
+          onSelect={(c) => { setPersonDraft(c.name); setPersonSheetOpen(false); }}
+          onClose={() => setPersonSheetOpen(false)}
+        />
+
+        {/* Neither this nor ContactPickerSheet above is ever open while the
+            other is — nothing on this screen opens one while the other is
+            already up, so the stacked-Modal hazard (§8b) doesn't apply here. */}
+        <CenterModal
+          visible={confirmDelete}
+          title="Delete this reminder?"
+          message="It won't notify you any more. This cannot be undone."
+          primaryText="Delete"
+          secondaryText="Cancel"
+          destructive
+          onPrimary={handleDelete}
+          onSecondary={() => setConfirmDelete(false)}
+          onClose={() => setConfirmDelete(false)}
+        />
       </SafeAreaView>
     </View>
   );
@@ -398,6 +495,22 @@ const styles = StyleSheet.create({
 
   sectionLabel: { ...typography.tiny, fontWeight: '800', letterSpacing: 1.2, marginTop: spacing.md },
 
+  // Who — name input + a trailing contact-pick button matching it in height
+  // (`alignSelf: 'stretch'`, same trick as DateField's `iconBtn`) rather than
+  // by copying padding, which drifts the moment either control's font changes.
+  personRow: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.sm },
+  personInput: { flex: 1, marginBottom: 0 },
+  personPickBtn: {
+    alignSelf: 'stretch',
+    minWidth: 48,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   presetRow: { flexDirection: 'row', gap: spacing.sm },
   preset: {
     flex: 1,
@@ -416,24 +529,25 @@ const styles = StyleSheet.create({
 
   repeatNote: { ...typography.small, marginTop: spacing.xs, lineHeight: 18 },
 
-  deleteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-    minHeight: BUTTON_H,
-    borderRadius: radius.md,
-    borderWidth: 1,
-  },
-  deleteTxt: { ...typography.bodyBold, fontWeight: '700' },
-
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  // BUTTON_H tall like Save (matching PADDING isn't matching height), but only
+  // as wide as its glyph needs — an icon-only square, never text beside Save's
+  // text, so the destructive action reads as secondary at a glance.
+  deleteBtn: {
+    width: BUTTON_H,
+    minHeight: BUTTON_H,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+  },
   saveBtn: {
+    flex: 1,
     minHeight: BUTTON_H,
     borderRadius: radius.lg,
     alignItems: 'center',
