@@ -40,12 +40,14 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { spacing } from '../constants/theme';
 import { THEMES } from '../constants/themes';
 import { STATIC_CONFIG } from '../config/staticConfig';
+import { APP_VERSION } from '../constants/appMeta';
 import { useTheme } from '../hooks/useTheme';
 import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import ThemePickerSheet from '../components/ThemePickerSheet';
 
 const SMS_DIAGNOSTIC_ENABLED = STATIC_CONFIG.smsDiagnostic.enabled;
+const RATING_ENABLED = STATIC_CONFIG.rating.enabled;
 
 interface Props {
   navigation: { goBack: () => void; navigate: (route: string) => void };
@@ -58,6 +60,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const setThemeId = useEPurseStore((s: any) => s.setThemeId);
   const showMonthlyRecap = useEPurseStore((s: any) => s.showMonthlyRecap);
   const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
+  const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
 
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
 
@@ -84,9 +87,16 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
       >
         <>
           <NavListRow
+            icon="finger-print-outline"
+            label="Security"
+            hint={appLockEnabled ? 'App Lock on' : 'App Lock off'}
+            onPress={() => navigation.navigate('Security')}
+          />
+          <NavListRow
             icon="color-palette-outline"
             label="Appearance"
             hint={activeThemeLabel}
+            divided
             onPress={() => setThemeSheetOpen(true)}
           />
           <NavListRow
@@ -133,6 +143,27 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
               onPress={() => navigation.navigate('SmsDiagnostic')}
             />
           ) : null}
+          <NavListRow
+            icon="help-circle-outline"
+            label="Help & Support"
+            hint="FAQs and how to reach us"
+            divided
+            onPress={() => navigation.navigate('HelpSupport')}
+          />
+          <NavListRow
+            icon="star-outline"
+            label="Rate & Feedback"
+            hint={RATING_ENABLED ? 'Rate us and tell us what you think' : 'Send feedback'}
+            divided
+            onPress={() => navigation.navigate('RateFeedback')}
+          />
+          <NavListRow
+            icon="information-circle-outline"
+            label="About"
+            hint={`Version ${APP_VERSION}`}
+            divided
+            onPress={() => navigation.navigate('About')}
+          />
         </>
       </ScrollView>
 

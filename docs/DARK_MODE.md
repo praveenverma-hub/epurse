@@ -105,9 +105,15 @@ was written. **The migration unblocks both** — same code path — so this can 
 before. WhatsApp-style suggests the toggle: *Settings → Appearance → Light / Dark / System*, with
 the accent orthogonal to it. Carbon would then be the accent that also *defaults* to dark.
 
-## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×4)
+## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×5)
 
-**50 files · 923 references.** Sep-14 (4th pass): −2 static refs (925→923). `SheetCloseButton.tsx`
+**51 files · 927 references.** Sep-14 (5th pass): +4 static refs (923→927), a deliberate GROWTH.
+`InviteEarnScreen.tsx` moved off the Profile hub's Settings-nested tree onto the Profile hub
+itself (below Backup) — no longer subject to the flattened/plain Settings convention, so it was
+restyled to match its new sibling `BackupScreen.js`'s card-per-section look exactly: static
+`colors.card`/`colors.background`/`colors.textSecondary` for structure, `theme.primary` (via
+`useTheme()`) for the one accent, same as Backup. New file, 4 refs — see the table below.
+Sep-14 (4th pass): −2 static refs (925→923). `SheetCloseButton.tsx`
 lost its only two `colors.*` references (`colors.card` on the circle's fill, `colors.textPrimary`
 on the icon) while restyling the ✕ to sit as a translucent-dark "cut from the overlay" chip
 (`#00000066`, the app's existing canonical scrim tone) with a white icon always, rather than a
@@ -194,6 +200,7 @@ sub-components touching `styles` (the gotcha in §4.1) — bold means it needs t
 | `components/HomeCarousel.tsx` | 6 | yes | 1 | **2** |
 | `components/CustomWidgetContainer.tsx` | 5 | **no** | 1 | 0 |
 | `screens/DashboardScreen.js` | 4 | yes | 1 | 1 |
+| `screens/InviteEarnScreen.tsx` | 4 | yes | 1 | 1 |
 | `components/PlainScreenHeader.tsx` | 4 | **no** | 1 | 1 |
 | `components/SectionHeader.tsx` | 4 | **no** | 1 | 1 |
 | `components/AccountChip.js` | 3 | **no** | 1 | 1 |

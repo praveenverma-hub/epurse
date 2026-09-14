@@ -1049,6 +1049,10 @@ export const useEPurseStore = create(
       themeId: DEFAULT_THEME_ID,   // THEMES keys: 'orange'|'blue'|'carbon'|'indigo'|'platinum'
       darkMode: false,             // reserved for future dark-theme rollout
 
+      // Require Face ID / Fingerprint to open the app (AppLockGate, App.js). Off
+      // by default — opted into from Settings → Security, not assumed.
+      appLockEnabled: false,
+
       // Dashboard preference: show the weekly spend recap. On by default; toggled
       // from the Settings sheet. The recap now appears ONLY after a week ends, as a
       // one-time centered modal (no persistent card). Persisted (see partialize).
@@ -1277,6 +1281,7 @@ export const useEPurseStore = create(
 
       setThemeId: (id) => set({ themeId: id || DEFAULT_THEME_ID }),
       setDarkMode: (v) => set({ darkMode: !!v }),
+      setAppLockEnabled: (v) => set({ appLockEnabled: !!v }),
       /** Dashboard: show/hide the weekly spend recap (week-end modal). */
       setShowWeeklySummary: (v) => set({ showWeeklySummary: !!v }),
 
@@ -5524,6 +5529,7 @@ export const useEPurseStore = create(
           contactsPermissionGranted: false,
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
+          appLockEnabled: false,
           showWeeklySummary: true,
           weeklyRecapHandled: null,
           pendingWeeklyRecap: null,
@@ -6239,6 +6245,7 @@ export const useEPurseStore = create(
         contactsPermissionGranted: state.contactsPermissionGranted,
         themeId: state.themeId,
         darkMode: state.darkMode,
+        appLockEnabled: state.appLockEnabled ?? false,
         showWeeklySummary: state.showWeeklySummary ?? true,
         weeklyRecapHandled: state.weeklyRecapHandled ?? null,
         // The QUEUE is persisted alongside its guard, and that pairing is the

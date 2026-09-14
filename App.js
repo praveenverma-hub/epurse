@@ -11,6 +11,7 @@ import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
 import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChannel } from './src/utils/notifications';
 import { ToastProvider } from './src/components/Toast';
+import AppLockGate from './src/components/AppLockGate';
 
 // =============================================================================
 // Background workers — mounted once at the root, render nothing.
@@ -133,6 +134,7 @@ export default function App() {
           <CompactionBoot />
           <BudgetRolloverBoot />
           <AppNavigator />
+          <AppLockGate />
         </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

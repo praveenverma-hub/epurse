@@ -1846,8 +1846,21 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `BackupScreen` was swept too in a first pass, then reverted — it's a Profile-hub sibling of
   Settings (its own top-level destination, not nested under it), caught on report ("why are you
   changing in backup screen").
+- **Sep-14-2026: four new Settings sections + one on the Profile hub** — Security (app-open
+  Face ID/Fingerprint lock, new shared `AppLockGate` mounted at the App.js root,
+  `appLockEnabled` in the store), About (identity + version from `app.json`), Help & Support
+  (general app FAQ via `FaqAccordion` + a mail-to contact row), Rate & Feedback (store-review
+  link gated by `STATIC_CONFIG.rating.enabled` until published, plus feedback email). **Invite &
+  Earn moved to the Profile hub's destination list** (below Backup & restore, above Settings) —
+  it's a feature meant to be used, not filed under Settings; share action works today, EPC
+  reward gated by `STATIC_CONFIG.inviteEarn.enabled` — no backend yet to verify a real invite.
+  New `constants/appMeta.ts` holds the identity/contact constants; `SUPPORT_EMAIL`/
+  `APP_STORE_URL` are **placeholders — replace before shipping**.
 
 **Open**
+- **`constants/appMeta.ts` has placeholder values** — `SUPPORT_EMAIL` and `APP_STORE_URL`
+  are not real. Help & Support / Rate & Feedback are functional but point nowhere useful
+  until these are filled in.
 - **Dark mode is planned but not fully built** — read `docs/DARK_MODE.md` before touching
   any colour/background. Blocked on 972 static `colors.*` references across 50 files that
   `StyleSheet.create` freezes at load. A regression test ratchets this backlog so it can

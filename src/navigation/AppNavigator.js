@@ -10,6 +10,7 @@ import AddTransactionScreen from '../screens/AddTransactionScreen';
 import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
+import SecuritySettingsScreen from '../screens/SecuritySettingsScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import MonthlyRecapSettingsScreen from '../screens/MonthlyRecapSettingsScreen';
 import SpendRulesScreen    from '../screens/SpendRulesScreen';
@@ -19,6 +20,10 @@ import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import BudgetPlanScreen    from '../screens/BudgetPlanScreen';
 import LbPersonScreen      from '../screens/LbPersonScreen';
 import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
+import HelpSupportScreen   from '../screens/HelpSupportScreen';
+import RateFeedbackScreen  from '../screens/RateFeedbackScreen';
+import InviteEarnScreen    from '../screens/InviteEarnScreen';
+import AboutScreen         from '../screens/AboutScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 import ShopScreen          from '../screens/ShopScreen';
 import RemindersScreen     from '../screens/RemindersScreen';
@@ -66,6 +71,7 @@ export default function AppNavigator() {
         <Stack.Screen name="AddGroupExpense" component={AddGroupExpenseScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="Settings"       component={SettingsScreen} />
+        <Stack.Screen name="Security"       component={SecuritySettingsScreen} />
         <Stack.Screen name="Notifications"  component={NotificationsScreen} />
         <Stack.Screen name="MonthlyRecapSettings" component={MonthlyRecapSettingsScreen} />
         <Stack.Screen name="SpendRules"     component={SpendRulesScreen} />
@@ -75,6 +81,10 @@ export default function AppNavigator() {
         <Stack.Screen name="BudgetPlan"     component={BudgetPlanScreen} />
         <Stack.Screen name="LbPerson"       component={LbPersonScreen} />
         <Stack.Screen name="SmsDiagnostic" component={SmsDiagnosticScreen} />
+        <Stack.Screen name="HelpSupport"   component={HelpSupportScreen} />
+        <Stack.Screen name="RateFeedback"  component={RateFeedbackScreen} />
+        <Stack.Screen name="InviteEarn"    component={InviteEarnScreen} />
+        <Stack.Screen name="About"         component={AboutScreen} />
         {/* Profile hub → its three destinations. The hub was one screen
             ("RewardShop") holding the profile, the widget catalogue and the
             settings sheet; each is now its own route so the list on the hub can

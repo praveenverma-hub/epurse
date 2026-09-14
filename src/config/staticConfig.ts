@@ -135,6 +135,18 @@ export const STATIC_CONFIG = {
     /** false (MVP): catalogue shows "coming soon"; RP/EPC/level earn as normal. */
     enabled: false,
   },
+
+  /** `RateFeedbackScreen`'s "Rate ePurse" row. */
+  rating: {
+    /** false: no store listing yet — the row shows but stays disabled. */
+    enabled: false,
+  },
+
+  /** `InviteEarnScreen` — sharing works either way; this gates the EPC reward. */
+  inviteEarn: {
+    /** false (no backend to verify an invite yet): share only, no reward promised. */
+    enabled: false,
+  },
 } as const;
 
 export default STATIC_CONFIG;

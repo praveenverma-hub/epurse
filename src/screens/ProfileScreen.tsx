@@ -62,6 +62,7 @@ import { radius, shadows, spacing } from '../constants/theme';
 import { STATIC_CONFIG } from '../config/staticConfig';
 
 const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
+const INVITE_EARN_ENABLED = STATIC_CONFIG.inviteEarn.enabled;
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -288,6 +289,15 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               label="Backup & restore"
               hint="End-to-end encrypted · Google Drive"
               onPress={go('Backup')}
+            />
+            <NavListRow
+              variant="tile"
+              divided
+              icon="gift-outline"
+              label="Invite & Earn"
+              hint={INVITE_EARN_ENABLED ? 'Invite a friend and earn EPC' : 'Share ePurse with a friend'}
+              badge={INVITE_EARN_ENABLED ? undefined : 'SOON'}
+              onPress={go('InviteEarn')}
             />
             <NavListRow
               variant="tile"
