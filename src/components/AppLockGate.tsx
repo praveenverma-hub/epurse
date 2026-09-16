@@ -7,6 +7,7 @@ import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import type { AppStateStatus, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as ScreenCapture from 'expo-screen-capture';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
@@ -58,6 +59,26 @@ const AppLockGate: React.FC = () => {
     if (hydrated) authenticate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
+
+  // Android takes the recent-apps (task switcher) thumbnail at the native
+  // window-compositor level the instant the Activity pauses — before our JS
+  // AppState listener below gets a chance to flip `unlocked` and repaint the
+  // lock overlay, so the real screen leaked into the thumbnail even though
+  // re-opening the app correctly re-locked it. FLAG_SECURE (set here via
+  // expo-screen-capture) blanks that thumbnail at the OS level regardless of
+  // JS timing. It must stay set for as long as app lock is enabled, not just
+  // while the overlay is showing. No-op on iOS (no equivalent API) — there
+  // the app-switcher snapshot is taken after `willResignActive`, which is
+  // when the AppState listener already covers the screen, so this JS-timed
+  // approach is sufficient on that platform.
+  useEffect(() => {
+    if (!hydrated) return;
+    if (appLockEnabled) {
+      ScreenCapture.preventScreenCaptureAsync();
+    } else {
+      ScreenCapture.allowScreenCaptureAsync();
+    }
+  }, [hydrated, appLockEnabled]);
 
   const appState = useRef<AppStateStatus>(AppState.currentState);
   useEffect(() => {
