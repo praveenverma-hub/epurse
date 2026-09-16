@@ -7,23 +7,18 @@ import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import type { AppStateStatus, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { NativeModules } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase } from '../constants/theme';
 import { isAppLockSuppressed, consumeAppLockSuppress } from '../utils/appLockSuppress';
 
-// Guarded require, not a static import: requireNativeModule() throws at
-// module-evaluation time if the native side isn't linked in a given build,
-// and a static `import` can't be try/caught — it would take the whole app
-// down before anything renders. FLAG_SECURE is a hardening extra; it must
-// never be able to crash the app it's meant to protect.
-let ScreenCapture: typeof import('expo-screen-capture') | null = null;
-try {
-  ScreenCapture = require('expo-screen-capture');
-} catch {
-  ScreenCapture = null;
-}
+// Plain RN bridge module (android/.../ScreenSecurityModule.kt), not an Expo
+// module — FLAG_SECURE needs no manifest permission, and a NativeModules
+// lookup is simply undefined where it isn't registered (iOS has no
+// equivalent) rather than throwing at import time.
+const ScreenSecurity: { setSecure(secure: boolean): Promise<void> } | undefined = (NativeModules as any).ScreenSecurity;
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -74,17 +69,17 @@ const AppLockGate: React.FC = () => {
   // window-compositor level the instant the Activity pauses — before our JS
   // AppState listener below gets a chance to flip `unlocked` and repaint the
   // lock overlay, so the real screen leaked into the thumbnail even though
-  // re-opening the app correctly re-locked it. FLAG_SECURE (set here via
-  // expo-screen-capture) blanks that thumbnail at the OS level regardless of
-  // JS timing. It must stay set for as long as app lock is enabled, not just
-  // while the overlay is showing. No-op on iOS (no equivalent API) — there
-  // the app-switcher snapshot is taken after `willResignActive`, which is
-  // when the AppState listener already covers the screen, so this JS-timed
-  // approach is sufficient on that platform.
+  // re-opening the app correctly re-locked it. FLAG_SECURE (set here) blanks
+  // that thumbnail at the OS level regardless of JS timing. It must stay set
+  // for as long as app lock is enabled, not just while the overlay is
+  // showing. No-op on iOS (no equivalent API, and this module isn't
+  // registered there) — the app-switcher snapshot there is taken after
+  // `willResignActive`, which is when the AppState listener below already
+  // covers the screen, so the JS-timed approach is sufficient on that
+  // platform.
   useEffect(() => {
-    if (!hydrated || !ScreenCapture) return;
-    const fn = appLockEnabled ? ScreenCapture.preventScreenCaptureAsync : ScreenCapture.allowScreenCaptureAsync;
-    fn().catch(() => {});
+    if (!hydrated || !ScreenSecurity) return;
+    ScreenSecurity.setSecure(appLockEnabled).catch(() => {});
   }, [hydrated, appLockEnabled]);
 
   const appState = useRef<AppStateStatus>(AppState.currentState);

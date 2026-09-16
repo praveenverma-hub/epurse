@@ -52,8 +52,6 @@ PODS:
     - ExpoModulesCore
   - ExpoWebBrowser (12.8.2):
     - ExpoModulesCore
-  - EXScreenCapture (5.8.1):
-    - ExpoModulesCore
   - FBLazyVector (0.73.6)
   - FBReactNativeSpec (0.73.6):
     - RCT-Folly (= 2022.05.16.00)
@@ -1172,7 +1170,6 @@ DEPENDENCIES:
   - ExpoSecureStore (from `../node_modules/expo-secure-store/ios`)
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
   - ExpoWebBrowser (from `../node_modules/expo-web-browser/ios`)
-  - EXScreenCapture (from `../node_modules/expo-screen-capture/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - FBReactNativeSpec (from `../node_modules/react-native/React/FBReactNativeSpec`)
   - glog (from `../node_modules/react-native/third-party-podspecs/glog.podspec`)
@@ -1288,8 +1285,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-sharing/ios"
   ExpoWebBrowser:
     :path: "../node_modules/expo-web-browser/ios"
-  EXScreenCapture:
-    :path: "../node_modules/expo-screen-capture/ios"
   FBLazyVector:
     :path: "../node_modules/react-native/Libraries/FBLazyVector"
   FBReactNativeSpec:
@@ -1430,7 +1425,6 @@ SPEC CHECKSUMS:
   ExpoSecureStore: 4cec57fd2c40dcff05ce2186c39afc1af39d213c
   ExpoSharing: 2537ddc516138bb6d8eb536ff7055e370485f4d1
   ExpoWebBrowser: c5d027f58a0b2c1926c86ce3596c94490a639fa2
-  EXScreenCapture: 4a6c2110d290205bb602ef09aca40f10bc9554a9
   FBLazyVector: f64d1e2ea739b4d8f7e4740cde18089cd97fe864
   FBReactNativeSpec: 9f2b8b243131565335437dba74923a8d3015e780
   fmt: ff9d55029c625d3757ed641535fd4a75fedc7ce9
