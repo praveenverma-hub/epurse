@@ -334,6 +334,16 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           bordered
           surfaceColor={theme.card}
           dividerColor={theme.divider}
+          right={
+            <TouchableOpacity
+              onPress={() => { hapticLight(); navigation.navigate('GoalFaq'); }}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Goal FAQs"
+            >
+              <Ionicons name="help-circle-outline" size={26} color={theme.primary} />
+            </TouchableOpacity>
+          }
         />
 
         <ScrollView

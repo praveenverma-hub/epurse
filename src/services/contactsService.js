@@ -4,6 +4,7 @@
 
 import { Platform } from 'react-native';
 import * as Contacts from 'expo-contacts';
+import { suppressAppLockOnce } from '../utils/appLockSuppress';
 
 export async function getContactsPermissionStatus() {
   try {
@@ -16,6 +17,9 @@ export async function getContactsPermissionStatus() {
 
 export async function requestContactsPermission() {
   try {
+    // The OS permission dialog is a native view that backgrounds the app for
+    // a moment — without this, App Lock would see that blip and re-lock.
+    suppressAppLockOnce();
     const result = await Contacts.requestPermissionsAsync();
     return result.status === 'granted';
   } catch {
@@ -25,6 +29,17 @@ export async function requestContactsPermission() {
 
 export async function requestContactsPermissionMeta() {
   try {
+    // Only actually asks (and arms the App Lock suppression) when the OS
+    // might show a dialog at all — already-decided statuses resolve with no
+    // native UI, so there's nothing for App Lock to misread.
+    const current = await Contacts.getPermissionsAsync();
+    if (current.status === 'granted') {
+      return { granted: true, status: current.status, canAskAgain: current.canAskAgain !== false };
+    }
+    if (current.status !== 'undetermined' && current.canAskAgain === false) {
+      return { granted: false, status: current.status, canAskAgain: false };
+    }
+    suppressAppLockOnce();
     const result = await Contacts.requestPermissionsAsync();
     return {
       granted: result.status === 'granted',

@@ -27,14 +27,15 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import type { TextStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, shadows, BUTTON_H } from '../constants/theme';
 import { REPEAT, describeRepeat, nextOccurrence } from '../utils/reminderSchedule';
+import { formatCurrency } from '../utils/format';
 import EmptyState from '../components/EmptyState';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
@@ -53,6 +54,13 @@ const KIND_META: Record<string, { icon: string; tag: string }> = {
   cc_bill:   { icon: 'card-outline',              tag: 'CARD BILL' },
 };
 
+const initialsOf = (s: string): string => {
+  const words = (s || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+};
+
 const dayLabel = (ms: number): string => {
   const d = new Date(ms);
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -69,6 +77,7 @@ interface Props {
 
 const RemindersScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
 
   const reminders = useEPurseStore((s: any) => s.reminders) as any[];
   const cancelReminder = useEPurseStore((s: any) => s.cancelReminder);
@@ -107,13 +116,17 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
           surfaceColor={theme.card}
           dividerColor={theme.divider}
           right={
+            // Adding lives at the bottom now (full-width, once there's
+            // something to show); this is the only way into the "how do
+            // reminders work" FAQ, so it stays reachable even from an empty
+            // list.
             <TouchableOpacity
-              onPress={() => openForm()}
+              onPress={() => { hapticLight(); navigation.navigate('ReminderFaq'); }}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel="Add a reminder"
+              accessibilityLabel="Reminder FAQs"
             >
-              <Ionicons name="add" size={26} color={theme.primary} />
+              <Ionicons name="help-circle-outline" size={26} color={theme.primary} />
             </TouchableOpacity>
           }
         />
@@ -141,61 +154,106 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
               {upcoming.map((r) => {
                 const meta = KIND_META[r.kind] || KIND_META.custom;
                 const repeats = (r.repeat || REPEAT.ONCE) !== REPEAT.ONCE;
+                // A card bill isn't editable here — its date comes from the
+                // bank's message, not from us, so the only sensible action is
+                // to silence it (the trash icon); no bottom pill either.
+                const editable = r.kind !== 'cc_bill';
                 return (
                   <TouchableOpacity
                     key={r.id}
-                    style={[styles.card, styles.row, { backgroundColor: theme.card }]}
-                    // A card bill isn't editable here — its date comes from the
-                    // bank's message, not from us, so the only sensible action is
-                    // to silence it (the ✕).
-                    onPress={r.kind === 'cc_bill' ? undefined : () => openForm({ reminderId: r.id })}
-                    activeOpacity={r.kind === 'cc_bill' ? 1 : 0.7}
+                    style={[styles.card, { backgroundColor: theme.card }]}
+                    onPress={editable ? () => openForm({ reminderId: r.id }) : undefined}
+                    activeOpacity={editable ? 0.7 : 1}
                   >
-                    <View style={[styles.rowIconWrap, { backgroundColor: theme.primary + '14' }]}>
-                      <Ionicons name={meta.icon as any} size={18} color={theme.primary} />
-                    </View>
-                    <View style={styles.rowMid}>
-                      <View style={styles.rowTitleLine}>
-                        <Text style={[styles.rowTitle, { color: theme.textPrimary }]} numberOfLines={1}>
-                          {r.title}
+                    <View style={styles.topRow}>
+                      <View style={[styles.avatar, { backgroundColor: theme.primary + '1F' }]}>
+                        <Text style={[styles.avatarTxt, { color: theme.primary }]} allowFontScaling={false}>
+                          {initialsOf(r.title)}
                         </Text>
-                        {meta.tag ? (
-                          <Text style={[styles.tag, { color: theme.textSecondary, borderColor: theme.divider }]}>
-                            {meta.tag}
+                      </View>
+                      <View style={styles.rowMid}>
+                        <View style={styles.rowTitleLine}>
+                          <Text style={[styles.rowTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+                            {r.title}
+                          </Text>
+                          {meta.tag ? (
+                            <Text style={[styles.tag, { color: theme.textSecondary, borderColor: theme.divider }]}>
+                              {meta.tag}
+                            </Text>
+                          ) : null}
+                        </View>
+                        {r.body ? (
+                          <Text style={[styles.rowBody, { color: theme.textSecondary }]} numberOfLines={1}>
+                            {r.body}
+                          </Text>
+                        ) : r.person ? (
+                          // A custom reminder tagged to a person but with no amount has
+                          // no composed body (that wording needs both) — say who it's
+                          // about anyway, or the tag picked in the form is invisible here.
+                          <Text style={[styles.rowBody, { color: theme.textSecondary }]} numberOfLines={1}>
+                            {`For ${r.person}`}
                           </Text>
                         ) : null}
                       </View>
-                      {r.body ? (
-                        <Text style={[styles.rowBody, { color: theme.textSecondary }]} numberOfLines={1}>
-                          {r.body}
-                        </Text>
-                      ) : r.person ? (
-                        // A custom reminder tagged to a person but with no amount has
-                        // no composed body (that wording needs both) — say who it's
-                        // about anyway, or the tag picked in the form is invisible here.
-                        <Text style={[styles.rowBody, { color: theme.textSecondary }]} numberOfLines={1}>
-                          {`For ${r.person}`}
-                        </Text>
-                      ) : null}
+                      <TouchableOpacity
+                        onPress={() => { hapticLight(); setDeleteTarget({ id: r.id, title: r.title }); }}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete reminder: ${r.title}`}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={theme.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={[styles.divider, { backgroundColor: theme.divider }]} />
+
+                    <View style={styles.bottomRow}>
                       <Text style={[styles.rowWhen, { color: theme.textSecondary }]} numberOfLines={1}>
+                        Next:{' '}
+                        {r.amount ? (
+                          <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>
+                            {formatCurrency(r.amount)} ·{' '}
+                          </Text>
+                        ) : null}
                         {dayLabel(r.nextAt)} · {formatTimeLabel(new Date(r.nextAt))}
                         {repeats ? ` · ${describeRepeat(r.anchorAt, r.repeat)}` : ''}
                       </Text>
+                      {editable ? (
+                        <TouchableOpacity
+                          onPress={() => openForm({ reminderId: r.id })}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Edit reminder: ${r.title}`}
+                          style={[styles.pill, { backgroundColor: theme.primary }]}
+                        >
+                          <Text style={styles.pillTxt}>Edit</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
-                    <TouchableOpacity
-                      onPress={() => { hapticLight(); setDeleteTarget({ id: r.id, title: r.title }); }}
-                      hitSlop={10}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete reminder: ${r.title}`}
-                    >
-                      <Ionicons name="close" size={18} color={theme.textMuted} />
-                    </TouchableOpacity>
                   </TouchableOpacity>
                 );
               })}
             </>
           )}
         </ScrollView>
+
+        {/* Pinned below the scroll view, per the footer-CTA rule (matches
+            ReminderFormScreen's own Save) — only once there's something to
+            add TO; a first-run empty list already has EmptyState's own
+            "Add a reminder" action. */}
+        {upcoming.length > 0 ? (
+          <View style={[styles.footer, { borderTopColor: theme.divider, backgroundColor: theme.card, paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <TouchableOpacity
+              style={[styles.addBtn, { backgroundColor: theme.primary }]}
+              onPress={() => openForm()}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Add a reminder"
+            >
+              <Text style={styles.addBtnTxt}>Add Reminder</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* Same destructive action as the form's own "Delete reminder" — same
             confirm, same verb (ui-consistency §8c), just reachable from the
@@ -237,22 +295,22 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     ...shadows.card,
   },
-  row: {
+  topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
   },
-  rowIconWrap: {
-    width: 34, height: 34, borderRadius: 17,
+  avatar: {
+    width: 42, height: 42, borderRadius: 21,
     alignItems: 'center', justifyContent: 'center',
   },
+  avatarTxt: { ...typography.body, fontWeight: '800' },
   // flex:1 + numberOfLines on the children: a 40-char reminder title must
-  // truncate rather than push the ✕ off the row (input-validation skill).
+  // truncate rather than push the trash icon off the row (input-validation skill).
   rowMid: { flex: 1 },
   rowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   rowTitle: { ...typography.body, fontWeight: '600', flexShrink: 1 },
-  rowBody:  { ...typography.tiny, marginTop: 1 },
-  rowWhen:  { ...typography.tiny, marginTop: 2, fontWeight: '600' },
+  rowBody:  { ...typography.tiny, marginTop: 2 },
   tag: {
     ...typography.tiny,
     fontWeight: '800',
@@ -263,4 +321,33 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     flexShrink: 0,
   },
+  divider: { height: StyleSheet.hairlineWidth, marginTop: spacing.md, marginBottom: spacing.sm },
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  rowWhen: { ...typography.tiny, flex: 1, fontWeight: '600' },
+  pill: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  pillTxt: { ...typography.tiny, fontWeight: '800', color: '#FFFFFF' },
+
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  addBtn: {
+    flexDirection: 'row',
+    minHeight: BUTTON_H,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  addBtnTxt: { ...typography.bodyBold, fontWeight: '700', fontSize: 16, color: '#FFFFFF' },
 });

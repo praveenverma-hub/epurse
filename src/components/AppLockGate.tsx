@@ -12,6 +12,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase } from '../constants/theme';
+import { isAppLockSuppressed, consumeAppLockSuppress } from '../utils/appLockSuppress';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -63,10 +64,21 @@ const AppLockGate: React.FC = () => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       const prev = appState.current;
       appState.current = next;
-      if (authInFlight.current) return;
       if (next === 'background' || next === 'inactive') {
+        // Locks the INSTANT the app leaves the foreground — like other
+        // finance apps, not only once it's reopened. Deliberately NOT gated
+        // on `authInFlight`: backgrounding always wins, even if a Face ID
+        // prompt happens to be mid-flight (e.g. the user backgrounds the app
+        // from that very system sheet) — that guard is only for the
+        // re-auth-on-return path below, so we never double-invoke the prompt.
+        // An expected native interruption (contacts permission prompt,
+        // Linking.openSettings…) is the one exception — not the user
+        // actually leaving the app.
+        if (isAppLockSuppressed()) return;
         if (appLockEnabled) setUnlocked(false);
       } else if (next === 'active' && prev !== 'active') {
+        if (authInFlight.current) return;
+        if (isAppLockSuppressed()) { consumeAppLockSuppress(); return; }
         if (appLockEnabled) authenticate();
       }
     });
@@ -85,7 +97,7 @@ const AppLockGate: React.FC = () => {
       </View>
       <Text style={[styles.title, { color: theme.textPrimary }]}>ePurse is locked</Text>
       <Text style={[styles.hint, { color: theme.textSecondary }]}>
-        {failed ? "That didn't work — try again." : 'Verify to see your accounts.'}
+        {failed ? "That didn't work — try again." : 'Verify your identity to continue.'}
       </Text>
       <TouchableOpacity
         style={[styles.btn, { backgroundColor: theme.primary }]}

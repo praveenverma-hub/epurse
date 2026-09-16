@@ -29,8 +29,10 @@ import ShopScreen          from '../screens/ShopScreen';
 import RemindersScreen     from '../screens/RemindersScreen';
 import GoalsScreen         from '../screens/GoalsScreen';
 import GoalFormScreen      from '../screens/GoalFormScreen';
+import GoalFaqScreen       from '../screens/GoalFaqScreen';
 import GoalDetailScreen    from '../screens/GoalDetailScreen';
 import ReminderFormScreen  from '../screens/ReminderFormScreen';
+import ReminderFaqScreen   from '../screens/ReminderFaqScreen';
 import WhatsAppReminderScreen from '../screens/WhatsAppReminderScreen';
 
 const Stack = createNativeStackNavigator();
@@ -98,8 +100,10 @@ export default function AppNavigator() {
         <Stack.Screen name="Reminders" component={RemindersScreen} />
         <Stack.Screen name="Goals"     component={GoalsScreen} />
         <Stack.Screen name="GoalForm" component={GoalFormScreen} />
+        <Stack.Screen name="GoalFaq" component={GoalFaqScreen} />
         <Stack.Screen name="GoalDetail" component={GoalDetailScreen} />
         <Stack.Screen name="ReminderForm" component={ReminderFormScreen} />
+        <Stack.Screen name="ReminderFaq" component={ReminderFaqScreen} />
         <Stack.Screen name="WhatsAppReminder" component={WhatsAppReminderScreen} />
       </Stack.Navigator>
     </NavigationContainer>
