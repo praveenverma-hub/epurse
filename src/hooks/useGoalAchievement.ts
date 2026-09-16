@@ -65,6 +65,7 @@ export const useGoalAchievement = ({ blocked = false }: { blocked?: boolean } = 
   const markGoalAchieved = useEPurseStore((s: any) => s.markGoalAchieved);
   const markGoalMonthlyBonusAwarded = useEPurseStore((s: any) => s.markGoalMonthlyBonusAwarded);
   const markGoalCelebrated = useEPurseStore((s: any) => s.markGoalCelebrated);
+  const creditGoalReward = useEPurseStore((s: any) => s.creditGoalReward);
   const awardGoalBonus = useRewardStore((s: any) => s.awardGoalBonus);
 
   const [achievement, setAchievement] = useState<GoalAchievement | null>(null);
@@ -101,11 +102,19 @@ export const useGoalAchievement = ({ blocked = false }: { blocked?: boolean } = 
     // monthly reward ceiling.
     if (next.kind === 'lifetime') markGoalAchieved(next.goalId, { bonusAwarded: true });
     else if (attemptingPay) markGoalMonthlyBonusAwarded(next.goalId, next.monthKey);
+    // The goal's OWN reward ledger (`GoalCard`'s rpEarned/epcEarned, Sep-16-26)
+    // only grows on a REAL payout — a re-show (`paid === null`) already
+    // credited it the first time, and a monthly-ceiling clamp to zero has
+    // nothing to add.
+    if (paid && (paid.rpAwarded > 0 || paid.epcAwarded > 0)) {
+      creditGoalReward(next.goalId, paid.rpAwarded, paid.epcAwarded);
+    }
     setReward(paid);
     setAchievement(next);
   }, [
     isFocused, blocked, settled, goals, transactions, goalContributions,
-    achievement, getNewlyAchievedGoals, awardGoalBonus, markGoalAchieved, markGoalMonthlyBonusAwarded,
+    achievement, getNewlyAchievedGoals, awardGoalBonus, markGoalAchieved,
+    markGoalMonthlyBonusAwarded, creditGoalReward,
   ]);
 
   // THE claim, and it happens on DISMISS — not on render. Anything that stops

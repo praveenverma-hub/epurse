@@ -527,7 +527,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
                   : showError && monthlyOverRoom
                     ? `Only ${formatCurrency(freeRoom)} is free this month — lower this or free up room elsewhere.`
                     : freeRoom > 0
-                      ? `${formatCurrency(freeRoom)} unallocated this month. Reapplies automatically every month after.`
+                      ? `${formatCurrency(freeRoom)} unallocated this month.`
                       : 'This month is fully allocated — free up room on another goal first.'}
               </Text>
             </>

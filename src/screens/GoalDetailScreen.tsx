@@ -21,8 +21,10 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { useRewardStore } from '../store/useRewardStore';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase, withAlpha, mix, readableOn } from '../constants/theme';
+import { REWARD_CONFIG, goalRewardDisplay } from '../config/rewardConfig';
 import { formatCurrency, formatCompact, monthKey } from '../utils/format';
 import { monthsToTarget, projectedMonthLabel, goalAutoRule } from '../utils/goalPlan';
 import { GOAL_KIND_META, GOAL_DURATION_META, GOAL_DURATIONS } from '../constants/goals';
@@ -36,6 +38,7 @@ import GoalFundModal from '../components/GoalFundModal';
 import GoalAchievedModal from '../components/GoalAchievedModal';
 import { useGoalAchievement } from '../hooks/useGoalAchievement';
 import TransactionItemRaw from '../components/TransactionItem';
+import MonthDivider from '../components/MonthDivider';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import FAB from '../components/FAB';
 import { hapticLight } from '../utils/haptics';
@@ -47,11 +50,6 @@ const typography = typographyBase as unknown as Record<string, TextStyle>;
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any; onPress?: () => void;
 }>;
-
-const MONTH_LABEL = (mk: string) => {
-  const [y, m] = mk.split('-').map(Number);
-  return new Date(y, (m || 1) - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-};
 
 /** Same words `GoalCard`'s ribbon uses for this month's pace. */
 const PACE_LABEL: Record<string, string> = {
@@ -91,6 +89,17 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const lifetimeSaved = goal ? getGoalLifetimeSaved(goal.id) : 0;
   const isOneTime = !!(goal?.lifetimeTarget && goal.lifetimeTarget > 0);
   const achieved = !!goal?.achievedAt;
+  const discontinued = !!goal?.discontinuedAt;
+  const awareStreak = useRewardStore((s: any) => s.awareStreak);
+  // Same `goalRewardDisplay` GoalCard reads, so the two can't disagree.
+  const rewardDisplay = goal && REWARD_CONFIG.GOAL_REWARD_ENABLED
+    ? goalRewardDisplay({
+        isOneTime, lifetimeTarget: goal.lifetimeTarget || 0, planned,
+        inactive: achieved || discontinued,
+        rpEarned: goal.rpEarned || 0, epcEarned: goal.epcEarned || 0,
+        streakDay: awareStreak,
+      })
+    : null;
 
   const monthsLeft = isOneTime && goal?.lifetimeTarget
     ? monthsToTarget(goal.lifetimeTarget, lifetimeSaved, planned)
@@ -230,16 +239,41 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 of {formatCurrency(isOneTime ? goal.lifetimeTarget : planned)}
                 {isOneTime ? ' target' : ' planned this month'}
               </Text>
-              <View style={[styles.heroCaptionPill, { backgroundColor: withAlpha(goal.color, 0.16) }]}>
-                <Text style={[styles.heroCaption, { color: theme.textPrimary }]} numberOfLines={1}>{heroCaption}</Text>
-              </View>
             </View>
           </View>
 
-          {/* Kind/duration badges (plain outline) and what this goal is MADE
-              of (tinted chips) share ONE wrapping row — same for either
-              duration, and the tint is what tells the two kinds of pill apart
-              without a second label taking its own line. */}
+          {/* Status pill + reward info — "how is this goal doing". */}
+          <View style={styles.statusRow}>
+            <View style={[styles.heroCaptionPill, { backgroundColor: withAlpha(goal.color, 0.16) }]}>
+              <Text style={[styles.heroCaption, { color: theme.textPrimary }]} numberOfLines={1}>{heroCaption}</Text>
+            </View>
+            {rewardDisplay ? (
+              <>
+                <View
+                  style={[
+                    styles.rewardChip,
+                    { backgroundColor: withAlpha(rewardDisplay.mode === 'earned' ? theme.textMuted : theme.primary, 0.12) },
+                  ]}
+                >
+                  <Text style={[styles.rewardChipTxt, { color: rewardDisplay.mode === 'earned' ? theme.textMuted : theme.primary }]}>
+                    {rewardDisplay.mode === 'earned' && rewardDisplay.rp === 0 ? '— RP' : `+${rewardDisplay.rp} RP`}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.rewardChip,
+                    { backgroundColor: withAlpha(rewardDisplay.mode === 'earned' ? theme.textMuted : theme.success, 0.12) },
+                  ]}
+                >
+                  <Text style={[styles.rewardChipTxt, { color: rewardDisplay.mode === 'earned' ? theme.textMuted : theme.success }]}>
+                    {rewardDisplay.mode === 'earned' && rewardDisplay.epc === 0 ? '— EPC' : `+${rewardDisplay.epc} EPC`}
+                  </Text>
+                </View>
+              </>
+            ) : null}
+          </View>
+
+          {/* Kind/duration badges + category chips, one wrapping row. */}
           <View style={styles.chipRow}>
             {kindMeta ? (
               <View style={[styles.badge, { borderColor: theme.inputBorder }]}>
@@ -297,29 +331,19 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </View>
 
-        {/* ── history: closed months only ────────────────────────────────── */}
+        {/* Closed months only — a total only shows once a month has ended. */}
         {history.length > 0 ? (
           <View style={styles.section}>
-            <SectionHeader icon="time-outline" title="History" subtitle="What this goal saved, month by month" accentColor={theme.primary} />
+            <SectionHeader icon="time-outline" title="History" accentColor={theme.primary} style={styles.secHead} />
             {history.map((h: any) => (
-              <View key={h.monthKey} style={[styles.historyRow, { borderColor: theme.divider }]}>
-                <Text style={[styles.historyMonth, { color: theme.textPrimary }]}>{MONTH_LABEL(h.monthKey)}</Text>
-                <Text style={[styles.historyAmt, { color: theme.textSecondary }]}>
-                  {formatCurrency(h.funded)} <Text style={{ color: theme.textMuted }}>of {formatCurrency(h.planned)}</Text>
-                </Text>
-              </View>
+              <MonthDivider key={h.monthKey} monthKey={h.monthKey} total={h.funded} />
             ))}
           </View>
         ) : null}
 
         {/* ── this month's transactions — the auto-fund link, surfaced ──── */}
         <View style={styles.section}>
-          <SectionHeader
-            icon="receipt-outline"
-            title="This Month's Transactions"
-            subtitle="What this month's total is made of"
-            accentColor={theme.primary}
-          />
+          <SectionHeader icon="receipt-outline" title="Transactions" accentColor={theme.primary} style={styles.secHead} />
           {txns.length > 0 ? (
             <FlatList
               data={txns}
@@ -405,8 +429,7 @@ const styles = StyleSheet.create({
   heroValue: { ...typography.h2, fontWeight: '800' },
   heroSub: { ...typography.small, marginTop: 1 },
   heroCaptionPill: {
-    alignSelf: 'flex-start',
-    marginTop: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 3,
+    paddingHorizontal: spacing.sm, paddingVertical: 3,
     borderRadius: radius.pill,
   },
   heroCaption: { ...typography.tiny, fontWeight: '700' },
@@ -433,6 +456,15 @@ const styles = StyleSheet.create({
   categoryChipEmoji: { fontSize: 12 },
   categoryChipTxt: { ...typography.tiny, fontWeight: '600' },
 
+  // Row 3: the pace/status pill (moved out of heroTextCol) + the goal's
+  // reward chips — grouped since both answer "how is this goal doing".
+  statusRow: {
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap',
+    gap: spacing.xs + 1, marginTop: spacing.sm,
+  },
+  rewardChip: { borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 4 },
+  rewardChipTxt: { ...typography.tiny, fontWeight: '800' },
+
   statGrid: {
     flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md,
   },
@@ -446,12 +478,10 @@ const styles = StyleSheet.create({
   statK: { ...typography.tiny, marginTop: 2, textAlign: 'center' },
 
   section: { marginTop: spacing.lg },
-  historyRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: spacing.sm + 2, borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  historyMonth: { ...typography.body, fontWeight: '600' },
-  historyAmt: { ...typography.small },
+  // `SectionHeader` carries no bottom margin of its own (that's layout, the
+  // caller's job) — without this, "Transactions" sat flush against the list
+  // right under it, no gap at all.
+  secHead: { marginBottom: spacing.sm },
 });
 
 export default GoalDetailScreen;

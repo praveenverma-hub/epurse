@@ -81,24 +81,28 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
 
   // `reward` is now THREE states, not two (Sep-14-26 reward rework):
   //   • a real amount        — paid this time, show the numbers.
-  //   • present but all-zero — a payment was ATTEMPTED but the monthly reward
-  //     ceiling had nothing left (`useRewardStore.awardGoalBonus` clamps to
-  //     zero rather than refusing outright, so this can legitimately happen
-  //     when several goals complete in the same busy month) — never render
-  //     "+0 RP", say so instead.
+  //   • present but all-zero — a payment was ATTEMPTED but nothing was left to
+  //     pay: either the monthly reward ceiling had no room (several goals
+  //     completing in the same busy month), or `GOAL_REWARD_ENABLED` is off
+  //     (Sep-16-26) — both clamp to zero rather than refusing outright, so
+  //     this can legitimately happen for a reason the modal never needs to
+  //     name. Never render "+0 RP", say so instead.
   //   • null                 — nothing was attempted THIS time because it was
   //     already paid earlier (a re-show of an unseen congratulation) — still
   //     true to say "credited", just not just now.
   const rewardIsZero  = !!reward && reward.rpAwarded === 0 && reward.epcAwarded === 0;
   const showRewardRow = !!reward && !rewardIsZero;
+  // Deliberately reason-agnostic — a zero can come from the cross-goal
+  // monthly ceiling OR the `GOAL_REWARD_ENABLED` kill switch, and this copy
+  // has to stay true either way without naming which one applied.
   const noteText = monthly
     ? (rewardIsZero
-        ? "This month's goal-reward budget is already spent — nothing paid this time, but it starts fresh again next month."
+        ? 'Nothing extra to add to your balance this time, but it starts fresh again next month.'
         : reward
           ? 'It starts again next month — anything more you put in this month still counts.'
           : 'Already credited for this month — it starts fresh again next month.')
     : (rewardIsZero
-        ? "This month's goal-reward budget was already spent by the time this one landed — nothing paid this time. The goal stays on your list."
+        ? 'Nothing extra to add to your balance this time. The goal stays on your list.'
         : reward
           ? 'Credited to your balance. The goal stays on your list — keep it, retarget it, or remove it whenever you like.'
           : 'Already credited to your balance earlier. The goal stays on your list — keep it, retarget it, or remove it whenever you like.');

@@ -1608,6 +1608,7 @@ export const useEPurseStore = create(
         const clean = (name || '').trim();
         if (!clean) return null;
         const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const nowIso = new Date().toISOString();
         // Which single field applies (Overall Target vs Monthly Contribution)
         // and whether the goal joins the split bar at all — see GOAL_DURATIONS
         // in constants/goals.ts. An explicit `duration` always wins (this is
@@ -1618,6 +1619,20 @@ export const useEPurseStore = create(
         const dur = duration === 'oneTime' || duration === 'recurring'
           ? duration
           : (Number(lifetimeTarget) > 0 ? 'oneTime' : 'recurring');
+        // ONE-TIME only: stamp every initial entry with the goal's own
+        // createdAt, same mechanism widening already uses — otherwise a
+        // small-target goal could be born already achieved from old spend in
+        // a category it never actually earned credit for. RECURRING is left
+        // ungated on purpose: its number is "this calendar month," and spend
+        // from earlier the same month is genuinely that month's spend
+        // regardless of when the tracker was created — there's no permanent-
+        // achievement risk to protect against the way there is for one-time.
+        const rule = normalizeAutoRule(autoRule, autoParentId);
+        if (rule && dur === 'oneTime') {
+          const addedAt = {};
+          [...rule.parentIds, ...rule.categoryIds, ...rule.merchants].forEach((k) => { addedAt[k] = nowIso; });
+          rule.addedAt = addedAt;
+        }
         set((s) => ({
           goals: [
             ...s.goals,
@@ -1629,11 +1644,8 @@ export const useEPurseStore = create(
               kind,
               duration: dur,
               lifetimeTarget: dur === 'oneTime' && Number(lifetimeTarget) > 0 ? Number(lifetimeTarget) : null,
-              // `autoParentId` is folded into the rule at creation; the loose
-              // field is still accepted so phase-1 callers (templates, tests)
-              // keep working unchanged.
-              autoRule: normalizeAutoRule(autoRule, autoParentId),
-              createdAt: new Date().toISOString(),
+              autoRule: rule,
+              createdAt: nowIso,
               archivedAt: null,
               // Set the moment a lifetime target is reached, and never unset —
               // it is what makes the congratulation fire exactly once.
@@ -1649,6 +1661,14 @@ export const useEPurseStore = create(
               // `celebratedMonth` (SEEN) for the same reason `achievedAt` and
               // `celebratedAt` are separate — paid and seen are different facts.
               bonusAwardedMonth: null,
+              // Lifetime RP/EPC THIS goal has earned (Sep-16-26) — shown on
+              // its own card. Separate from `useRewardStore`'s global
+              // totalRP/epcBalance (that's the wallet everything pools into);
+              // this is a per-goal ledger nothing else needed until the card
+              // wanted to show it. Additive-only via `creditGoalReward`,
+              // called right after a real (non-zero) `awardGoalBonus`.
+              rpEarned: 0,
+              epcEarned: 0,
               // A RECURRING goal's "I'm done with this" — a one-time goal
               // uses `achievedAt` instead (it has a real finish line to
               // cross); a recurring goal never does, so it needs its own
@@ -2062,6 +2082,26 @@ export const useEPurseStore = create(
       markGoalMonthlyBonusAwarded: (goalId, mk) =>
         set((s) => ({
           goals: s.goals.map((g) => (g.id === goalId ? { ...g, bonusAwardedMonth: mk } : g)),
+        })),
+
+      /**
+       * Add to a goal's own lifetime RP/EPC ledger — called once per real
+       * (non-zero) `awardGoalBonus`, so `GoalCard` can show what THIS goal
+       * has earned rather than only the wallet everything pools into.
+       * Additive and never negative: a goal's reward history only grows, the
+       * same shape as `bonusAwardedAt`/`bonusAwardedMonth` next to it.
+       */
+      creditGoalReward: (goalId, rp, epc) =>
+        set((s) => ({
+          goals: s.goals.map((g) => (
+            g.id === goalId
+              ? {
+                  ...g,
+                  rpEarned: (g.rpEarned || 0) + (Math.max(0, Number(rp)) || 0),
+                  epcEarned: (g.epcEarned || 0) + (Math.max(0, Number(epc)) || 0),
+                }
+              : g
+          )),
         })),
 
       /**
@@ -5563,7 +5603,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 33,
+      version: 34,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -6215,6 +6255,20 @@ export const useEPurseStore = create(
             goals: (state.goals || []).map((g) => ({
               ...g,
               bonusAwardedMonth: g.bonusAwardedMonth ?? null,
+            })),
+          };
+        }
+
+        // v34: a goal's OWN lifetime RP/EPC ledger (`creditGoalReward`), shown
+        // on its card — nothing restored from before this existed ever earned
+        // anything through it, so both start at zero rather than unset.
+        if (version < 34) {
+          state = {
+            ...state,
+            goals: (state.goals || []).map((g) => ({
+              ...g,
+              rpEarned: g.rpEarned ?? 0,
+              epcEarned: g.epcEarned ?? 0,
             })),
           };
         }

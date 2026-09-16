@@ -3360,6 +3360,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     name: 'Wheels', emoji: '🚗', kind: 'saving', duration: 'oneTime', lifetimeTarget: 200000,
     autoRule: { parentIds: ['investments'], categoryIds: [], merchants: [] },
   });
+  const goalCreatedAt = st().goals.find((g) => g.id === id).createdAt;
   st().updateGoal(id, { autoRule: { parentIds: ['fuel'], categoryIds: [], merchants: [] } });
   const stamp = st().goals.find((g) => g.id === id).autoRule.addedAt.fuel;
   check('widening a live goal keeps the original entry and stamps the new one',
@@ -3379,16 +3380,28 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('…and never reaches back over spend from before it',
     !st().getGoalTransactions(id).some((t) => t.id === 'fuel_before'));
 
-  // The entry the goal was CREATED with has no stamp, so it still applies to
-  // everything — widening must not retro-limit what was already being counted.
+  // The entry the goal was CREATED with is stamped with the GOAL's own
+  // createdAt (Sep-16-26) — so it counts everything from THEN on, unaffected
+  // by the later widening, but not from before the goal itself existed.
+  const afterGoalCreated = new Date(Date.parse(goalCreatedAt) + 1000).toISOString();
+  const beforeGoalCreated = new Date(Date.parse(goalCreatedAt) - 60 * 60 * 1000).toISOString();
+  useStore.setState({
+    transactions: [{
+      id: 'sip_new', amount: 7000, type: 'debit', merchant: 'Groww', categoryId: 'investments',
+      createdAt: afterGoalCreated,
+    }],
+  });
+  check('…the original entry keeps counting everything from the GOAL\'s own creation on',
+    st().getGoalFunded(id) === 7000, `${st().getGoalFunded(id)}`);
+
   useStore.setState({
     transactions: [{
       id: 'sip_old', amount: 7000, type: 'debit', merchant: 'Groww', categoryId: 'investments',
-      createdAt: before,
+      createdAt: beforeGoalCreated,
     }],
   });
-  check('…while the original entry keeps counting from before the edit',
-    st().getGoalFunded(id) === 7000, `${st().getGoalFunded(id)}`);
+  check('…but not from before the goal itself existed',
+    st().getGoalFunded(id) === 0, `${st().getGoalFunded(id)}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3420,6 +3433,16 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
       name: 'New laptop', emoji: '💻', kind: 'saving', duration,
       lifetimeTarget: 100000,
       autoRule: { parentIds: [], categoryIds: ['electronics'], merchants: [] },
+    });
+    // Backdated so the goal genuinely existed before `prev` — a ONE-TIME
+    // goal's rule is gated by its own createdAt (Sep-16-26), so re-deriving
+    // a month from before the goal existed would otherwise correctly read 0,
+    // which is a different case than what this test means to check.
+    const longAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString();
+    useStore.setState({
+      goals: st().goals.map((g) => (g.id === id
+        ? { ...g, createdAt: longAgo, autoRule: { ...g.autoRule, addedAt: { electronics: longAgo } } }
+        : g)),
     });
     // The snapshot says the month closed at 0 — nothing was filed under
     // Electronics at the time.
@@ -3839,6 +3862,95 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   st().discontinueGoal(id);
   check('discontinuing an already-discontinued goal does not error or double-stamp',
     !!st().goals.find((g) => g.id === id).discontinuedAt);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A GOAL'S OWN RP/EPC LEDGER (Sep-16-26)
+// -----------------------------------------------------------------------------
+// `creditGoalReward` is what lets GoalCard show what THIS goal has earned,
+// separate from useRewardStore's global wallet. Additive-only, never negative.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, goalContributions: [], goalHistory: {}, transactions: [] });
+  const id = st().addGoal({ name: 'SIP', emoji: '📈', kind: 'investment', duration: 'recurring' });
+
+  check('a new goal starts with nothing earned',
+    st().goals.find((g) => g.id === id).rpEarned === 0
+    && st().goals.find((g) => g.id === id).epcEarned === 0);
+
+  st().creditGoalReward(id, 20, 2);
+  check('crediting adds to the goal\'s own ledger',
+    st().goals.find((g) => g.id === id).rpEarned === 20
+    && st().goals.find((g) => g.id === id).epcEarned === 2);
+
+  st().creditGoalReward(id, 24, 2);
+  check('…and a SECOND credit ADDS, it does not replace — this is a lifetime running total',
+    st().goals.find((g) => g.id === id).rpEarned === 44
+    && st().goals.find((g) => g.id === id).epcEarned === 4);
+
+  st().creditGoalReward(id, -50, -50);
+  check('a negative amount cannot claw back what was already earned',
+    st().goals.find((g) => g.id === id).rpEarned === 44
+    && st().goals.find((g) => g.id === id).epcEarned === 4);
+
+  const otherId = st().addGoal({ name: 'Emergency Fund', emoji: '🛟', kind: 'saving', duration: 'recurring' });
+  st().creditGoalReward(otherId, 12, 1);
+  check('crediting one goal never touches another\'s ledger',
+    st().goals.find((g) => g.id === id).rpEarned === 44
+    && st().goals.find((g) => g.id === otherId).rpEarned === 12);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A NEW GOAL DOES NOT SWEEP UP SPEND FROM BEFORE IT EXISTED (Sep-16-26)
+// -----------------------------------------------------------------------------
+// "new goal, category already has transactions, small target — real gap
+// found". A ONE-TIME goal's rule is now gated by its own createdAt, same
+// mechanism widening already used — otherwise a small target could be born
+// already achieved from old category history. RECURRING is deliberately left
+// ungated: its number is "this calendar month," and month-to-date spend from
+// before the tracker was created is still genuinely that month's spend.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const st = () => useStore.getState();
+  reset();
+  useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
+
+  useStore.setState({
+    transactions: [{
+      id: 'old_electronics', amount: 8000, type: 'debit', merchant: 'Croma', categoryId: 'electronics',
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    }],
+  });
+
+  const oneTime = st().addGoal({
+    name: 'New Phone', emoji: '📱', kind: 'saving', duration: 'oneTime', lifetimeTarget: 5000,
+    autoRule: { parentIds: [], categoryIds: ['electronics'], merchants: [] },
+  });
+  check('a ONE-TIME goal is NOT born already funded from spend that predates it',
+    st().getGoalLifetimeSaved(oneTime) === 0);
+  check('…so a small target is NOT born already achieved',
+    !st().getNewlyAchievedGoals().some((a) => a.goalId === oneTime));
+
+  st().setGoalPlan({ salary: 50000, allocations: { [oneTime]: 0 } });
+  useStore.setState({
+    transactions: [
+      ...st().transactions,
+      { id: 'new_electronics', amount: 6000, type: 'debit', merchant: 'Croma', categoryId: 'electronics',
+        createdAt: new Date(Date.now() + 1000).toISOString() },
+    ],
+  });
+  check('…but spend from AFTER the goal was created still counts, and can achieve it',
+    st().getGoalLifetimeSaved(oneTime) === 6000
+    && st().getNewlyAchievedGoals().some((a) => a.goalId === oneTime));
+
+  const recurring = st().addGoal({
+    name: 'Gadgets', emoji: '🎧', kind: 'saving', duration: 'recurring',
+    autoRule: { parentIds: [], categoryIds: ['electronics'], merchants: [] },
+  });
+  check('a RECURRING goal DOES count this month\'s spend from before it was created',
+    st().getGoalFunded(recurring) === 6000 + 8000);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

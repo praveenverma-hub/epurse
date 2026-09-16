@@ -577,6 +577,8 @@ const GoalsScreen = ({ navigation }: any) => {
                             g.lifetimeTarget ? monthsToTarget(g.lifetimeTarget, lifetime, planned) : null
                           }
                           achieved={false}
+                          rpEarned={g.rpEarned}
+                          epcEarned={g.epcEarned}
                           // The body opens the goal's own detail screen — full
                           // stats plus the same transactions drill-down that
                           // used to live in a sheet here — while the pencil
@@ -873,6 +875,8 @@ const GoalsScreen = ({ navigation }: any) => {
                           monthsLeft={null}
                           achieved={!isDiscontinued}
                           discontinued={isDiscontinued}
+                          rpEarned={g.rpEarned}
+                          epcEarned={g.epcEarned}
                           onPress={() => { hapticLight(); navigation.navigate('GoalDetail', { goalId: g.id }); }}
                           onEdit={() => openForm(g.id)}
                           onAddMoney={isDiscontinued ? undefined : () => openFund(g)}

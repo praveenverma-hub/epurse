@@ -25,6 +25,7 @@ import {
   REWARD_CONFIG,
   bandForGoalAmount,
   computeGoalReward,
+  goalRewardDisplay,
   multiplierForStreak,
 } from '../../config/rewardConfig.ts';
 
@@ -107,6 +108,114 @@ section('EPC always pays at least 1, even at the smallest band and lowest streak
   ok('recurring/Small at day 0 still pays a whole coin, never 0', smallest.epcAwarded >= 1);
 }
 
+// ── GOAL_REWARD_ENABLED — the build-time kill switch ────────────────────────
+// "make the reward goals config based check, whether to reward or not"
+// (Sep-16-26). `REWARD_CONFIG` is a plain object (no runtime freeze — `as
+// const` is compile-time only), so flipping the flag here and restoring it is
+// a legitimate way to exercise both branches of `computeGoalReward` directly.
+section('GOAL_REWARD_ENABLED — one flag, read in exactly one place');
+{
+  const before = REWARD_CONFIG.GOAL_REWARD_ENABLED;
+  check('defaults to on', before, true);
+
+  REWARD_CONFIG.GOAL_REWARD_ENABLED = false;
+  const off = computeGoalReward({ durationKind: 'oneTime', amount: 50_000, streakDay: 20 });
+  check('…off pays nothing, RP', off.rpAwarded, 0);
+  check('…off pays nothing, EPC', off.epcAwarded, 0);
+  ok('…but still reports which band the goal WOULD have earned',
+    off.band === bandForGoalAmount(50_000).label);
+
+  REWARD_CONFIG.GOAL_REWARD_ENABLED = true;
+  const on = computeGoalReward({ durationKind: 'oneTime', amount: 50_000, streakDay: 20 });
+  ok('flipping it back on restores the normal payout', on.rpAwarded > 0 && on.epcAwarded > 0);
+
+  REWARD_CONFIG.GOAL_REWARD_ENABLED = before; // leave the config as we found it
+}
+
+// ── goalRewardDisplay — the single source GoalCard + GoalDetailScreen share ─
+// "the point of showing RP/EPC is to inform/motivate the user... so do we
+// show them all the time" (Sep-16-26). Answer encoded here: yes, whenever
+// there's something real to show — a PROJECTION while still active (even
+// before anything's been earned, since that's the whole point), or the
+// actual EARNED total once there's nothing left to motivate toward.
+section('goalRewardDisplay — projection while active, earned total once inactive');
+{
+  ok('an active ONE-TIME goal with a target projects its COMPLETION reward',
+    (() => {
+      const d = goalRewardDisplay({
+        isOneTime: true, lifetimeTarget: 50_000, planned: 0, inactive: false,
+        rpEarned: 0, epcEarned: 0, streakDay: 1,
+      });
+      return d && d.mode === 'projected' && d.rp > 0;
+    })());
+
+  ok('an active RECURRING goal projects THIS MONTH\'s reward from its planned figure, not a target',
+    (() => {
+      const d = goalRewardDisplay({
+        isOneTime: false, lifetimeTarget: 0, planned: 5_000, inactive: false,
+        rpEarned: 0, epcEarned: 0, streakDay: 1,
+      });
+      return d && d.mode === 'projected' && d.rp > 0;
+    })());
+
+  check('a projection is NEVER zero — this is what makes it safe to show before anything is earned',
+    (() => {
+      const d = goalRewardDisplay({
+        isOneTime: true, lifetimeTarget: 100, planned: 0, inactive: false,
+        rpEarned: 0, epcEarned: 0, streakDay: 0,
+      });
+      return d.rp > 0 && d.epc > 0;
+    })(), true);
+
+  check('an active goal with NOTHING to project from (no target, nothing planned) shows nothing at all',
+    goalRewardDisplay({
+      isOneTime: false, lifetimeTarget: 0, planned: 0, inactive: false,
+      rpEarned: 0, epcEarned: 0, streakDay: 5,
+    }), null);
+
+  ok('an INACTIVE goal (achieved or discontinued) shows what it ACTUALLY earned instead',
+    (() => {
+      const d = goalRewardDisplay({
+        isOneTime: true, lifetimeTarget: 50_000, planned: 0, inactive: true,
+        rpEarned: 260, epcEarned: 26, streakDay: 20,
+      });
+      return d.mode === 'earned' && d.rp === 260 && d.epc === 26;
+    })());
+
+  ok('…even if the streak is high — an inactive goal\'s number is history, not a live re-quote',
+    (() => {
+      const d = goalRewardDisplay({
+        isOneTime: true, lifetimeTarget: 50_000, planned: 0, inactive: true,
+        rpEarned: 260, epcEarned: 26, streakDay: 20,
+      });
+      // 260/26 is what was actually credited, NOT computeGoalReward's live
+      // quote for a 50k target at day-20 streak (which would be different —
+      // the band's base RP times the day-20 multiplier, not the raw base).
+      const liveQuote = computeGoalReward({ durationKind: 'oneTime', amount: 50_000, streakDay: 20 });
+      return d.rp === 260 && d.epc === 26 && d.rp !== liveQuote.rpAwarded;
+    })());
+
+  check('an inactive goal that genuinely never earned anything reads as a dash-worthy zero, not hidden',
+    (() => {
+      const d = goalRewardDisplay({
+        isOneTime: false, lifetimeTarget: 0, planned: 0, inactive: true,
+        rpEarned: 0, epcEarned: 0, streakDay: 5,
+      });
+      return d.mode === 'earned' && d.rp === 0 && d.epc === 0;
+    })(), true);
+
+  {
+    const before = REWARD_CONFIG.GOAL_REWARD_ENABLED;
+    REWARD_CONFIG.GOAL_REWARD_ENABLED = false;
+    check('the kill switch suppresses EVERYTHING here too, not just the payout',
+      goalRewardDisplay({
+        isOneTime: true, lifetimeTarget: 50_000, planned: 0, inactive: false,
+        rpEarned: 0, epcEarned: 0, streakDay: 20,
+      }), null);
+    REWARD_CONFIG.GOAL_REWARD_ENABLED = before;
+  }
+}
+
 // ── the monthly reward CEILING — the actual anti-grind backstop ────────────
 // `useRewardStore.awardGoalBonus` can't run headlessly (see file header), so
 // its clamp logic is verified as source text, the same convention every other
@@ -158,6 +267,92 @@ section('useGoalAchievement.ts — both durations attempt payment, gated by bonu
     /awardGoalBonus\(next\.goalId, next\.name, next\.kind === 'lifetime' \? 'oneTime' : 'recurring', next\.target\)/.test(hook));
   ok('a monthly payment attempt stamps bonusAwardedMonth, mirroring the lifetime path',
     /markGoalMonthlyBonusAwarded\(next\.goalId, next\.monthKey\)/.test(hook));
+  ok('a REAL payout also credits the goal\'s own RP/EPC ledger',
+    /creditGoalReward\(next\.goalId, paid\.rpAwarded, paid\.epcAwarded\)/.test(hook));
+  ok('…but only when something was actually paid, never on a re-show or a zero clamp',
+    /if \(paid && \(paid\.rpAwarded > 0 \|\| paid\.epcAwarded > 0\)\)/.test(hook));
+}
+
+// ── the card: layout branches on the SAME kill switch as the payout ────────
+section('GoalCard.tsx — pencil/quick-action/reward-row all branch on GOAL_REWARD_ENABLED (cannot execute RN/SVG code here)');
+{
+  const card = readFileSync(new URL('../../components/GoalCard.tsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok('reads the SAME flag the payout itself reads — no separate prop threaded down',
+    /const rewardsOn = REWARD_CONFIG\.GOAL_REWARD_ENABLED;/.test(card));
+  ok('the pencil moves to the LEFT only when rewards are on',
+    /rewardsOn \? styles\.cornerLeft : styles\.cornerRight/.test(card));
+  ok('the top-right quick action only renders when rewards are on AND there is a handler',
+    /\{rewardsOn && actionHandler \?/.test(card));
+  ok('the labelled bottom button is the ORIGINAL behaviour — rendered only when rewards are OFF',
+    /!rewardsOn && showResume/.test(card) && /!rewardsOn && showFund/.test(card));
+  ok('the reward chip row is the alternative — rendered only when rewards are ON and there is something to show',
+    /\) : rewardsOn && rewardDisplay \? \(/.test(card));
+  ok('the projection/earned split reads goalRewardDisplay, not the raw ledger props directly',
+    /const rewardDisplay = rewardsOn/.test(card) && /goalRewardDisplay\(\{/.test(card));
+  ok('the live Aware Run streak feeds the projection, so it reflects TODAY\'s multiplier',
+    /const awareStreak = useRewardStore\(\(s: any\) => s\.awareStreak\);/.test(card));
+  ok('a dash ONLY ever replaces an "earned" (historical) zero — a projection is never zero, never dashed',
+    /rewardDisplay\.mode === 'earned' && rewardDisplay\.rp === 0 \? '— RP'/.test(card));
+  ok('no caption is rendered any more ("just show")',
+    !/rewardCaption/.test(card));
+  ok('no divider line above the reward row',
+    !/rewardRow:\s*\{[^}]*borderTopWidth/.test(card));
+  ok('RP and EPC are merged into ONE row, not two separate chips',
+    !/rewardChip:/.test(card) && /styles\.rewardChipTxt/.test(card));
+  ok('the goal name has no divider line under it any more',
+    !/stats:\s*\{[^}]*borderTopWidth/.test(card));
+}
+
+// ── the detail screen shows the SAME info, from the SAME shared function ───
+section('GoalDetailScreen.tsx — "we have to show these value in goal details as well"');
+{
+  const detail = readFileSync(new URL('../../screens/GoalDetailScreen.tsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok('computes the SAME projection/earned split GoalCard does, not a re-implementation',
+    /goalRewardDisplay\(\{/.test(detail));
+  ok('reads the live streak too, so its projection matches GoalCard\'s at any given moment',
+    /const awareStreak = useRewardStore\(\(s: any\) => s\.awareStreak\);/.test(detail));
+  ok('passes BOTH discontinued and achieved into inactive — a discontinued goal has nothing to earn either',
+    /inactive: achieved \|\| discontinued/.test(detail));
+  ok('renders nothing (not an empty box) when there is nothing to show',
+    /\{rewardDisplay \? \(/.test(detail));
+  ok('no caption here either — "just show", the same instruction applies to both screens',
+    !/rewardCaption/.test(detail));
+  // Sep-16-26 follow-up: "move the rp and epc row above the recurring and
+  // savings row" — the status+reward row (`statusRow`) must appear BEFORE
+  // the kind/duration/category row (`chipRow`) in source order.
+  ok('the status+reward row is placed ABOVE the kind/duration/category row',
+    detail.indexOf('styles.statusRow') > 0
+    && detail.indexOf('styles.statusRow') < detail.indexOf('styles.chipRow'));
+  // "we show the separator with amount once the month ends as in group and
+  // other places" — the LIVE (still-open) current month must NOT get a
+  // MonthDivider (its total isn't final yet); only CLOSED months in History
+  // do, one per entry, reusing the exact shared component Groups/Activity
+  // already use for a month + its total.
+  ok('History renders one MonthDivider per CLOSED month, with that month\'s own total',
+    /<MonthDivider key=\{h\.monthKey\} monthKey=\{h\.monthKey\} total=\{h\.funded\} \/>/.test(detail));
+  ok('the LIVE current month gets no divider — its total isn\'t final yet',
+    !/monthKey=\{monthKey\(new Date\(\)\)\}/.test(detail));
+}
+
+// ── the shared type: no orphaned field left after removing the caption ────
+section('GoalRewardDisplay no longer carries an unused caption field');
+{
+  const rc = readFileSync(new URL('../../config/rewardConfig.ts', import.meta.url), 'utf8');
+  ok('the interface itself was trimmed, not just left unused',
+    !/caption:\s*string;/.test(rc));
+}
+
+// ── the screens: every GoalCard call site actually passes the ledger ──────
+section('GoalsScreen.tsx passes rpEarned/epcEarned through to every GoalCard');
+{
+  const screen = readFileSync(new URL('../../screens/GoalsScreen.tsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const goalCardBlocks = screen.match(/<GoalCard[\s\S]*?\/>/g) || [];
+  check('both GoalCard call sites exist (active grid + inactive grid)', goalCardBlocks.length, 2);
+  ok('EVERY call site passes both fields — a caller silently skipping one would just show a dash forever',
+    goalCardBlocks.every((b) => /rpEarned=\{g\.rpEarned\}/.test(b) && /epcEarned=\{g\.epcEarned\}/.test(b)));
 }
 
 // ── summary ─────────────────────────────────────────────────────────────────

@@ -1346,6 +1346,177 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - UI-only, `tsc` clean, full suite unaffected (2233/2233 — no test asserted on either the removed
   cell or the old button text).
 
+**Done — Sep-16-2026, small cleanups + a reward kill switch**
+- Removed the Monthly Contribution field's trailing hint ("Reapplies automatically every month
+  after.") — true, but redundant with the auto-carry behaviour itself and confusing floating next
+  to the "unallocated this month" figure it was appended to.
+- **New `REWARD_CONFIG.GOAL_REWARD_ENABLED`** (`rewardConfig.ts`, default `true`) — one build-time
+  switch for the whole goal-reward economy, read inside `computeGoalReward` (the single formula),
+  not scattered as `if` guards at each caller. `false` pays zero RP/EPC but never blocks the
+  congratulation modal itself — `achievedAt`/`celebratedAt` are facts about the money, independent
+  of whether the economy is switched on. Reuses the EXISTING "attempted, paid zero" code path a
+  goal already takes when the monthly reward ceiling has nothing left, so `GoalAchievedModal`
+  needed no new state — only its zero-reward copy was softened to stay true regardless of WHICH of
+  the two reasons produced it ("Nothing extra to add to your balance this time" instead of naming
+  the monthly budget specifically). `test:rewards` 42 → 47 (flips the flag off/on directly, since
+  `REWARD_CONFIG` has no runtime freeze — `as const` is compile-time only).
+- `tsc` clean, full suite unaffected elsewhere.
+
+**Open — flagged same day, resolved below (Sep-16-26)**
+- Duration vs Frequency label: discussed, not changed — "Frequency" implies a repeat cadence
+  (daily/weekly/monthly), which isn't what this field picks (whether the goal has a finish line at
+  all); flagged as a possibly-worse fit rather than switched.
+- Where to surface a goal's own RP/EPC earned on its card: discussed (footer near the + vs a
+  column beside the edit pencil), not decided or built. **Decided same day, see below.**
+
+**Done — Sep-16-2026, RP/EPC earned surfaced on the goal card**
+- Compared 4 placement options as a mocked HTML artifact (real theme tokens, same two sample
+  goals throughout) before writing any component code — user picked a 5th variant refined from
+  there: **pencil moves to top-left; a bare "+" (the same glyph the action button already used)
+  takes over the top-right as an icon-only quick action; RP/EPC land as chips at the bottom, in
+  the action button's old spot rather than beside it** — so the new layout costs no extra height
+  over today's card.
+- **Gated on the SAME `REWARD_CONFIG.GOAL_REWARD_ENABLED` flag the payout itself reads** ("show the
+  current one if rewards are off") — one flag, `GoalCard` doesn't take a separate prop for it. Off:
+  the card is byte-for-byte the original — pencil top-right, a LABELLED action button
+  ("Update"/"Add Extra"/"Resume") at the bottom, nothing new. On: the layout above. Both branches
+  share one derivation of "which action, which handler, which colour" (`showResume`/`showFund`/
+  `actionColor`) so the icon-only and labelled versions can never disagree about what they do.
+- **New per-goal ledger, not just a read of the global wallet**: `goal.rpEarned`/`epcEarned`
+  (store v34) are additive-only totals credited by a new `creditGoalReward(goalId, rp, epc)`,
+  called from `useGoalAchievement` right after a REAL (non-zero) `awardGoalBonus` — a re-show or a
+  monthly-ceiling clamp to zero credits nothing. Needed because `useRewardStore`'s totalRP/
+  epcBalance is one global pool; nothing previously remembered what a SPECIFIC goal itself had
+  earned. A goal with nothing earned yet reads as a dash ("— RP"), never "+0" — same convention
+  `isIdle` already uses elsewhere on this card.
+- Discontinued goals keep their "Resume" affordance in the new top-right slot (▶ instead of +) —
+  swapping to an icon-only quick action couldn't be allowed to silently drop the one way back into
+  active planning.
+- `backupService.ts` `STORE_VERSION` bumped in lockstep (33 → 34) — the trap this session has
+  already hit twice, both times caught by the same existing sync test.
+- `tsc` clean. `test:store` 558 → 563 (new `creditGoalReward` coverage: additive, never negative,
+  never leaks across goals). `test:rewards` 47 → 57 (source-text coverage for `GoalCard.tsx`'s
+  branch-on-the-flag layout and the hook's crediting condition, plus a check that BOTH
+  `GoalsScreen` call sites actually pass the new props — the same "audit every skip site" habit
+  this feature area keeps needing). Full suite green.
+- Not yet manually verified in a running app — the usual caveat for a UI change built from a mock.
+
+**Done — Sep-16-2026, corrected: the card shows what you'll EARN, not what you HAVE**
+- The entry above got the intent backwards — user clarified same day: "the point of showing
+  RP/EPC is to inform/motivate the user... so he will get these rewards, so do we show them all
+  time." The ledger (`rpEarned`/`epcEarned`, historical, only nonzero after a real payout) was
+  the wrong number for an ACTIVE goal — it read as "you've earned nothing" right when the point
+  was "here's what finishing this pays." Corrected: **while a goal is still active, the card now
+  shows a live PROJECTION** — what completing it (its lifetime target) or meeting it (this
+  month's commitment) would pay AT TODAY'S Aware Run streak — computed via the SAME
+  `computeGoalReward` the actual payout uses, so it's never invented. A projection is never
+  zero (the whole point is to motivate before anything's been earned), so the "— RP" dash from
+  the first pass is now reserved for ONLY the historical case.
+- **Once a goal is achieved or discontinued, there's nothing left to motivate toward** — the card
+  falls back to the ledger (what it ACTUALLY earned) at that point, since a projection past the
+  finish line makes no sense. A caption above the two chips ("Reward on completion" / "Reward
+  this month" / "Total earned") is what tells projection and history apart — the numbers alone
+  look identical either way. New single source of truth for both: `goalRewardDisplay()` in
+  `rewardConfig.ts`, returning `null` only when the kill switch is off or an active goal has
+  nothing to project from yet (no target, nothing planned — the ribbon already says
+  "NOTHING PLANNED" in that case, no second empty state piled on).
+- **"we have to show these values in goal details as well"** — `GoalDetailScreen` (previously had
+  no reward info at all) now shows the identical block inside its hero card, reading the exact
+  same `goalRewardDisplay()` so the two screens can never quietly disagree about a goal's number.
+- `test:rewards` 57 → 71 (real executable coverage for `goalRewardDisplay` itself: one-time vs
+  recurring project from the right amount, a projection is provably never zero, an inactive
+  goal's number is history and does NOT re-quote at the live streak, the kill switch suppresses
+  this too) plus new source-text checks for both `GoalCard.tsx` and `GoalDetailScreen.tsx`.
+  `tsc` clean, full suite green.
+
+**Done — Sep-16-2026, invisible-chips bug fixed live + layout/copy follow-ups**
+- **Real bug, found and fixed on-device**: "reward this month" showed but the RP/EPC values under
+  it did not — user reported it after a full reload, ruling out a stale bundle. Root cause: the
+  chip was a single `<Text>` carrying `backgroundColor` + `borderRadius` + `overflow:'hidden'` +
+  its own content together — an unreliable combination in RN (particularly with a large pill
+  radius over padding). Fixed to the SAME split `ribbon`/`ribbonTxt` already uses successfully:
+  background/radius on an outer `View`, colour on the `Text` inside it. Confirmed live in the iOS
+  simulator (this machine had one already booted, running this project's own `expo start` — used
+  `xcrun simctl io screenshot` to see the actual bug, then the actual fix, before reporting back).
+- **Caption removed entirely** ("just show") — no more "Reward this month"/"Reward on
+  completion"/"Total earned" label, on either `GoalCard` or `GoalDetailScreen`. Since nothing reads
+  it any more, the `caption` field was dropped from the shared `GoalRewardDisplay` type too, not
+  left as dead weight.
+- `GoalCard`'s reward-chip row now uses the SAME spacing rhythm as "Saved so far"/"This month"
+  above it (`marginTop`/`paddingTop`/hairline divider) — it was noticeably tighter before, reading
+  as a different distance for no reason.
+- `GoalDetailScreen`'s hero: the pace/status pill ("On track" etc., previously stacked under the
+  headline value) moved into a THIRD row, alongside the reward chips — both answer "how is this
+  goal doing," so they read as one fact group instead of the status pill sitting alone above an
+  unrelated reward row.
+- `GoalDetailScreen`'s transaction section: heading simplified from "This Month's Transactions" /
+  "What this month's total is made of" (both said "this month") to a plain "Transactions" — the
+  month + its total now come from a **`MonthDivider`** row above the list instead, reusing the
+  EXACT shared component Groups/Activity already use for this job (`"September 2026 · ₹2,500"`),
+  rather than restating the month in prose.
+- `tsc` clean, full suite green (`test:rewards` 71 → 75, with a permanent regression guard for the
+  invisible-chip bug specifically: asserts the chip's background/radius is on a `View`, never on a
+  `Text` that also carries its own text content).
+
+**Done — Sep-16-2026, one more layout pass on the card + detail screen**
+- `GoalCard`'s reward row: removed the hairline divider added the same day (asked for the SPACING
+  it copied from `stats`, not a second line above it) — the gap alone reads as its own row without
+  repeating the divider `stats` already drew. The two chips now split the tile's full width evenly
+  (`flex: 1` each) with a smaller `radius.sm` corner and tighter side padding, instead of a pair of
+  compact pills sized to their own text.
+- `GoalDetailScreen` hero: the status+reward row now sits ABOVE the kind/duration/category row
+  (was below it) — it's the more immediately useful of the two facts.
+- **`GoalDetailScreen`'s transactions: corrected which month gets a total.** The `MonthDivider`
+  added earlier the same day showed a total for the LIVE, still-open current month — wrong per the
+  very convention it was borrowed from: Groups/Activity only show a month's total once that month
+  has actually CLOSED. Moved it to where it belongs: **History** (closed months) now renders one
+  `MonthDivider` per entry with that month's real total, replacing the custom-styled row that used
+  to live there; the current month's transaction list goes back to no divider at all (nothing to
+  finalize yet). Dropped the now-unused `MONTH_LABEL` helper and `historyRow`/`historyMonth`/
+  `historyAmt` styles along with it.
+- `tsc` clean, `test:rewards` 75 → 80 (regression guards for: no border on the reward row, the
+  chips are `flex:1`, the status row is ordered before the chip row, History uses one `MonthDivider`
+  per closed month, and the live month gets none). Full suite green. Both card and detail-screen
+  changes reconfirmed live on the same booted simulator.
+
+**Done — Sep-16-2026, two more spacing fixes**
+- `GoalCard`'s reward row: the gap above it (`marginTop`+`paddingTop`, carried over from the same
+  rhythm `stats` uses) was still too generous now that the hairline it was originally paired with
+  is gone — collapsed to a single smaller `marginTop`.
+- `GoalDetailScreen`: "Transactions" (and "History") sat flush against their content with no gap at
+  all — `SectionHeader` carries no bottom margin of its own by design (that's the caller's job, per
+  ui-consistency), and neither section had ever passed one. Added a shared `secHead` style
+  (`marginBottom: spacing.sm`) to both.
+- `tsc` clean, full suite green. Reconfirmed live (`GoalCard`'s tighter gap, screenshot-verified on
+  the same booted simulator).
+
+**Done — Sep-16-2026, GoalCard: no separator under the name, RP/EPC merged into one row**
+- Removed the hairline between the goal name and "Saved so far"/"This month" — the last divider
+  left on the tile.
+- The RP/EPC chips are now ONE row ("+18 RP · +2 EPC") instead of two separate pills — same colours
+  per value (primary RP, success EPC, both muted once inactive), one shared neutral background.
+- Trimmed a batch of comments added earlier the same day (`GoalCard.tsx`, `GoalDetailScreen.tsx`,
+  `rewardConfig.ts`'s `goalRewardDisplay`) that had grown into multi-line re-explanations of
+  already-decided reasoning — flagged directly by the user, see `feedback_minimal_comments.md`.
+- `tsc` clean, full suite green (`test:rewards` regression checks updated for the merged row).
+  Reconfirmed live on the same booted simulator.
+
+**Done — Sep-16-2026, closed the "born already achieved" gap — ONE-TIME goals only**
+- A ONE-TIME goal's auto-rule is now stamped with its own `createdAt` at creation (`addGoal`),
+  reusing the exact `addedAt`/`activeAt` gate widening already used — a small-target one-time goal
+  can no longer be born already funded (or already achieved, with a real RP/EPC payout) from
+  matching spend that predates it.
+- **RECURRING goals are deliberately left ungated** — decided directly with the user: a recurring
+  goal's number is "this calendar month," and spend from earlier the same month is genuinely that
+  month's spend regardless of when the tracker was created. No permanent-achievement risk to guard
+  against the way one-time has (it re-evaluates fresh every month, on the smaller recurring reward
+  band, under the same monthly ceiling).
+- Manual/automatic funding itself needs no cap of its own — already covered: the cross-goal monthly
+  reward ceiling bounds what any lump-sum completion can pay out, however the money arrived.
+- `test:store` 564 → 568 (new goal is not born funded/achieved for one-time; recurring still counts
+  the whole month; two older tests whose setups assumed the old ungated behaviour corrected).
+  `tsc` clean, full suite green.
+
 **Open**
 - Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block.
 - The liquid-fill visual from the prototype was deliberately NOT used — `DailyBudgetLiquidWave`

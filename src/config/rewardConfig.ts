@@ -95,6 +95,16 @@ export const REWARD_CONFIG = {
   SAVINGS_EPC_BASE: 5,
 
   // Goal completion ─────────────────────────────────────────────────────────
+  // Sep-16-26: one build-time kill switch for the whole goal-reward economy —
+  // "make the reward goals config based check, whether to reward or not."
+  // `false` never blocks the CONGRATULATION (a goal is still genuinely
+  // achieved, `achievedAt`/`celebratedAt` are facts about the money, not about
+  // the economy) — only `computeGoalReward` pays zero, the same code path a
+  // goal already takes when the monthly ceiling has nothing left. One flag,
+  // read in exactly one place, rather than a scatter of `if` guards at every
+  // caller.
+  GOAL_REWARD_ENABLED: true,
+
   // Sep-14-26 rework: the payout used to be one FLAT number regardless of the
   // goal's own size, and a recurring goal never paid at all (congratulation
   // only) — the exact split the user flagged: a ₹500 goal and a ₹5,00,000
@@ -288,6 +298,12 @@ export const computeGoalReward = (
   { durationKind, amount, streakDay }: { durationKind: 'oneTime' | 'recurring'; amount: number; streakDay: number },
 ): GoalRewardQuote => {
   const band = bandForGoalAmount(amount);
+  // The kill switch pays nothing, but still reports which band the goal
+  // WOULD have earned — `awardGoalBonus`'s notification meta and this
+  // function's own tests read `band` regardless of whether anything paid.
+  if (!REWARD_CONFIG.GOAL_REWARD_ENABLED) {
+    return { rpAwarded: 0, epcAwarded: 0, band: band.label };
+  }
   const multiplier = multiplierForStreak(streakDay);
   const baseRp  = durationKind === 'oneTime' ? band.oneTimeRp  : band.recurringRp;
   const baseEpc = durationKind === 'oneTime' ? band.oneTimeEpc : band.recurringEpc;
@@ -295,6 +311,53 @@ export const computeGoalReward = (
     rpAwarded:  Math.round(baseRp * multiplier),
     epcAwarded: Math.max(1, Math.round(baseEpc * multiplier)),
     band:       band.label,
+  };
+};
+
+export interface GoalRewardDisplay {
+  /** 'projected': what completing it WOULD pay (active goal). 'earned': what
+   *  it actually paid (achieved/discontinued — nothing left to project). */
+  mode: 'projected' | 'earned';
+  rp: number;
+  epc: number;
+}
+
+/**
+ * Single source `GoalCard`/`GoalDetailScreen` both read for a goal's reward.
+ * Projection is an ESTIMATE, not a promise — the real payout can be clamped
+ * later by the cross-goal monthly ceiling; not modelled here on purpose.
+ * Null when the kill switch is off, or an active goal has nothing to
+ * project from yet (no target, nothing planned).
+ */
+export const goalRewardDisplay = (
+  {
+    isOneTime, lifetimeTarget, planned, inactive, rpEarned, epcEarned, streakDay,
+  }: {
+    isOneTime: boolean;
+    lifetimeTarget: number;
+    planned: number;
+    inactive: boolean;
+    rpEarned: number;
+    epcEarned: number;
+    streakDay: number;
+  },
+): GoalRewardDisplay | null => {
+  if (!REWARD_CONFIG.GOAL_REWARD_ENABLED) return null;
+
+  if (inactive) {
+    return { mode: 'earned', rp: rpEarned || 0, epc: epcEarned || 0 };
+  }
+
+  const amount = isOneTime ? lifetimeTarget : planned;
+  if (!(amount > 0)) return null;
+
+  const quote = computeGoalReward({
+    durationKind: isOneTime ? 'oneTime' : 'recurring', amount, streakDay,
+  });
+  return {
+    mode: 'projected',
+    rp: quote.rpAwarded,
+    epc: quote.epcAwarded,
   };
 };
 

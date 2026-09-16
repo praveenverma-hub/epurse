@@ -36,6 +36,8 @@ import { useTheme } from '../hooks/useTheme';
 import {
   radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn, mix,
 } from '../constants/theme';
+import { REWARD_CONFIG, goalRewardDisplay } from '../config/rewardConfig';
+import { useRewardStore } from '../store/useRewardStore';
 import { formatCompact } from '../utils/format';
 import { projectedMonthLabel } from '../utils/goalPlan';
 import ProgressRing from './ProgressRing';
@@ -123,6 +125,17 @@ export interface GoalCardProps {
   /** The pencil. The ONLY way into the edit form from this tile. */
   onEdit?: () => void;
   onAddMoney?: () => void;
+  /**
+   * RP/EPC this specific goal has earned LIFETIME (`goal.rpEarned`/
+   * `epcEarned`, credited by `useGoalAchievement` alongside `awardGoalBonus`
+   * — see `creditGoalReward`). Only ever shown once the goal is INACTIVE
+   * (achieved or discontinued) — while it's still active, the card shows a
+   * live PROJECTION instead (`goalRewardDisplay`), computed from its own
+   * target/planned amount, not these props. Both only ever render at all
+   * when `REWARD_CONFIG.GOAL_REWARD_ENABLED` is on (Sep-16-26).
+   */
+  rpEarned?: number;
+  epcEarned?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -155,9 +168,16 @@ const RIBBON_UNPLANNED = 'NOTHING PLANNED';
 
 const GoalCard: React.FC<GoalCardProps> = ({
   name, emoji, color, planned, funded, status, lifetimeSaved, lifetimeTarget,
-  monthsLeft, achieved, discontinued, onPress, onEdit, onAddMoney, onResume, style,
+  monthsLeft, achieved, discontinued, onPress, onEdit, onAddMoney, onResume,
+  rpEarned, epcEarned, style,
 }) => {
   const theme = useTheme();
+
+  // Layout branches on the same reward kill switch, not a prop.
+  const rewardsOn = REWARD_CONFIG.GOAL_REWARD_ENABLED;
+  const rpTotal = Number(rpEarned) || 0;
+  const epcTotal = Number(epcEarned) || 0;
+  const awareStreak = useRewardStore((s: any) => s.awareStreak);
   // SVG gradient ids are GLOBAL to the document, and a screen renders many of
   // these tiles at once — a shared id means every glow picks up whichever card
   // mounted last (and renders the wrong colour, or nothing, on Android). React's
@@ -176,6 +196,13 @@ const GoalCard: React.FC<GoalCardProps> = ({
    *  not two `if`s scattered through the render — "feel them as non active"
    *  (Sep-14-26) is ONE visual treatment regardless of which reason applies. */
   const inactive = achieved || discontinued;
+
+  const rewardDisplay = rewardsOn
+    ? goalRewardDisplay({
+        isOneTime, lifetimeTarget: lifetimeTarget || 0, planned, inactive: !!inactive,
+        rpEarned: rpTotal, epcEarned: epcTotal, streakDay: awareStreak,
+      })
+    : null;
   // "can't see any update on inactive goals" — a flat overlay was tried first
   // and made almost no visible difference, because the card's most eye-
   // catching colour (the medallion's glow, the progress ring) is drawn from
@@ -299,6 +326,24 @@ const GoalCard: React.FC<GoalCardProps> = ({
     { k: 'This month', v: isIdle ? '—' : formatCompact(funded) },
   ];
 
+  // The ONE action this tile offers, same choice the footer button already
+  // made (discontinued wins, then fund, then nothing) — only WHERE it lands
+  // changes with `rewardsOn`. Kept as one source so the icon-only top-right
+  // version (rewards on) and the labelled bottom version (rewards off) can
+  // never disagree about which handler or colour applies.
+  const showResume = discontinued && !!onResume;
+  const showFund = !showResume && !!onAddMoney;
+  const actionHandler = showResume ? onResume : (showFund ? onAddMoney : undefined);
+  const actionIcon = showResume ? 'play' : 'add';
+  // Muted only for "Add Extra" on an already-achieved goal — resuming and a
+  // still-open goal's own update are both real, primary-coloured actions.
+  const actionColor = showResume ? theme.primary : (achieved ? theme.textMuted : theme.primary);
+  const actionA11yLabel = showResume
+    ? `Resume ${name} — bring it back into active planning`
+    : achieved
+      ? `Add more to ${name}, already at its target`
+      : `Update how much you've put into ${name}`;
+
   return (
     <View style={[styles.cardShell, style]}>
     <Pressable
@@ -350,10 +395,8 @@ const GoalCard: React.FC<GoalCardProps> = ({
         </Text>
       </View>
 
-      {/* Edit is the ONLY way into the form from here, so it has to be an
-          explicit affordance. Bottom-right rather than top-right: the ribbon
-          now owns the full top edge. The outline makes it read as a BUTTON — a
-          bare glyph in the corner of a decorated tile looks like decoration. */}
+      {/* The ONLY way into the edit form. Left when rewards are on (right
+          otherwise), so the quick action below can take the freed corner. */}
       {onEdit ? (
         <Pressable
           onPress={onEdit}
@@ -361,11 +404,29 @@ const GoalCard: React.FC<GoalCardProps> = ({
           accessibilityRole="button"
           accessibilityLabel={`Edit ${name}`}
           style={({ pressed }) => [
-            styles.pencil,
+            styles.cornerBtn,
+            rewardsOn ? styles.cornerLeft : styles.cornerRight,
             { borderColor: theme.inputBorder, backgroundColor: theme.card, opacity: pressed ? 0.55 : 1 },
           ]}
         >
           <EditIcon size={12} color={theme.textSecondary} />
+        </Pressable>
+      ) : null}
+
+      {/* Same action as the bottom button below, icon-only, rewards-on only. */}
+      {rewardsOn && actionHandler ? (
+        <Pressable
+          onPress={actionHandler}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={actionA11yLabel}
+          style={({ pressed }) => [
+            styles.cornerBtn,
+            styles.cornerRight,
+            { borderColor: withAlpha(actionColor, 0.45), backgroundColor: theme.card, opacity: pressed ? 0.55 : 1 },
+          ]}
+        >
+          <Ionicons name={actionIcon} size={14} color={actionColor} />
         </Pressable>
       ) : null}
 
@@ -424,7 +485,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
         {name}
       </Text>
 
-      <View style={[styles.stats, { borderTopColor: theme.divider }]}>
+      <View style={styles.stats}>
         {stats.map((s, i) => (
           <View
             key={s.k}
@@ -439,19 +500,13 @@ const GoalCard: React.FC<GoalCardProps> = ({
         ))}
       </View>
 
-      {/* One centred action. Whether the goal also fills itself is said in the
-          sheet this opens, not crowded in beside the button. A discontinued
-          goal gets a DIFFERENT verb entirely — funding it doesn't apply (its
-          auto-match already stopped, and the card that got it here has no
-          plan to add toward), only bringing it back does. Primary-coloured,
-          not muted like the ribbon: resuming is a re-engagement action, not
-          a passive fact about the goal's state. */}
-      {discontinued && onResume ? (
+      {/* Rewards off: original labelled footer button. */}
+      {!rewardsOn && showResume ? (
         <Pressable
           onPress={onResume}
           hitSlop={6}
           accessibilityRole="button"
-          accessibilityLabel={`Resume ${name} — bring it back into active planning`}
+          accessibilityLabel={actionA11yLabel}
           style={({ pressed }) => [
             styles.addBtn,
             { borderColor: withAlpha(theme.primary, 0.45), opacity: pressed ? 0.6 : 1 },
@@ -460,27 +515,37 @@ const GoalCard: React.FC<GoalCardProps> = ({
           <Ionicons name="play" size={13} color={theme.primary} />
           <Text style={[styles.addTxt, { color: theme.primary }]}>Resume</Text>
         </Pressable>
-      ) : onAddMoney ? (
+      ) : !rewardsOn && showFund ? (
         <Pressable
           onPress={onAddMoney}
           hitSlop={6}
           accessibilityRole="button"
-          accessibilityLabel={
-            achieved ? `Add more to ${name}, already at its target` : `Update how much you've put into ${name}`
-          }
+          accessibilityLabel={actionA11yLabel}
           style={({ pressed }) => [
             styles.addBtn,
-            {
-              borderColor: withAlpha(achieved ? theme.textMuted : theme.primary, achieved ? 0.35 : 0.45),
-              opacity: pressed ? 0.6 : 1,
-            },
+            { borderColor: withAlpha(actionColor, achieved ? 0.35 : 0.45), opacity: pressed ? 0.6 : 1 },
           ]}
         >
-          <Ionicons name="add" size={13} color={achieved ? theme.textMuted : theme.primary} />
-          <Text style={[styles.addTxt, { color: achieved ? theme.textMuted : theme.primary }]}>
+          <Ionicons name="add" size={13} color={actionColor} />
+          <Text style={[styles.addTxt, { color: actionColor }]}>
             {achieved ? ACTION_LABEL_DONE : ACTION_LABEL}
           </Text>
         </Pressable>
+      ) : rewardsOn && rewardDisplay ? (
+        // Rewards on: projection while active, actual total once inactive.
+        <View style={[styles.rewardRow, { backgroundColor: withAlpha(theme.textMuted, 0.08) }]}>
+          <View style={styles.rewardHalf}>
+            <Text style={[styles.rewardChipTxt, { color: rewardDisplay.mode === 'earned' ? theme.textMuted : theme.primary }]}>
+              {rewardDisplay.mode === 'earned' && rewardDisplay.rp === 0 ? '— RP' : `+${rewardDisplay.rp} RP`}
+            </Text>
+          </View>
+          <Text style={[styles.rewardChipTxt, { color: theme.textMuted }]}>·</Text>
+          <View style={styles.rewardHalf}>
+            <Text style={[styles.rewardChipTxt, { color: rewardDisplay.mode === 'earned' ? theme.textMuted : theme.success }]}>
+              {rewardDisplay.mode === 'earned' && rewardDisplay.epc === 0 ? '— EPC' : `+${rewardDisplay.epc} EPC`}
+            </Text>
+          </View>
+        </View>
       ) : null}
     </Pressable>
     </View>
@@ -533,12 +598,14 @@ const styles = StyleSheet.create({
   // characters of room for no legibility gain at this size.
   ribbonTxt: { ...typography.tiny, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.4 },
 
-  // Top-right, tucked just under the ribbon — both offsets derive from RIBBON_H
-  // so neither drifts if the band's height changes.
-  pencil: {
+  // Tucked just under the ribbon — the offset derives from RIBBON_H so it
+  // never drifts if the band's height changes. Corner (left/right) is a
+  // separate style now (Sep-16-26): with rewards on, the pencil moves to the
+  // LEFT and a quick action takes over the RIGHT, so the box itself can't
+  // bake in a side.
+  cornerBtn: {
     position: 'absolute',
     top: RIBBON_H + spacing.xs,
-    right: spacing.sm - 2,
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -547,6 +614,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 2,
   },
+  cornerLeft: { left: spacing.sm - 2 },
+  cornerRight: { right: spacing.sm - 2 },
 
   ringWrap: {
     width: RING,
@@ -589,7 +658,6 @@ const styles = StyleSheet.create({
     width: '100%',
     marginTop: spacing.md - 2,
     paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
   stat: { flex: 1, alignItems: 'center', paddingHorizontal: spacing.xs },
   // A size up from the three-cell version — half a row each is room the old
@@ -610,6 +678,25 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   addTxt: { ...typography.tiny, fontSize: 10.5, fontWeight: '700' },
+
+  rewardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    width: '100%',
+    marginTop: spacing.xs,
+    borderRadius: radius.sm,
+    paddingVertical: 4,
+  },
+  // Each half centers its own figure, so RP sits in the middle of the row's
+  // left half and EPC in the middle of its right half — the "·" between them
+  // marks the row's true centre instead of both figures clumping around it.
+  rewardHalf: { flex: 1, alignItems: 'center' },
+  rewardChipTxt: {
+    ...typography.tiny,
+    fontSize: 10,
+    fontWeight: '800',
+  },
 });
 
 export default GoalCard;
