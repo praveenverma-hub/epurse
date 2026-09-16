@@ -7,13 +7,23 @@ import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import type { AppStateStatus, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as ScreenCapture from 'expo-screen-capture';
-
 import { useEPurseStore } from '../store/ePurseStore';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase } from '../constants/theme';
 import { isAppLockSuppressed, consumeAppLockSuppress } from '../utils/appLockSuppress';
+
+// Guarded require, not a static import: requireNativeModule() throws at
+// module-evaluation time if the native side isn't linked in a given build,
+// and a static `import` can't be try/caught — it would take the whole app
+// down before anything renders. FLAG_SECURE is a hardening extra; it must
+// never be able to crash the app it's meant to protect.
+let ScreenCapture: typeof import('expo-screen-capture') | null = null;
+try {
+  ScreenCapture = require('expo-screen-capture');
+} catch {
+  ScreenCapture = null;
+}
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -72,12 +82,9 @@ const AppLockGate: React.FC = () => {
   // when the AppState listener already covers the screen, so this JS-timed
   // approach is sufficient on that platform.
   useEffect(() => {
-    if (!hydrated) return;
-    if (appLockEnabled) {
-      ScreenCapture.preventScreenCaptureAsync();
-    } else {
-      ScreenCapture.allowScreenCaptureAsync();
-    }
+    if (!hydrated || !ScreenCapture) return;
+    const fn = appLockEnabled ? ScreenCapture.preventScreenCaptureAsync : ScreenCapture.allowScreenCaptureAsync;
+    fn().catch(() => {});
   }, [hydrated, appLockEnabled]);
 
   const appState = useRef<AppStateStatus>(AppState.currentState);
