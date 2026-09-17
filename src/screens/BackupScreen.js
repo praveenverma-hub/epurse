@@ -37,6 +37,7 @@ import { formatDateLabel } from '../utils/format';
 import { isBackupConfigured } from '../backup/config';
 import { generateRecoveryKey } from '../backup/random';
 import * as auth from '../backup/googleAuth';
+import { useGoogleSession } from '../hooks/useGoogleSession';
 import {
   runBackup, listRemoteBackups, fetchAndDecrypt, applyRestore,
   removeRemoteBackup, getPreRestoreSnapshot, undoRestore,
@@ -82,6 +83,7 @@ const BackupScreen = ({ navigation, route }) => {
   const fromOnboarding = !!route?.params?.fromOnboarding;
   const theme = useTheme();
   const toast = useToast();
+  const { signIn: signInWithGoogle } = useGoogleSession();
 
   const [account, setAccount]   = useState(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -124,7 +126,7 @@ const BackupScreen = ({ navigation, route }) => {
   const handleSignIn = async () => {
     try {
       setBusy('Opening Google');
-      const { email } = await auth.signIn();
+      const { email } = await signInWithGoogle();
       toast.success('Connected', email ? `Backing up to ${email}` : 'Google account connected.');
       await refresh();
     } catch (e) {
@@ -132,21 +134,6 @@ const BackupScreen = ({ navigation, route }) => {
       if (e.code !== 'CANCELLED') toast.error('Sign-in failed', e.message);
     } finally { setBusy(null); }
   };
-
-  const handleSignOut = () => setConfirm({
-    title: 'Disconnect Google?',
-    message: 'ePurse will stop backing up. Backups already in your Drive are kept, and you can reconnect any time.',
-    primaryText: 'Disconnect',
-    secondaryText: 'Cancel',
-    destructive: true,
-    onConfirm: async () => {
-      setConfirm(null);
-      await auth.signOut();
-      setBackups([]);
-      await refresh();
-      toast.info('Disconnected', 'Your existing backups were not deleted.');
-    },
-  });
 
   const openPassword = (mode, file) => {
     setPw(''); setPw2(''); setPwErr('');
@@ -299,11 +286,11 @@ const BackupScreen = ({ navigation, route }) => {
                   <Ionicons name="person-circle-outline" size={22} color={colors.textSecondary} style={styles.rowIcon} />
                   <View style={styles.rowTextWrap}>
                     <Text style={styles.rowLabel} numberOfLines={1}>{account || 'Google account'}</Text>
-                    <Text style={styles.rowHint} numberOfLines={1}>Connected</Text>
+                    {/* Signing out now logs the user out of the whole app (login and
+                        backup share one session) — that action lives in exactly one
+                        place, Settings > Logout, not here too. */}
+                    <Text style={styles.rowHint} numberOfLines={1}>Connected · Manage sign-in in Settings</Text>
                   </View>
-                  <TouchableOpacity onPress={handleSignOut} hitSlop={8}>
-                    <Text style={[styles.linkDanger]}>Disconnect</Text>
-                  </TouchableOpacity>
                 </View>
               ) : (
                 <GradientButton title="Connect Google Drive" onPress={handleSignIn} />
@@ -381,7 +368,9 @@ const BackupScreen = ({ navigation, route }) => {
               </TouchableOpacity>
             ) : null}
 
-            <FaqAccordion title="FAQs" items={BACKUP_FAQ} style={styles.faqWrap} />
+            {!fromOnboarding ? (
+              <FaqAccordion title="FAQs" items={BACKUP_FAQ} style={styles.faqWrap} />
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -528,7 +517,6 @@ const styles = StyleSheet.create({
   rowLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
   rowHint: { ...typography.tiny, color: colors.textSecondary, marginTop: 1 },
   link: { ...typography.small, fontWeight: '700' },
-  linkDanger: { ...typography.small, fontWeight: '700', color: colors.danger },
   restoreBtn: { paddingHorizontal: spacing.xs },
 
   undoBtn: {

@@ -26,6 +26,8 @@ import { base64ToBytes, bytesToUtf8 } from './envelope';
 
 const REFRESH_KEY = 'epurse.backup.refreshToken';
 const EMAIL_KEY = 'epurse.backup.account';
+const NAME_KEY = 'epurse.backup.name';
+const PICTURE_KEY = 'epurse.backup.picture';
 
 const DISCOVERY: AuthSession.DiscoveryDocument = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -64,19 +66,41 @@ export async function getSignedInAccount(): Promise<string | null> {
   return SecureStore.getItemAsync(EMAIL_KEY);
 }
 
+export type GoogleProfile = { email: string | null; name: string | null; picture: string | null };
+
+/** Full identity for display (login UI), vs. getSignedInAccount's email-only shape kept for existing callers. */
+export async function getSignedInProfile(): Promise<GoogleProfile | null> {
+  if (!(await isSignedIn())) return null;
+  const [email, name, picture] = await Promise.all([
+    SecureStore.getItemAsync(EMAIL_KEY),
+    SecureStore.getItemAsync(NAME_KEY),
+    SecureStore.getItemAsync(PICTURE_KEY),
+  ]);
+  return { email, name, picture };
+}
+
+type SessionListener = (signedIn: boolean) => void;
+const sessionListeners = new Set<SessionListener>();
+
+/** Lets the store layer react to sign-in/out (including the involuntary one in getAccessToken) without this module importing the store. */
+export function onSessionChange(cb: SessionListener): () => void {
+  sessionListeners.add(cb);
+  return () => sessionListeners.delete(cb);
+}
+
 /**
  * Interactive sign-in. `access_type=offline` + `prompt=consent` are BOTH
  * required to get a refresh token: without them Google returns only an access
  * token, and the user would be re-prompted on every single backup.
  */
-export async function signIn(): Promise<{ email: string | null }> {
+export async function signIn(): Promise<GoogleProfile> {
   if (!isBackupConfigured()) {
     throw new AuthError('NOT_CONFIGURED', 'Google backup is not set up in this build yet.');
   }
 
   const request = new AuthSession.AuthRequest({
     clientId: clientId(),
-    scopes: [DRIVE_SCOPE, 'openid', 'email'],
+    scopes: [DRIVE_SCOPE, 'openid', 'email', 'profile'],
     redirectUri: redirectUri(),
     usePKCE: true,
     extraParams: { access_type: 'offline', prompt: 'consent' },
@@ -111,9 +135,13 @@ export async function signIn(): Promise<{ email: string | null }> {
   accessToken = token.accessToken;
   accessTokenExpiry = Date.now() + (token.expiresIn ?? 3600) * 1000;
 
-  const email = decodeEmail(token.idToken);
-  if (email) await SecureStore.setItemAsync(EMAIL_KEY, email);
-  return { email };
+  const profile = decodeProfile(token.idToken);
+  if (profile?.email) await SecureStore.setItemAsync(EMAIL_KEY, profile.email);
+  if (profile?.name) await SecureStore.setItemAsync(NAME_KEY, profile.name);
+  if (profile?.picture) await SecureStore.setItemAsync(PICTURE_KEY, profile.picture);
+
+  sessionListeners.forEach((l) => l(true));
+  return { email: profile?.email ?? null, name: profile?.name ?? null, picture: profile?.picture ?? null };
 }
 
 /**
@@ -149,14 +177,17 @@ export async function signOut(): Promise<void> {
   accessTokenExpiry = 0;
   await SecureStore.deleteItemAsync(REFRESH_KEY);
   await SecureStore.deleteItemAsync(EMAIL_KEY);
+  await SecureStore.deleteItemAsync(NAME_KEY);
+  await SecureStore.deleteItemAsync(PICTURE_KEY);
+  sessionListeners.forEach((l) => l(false));
 }
 
 /**
- * Read `email` out of the id_token for display. NOT verified — it's only ever
- * shown as "backing up to <account>", never trusted for a security decision, so
- * signature verification would be ceremony without benefit.
+ * Read `email`/`name`/`picture` out of the id_token for display. NOT verified —
+ * only ever shown as identity in the UI, never trusted for a security decision,
+ * so signature verification would be ceremony without benefit.
  */
-function decodeEmail(idToken?: string | null): string | null {
+function decodeProfile(idToken?: string | null): GoogleProfile | null {
   if (!idToken) return null;
   try {
     // Our own base64/utf8, not `atob` + percent-decoding: Hermes has neither
@@ -165,7 +196,7 @@ function decodeEmail(idToken?: string | null): string | null {
     // and no clue why. base64URL → base64 first (`-_` are not in the alphabet).
     const payload = idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     const json = JSON.parse(bytesToUtf8(base64ToBytes(payload)));
-    return json.email || null;
+    return { email: json.email || null, name: json.name || null, picture: json.picture || null };
   } catch {
     return null;
   }

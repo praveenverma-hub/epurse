@@ -105,9 +105,15 @@ was written. **The migration unblocks both** — same code path — so this can 
 before. WhatsApp-style suggests the toggle: *Settings → Appearance → Light / Dark / System*, with
 the accent orthogonal to it. Carbon would then be the accent that also *defaults* to dark.
 
-## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×5)
+## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×5, 2026-09-17)
 
-**51 files · 927 references.** Sep-14 (5th pass): +4 static refs (923→927), a deliberate GROWTH.
+**51 files · 926 references.** Sep-17: -1 (927→926) — Google login. The new `GoogleSignInPanel`/
+`LoginGate` components are fully theme-reactive (`useTheme()`, zero static refs); `BackupScreen.js`
+lost its "Disconnect" row (now the app-level Logout in Settings, per the shared
+single-session-sign-out design) along with its `colors.danger`-based `linkDanger` style, for a net
+decrease.
+
+Prior: Sep-14 (5th pass): +4 static refs (923→927), a deliberate GROWTH.
 `InviteEarnScreen.tsx` moved off the Profile hub's Settings-nested tree onto the Profile hub
 itself (below Backup) — no longer subject to the flattened/plain Settings convention, so it was
 restyled to match its new sibling `BackupScreen.js`'s card-per-section look exactly: static

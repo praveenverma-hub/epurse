@@ -25,6 +25,7 @@ import RateFeedbackScreen  from '../screens/RateFeedbackScreen';
 import InviteEarnScreen    from '../screens/InviteEarnScreen';
 import AboutScreen         from '../screens/AboutScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
+import MyProfileScreen     from '../screens/MyProfileScreen';
 import ShopScreen          from '../screens/ShopScreen';
 import RemindersScreen     from '../screens/RemindersScreen';
 import GoalsScreen         from '../screens/GoalsScreen';
@@ -87,6 +88,7 @@ export default function AppNavigator() {
         <Stack.Screen name="RateFeedback"  component={RateFeedbackScreen} />
         <Stack.Screen name="InviteEarn"    component={InviteEarnScreen} />
         <Stack.Screen name="About"         component={AboutScreen} />
+        <Stack.Screen name="MyProfile"     component={MyProfileScreen} />
         {/* Profile hub → its three destinations. The hub was one screen
             ("RewardShop") holding the profile, the widget catalogue and the
             settings sheet; each is now its own route so the list on the hub can

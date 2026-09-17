@@ -142,14 +142,21 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 entering={ZoomIn.springify().damping(18).stiffness(220)}
                 style={styles.avatarWrap}
               >
-                <LinearGradient
-                  colors={[D.primary, '#FB923C']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.avatar}
+                <TouchableOpacity
+                  onPress={go('MyProfile')}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit your profile"
                 >
-                  <Text style={styles.avatarText}>{initial}</Text>
-                </LinearGradient>
+                  <LinearGradient
+                    colors={[D.primary, '#FB923C']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.avatar}
+                  >
+                    <Text style={styles.avatarText}>{initial}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
                 <LevelChip level={level} styles={styles} D={D} />
               </Animated.View>
 

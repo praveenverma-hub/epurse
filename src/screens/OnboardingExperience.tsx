@@ -17,8 +17,13 @@
 // react-native-svg (no icon dependency). Everything is theme-aware and responsive.
 //
 // ── STORE WIRING ─────────────────────────────────────────────────────────────
-// Uses EXISTING store actions: setUserName, setUserPhones, setHasOnboarded,
+// Uses EXISTING store actions: setUserName, setHasOnboarded,
 // setSmsPermissionGranted, setAccountAnchor, deleteAccount.
+//
+// Also reads `isLoggedIn` (set via useGoogleSession/setGoogleAccount) — the
+// registration page embeds a compact GoogleSignInPanel alongside the name
+// field, and "Get Started" stays disabled until sign-in completes. The phone
+// number is no longer collected here; it's added later from MyProfileScreen.
 //
 // Add these TWO members to ePurseStore.js so the 24-hour widget rule works
 // (every call here is optional-chained, so the file is safe before you wire it):
@@ -61,15 +66,16 @@ import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing, radius } from '../constants/theme';
+import { spacing, radius, BUTTON_H } from '../constants/theme';
 import { useEPurseStore, selectAccountLinkSuggestions } from '../store/ePurseStore';
+import GoogleSignInPanel from '../components/GoogleSignInPanel';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { requestLocationPermission } from '../services/locationService';
 import { requestContactsPermission } from '../services/contactsService';
 import { requestNotificationPermissions } from '../utils/notifications';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
-import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone, sanitizeAmount } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount } from '../utils/validation';
 
 // =============================================================================
 // Types
@@ -124,6 +130,7 @@ type Nav = {
 // =============================================================================
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const WINDOW_W = Dimensions.get('window').width;
+const WINDOW_H = Dimensions.get('window').height;
 
 type IconKind = 'smartphone' | 'folder' | 'trophy';
 
@@ -271,8 +278,8 @@ export default function OnboardingDeck({
   const styles = useMemo(() => deckStyles(theme), [theme]);
 
   const setUserName = useEPurseStore((s: any) => s.setUserName);
-  const setUserPhones = useEPurseStore((s: any) => s.setUserPhones);
   const setHasOnboarded = useEPurseStore((s: any) => s.setHasOnboarded);
+  const isLoggedIn = useEPurseStore((s: any) => s.isLoggedIn) as boolean;
   const setUserOnboardedAt = useEPurseStore((s: any) => s.setUserOnboardedAt);
   const setSmsPermissionGranted = useEPurseStore((s: any) => s.setSmsPermissionGranted);
   // Inbox-sweep dependencies (one-time onboarding back-fill).
@@ -287,16 +294,16 @@ export default function OnboardingDeck({
   const [page, setPage] = useState(0);
 
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sweepLabel, setSweepLabel] = useState<string | null>(null);
 
-  const totalPages = SLIDES.length + 1; // info slides + registration
+  const totalPages = SLIDES.length + 1; // info slides + registration (name + Google sign-in)
   const registrationIndex = SLIDES.length;
 
   const nameValid = isValidName(name);
-  const phoneValid = isValidPhone(phone);
-  const formValid = nameValid && phoneValid;
+  // Phone number moved to MyProfileScreen (added later, after onboarding) — this
+  // form's only gates are a valid name and a completed Google sign-in.
+  const formValid = nameValid;
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -332,12 +339,11 @@ export default function OnboardingDeck({
   );
 
   const handleGetStarted = useCallback(async () => {
-    if (!formValid || submitting) return;
+    if (!formValid || submitting || !isLoggedIn) return;
     Keyboard.dismiss();
     setSubmitting(true);
     try {
       setUserName?.(name.trim());
-      setUserPhones?.([phone]);
       // Capture the absolute onboarding timestamp — drives the 24h widget rule.
       setUserOnboardedAt?.(Date.now());
 
@@ -381,7 +387,7 @@ export default function OnboardingDeck({
       setSubmitting(false);
     }
   }, [
-    formValid, submitting, name, phone, setUserName, setUserPhones,
+    formValid, submitting, isLoggedIn, name, setUserName,
     setUserOnboardedAt, setSmsPermissionGranted, setHasOnboarded,
     ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions,
     capOnboardingQueue, navAfter, accountFilterRoute,
@@ -437,53 +443,42 @@ export default function OnboardingDeck({
           {/* Registration / secure handshake */}
           <View style={[styles.page, { width }]}>
             <ScrollView
-              contentContainerStyle={styles.regScroll}
+              contentContainerStyle={[styles.regScroll, { paddingTop: WINDOW_H * 0.20 }]}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.iconHalo, styles.regIcon, { backgroundColor: theme.primary + '14' }]}>
-                <ShieldCheckIcon color={theme.primary} size={44} />
+                <ShieldCheckIcon color={theme.primary} size={48} />
               </View>
               <Text style={styles.regTitle}>Let&apos;s get you set up.</Text>
-              <Text style={styles.regSub}>
-                Two quick details and we&apos;ll securely connect your device logs.
-              </Text>
 
               <Text style={styles.label}>Full name</Text>
               <TextInput
                 style={[styles.input, name.length > 0 && !nameValid && styles.inputError]}
-                placeholder="e.g. Praveen Verma"
+                placeholder="Your full name"
                 placeholderTextColor={theme.textSecondary}
                 value={name}
                 onChangeText={(t) => setName(sanitizeName(t))}
                 autoCapitalize="words"
-                returnKeyType="next"
+                returnKeyType="done"
                 maxLength={INPUT_LIMITS.NAME_MAX}
               />
 
-              <Text style={styles.label}>Mobile number</Text>
-              <View style={[styles.phoneWrap, phone.length > 0 && !phoneValid && styles.inputError]}>
-                <Text style={styles.phonePrefix}>+91</Text>
-                <View style={styles.phoneDivider} />
-                <TextInput
-                  style={styles.phoneInput}
-                  placeholder="10-digit number"
-                  placeholderTextColor={theme.textSecondary}
-                  value={phone}
-                  onChangeText={(t) => setPhone(sanitizePhone(t))}
-                  keyboardType="number-pad"
-                  maxLength={INPUT_LIMITS.PHONE_LEN}
-                  returnKeyType="done"
-                />
-              </View>
+              <GoogleSignInPanel
+                compact
+                disabled={!nameValid}
+                onSuccess={(account) => {
+                  if (account.name && !name) setName(sanitizeName(account.name));
+                }}
+              />
 
               <Pressable
                 style={({ pressed }) => [
                   styles.primaryBtn,
-                  { backgroundColor: formValid ? theme.primary : theme.divider },
-                  pressed && formValid && styles.primaryBtnPressed,
+                  { backgroundColor: formValid && isLoggedIn ? theme.primary : theme.divider },
+                  pressed && formValid && isLoggedIn && styles.primaryBtnPressed,
                 ]}
-                disabled={!formValid || submitting}
+                disabled={!formValid || submitting || !isLoggedIn}
                 onPress={handleGetStarted}
                 accessibilityRole="button"
                 accessibilityLabel="Get started"
@@ -494,7 +489,7 @@ export default function OnboardingDeck({
                     {sweepLabel ? <Text style={styles.btnLoadingText}>{sweepLabel}</Text> : null}
                   </View>
                 ) : (
-                  <Text style={[styles.primaryBtnText, !formValid && { color: theme.textSecondary }]}>
+                  <Text style={[styles.primaryBtnText, !(formValid && isLoggedIn) && { color: theme.textSecondary }]}>
                     Get Started
                   </Text>
                 )}
@@ -510,17 +505,11 @@ export default function OnboardingDeck({
                 accessibilityRole="button"
                 accessibilityLabel="Restore from a Google Drive backup"
               >
-                <Text style={[styles.restoreLinkText, { color: theme.primary }]}>
-                  Already use ePurse?  Restore a backup
+                <Text style={[styles.restoreLinkText, { color: theme.textSecondary }]}>
+                  Already use ePurse?{' '}
+                  <Text style={{ color: theme.primary }}>Restore a backup</Text>
                 </Text>
               </Pressable>
-
-              {/* Was "Nothing leaves your phone." — no longer true once Drive backup
-                  exists, so it now says what is actually guaranteed. */}
-              <Text style={styles.regFinePrint}>
-                We&apos;ll request SMS access to read bank alerts on-device. Nothing is uploaded
-                anywhere unless you turn on backup.
-              </Text>
             </ScrollView>
           </View>
         </ScrollView>
@@ -540,13 +529,13 @@ export default function OnboardingDeck({
               />
             ))}
           </View>
-          {page < registrationIndex ? (
-            <Pressable style={styles.nextBtn} onPress={goNext} hitSlop={8}>
-              <Text style={[styles.nextText, { color: theme.primary }]}>Next</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.nextBtnPlaceholder} />
-          )}
+          <View style={styles.navSlot}>
+            {page < registrationIndex ? (
+              <Pressable style={styles.nextBtn} onPress={goNext} hitSlop={8}>
+                <Text style={[styles.nextText, { color: theme.primary }]}>Next</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1136,10 +1125,9 @@ const deckStyles = (t: Theme) =>
       textAlign: 'center',
       paddingHorizontal: spacing.sm,
     },
-    regScroll: { paddingHorizontal: 24, paddingTop: spacing.xxl, paddingBottom: spacing.xl, alignItems: 'stretch' },
-    regIcon: { alignSelf: 'center', width: 96, height: 96, marginBottom: spacing.xl },
-    regTitle: { fontSize: 26, fontWeight: '800', letterSpacing: -0.4, color: t.textPrimary, textAlign: 'center' },
-    regSub: { fontSize: 14, lineHeight: 20, color: t.textSecondary, textAlign: 'center', marginTop: spacing.sm, marginBottom: spacing.xl },
+    regScroll: { paddingHorizontal: 24, paddingBottom: spacing.xl, alignItems: 'stretch' },
+    regIcon: { alignSelf: 'center' },
+    regTitle: { fontSize: 26, fontWeight: '800', letterSpacing: -0.4, color: t.textPrimary, textAlign: 'center', marginBottom: spacing.xl },
     label: { fontSize: 13, fontWeight: '600', color: t.textSecondary, marginBottom: spacing.sm, marginTop: spacing.md },
     input: {
       borderWidth: 1,
@@ -1152,31 +1140,18 @@ const deckStyles = (t: Theme) =>
       backgroundColor: t.card,
     },
     inputError: { borderColor: t.danger },
-    phoneWrap: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: t.divider,
-      borderRadius: radius.md,
-      backgroundColor: t.card,
-      paddingHorizontal: spacing.lg,
-    },
-    phonePrefix: { fontSize: 16, fontWeight: '600', color: t.textPrimary },
-    phoneDivider: { width: 1, height: 22, backgroundColor: t.divider, marginHorizontal: spacing.md },
-    phoneInput: { flex: 1, fontSize: 16, color: t.textPrimary, paddingVertical: Platform.OS === 'ios' ? 14 : 10 },
     primaryBtn: {
       borderRadius: radius.lg,
-      paddingVertical: 16,
+      paddingVertical: spacing.xs,
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: spacing.xl,
-      minHeight: 52,
+      marginTop: spacing.lg,
+      minHeight: BUTTON_H,
     },
     primaryBtnPressed: { opacity: 0.9 },
     primaryBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
     btnLoadingRow: { flexDirection: 'row', alignItems: 'center' },
     btnLoadingText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', marginLeft: spacing.md },
-    regFinePrint: { fontSize: 12, lineHeight: 17, color: t.textSecondary, textAlign: 'center', marginTop: spacing.lg },
     footer: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1187,8 +1162,10 @@ const deckStyles = (t: Theme) =>
     dots: { flexDirection: 'row', alignItems: 'center' },
     dot: { width: 7, height: 7, borderRadius: radius.pill, marginRight: spacing.sm },
     dotActive: { width: 22 },
+    // Fixed height so the footer (and the dots inside it) never shifts between
+    // a page that shows "Next" and the last page, which shows nothing here.
+    navSlot: { minHeight: 40, justifyContent: 'center', alignItems: 'flex-end' },
     nextBtn: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
-    nextBtnPlaceholder: { width: 44, height: 20 },
     nextText: { fontSize: 16, fontWeight: '700' },
   });
 
@@ -1248,7 +1225,7 @@ const filterStyles = (t: Theme) =>
     segmentText: { fontSize: 13, fontWeight: '600', color: t.textSecondary },
     segmentTextActive: { color: '#FFFFFF' },
     footer: { paddingHorizontal: 24, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: t.divider },
-    primaryBtn: { borderRadius: radius.lg, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
+    primaryBtn: { borderRadius: radius.lg, paddingVertical: spacing.xs, alignItems: 'center', justifyContent: 'center', minHeight: BUTTON_H },
     primaryBtnPressed: { opacity: 0.9 },
     primaryBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
 

@@ -12,6 +12,8 @@ import { useEPurseStore } from './src/store/ePurseStore';
 import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChannel } from './src/utils/notifications';
 import { ToastProvider } from './src/components/Toast';
 import AppLockGate from './src/components/AppLockGate';
+import LoginGate from './src/components/LoginGate';
+import * as googleAuth from './src/backup/googleAuth';
 
 // =============================================================================
 // Background workers — mounted once at the root, render nothing.
@@ -83,6 +85,34 @@ function CompactionBoot() {
  * per cycle in the store). Both run at launch and on every return to foreground
  * so they're robust to users who leave the app open across midnight.
  */
+/**
+ * Keeps the store's googleAccount in sync with what googleAuth.ts actually
+ * holds — at boot (SecureStore, not the persisted store, is ground truth for
+ * "is there a live Google grant") and for the app's lifetime, so a mid-session
+ * token revocation (googleAuth's own auto-sign-out on a failed refresh)
+ * surfaces as LoginGate reappearing rather than a silently broken backup.
+ */
+function AuthSessionBoot() {
+  const setGoogleAccount = useEPurseStore((s) => s.setGoogleAccount);
+  const setSessionExpired = useEPurseStore((s) => s.setSessionExpired);
+
+  useEffect(() => {
+    (async () => {
+      const signedIn = await googleAuth.isSignedIn();
+      setGoogleAccount(signedIn ? await googleAuth.getSignedInProfile() : null);
+    })();
+
+    return googleAuth.onSessionChange((signedIn) => {
+      if (signedIn) return; // the sign-in path already updates the store itself
+      const wasLoggedIn = useEPurseStore.getState().isLoggedIn;
+      setGoogleAccount(null);
+      if (wasLoggedIn) setSessionExpired(true);
+    });
+  }, [setGoogleAccount, setSessionExpired]);
+
+  return null;
+}
+
 function BudgetRolloverBoot() {
   const rollover   = useEPurseStore((s) => s.rolloverBudgetIfNeeded);
   const nudge      = useEPurseStore((s) => s.maybeFireMidmonthNudge);
@@ -133,8 +163,10 @@ export default function App() {
           <SmsSyncBoot />
           <CompactionBoot />
           <BudgetRolloverBoot />
+          <AuthSessionBoot />
           <AppNavigator />
           <AppLockGate />
+          <LoginGate />
         </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

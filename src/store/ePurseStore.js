@@ -13,6 +13,9 @@
 //   • userName             — collected during onboarding, shown on dashboard
 //   • hasOnboarded         — true after first-launch onboarding completes
 //   • smsPermissionGranted — true once OS-level SMS permission is granted
+//   • googleAccount        — { email, name, picture } | null, persisted for display
+//   • isLoggedIn           — derived from googleAccount, NOT persisted (see setGoogleAccount);
+//                            re-synced at boot from googleAuth's SecureStore by AuthSessionBoot
 //
 // Retention rules (enforced by `compactTransactions`):
 //   • 0 – 3 months  → raw transactions (general categories only)
@@ -1040,6 +1043,14 @@ export const useEPurseStore = create(
       smsPermissionGranted: false,
       contactsPermissionGranted: false,
 
+      // Google login (LoginGate/AppNavigator gate the whole app on this). isLoggedIn is
+      // ALWAYS derived from googleAccount by setGoogleAccount — never set independently.
+      // Transient: recomputed at boot from googleAuth's SecureStore, which is the real
+      // source of truth, so a persisted copy could desync from an out-of-app revocation.
+      isLoggedIn: false,
+      googleAccount: null,   // { email, name, picture } | null — persisted, for instant display
+      sessionExpired: false, // true = was logged in, got kicked out mid-session (vs. never signed in)
+
       // One-time onboarding nudge: ask the user to anchor their real bank balances
       // on the Accounts screen. Auto-suppressed once any account has been anchored,
       // or when the user explicitly dismisses the card.
@@ -1248,6 +1259,11 @@ export const useEPurseStore = create(
         }),
 
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
+
+      /** The ONE setter for Google identity — isLoggedIn always derives from it, can't desync. */
+      setGoogleAccount: (account) => set({ googleAccount: account || null, isLoggedIn: !!account }),
+      setSessionExpired: (v) => set({ sessionExpired: !!v }),
+
       /** Stamp the moment onboarding completes (defaults to now). */
       setUserOnboardedAt: (ts) => set({ userOnboardedAt: ts ?? Date.now() }),
       /** Mark the review-queue welcome tutorial card as dismissed. */
@@ -6295,6 +6311,7 @@ export const useEPurseStore = create(
         userPhones: state.userPhones,
         userOnboardedAt: state.userOnboardedAt,
         hasOnboarded: state.hasOnboarded,
+        googleAccount: state.googleAccount,
         smsPermissionGranted: state.smsPermissionGranted,
         contactsPermissionGranted: state.contactsPermissionGranted,
         themeId: state.themeId,

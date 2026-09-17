@@ -42,9 +42,11 @@ import { THEMES } from '../constants/themes';
 import { STATIC_CONFIG } from '../config/staticConfig';
 import { APP_VERSION } from '../constants/appMeta';
 import { useTheme } from '../hooks/useTheme';
+import { useGoogleSession } from '../hooks/useGoogleSession';
 import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import ThemePickerSheet from '../components/ThemePickerSheet';
+import CenterModal from '../components/CenterModal';
 
 const SMS_DIAGNOSTIC_ENABLED = STATIC_CONFIG.smsDiagnostic.enabled;
 const RATING_ENABLED = STATIC_CONFIG.rating.enabled;
@@ -61,8 +63,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const showMonthlyRecap = useEPurseStore((s: any) => s.showMonthlyRecap);
   const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
+  const { googleAccount, signOut } = useGoogleSession();
 
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  const handleLogout = async () => {
+    setConfirmLogout(false);
+    await signOut();
+  };
 
   const excludedCount = (excludedExpenseParents || []).length;
   const activeThemeLabel = (THEMES as any)[themeId]?.label || 'Ocean';
@@ -164,6 +173,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             divided
             onPress={() => navigation.navigate('About')}
           />
+          <NavListRow
+            icon="log-out-outline"
+            label="Logout"
+            hint={googleAccount?.email}
+            hintTone="warn"
+            chevron={false}
+            divided
+            onPress={() => setConfirmLogout(true)}
+          />
         </>
       </ScrollView>
 
@@ -172,6 +190,18 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         currentThemeId={themeId}
         onSelect={(id) => setThemeId(id)}
         onClose={() => setThemeSheetOpen(false)}
+      />
+
+      <CenterModal
+        visible={confirmLogout}
+        title="Logout?"
+        message="You'll need to sign in with Google again to use ePurse. Nothing on this device is deleted."
+        primaryText="Logout"
+        secondaryText="Cancel"
+        destructive
+        onPrimary={handleLogout}
+        onSecondary={() => setConfirmLogout(false)}
+        onClose={() => setConfirmLogout(false)}
       />
     </SafeAreaView>
   );

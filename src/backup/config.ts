@@ -8,9 +8,12 @@
 //
 // ── What you need to create (Google Cloud Console) ───────────────────────────
 //  1. A project → APIs & Services → enable the **Google Drive API**.
-//  2. OAuth consent screen → External. Scope: `.../auth/drive.file` ONLY.
+//  2. OAuth consent screen → External. Drive scope: `.../auth/drive.file` ONLY.
 //     drive.file is NON-SENSITIVE, so this needs no Google review and has no
-//     100-user cap. Adding any broader Drive scope changes that — don't.
+//     100-user cap. Adding any broader DRIVE scope changes that — don't.
+//     Sign-in also requests `openid`/`email`/`profile` for login identity — these
+//     are Google's standard non-sensitive scopes, but reconfirm their current
+//     classification in the consent screen before shipping.
 //  3. Credentials → OAuth client ID → **Android**:
 //       package name : com.epurse.app
 //       SHA-1        : your DEBUG keystore AND your release / Play-signing key.
@@ -29,9 +32,10 @@ export const GOOGLE_ANDROID_CLIENT_ID = '32024277404-2b3d0i62i3er57out9qah6n15g3
 export const GOOGLE_IOS_CLIENT_ID = '';
 
 /**
- * The ONLY scope requested. `drive.file` limits the app to files it created
- * itself: it can never see the user's other Drive content, which is both the
- * privacy story and the reason no Google verification is required.
+ * The ONLY Drive scope requested (sign-in also asks for openid/email/profile,
+ * see googleAuth.ts). `drive.file` limits the app to files it created itself:
+ * it can never see the user's other Drive content, which is both the privacy
+ * story and the reason no Google verification is required.
  */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
