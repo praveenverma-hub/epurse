@@ -39,9 +39,19 @@ const withIconBackground = (config) =>
 // re-registers it. `expo-screen-capture` is NOT an option here: its bundled
 // manifest caps DETECT_SCREEN_CAPTURE at maxSdkVersion 34 while its native
 // OnCreate still calls the API, so it hard-crashes at launch on Android 15+.
-const KOTLIN_SOURCES = ['ScreenSecurityModule.kt', 'ScreenSecurityPackage.kt'];
+// Hand-written Kotlin that prebuild would otherwise drop, plus the ReactPackage
+// name each one contributes to MainApplication.
+const KOTLIN_SOURCES = [
+  'ScreenSecurityModule.kt',
+  'ScreenSecurityPackage.kt',
+  // Vendored SMS natives — see SmsModule.kt for why they are not npm packages.
+  'SmsModule.kt',
+  'SmsPackage.kt',
+];
 
-const withScreenSecuritySources = (config) =>
+const REACT_PACKAGES = ['ScreenSecurityPackage', 'SmsPackage'];
+
+const withNativeSources = (config) =>
   withDangerousMod(config, [
     'android',
     (cfg) => {
@@ -61,27 +71,46 @@ const withScreenSecuritySources = (config) =>
     },
   ]);
 
-const withScreenSecurityRegistered = (config) =>
+const withPackagesRegistered = (config) =>
   withMainApplication(config, (cfg) => {
-    if (cfg.modResults.contents.includes('ScreenSecurityPackage()')) return cfg;
-    const anchor = 'return PackageList(this).packages';
-    if (!cfg.modResults.contents.includes(anchor)) {
+    let contents = cfg.modResults.contents;
+    const missing = REACT_PACKAGES.filter((name) => !contents.includes(`${name}()`));
+    if (!missing.length) return cfg;
+
+    // RN 0.86 / SDK 57 hands back a MUTABLE list to add into...
+    const applyAnchor = 'PackageList(this).packages.apply {';
+    // ...while RN <= 0.81 returned an immutable one to concatenate onto. Both are
+    // supported so this plugin survives the next template change in one direction.
+    const concatAnchor = 'return PackageList(this).packages';
+
+    if (contents.includes(applyAnchor)) {
+      contents = contents.replace(
+        applyAnchor,
+        applyAnchor + missing.map((name) => `\n          add(${name}())`).join('')
+      );
+    } else if (contents.includes(concatAnchor)) {
+      contents = contents.replace(
+        concatAnchor,
+        concatAnchor + missing.map((name) => ` + ${name}()`).join('')
+      );
+    } else {
+      // Failing loudly matters: a silently unregistered package means app lock
+      // stops hiding the app from the recents thumbnail, and SMS capture — the
+      // whole product — quietly reads nothing.
       throw new Error(
-        'withEPurseAndroid: could not find the package list in MainApplication — ' +
-          'ScreenSecurity would be missing and app lock would silently stop ' +
-          'hiding the app from the recents thumbnail.'
+        'withEPurseAndroid: could not find the package list in MainApplication. ' +
+          `Looked for \`${applyAnchor}\` and \`${concatAnchor}\`; the RN template ` +
+          `may have changed again. Unregistered would be: ${missing.join(', ')}.`
       );
     }
-    cfg.modResults.contents = cfg.modResults.contents.replace(
-      anchor,
-      `${anchor} + ScreenSecurityPackage()`
-    );
+
+    cfg.modResults.contents = contents;
     return cfg;
   });
 
 module.exports = function withEPurseAndroid(config) {
   config = withIconBackground(config);
-  config = withScreenSecuritySources(config);
-  config = withScreenSecurityRegistered(config);
+  config = withNativeSources(config);
+  config = withPackagesRegistered(config);
   return config;
 };

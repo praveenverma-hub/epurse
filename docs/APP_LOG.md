@@ -2268,14 +2268,127 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   disclosure, and the on-device argument (the backup allow-list proves raw SMS never
   leaves the device). Fallbacks (notification listener / manual-only) are insurance now,
   not an expectation.
-- `android/` is committed *and* was hand-edited, while `build:apk-local` runs
-  `prebuild --clean` and regenerates it. Pick one model; run
-  `npx expo prebuild -p android --clean` once and review the diff before the first
-  store build.
-- `build:apk-local` output is **debug-signed** (stock RN template default). Fine for
+- ~~`android/` committed *and* hand-edited~~ **RESOLVED Sep-19-2026:** `android/` and
+  `ios/` are now gitignored and fully generated.
+- Local build output is **debug-signed** (stock RN template default). Fine for
   sideloading, never upload it. EAS production builds sign correctly, and deliberately
   so: EAS only injects its release signing config while `signingConfigs.release.storeFile`
   is absent from `build.gradle`, so do not hand-add one.
+- ~~non-CNG warning~~ **FIXED Sep-19-2026** — see the CNG entry below.
 - Considered, not done: replace `MediaLibrary.saveToLibraryAsync` in
   `WhatsAppReminderScreen` with `expo-sharing` — drops 3 storage permissions and the
   `expo-media-library` dependency.
+
+### Expo SDK 50 → 57 migration (Sep-19-2026)
+
+**Done**
+- **Expo 50.0.21 → 57.0.24**, RN 0.73.6 → 0.86.3, React 18.2 → 19.2.3, AGP 8.1.1 → 8.12.0,
+  Gradle 8.3 → 9.3.1, compile/targetSdk 34 → **36** (the Play blocker), minSdk 23 → 24.
+  **New Architecture is now ON** — SDK 55 removed the legacy one, so SDK 57 has no opt-out.
+- Reanimated 3.6 → 4.5.1: worklets moved to a separate `react-native-worklets` package and
+  `babel.config.js` now loads `react-native-worklets/plugin` (NOT
+  `react-native-reanimated/plugin`). Also Skia 0.1.221→2.6.2, React Navigation 6→7,
+  screens 3→4, safe-area-context 4→5, svg 14→15, pager-view 6→8, lottie 6→7,
+  view-shot 3→5, zustand 4→5, TS 5.3→6.
+- `app.json`: top-level `splash` is gone in SDK 57 → now the `expo-splash-screen` plugin's
+  config; added `expo-system-ui` for `userInterfaceStyle`. Added `.npmrc` with
+  `legacy-peer-deps=true` (React 19 makes strict peer resolution unsatisfiable here).
+- **SMS capture is now our own native module.** `react-native-get-sms-android` and
+  `react-native-android-sms-listener` (both last published 2022, neither declaring the
+  `namespace` AGP 8 requires) were removed and **vendored** — both were MIT — into
+  `plugins/android/SmsModule.kt` + `SmsPackage.kt`, copied and registered by
+  `withEPurseAndroid` like `ScreenSecurityModule`. ~170 lines of Kotlin replacing 544 of
+  Java. `receiveMultipart` kept faithful (a truncated multipart bank SMS parses into a
+  silently wrong transaction). Receiver now binds to the APPLICATION context, not
+  `currentActivity`, and guards double-registration. JS contract unchanged.
+- **`withEPurseAndroid` broke loudly and correctly** during prebuild: RN 0.86 replaced
+  `return PackageList(this).packages` with a mutable `PackageList(this).packages.apply {}`.
+  The existing guard threw rather than shipping an app with no `ScreenSecurityPackage`
+  (app lock would have silently stopped hiding the app from recents). Now handles both.
+- **`android/` is now GENERATED (CNG)** — regenerated with `expo prebuild --clean`, which
+  permanently resolves the hand-edit drift. **Do not hand-edit `android/` from here on.**
+- Blocked 2 more permissions (`READ_MEDIA_AUDIO`, `READ_MEDIA_VIDEO`) that SDK 57's
+  expo-media-library adds; the app only ever SAVES one image.
+
+- Sep-19-2026: **`./clean.sh`** added, with 8 npm scripts — `clean` (all safe),
+  `clean:cache`, `clean:pods`, `clean:android`, `clean:deps`, `clean:native`,
+  `clean:gradle`, `clean:all`, plus `--dry-run`. Target flags compose; passing none
+  runs all three. `clean:pods` also removes `Podfile.lock` (a stale lock is why
+  `pod install` keeps resolving the version you changed away from). Clears Metro/Haste, watchman, `.expo`,
+  `node_modules/.cache`, android build output + `.cxx`, and stops gradle daemons. Metro
+  keys its cache on a project HASH, not `package.json`, so a dependency change leaves a
+  stale map that still resolves the old module graph — that is the "impossible resolve
+  error" class. `--gradle` (global caches) is deliberately NOT part of `--all`: it
+  re-downloads every dependency. Documented in BUILD.md.
+
+- Sep-19-2026: **release APK builds green on SDK 57** — `BUILD SUCCESSFUL`, 146 MB
+  `app-release.apk` (debug-signed; test artifact only). Two breakages found by actually
+  building: (1) `@expo/vector-icons` was TRANSITIVE via `expo` in SDK 50 and is not in 57,
+  while 63 files import it — now an explicit dep; **no JS test catches this, they never
+  resolve React imports**; (2) `ScreenSecurityModule.kt` failed to compile —
+  `currentActivity` is no longer a Kotlin synthetic property on the module base class
+  (RN 0.80 deprecation), use `reactApplicationContext.currentActivity`. Pre-existing code;
+  the new `SmsModule.kt` compiled clean because it already binds the application context.
+
+- Sep-19-2026: **`./setup.sh`** (restore) and **`./build.sh`** (environment builds) added.
+  `npm run setup` / `setup:clean` / `setup:ios` / `prebuild` / `prebuild:clean`;
+  `build:dev|preview|prod` (EAS, signed) and `build:*:local` (debug-signed, sideload only).
+  `build.sh` is the single home for the env → `EXPO_PUBLIC_APP_VARIANT` → artifact mapping
+  so the three flavours can't drift. `setup` ends with an **import-resolution check**
+  (every external import in `src/`+`App.js` must resolve — this is the check that would
+  have caught `@expo/vector-icons` in a second instead of a 3-minute bundle) plus
+  `expo-doctor`.
+- Sep-19-2026: **`expo-font` was missing** — a peer dependency of `@expo/vector-icons`
+  whose absence crashes the app outside Expo Go. Found by `expo-doctor` in the new setup
+  flow, NOT by the import check (nothing imports a peer dep directly). Installed; that is
+  two latent icon-related breakages this upgrade.
+
+- Sep-19-2026: **CNG fix + environment rename.** `android/` and `ios/` are now
+  **gitignored and generated** — with either present, EAS Build refuses to sync
+  `orientation`/`icon`/`userInterfaceStyle`/`plugins`/`ios`/`android`/`scheme` from
+  app.json, so a permission added there would be silently dropped from a CLOUD build.
+  Hand-written natives stay in `plugins/android/`; `npm run setup` regenerates.
+- Sep-19-2026: **`preview` renamed to `stage`** everywhere — eas.json profile,
+  `EXPO_PUBLIC_APP_VARIANT` value, and `IS_PREVIEW_BUILD` → **`IS_STAGE_BUILD`** across
+  7 files (plus the `_store-hook.mjs` test mock, which would otherwise silently keep
+  mocking a constant nobody reads). Environments are now **dev / stage / prod**.
+- Sep-19-2026: build targets are `<env>-<where>`: `build:dev-test`, `build:dev-prod`,
+  `build:stage-test`, `build:stage-prod`, `build:prod-test`, `build:prod`. **`-test` =
+  built here (debug-signed, sideload only); `-prod` = built on EAS (real signing).**
+  These are two INDEPENDENT axes — the environment changes what the app does, `-test`
+  /`-prod` only changes who signs it. `prod-test` exists because it is the only way to
+  exercise the production code paths locally, and dev/stage differ from prod precisely
+  in what the flags gate.
+
+- Sep-19-2026: **FIRST DEVICE RUN after the SDK-57 upgrade — the app white-screened on
+  an infinite render loop.** Root cause was a whole class introduced by **zustand 4 → 5**:
+  v5 reads through a plain `useSyncExternalStore` and compares snapshots BY REFERENCE, so
+  any selector that ALLOCATES (`?? []`, `.filter()`, an object literal) never equals
+  itself ⇒ "The result of getSnapshot should be cached" ⇒ "Maximum update depth exceeded".
+  v4 memoised the selector and hid all of it. **12 sites fixed** in 3 shapes:
+  (a) 9 × `?? []` / `|| []` inside a selector → default moved OUTSIDE against a new shared
+  `constants/empty.ts` (`EMPTY_ARRAY`, frozen, so the fallback reference is stable for
+  downstream memo deps too);
+  (b) 2 × filtering selectors (`selectUnreviewedQueue`, `selectVisibleTransactions`) →
+  wrapped in `useShallow`;
+  (c) 2 × derived-object selectors (`selectWeeklySummary`, `selectAccountLinkSuggestions`)
+  → `useShallow` is NOT enough (they nest a fresh array), so they now select raw state and
+  compute in `useMemo`, matching the `selectExpenseStats` pattern already in DashboardScreen.
+- Sep-19-2026: **`npm run test:parse` now lints for allocating zustand selectors**
+  (negative-tested: reintroducing the bug fails the run). Nothing else catches this class —
+  it compiles, type-checks and all 2144 tests pass, because the fault only exists at RENDER
+  time against a live store.
+- Sep-19-2026: removed `sound: 'default'` from all 10 notification channel/content configs.
+  In SDK 57 that string is read as a custom sound FILENAME and logs an error on every
+  schedule; **omitting the key is what selects the system default**
+  (`Settings.System.DEFAULT_NOTIFICATION_URI`).
+- Sep-19-2026: **Dashboard verified rendering on an Android emulator** — header, carousel
+  and the auto-modal queue (EPC claim) all correct, zero JS errors in logcat.
+
+**Open**
+- **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
+  clean on an emulator. STILL unverified because an emulator cannot do them: a live SMS
+  arriving, a MULTIPART bank SMS reassembling whole, app lock hiding from recents, and
+  reminders actually firing. Skia/Reanimated render fine.
+- The New Architecture changes gesture/worklet semantics — re-check the drag interactions
+  (`AllocationBar`) given the known "a worklet must never call an imported function" trap.

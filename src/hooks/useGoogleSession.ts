@@ -53,7 +53,7 @@ export function useGoogleSession() {
   // ONLY — never a preview build someone else might run): real Google sign-in
   // needs Cloud Console setup (scopes, test users) that's easy to have broken
   // mid-development — this keeps that from blocking work on everything else.
-  // A login bypass is more sensitive than the app's other IS_PREVIEW_BUILD-gated
+  // A login bypass is more sensitive than the app's other IS_STAGE_BUILD-gated
   // debug tools, so it stays on the narrower flag on purpose.
   const devBypass = useCallback(() => {
     if (!IS_DEV_BUILD) return null;

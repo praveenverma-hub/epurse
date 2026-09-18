@@ -2,7 +2,7 @@
 // TxnDebugSheet — preview-only bottom sheet
 // Long-press any transaction to open this. Shows the raw SMS that produced it
 // and all the fields the parser extracted + the merchantEnricher overlay.
-// Gate at call site with IS_PREVIEW_BUILD before rendering.
+// Gate at call site with IS_STAGE_BUILD before rendering.
 // =============================================================================
 
 import React, { useRef, useEffect } from 'react';

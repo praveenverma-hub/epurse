@@ -37,7 +37,7 @@ cd ~/Desktop/pvn/ePurse
 eas build:configure             # accepts the eas.json that's already in the project
 
 # build the APK
-npm run build:apk               # alias for: eas build -p android --profile preview
+npm run build:stage-prod        # alias for: eas build -p android --profile stage
 ```
 
 When it finishes (~10 min in the cloud) EAS gives you a download URL. Open it on your phone to install. You may need to enable "Install unknown apps" for your browser the first time.
@@ -51,7 +51,7 @@ If you have Android Studio + the Android SDK installed locally:
 ```bash
 cd ~/Desktop/pvn/ePurse
 npm install
-npm run build:apk-local
+npm run build:stage-test
 ```
 
 The signed-debug APK lands at:
@@ -80,7 +80,7 @@ ePurse now ships with two SMS modes:
 
 ### Enabling real SMS reading
 
-1. Build with `npm run build:apk-local` (or `npx expo run:android`) — Expo Go *cannot* read SMS.
+1. Build with `npm run build:stage-test` (or `npm run build:dev-test`) — Expo Go *cannot* read SMS.
 2. Open the app → tap the gear icon (top-right of the dashboard) → **Categories & Settings**.
 3. Toggle **Auto-import SMS** on. The OS prompt asks for `READ_SMS` + `RECEIVE_SMS`.
 4. The app pulls the last 30 days of inbox messages, parses them, and auto-updates account balances. Live SMS arriving thereafter are added in real time.
@@ -93,6 +93,120 @@ ePurse now ships with two SMS modes:
 - **iOS**: Apple does not allow third-party apps to read SMS. The toggle is disabled on iOS, and the simulated/paste flow is the only option there.
 
 ---
+
+## Restoring after a clean (`./setup.sh`)
+
+The inverse of `clean.sh` — puts back dependencies and the native project.
+
+```bash
+npm run setup           # npm install → expo prebuild → verify
+npm run setup:clean     # same, but prebuild --clean (regenerate android/ from scratch)
+npm run setup:ios       # also prebuild ios/ and run pod install (macOS)
+
+npm run prebuild        # just regenerate android/
+npm run prebuild:clean  # ...from scratch
+```
+
+`setup` ends with two checks worth knowing about:
+
+- **Import verification** — resolves every external import in `src/` and `App.js`
+  against the installed tree. This exists because of a real SDK-57 failure:
+  `@expo/vector-icons` arrived transitively under SDK 50, vanished in 57, and 63
+  files imported it. **No JS test catches that** — the tests are Node-side and never
+  resolve the app's React imports, so the first thing to notice was a 3-minute
+  release bundle. This catches it in about a second.
+- **`expo-doctor`** — catches missing *peer* dependencies, which the import check
+  cannot see (nothing imports them directly). It found `expo-font`, a peer of
+  `@expo/vector-icons`, whose absence crashes the app outside Expo Go.
+
+## Environment builds (`./build.sh`)
+
+Two independent axes, combined into one target name.
+
+**Environment** — what the *app* does. Sets `EXPO_PUBLIC_APP_VARIANT`, which drives
+the flags in `src/constants/buildVariant.ts`:
+
+| Environment | `EXPO_PUBLIC_APP_VARIANT` | `IS_DEV_BUILD` | `IS_STAGE_BUILD` | Effect |
+|---|---|---|---|---|
+| `dev` | `development` | ✅ | ✅ | debug tools + login bypass |
+| `stage` | `stage` | ❌ | ✅ | debug tools, no bypass |
+| `prod` | *(unset)* | ❌ | ❌ | nothing gated on |
+
+**Where** — who builds and signs it. Changes nothing about the app itself:
+
+- `-test` → **this machine**, debug-signed. Sideload only; Play rejects it.
+- `-prod` → **EAS cloud**, real signing credentials, distributable.
+
+```bash
+npm run build:dev-test      # local dev client (Metro attached)
+npm run build:dev-prod      # EAS dev client, shareable
+
+npm run build:stage-test    # local release APK
+npm run build:stage-prod    # EAS APK for testers
+
+npm run build:prod-test     # local AAB — verification only
+npm run build:prod          # EAS AAB for Play
+
+npm run build:ios           # EAS, stage profile
+```
+
+`prod-test` is worth knowing about: it is the only way to exercise the
+**production** code paths locally. `dev` and `stage` differ from `prod` precisely
+in what those flags gate, so a bug that only appears with both flags false will
+not show up in any stage build — and the next place you would find it is a store
+upload.
+
+**Local builds are debug-signed** (the stock React Native template default). EAS
+injects real credentials; see `docs/ANDROID_RELEASE.md` §3.1 for why `build.gradle`
+must be left alone rather than given a release signingConfig.
+
+## Cleaning caches (`./clean.sh`)
+
+Most "impossible" build failures are stale caches, not broken code — a build that
+fails on something you already fixed, or succeeds on something you already deleted.
+Metro is the usual culprit: it keys its cache on a project hash rather than on
+`package.json`, so adding or removing a dependency leaves a map behind that still
+resolves the old module graph.
+
+```bash
+npm run clean            # everything safe: caches + android + pods
+
+# targeted
+npm run clean:cache      # Metro/Haste, watchman, .expo, node_modules/.cache
+npm run clean:pods       # ios/Pods, Podfile.lock, ios/build
+npm run clean:android    # android build output + .cxx, stops gradle daemons
+npm run clean:deps       # reinstall node_modules
+npm run clean:native     # regenerate android/ (expo prebuild --clean)
+npm run clean:gradle     # Gradle GLOBAL caches (re-downloads dependencies)
+npm run clean:all        # clean + deps + native
+
+./clean.sh --dry-run     # print what would be removed, delete nothing
+```
+
+Which one to reach for:
+
+| Symptom | Use |
+|---|---|
+| Odd bundling error, changes not picked up | `npm run clean:cache` |
+| `Unable to resolve module X` when X *is* installed | `npm run clean:deps` |
+| Changed `app.json`, a config plugin, or `plugins/android/*.kt` | `npm run clean:native` |
+| iOS build resolving a pod version you already changed | `npm run clean:pods` |
+| Gradle resolving a dependency version that no longer exists | `npm run clean:gradle` |
+| No idea | `npm run clean` |
+
+Flags compose: `./clean.sh --cache --android` cleans just those two. Passing no
+target flag runs all three.
+
+`clean:pods` also deletes `Podfile.lock` — a stale lock is exactly why `pod install`
+keeps resolving the version you just changed away from. Run `npx pod-install`
+afterwards.
+
+`--gradle` is deliberately excluded from `--all`: it re-downloads every dependency
+and is rarely what you need.
+
+**Note:** `android/` is GENERATED. `clean:native` regenerates it from `app.json` +
+the config plugins, and only hand-written natives in `plugins/android/` survive
+(the plugin copies them back). Never hand-edit `android/`.
 
 ## Troubleshooting
 

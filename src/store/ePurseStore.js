@@ -82,7 +82,7 @@ import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSch
 import { parseDueDate, ccReminderFireAt } from '../utils/dueDate';
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { locationKey } from '../utils/location';
-import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
+import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import { useNotificationStore } from './useNotificationStore';
 import {
   computeEqualSplit,
@@ -3947,7 +3947,7 @@ export const useEPurseStore = create(
           // compatible — older txns simply have no `location`.
           if (opts.location) candidate.location = opts.location;
           // TODO: remove rawSms/rawSender before production — preview-only debug fields
-          if (IS_PREVIEW_BUILD) {
+          if (IS_STAGE_BUILD) {
             const txnAge = Date.now() - new Date(candidate.createdAt || Date.now()).getTime();
             if (txnAge < RAW_SMS_RETENTION_MS) {
               candidate.rawSms    = rawMessage || '';

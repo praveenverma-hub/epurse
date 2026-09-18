@@ -56,7 +56,7 @@ import {
   buildListRows, makeGrouper,
 } from '../utils/txnArrange';
 import TxnDebugSheet from '../components/TxnDebugSheet';
-import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
+import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import LinkContactModal from '../components/LinkContactModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
@@ -914,7 +914,7 @@ const TransactionsScreen = ({ navigation, route }) => {
               }}
               onPressCategory={() => setActiveTxn(item)}
               onPressSplitChip={() => setDetailTxn(item)}
-              onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
+              onLongPress={IS_STAGE_BUILD ? () => setDebugTxn(item) : undefined}
             />
           )
         }
@@ -1272,7 +1272,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         filterCtx={exportFilterCtx}
       />
 
-      {IS_PREVIEW_BUILD && (
+      {IS_STAGE_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
 

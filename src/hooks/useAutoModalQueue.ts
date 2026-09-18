@@ -33,12 +33,13 @@
 import { useEPurseStore } from '../store/ePurseStore';
 import { useRewardStore } from '../store/useRewardStore';
 import { pickAutoModal, type AutoModalId } from '../constants/autoModals';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 export { AUTO_MODAL_PRIORITY, pickAutoModal, type AutoModalId } from '../constants/autoModals';
 
 
 export const useAutoModalQueue = (): AutoModalId | null => {
-  const ccQueue = useEPurseStore((s: any) => s.pendingCCPaymentQueue ?? []);
+  const ccQueue = useEPurseStore((s: any) => s.pendingCCPaymentQueue) ?? EMPTY_ARRAY;
   const pendingMonthlyRecap = useEPurseStore((s: any) => s.pendingMonthlyRecap);
   const showMonthlyRecap = useEPurseStore((s: any) => s.showMonthlyRecap);
   const pendingWeeklyRecap = useEPurseStore((s: any) => s.pendingWeeklyRecap);

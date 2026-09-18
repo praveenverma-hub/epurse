@@ -73,7 +73,7 @@ import MonthlyRecapCard from '../components/MonthlyRecapCard';
 import CCPaymentPromptModal from '../components/CCPaymentPromptModal';
 import TransactionItem from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
-import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
+import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
@@ -296,7 +296,14 @@ const DashboardScreen = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [transactions, groups, excludedExpenseParents, getCategoryBreakdown],
   );
-  const weekSummary = useEPurseStore(selectWeeklySummary);
+  // Computed in a memo, NOT as a store selector: it returns a fresh object
+  // (with a nested `perDay` array) every call, and zustand v5 compares snapshots
+  // by reference — as a selector this re-rendered forever. Same shape as
+  // `periodStats` above.
+  const weekSummary = useMemo(
+    () => selectWeeklySummary({ transactions, categories, groups }),
+    [transactions, categories, groups]
+  );
   const ccBills     = useEPurseStore((s) => s.ccBills);
 
   // detectSubscriptions has no access to `groups`, so the exclusion has to be
@@ -570,7 +577,7 @@ const DashboardScreen = ({ navigation }) => {
       accessibilityHint: 'Explains how the Aware Run streak works',
       // Dev-only tier preview, gated like TxnDebugSheet. UnGated, a user
       // long-pressing got an unexplainable 8-second visual change.
-      onLongPress: IS_PREVIEW_BUILD ? () => {
+      onLongPress: IS_STAGE_BUILD ? () => {
         const ORDER = ['base', 'streak', 'premium'];
         const current = devVaultTier ?? vaultTier;
         const next = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
@@ -890,7 +897,7 @@ const DashboardScreen = ({ navigation }) => {
                   }}
                   onPressCategory={() => setActiveTxn(t)}
                   onPressSplitChip={() => setDetailTxn(t)}
-                  onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(t) : undefined}
+                  onLongPress={IS_STAGE_BUILD ? () => setDebugTxn(t) : undefined}
                 />
               ))
             )}
@@ -1121,7 +1128,7 @@ const DashboardScreen = ({ navigation }) => {
       {/* CC outstanding true-up prompt */}
       <CCPaymentPromptModal />
 
-      {IS_PREVIEW_BUILD && (
+      {IS_STAGE_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
 

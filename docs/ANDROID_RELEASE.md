@@ -68,39 +68,52 @@ should not shape v1:
 Budget for a rejection round anyway: these reviews take days to weeks and often need a
 resubmission with a clearer video.
 
-### 0.2 Target API level — **verified blocker**, needs the Expo upgrade
+### 0.2 Target API level — **upgraded to Expo SDK 57 (2026-09-19)**
 
-`android/build.gradle` sets `compileSdk`/`targetSdk` **34**. Confirmed against Google's
-current policy: since **2026-08-31, new apps and updates must target Android 16
-(API 36)**; anything at API 35 or lower is rejected at upload. That deadline has
-already passed. An extension can be requested until **2026-11-01**.
+Play requires **API 36** for new apps and updates since 2026-08-31 (extension available to
+2026-11-01). The project was on `targetSdk 34`, and it could not be bumped in place: AGP
+8.1.1 / Gradle 8.3 cannot do `compileSdk 36`, which needs AGP 8.6+ / Gradle 8.7+.
 
-**This cannot be fixed by bumping the number.** Measured in this repo:
+**Done: Expo SDK 50 → 57.** SDK 54 (the last release supporting the Legacy Architecture)
+was the lower-risk option; SDK 57 was chosen instead to land on current and avoid a second
+migration. That makes the **New Architecture mandatory** — SDK 55 removed the legacy one.
 
-| | Installed | Needed for `compileSdk 36` |
+| | Before | After |
 |---|---|---|
-| Android Gradle Plugin | **8.1.1** | 8.6.0+ |
-| Gradle | **8.3** | 8.7+ |
-| React Native | 0.73.6 | — |
-| Expo SDK | 50.0.21 | 54+ |
+| Expo SDK | 50.0.21 | **57.0.24** |
+| React Native | 0.73.6 | **0.86.3** |
+| React | 18.2.0 | **19.2.3** |
+| AGP / Gradle | 8.1.1 / 8.3 | **8.12.0 / 9.3.1** |
+| compileSdk / targetSdk | 34 | **36** |
+| minSdk | 23 | **24** |
+| Architecture | Legacy | **New (bridgeless)** |
 
-So API 36 requires an **Expo SDK 50 → 54/55 upgrade**, which is the single largest
-engineering item on this page. Specific landmines in this repo:
+Notable dependency moves: Reanimated 3.6 → **4.5.1** (worklets now live in a separate
+`react-native-worklets` package, and `babel.config.js` must load
+`react-native-worklets/plugin` instead of `react-native-reanimated/plugin`), Skia 0.1.221 →
+2.6.2, React Navigation 6 → 7, screens 3 → 4, safe-area-context 4 → 5, svg 14 → 15,
+pager-view 6 → 8, lottie 6 → 7, view-shot 3 → 5, zustand 4 → 5, TypeScript 5.3 → 6.
 
-- `plugins/withEPurseAndroid.js` copies hand-written Kotlin (`ScreenSecurityModule`)
-  into the prebuilt `android/` tree — re-verify after the upgrade, and note the
-  comment there explaining why `expo-screen-capture` is **not** an option
-  (it crashes on Android 15+).
-- `newArchEnabled=false` today. Newer Expo SDKs default the New Architecture on;
-  Skia, Reanimated, `react-native-pager-view` and the SMS libraries all need
-  re-checking. Keep the old architecture if the SDK still allows it — one battle
-  at a time.
-- `react-native-get-sms-android` and `react-native-android-sms-listener` are both
-  unmaintained. They are the most likely things to break against a new RN. Check
-  them *first*, before doing the rest of the upgrade — if they don't survive,
-  that feeds straight back into §0.1.
-- The debug variant is already broken (Reanimated). Verify everything with
-  `assembleRelease`, never `assembleDebug`.
+Things that had to change beyond version numbers:
+
+- **`app.json` schema:** top-level `splash` is gone in SDK 57; it is now the
+  `expo-splash-screen` plugin's config. `expo-system-ui` had to be added for
+  `userInterfaceStyle`.
+- **`withEPurseAndroid` broke, loudly and correctly.** RN 0.86's `MainApplication`
+  template replaced the immutable `return PackageList(this).packages` with a mutable
+  `PackageList(this).packages.apply { add(...) }`. The plugin's existing guard threw
+  instead of silently producing an app with no `ScreenSecurityPackage` — which would have
+  meant app lock quietly stopping hiding the app from the recents thumbnail. It now
+  handles both templates.
+- **`android/` is now generated (CNG).** It was regenerated with
+  `expo prebuild --clean`, which resolves the drift described in §3.3 permanently. The
+  only hand-written native code — the Kotlin modules — is copied back in by the config
+  plugin, so nothing is lost. **Do not hand-edit `android/` from here on.**
+- **`.npmrc` with `legacy-peer-deps=true`** was added; the React 19 bump makes strict peer
+  resolution unsatisfiable across this dependency set.
+
+Status: prebuild clean, all 2144 JS tests passing, release build verified compiling.
+**Not yet verified on a device** — see §6.
 
 ### 0.3 Login is mandatory → Play's account-deletion requirement applies
 
@@ -140,85 +153,46 @@ non-sensitive scope, so publishing it should not require Google's app
 verification review — but confirm that in Cloud Console, because if verification
 *is* demanded it is a multi-week process.
 
-### 0.5 The two SMS libraries — what survives the Expo upgrade
+### 0.5 SMS capture — **vendored into our own native module (2026-09-19)**
 
-Both native SMS packages are **unmaintained** (last published 2022) and both predate the
-AGP 8 `namespace` requirement — each still declares `package=` in its `AndroidManifest.xml`
-with no `namespace` in its `build.gradle`:
+Both npm packages are gone. `react-native-get-sms-android` (2.1.0) and
+`react-native-android-sms-listener` (0.8.0) were last published in **2022** and neither
+declared the `namespace` that AGP 8 requires — which is what finally made them
+unbuildable under SDK 57, rather than merely stale. They were also flagged by
+`expo-doctor` as unmaintained and untested on the New Architecture.
 
-| Package | Version | Last published | Job in this app |
-|---|---|---|---|
-| `react-native-get-sms-android` | 2.1.0 | Jun 2022 | `SmsAndroid.list(...)` — bulk inbox read (onboarding backfill / sync) |
-| `react-native-android-sms-listener` | 0.8.0 | Jun 2022 | `SmsListener.addListener(...)` — live incoming SMS |
+They are replaced by **`plugins/android/SmsModule.kt`** (+ `SmsPackage.kt`), copied in and
+registered by the existing `withEPurseAndroid` plugin exactly like `ScreenSecurityModule`.
+Both libraries were MIT, so the code was **vendored, not rewritten** — deliberately:
 
-**They do still compile.** Both AARs in `node_modules/*/android/build/outputs/aar/` are
-dated the same minute as the last app build, under the current AGP 8.1.1 / Gradle 8.3.
-So this is a *forward* risk, not a present breakage: the question is whether they survive
-**AGP 8.6+**, which the API 36 bump requires (§0.2). **Test this first** — before doing
-any other upgrade work — because the answer feeds straight back into §0.1.
+- `receiveMultipart` is kept faithful to the original. A long bank SMS arrives as several
+  PDUs, and a botched reassembly **truncates** the body. That does not fail loudly; it
+  parses into a subtly wrong transaction, which is the worst failure mode this app has.
+- Everything unused was dropped: sending and deleting SMS (most of the original 304-line
+  `SmsModule.java`) and the pre-KitKat PDU path, dead at `minSdk 24`.
 
-The good news is that the blast radius is tiny. Both libraries are wrapped by a single
-file, `src/services/smsService.js`, behind lazy `require`s and an exported `smsSupported`
-flag that already degrades gracefully when neither is linked. Replacing the native layer
-touches **one file**, and the parser (pure JS, text in → transaction out) is untouched
-either way.
+Net: ~170 lines of Kotlin we own, replacing 544 lines of unmaintained Java, with two fewer
+dependencies. Two deliberate improvements over the originals:
 
-Options, cheapest first:
+- The receiver registers against the **application context**, not `currentActivity`. The
+  original used the Activity, which is why it had to re-register on every resume and
+  silently listened to nothing whenever that was null.
+- `registerReceiver` is guarded against double-registration, and uses
+  `RECEIVER_NOT_EXPORTED` on API 33+.
 
-1. **Keep both, add a namespace shim.** If AGP 8.6 rejects them, the standard fix is a
-   `subprojects { afterEvaluate { ... namespace = ... } }` block, or `patch-package`.
-   Six lines. Note it would have to live in `plugins/withEPurseAndroid.js`, not in
-   `android/build.gradle`, or `prebuild` will wipe it. Cheapest, but you stay on two
-   dead dependencies for a core feature.
-2. **`expo-sms-listener`** (v1.0.10, Mar 2026) — modern Kotlin on the Expo Modules API,
-   with a foreground service and Headless JS for Doze. Covers the *listener* half only;
-   still young (v1.0.x, small maintainer base).
-   **`@maniac-tech/react-native-expo-read-sms`** (v9.1.2, Mar 2026) is the other
-   actively-published option.
-3. **Write our own Expo module.** This is the one worth taking seriously. The inbox read
-   is a `ContentResolver` query against `content://sms/inbox` and the live feed is a
-   `SMS_RECEIVED` `BroadcastReceiver` — on the order of 150 lines of Kotlin, and
-   **this repo already has the exact pattern**: `plugins/android/ScreenSecurityModule.kt`
-   plus the `withEPurseAndroid` plugin that copies it in and registers it after every
-   prebuild. That removes both dead dependencies, makes every future SDK upgrade a
-   non-event, and puts the most policy-sensitive code in the repo under our own control.
+Listening stays foreground-only, matching the old behaviour: anything missed is picked up
+by the inbox sweep on next foreground, so a background receiver would cost battery for
+nothing.
 
-**Recommendation: option 3, but VENDOR rather than rewrite, and do it as part of the
-Expo upgrade — not before.**
+The JS contract is unchanged — `src/services/smsService.js` still exports `smsSupported`,
+`readInbox` and `subscribeToIncomingSms`, and still returns `{_id, address, body, date}`
+(`_id` is the dedupe key; without it every sweep re-ingests). It now calls
+`NativeModules.EPurseSms.listInbox()` and listens on the `ePurse:smsReceived` device event.
+All 2144 tests pass unchanged.
 
-Both libraries are **MIT**, so their source can be copied in wholesale (keep the
-copyright notice). Take only what is used, port to Kotlin, give it a `namespace`, and
-land it in `plugins/android/` beside `ScreenSecurityModule.kt`. Measured surface:
+**Still to verify on a real device:** that a live SMS arrives and that a multipart bank
+message reassembles whole — the tests cover the parser, not the native bridge.
 
-- **Inbox read.** `smsService.js` makes exactly one call —
-  `{ box: 'inbox', selection: 'date >= …', minDate, sortOrder: 'date ASC', maxCount: 2000 }`.
-  That is a single `ContentResolver` query. `SmsModule.java` is 304 lines because it also
-  sends and deletes SMS; we use none of that.
-- **Live listener.** 100 lines, of which the whole pre-KitKat `pdus` branch is dead code
-  at `minSdkVersion 23`.
-
-Realistically ~150 lines of Kotlin, against 544 lines of unmaintained 2022 Java.
-
-**Why vendor instead of writing fresh:** the one genuinely fiddly part is multipart
-reassembly — a long bank SMS arrives as several PDUs, and `SmsReceiver.receiveMultipartMessage`
-already handles concatenation and the `isReplace()` case. Get that wrong and you get a
-*truncated* message, which does not fail loudly: it silently parses into a wrong
-transaction. That logic is worth keeping verbatim rather than re-deriving.
-
-**Why during the upgrade, not now:** nothing is broken today, and if the New Architecture
-gets enabled an old bridge module has to be rewritten as an Expo module anyway — so do it
-once, at that moment. Note also that if Play refuses `READ_SMS` (§0.1) this module is wasted
-work and a `NotificationListenerService` is needed instead, so resolve that question first
-if you can. No preparation is needed in the meantime: `smsService.js` already isolates both
-libraries behind lazy requires and `smsSupported`, so the swap stays a one-file change.
-
-**What you take on either way** (dependency or not — the difference is only who can fix it):
-multipart reassembly, OEM quirks in the SMS content provider on Xiaomi/Samsung, dual-SIM,
-and Android's tightening rules on manifest-declared background receivers.
-
-Note that **`react-native-sms-retriever` and `expo-otp-autofill` are not alternatives** —
-the SMS Retriever API only ever delivers messages containing your own app's hash, which is
-for OTP autofill. Bank SMS will never match.
 
 ---
 
@@ -328,10 +302,10 @@ alarming but is the stock React Native template default. What matters is how you
   exactly why you should **not** hand-add a release signing config to `build.gradle`.
   Doing so would silently switch off EAS's signing and put keystore management back
   on you. **Left unchanged deliberately.**
-- **`npm run build:apk-local` (`prebuild --clean && ./gradlew assembleRelease`):**
+- **`npm run build:stage-test` / `build:prod-test` (local Gradle):**
   this *does* sign with the debug keystore. That is fine for sideloading a test APK
   and fatal if the artifact is ever uploaded — Play rejects debug-signed uploads.
-  Treat that script's output as a test build only, never a store artifact.
+  Treat those artifacts as test builds only, never store uploads.
 
 Actions:
 
@@ -347,8 +321,7 @@ The old setup could silently regress the version and get an upload rejected.
 `versionCode 1` was hardcoded in `android/app/build.gradle` while `eas.json` had
 `appVersionSource: "local"` + `autoIncrement: true`. Because `android/` is committed,
 EAS treats this as a bare project and `autoIncrement` bumps the number **in
-`build.gradle`** — but `npm run build:apk-local` runs `prebuild --clean`, which
-regenerates `build.gradle` from `app.json` and **resets the versionCode**. The next
+`build.gradle`** — but a local `prebuild --clean` regenerates `build.gradle` from `app.json` and **resets the versionCode**. The next
 upload would then carry a number Play had already seen, and Play rejects any upload
 whose `versionCode` is not strictly higher than the last.
 
@@ -409,8 +382,8 @@ Android ≤13, inexact on 14+ unless the user opts in. Nothing breaks either way
 **Note on the storage permissions.****The structural fix that mattered more than any single permission.** `android/` is
 committed *and* hand-edited — git history shows permissions added straight into
 `AndroidManifest.xml` (`c77ff1c`, `f146dad`, `e96f1b5`) rather than through `app.json`.
-But `npm run build:apk-local` runs `expo prebuild --clean`, which regenerates the whole
-`android/` tree from `app.json` and the plugins. The two had drifted, so the committed
+But `expo prebuild --clean` regenerates the whole `android/` tree from `app.json` and
+the plugins. The two had drifted, so the committed
 manifest and a freshly prebuilt one no longer agreed.
 
 Everything now flows from `app.json`: `android.permissions` is the allow-list and the new
@@ -420,11 +393,13 @@ does not — the library merges it back in). The committed manifest was rewritte
 and the match was verified by parsing it with Expo's own `AndroidConfig.Manifest` and
 diffing against `app.json`.
 
-**Pick one model and stick to it:** either `android/` is generated (run `prebuild`, commit
-the result, never hand-edit) or it is source (never run `prebuild --clean`). Generated is
-the better choice here, since a config plugin already exists. Whichever you pick, run
-`npx expo prebuild -p android --clean` once and review the diff before the first store
-build, so there are no surprises left in that tree.
+**Resolved (2026-09-19): `android/` and `ios/` are GENERATED and no longer committed.**
+Both are in `.gitignore`. This was not just tidiness — with either folder present in the
+repo, EAS Build refuses to sync `orientation`, `icon`, `userInterfaceStyle`, `plugins`,
+`ios`, `android` and `scheme` from `app.json`, so a permission added there would have been
+silently dropped from a cloud build. The same drift class, but on the path that produces
+the artifact you actually upload. Hand-written natives live in `plugins/android/` and are
+copied back by `withEPurseAndroid` on every prebuild. Run `npm run setup` to regenerate.
 
 ### 3.4 Placeholders and flags
 

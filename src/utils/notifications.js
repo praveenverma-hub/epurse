@@ -20,8 +20,11 @@ export function configureNotificationHandler() {
 }
 
 // Android 8+ requires a channel to display notifications.
-// MAX importance + explicit sound is what makes the reminder pop as a heads-up
-// with sound + vibration even when the app is killed.
+// MAX importance is what makes the reminder pop as a heads-up with sound +
+// vibration even when the app is killed. `sound` is deliberately OMITTED: an
+// absent key means the system default, whereas `sound: 'default'` is read as a
+// custom sound FILENAME and expo-notifications logs an error when no such file
+// is bundled.
 export async function setupAndroidChannel() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
@@ -30,7 +33,6 @@ export async function setupAndroidChannel() {
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 400, 200, 400, 200, 400],
     lightColor: '#6366F1',
-    sound: 'default',
     enableLights: true,
     enableVibrate: true,
     showBadge: true,
@@ -71,7 +73,6 @@ export async function scheduleReminderAt({ title, body, fireAt }) {
     content: {
       title: title || '🔔 Reminder',
       body:  body || '',
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.MAX,
       vibrate: [0, 400, 200, 400, 200, 400],
       sticky: false,
@@ -115,7 +116,6 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
     content: {
       title: '💳 Credit card bill due soon',
       body:  `${amtFmt} due on ${cardStr}. Pay to avoid late fees + interest.`,
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.HIGH,
       ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
     },
@@ -140,7 +140,6 @@ export async function setupBudgetAlertChannel() {
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 200, 250],
     lightColor: '#EF4444',
-    sound: 'default',
     enableLights: true,
     enableVibrate: true,
     showBadge: true,
@@ -176,7 +175,6 @@ export async function fireBudgetBreachNotification({ scope, categoryName, actual
     content: {
       title,
       body,
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.HIGH,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
@@ -200,7 +198,6 @@ export async function fireCCPaymentNotification({ amount, accountMask, bankName 
     content: {
       title: '✅ CC Bill Payment Received',
       body:  `${amtFmt} received on ${bankStr}Credit Card ${cardStr}`,
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
@@ -221,7 +218,6 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
     content: {
       title: `📈 ${merchant} price went up`,
       body:  `Your ${merchant} subscription rose from ${oldFmt} to ${newFmt}. Still using it?`,
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
@@ -244,7 +240,6 @@ export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
     content: {
       title: `💳 ${cardLabel} cycle closed`,
       body:  'Your billing cycle likely just closed — a new statement should arrive soon.',
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
@@ -264,7 +259,6 @@ export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
     content: {
       title: `📊 Your ${monthLabel} recap is ready`,
       body:  'Tap to view and download.',
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       data: { type: 'monthly_recap', monthKey },
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
@@ -285,7 +279,6 @@ export async function fireMidmonthNudgeNotification({ title, body }) {
     content: {
       title,
       body,
-      sound: 'default',
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },

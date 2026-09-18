@@ -93,6 +93,50 @@ if (hookConditional.length) {
   pass++;
 }
 
+// ── zustand selectors must never ALLOCATE ──────────────────────────────────
+// zustand v5 reads through a plain `useSyncExternalStore`, which compares
+// snapshots BY REFERENCE. A selector that builds a fresh array or object each
+// call never equals itself, so React re-renders, re-reads and loops:
+// "The result of getSnapshot should be cached" then "Maximum update depth
+// exceeded". v4 memoised the selector and hid this entirely, so the whole class
+// arrived at once with the SDK-57 upgrade (Sep-19-26) and white-screened the
+// Dashboard.
+//
+// Nothing else catches it: it compiles, it type-checks, and all 2144 tests pass,
+// because the fault only exists at RENDER time against a live store.
+//
+// Fix by defaulting OUTSIDE the selector (`?? EMPTY_ARRAY` from constants/empty),
+// by wrapping the call in `useShallow`, or — when the result is a derived object
+// — by selecting raw state and computing in a `useMemo`.
+const allocatingSelector = [];
+for (const f of files) {
+  const src = readFileSync(f, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const hook = /use[A-Z]\w*Store\s*\(/g;
+  let m;
+  while ((m = hook.exec(src))) {
+    let i = hook.lastIndex, depth = 1;
+    while (i < src.length && depth) {
+      if (src[i] === '(') depth++;
+      else if (src[i] === ')') depth--;
+      i++;
+    }
+    const body = src.slice(hook.lastIndex, i - 1);
+    if (body.includes('useShallow')) continue;
+    if (/\?\?\s*[[{]|\|\|\s*[[{]|=>\s*[[{]|\.(filter|map|sort|slice|concat|flatMap)\s*\(|Object\.(keys|values|entries)\s*\(/.test(body)) {
+      const line = src.slice(0, m.index).split('\n').length;
+      allocatingSelector.push(`${f}:${line}  ${body.replace(/\s+/g, ' ').slice(0, 70)}`);
+    }
+  }
+}
+if (allocatingSelector.length) {
+  failures.push({ f: 'zustand-selectors', msg: 'selector allocates — see below' });
+  allocatingSelector.forEach((l) => console.log(`  ${C.red}✗ selector returns a NEW reference${C.reset}\n      ${l}`));
+} else {
+  console.log(`  ${C.green}✓ no zustand selector allocates${C.reset}`);
+  pass++;
+}
+
 console.log(`\n${'─'.repeat(34)}`);
-console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 1} passed${C.reset}`);
+console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 2} passed${C.reset}`);
 process.exit(failures.length === 0 ? 0 : 1);

@@ -52,8 +52,9 @@ import MonthDivider from '../components/MonthDivider';
 import { monthKey } from '../utils/format';
 import { txnBelongsToAccount } from '../utils/accountMatch';
 import { useAnchorToast, BalanceAnchorModal } from './OnboardingExperience';
-import { IS_PREVIEW_BUILD } from '../constants/buildVariant';
+import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import SectionHeader from '../components/SectionHeader';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -188,7 +189,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const transactions = useEPurseStore((s: any) => s.transactions) as Txn[];
   // Historical SMS captured at onboarding — shown ONLY here, for reference. They
   // don't count toward balances or any totals (see store: archivedTransactions).
-  const archivedTransactions = useEPurseStore((s: any) => s.archivedTransactions || []) as Txn[];
+  const archivedTransactions = useEPurseStore((s: any) => s.archivedTransactions) ?? EMPTY_ARRAY as Txn[];
   const userName    = useEPurseStore((s: any) => s.userName)      as string;
 
   const account = useMemo(
@@ -537,7 +538,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
                   txn={item}
                   muted={!!(item as any).preOnboarding}
                   onPress={itemGroup && itemGroup.type === 'shared' ? () => setGroupDetailTxn(item) : undefined}
-                  onLongPress={IS_PREVIEW_BUILD ? () => setDebugTxn(item) : undefined}
+                  onLongPress={IS_STAGE_BUILD ? () => setDebugTxn(item) : undefined}
                 />
               </View>
             );
@@ -557,7 +558,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         />
       </View>
 
-      {IS_PREVIEW_BUILD && (
+      {IS_STAGE_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
 

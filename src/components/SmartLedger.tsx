@@ -32,12 +32,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useShallow } from 'zustand/react/shallow';
 import { useEPurseStore, selectVisibleTransactions } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing } from '../constants/theme';
 import { NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import { debitDisplayAmount, spendContribution } from '../utils/split';
 import { formatCurrency } from '../utils/format';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export interface LedgerTxn {
@@ -188,8 +190,9 @@ const SmartLedger: React.FC<SmartLedgerProps> = ({ transactions }) => {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const categories = useEPurseStore((s: any) => s.categories ?? []);
-  const storeTxns = useEPurseStore(selectVisibleTransactions);
+  const categories = useEPurseStore((s: any) => s.categories) ?? EMPTY_ARRAY;
+  // useShallow: the selector filters, returning a new array each call (zustand v5).
+  const storeTxns = useEPurseStore(useShallow(selectVisibleTransactions));
 
   // Source rows — the passed list, or the current month's visible debit spends.
   const txns: LedgerTxn[] = useMemo(() => {

@@ -26,6 +26,7 @@ import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 const outstandingOf = (acc) => Math.abs(Math.min(acc?.balance ?? 0, 0));
 
@@ -33,7 +34,7 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
   const theme  = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const accounts            = useEPurseStore((s) => s.accounts ?? []);
+  const accounts            = useEPurseStore((s) => s.accounts) ?? EMPTY_ARRAY;
   const markAsCCBillPayment = useEPurseStore((s) => s.markAsCCBillPayment);
 
   const ccAccounts = useMemo(

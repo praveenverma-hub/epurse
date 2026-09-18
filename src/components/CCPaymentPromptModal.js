@@ -27,6 +27,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 // Short label for an account chip, e.g. "HDFC ••4521".
 const acctLabel = (a) =>
@@ -36,8 +37,8 @@ const CCPaymentPromptModal = () => {
   const theme  = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const queue                  = useEPurseStore((s) => s.pendingCCPaymentQueue ?? []);
-  const accounts               = useEPurseStore((s) => s.accounts ?? []);
+  const queue                  = useEPurseStore((s) => s.pendingCCPaymentQueue) ?? EMPTY_ARRAY;
+  const accounts               = useEPurseStore((s) => s.accounts) ?? EMPTY_ARRAY;
   const confirmCCTrueUp        = useEPurseStore((s) => s.confirmCCTrueUp);
   const settleCCPayment        = useEPurseStore((s) => s.settleCCPayment);
   const dismissCCPaymentPrompt = useEPurseStore((s) => s.dismissCCPaymentPrompt);

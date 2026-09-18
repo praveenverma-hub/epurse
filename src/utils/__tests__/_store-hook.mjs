@@ -7,7 +7,7 @@
 //      useNotificationStore types) on the fly,
 //   3. stubbing React-Native / Expo-only modules that can't load headlessly
 //      (AsyncStorage → in-memory, notifications → no-ops, useNotificationStore →
-//      no-op proxy, buildVariant → IS_PREVIEW_BUILD=false to avoid __DEV__).
+//      no-op proxy, buildVariant → IS_STAGE_BUILD=false to avoid __DEV__).
 // The store's own logic (ingest, dedup, balances, mask-merge, self-transfer) runs
 // byte-identical to production — only the leaf native deps are swapped.
 // =============================================================================
@@ -57,7 +57,7 @@ const STUBS = {
     'export const parseDueDate=()=>null;',
   notifStore:
     'export const useNotificationStore={getState:()=>new Proxy({},{get:()=>()=>{}}),setState:()=>{},subscribe:()=>()=>{}};',
-  buildVariant: 'export const IS_PREVIEW_BUILD=false;',
+  buildVariant: 'export const IS_STAGE_BUILD=false;',
   // ── SMS-sync leaves (used by smsSync.test.mjs) ────────────────────────────
   // Every one reads `globalThis.__smsStub` at CALL time, not at module load, so a
   // test can change the device's answers between cases. `Platform` is a shared

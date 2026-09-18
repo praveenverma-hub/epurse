@@ -24,6 +24,7 @@ import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
 import SectionHeader from '../components/SectionHeader';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 const COLOR_PALETTE = [
   '#FF5A1F', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981',
@@ -68,8 +69,8 @@ const CategoriesScreen = ({ navigation }) => {
   const theme = useTheme();
   const tree = useCategoryTree();
 
-  const customParents        = useEPurseStore((s) => s.customParents ?? []);
-  const customChildren       = useEPurseStore((s) => s.customChildren ?? []);
+  const customParents        = useEPurseStore((s) => s.customParents) ?? EMPTY_ARRAY;
+  const customChildren       = useEPurseStore((s) => s.customChildren) ?? EMPTY_ARRAY;
   const addCustomParent      = useEPurseStore((s) => s.addCustomParent);
   const addCustomChild       = useEPurseStore((s) => s.addCustomChild);
   const removeCustomCategory = useEPurseStore((s) => s.removeCustomCategory);

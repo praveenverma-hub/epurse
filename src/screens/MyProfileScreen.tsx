@@ -22,6 +22,7 @@ import { radius, spacing, typography as typographyBase, BUTTON_H } from '../cons
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone } from '../utils/validation';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
+import { EMPTY_ARRAY } from '../constants/empty';
 
 interface Props {
   navigation: { goBack: () => void };
@@ -32,7 +33,7 @@ const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
   const toast = useToast();
 
   const userName = useEPurseStore((s: any) => s.userName ?? '') as string;
-  const userPhones = useEPurseStore((s: any) => s.userPhones ?? []) as string[];
+  const userPhones = useEPurseStore((s: any) => s.userPhones) ?? EMPTY_ARRAY as string[];
   const googleAccount = useEPurseStore((s: any) => s.googleAccount) as { email: string | null } | null;
   const setUserName = useEPurseStore((s: any) => s.setUserName);
   const setUserPhones = useEPurseStore((s: any) => s.setUserPhones);

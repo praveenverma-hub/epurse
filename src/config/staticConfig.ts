@@ -24,7 +24,7 @@
 //     costs nothing; a user setting costs a store key, a backup field, a
 //     migration and a Settings row, so it has to earn them.
 //   • Anything derived from the ENVIRONMENT (dev vs preview vs store build) →
-//     `constants/buildVariant.ts` (`IS_PREVIEW_BUILD`). That is not a choice.
+//     `constants/buildVariant.ts` (`IS_STAGE_BUILD`). That is not a choice.
 //   • Tuning numbers that several files must agree on (spacing, carousel
 //     geometry, retention windows) → `constants/`. Those are shared values, not
 //     switches; a switch has a small number of discrete states. `constants/` is

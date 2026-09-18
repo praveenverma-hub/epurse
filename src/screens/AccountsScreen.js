@@ -112,7 +112,21 @@ export default function AccountsScreen({ navigation }) {
   const deleteAccount = useEPurseStore((s) => s.deleteAccount);
 
   // Debit-card↔bank unification: auto-detected merge suggestions + the actions.
-  const linkSuggestions          = useEPurseStore(selectAccountLinkSuggestions);
+  // useMemo, not a selector: it builds a fresh array of fresh objects, which
+  // zustand v5 can never compare equal — as a selector this re-renders forever.
+  const accountsForLinks         = useEPurseStore((s) => s.accounts);
+  const txnsForLinks             = useEPurseStore((s) => s.transactions);
+  const archivedForLinks         = useEPurseStore((s) => s.archivedTransactions);
+  const declinedForLinks         = useEPurseStore((s) => s.declinedAccountLinks);
+  const linkSuggestions          = useMemo(
+    () => selectAccountLinkSuggestions({
+      accounts: accountsForLinks,
+      transactions: txnsForLinks,
+      archivedTransactions: archivedForLinks,
+      declinedAccountLinks: declinedForLinks,
+    }),
+    [accountsForLinks, txnsForLinks, archivedForLinks, declinedForLinks]
+  );
   const linkDebitCardToBank      = useEPurseStore((s) => s.linkDebitCardToBank);
   const dismissAccountLinkSuggestion = useEPurseStore((s) => s.dismissAccountLinkSuggestion);
   // Manual link: the Debit Card the user chose to fold into a bank (opens picker).

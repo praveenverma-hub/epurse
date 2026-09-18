@@ -561,7 +561,21 @@ export function AccountFilterScreen({
   const setAccountType = useEPurseStore((s: any) => s.setAccountType);
 
   // Debit-card↔bank merge suggestions surfaced from the just-completed sweep.
-  const linkSuggestions = useEPurseStore(selectAccountLinkSuggestions) as Array<{
+  // useMemo, not a selector: it builds a fresh array of fresh objects, which
+  // zustand v5 can never compare equal — as a selector this re-renders forever.
+  const accountsForLinks = useEPurseStore((s: any) => s.accounts);
+  const txnsForLinks = useEPurseStore((s: any) => s.transactions);
+  const archivedForLinks = useEPurseStore((s: any) => s.archivedTransactions);
+  const declinedForLinks = useEPurseStore((s: any) => s.declinedAccountLinks);
+  const linkSuggestions = useMemo(
+    () => selectAccountLinkSuggestions({
+      accounts: accountsForLinks,
+      transactions: txnsForLinks,
+      archivedTransactions: archivedForLinks,
+      declinedAccountLinks: declinedForLinks,
+    }),
+    [accountsForLinks, txnsForLinks, archivedForLinks, declinedForLinks]
+  ) as Array<{
     cardId: string; cardMask: string; bankId: string; bankMask: string; bankName: string;
   }>;
   const linkDebitCardToBank = useEPurseStore((s: any) => s.linkDebitCardToBank);

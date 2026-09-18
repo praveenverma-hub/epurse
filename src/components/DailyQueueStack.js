@@ -25,6 +25,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useShallow } from 'zustand/react/shallow';
 import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
 import {
   useRewardStore,
@@ -289,7 +290,10 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
 const DailyQueueStack = () => {
   const theme      = useTheme();
   const navigation = useNavigation();
-  const queue    = useEPurseStore(selectUnreviewedQueue);
+  // useShallow is required: the selector filters+sorts, so it returns a NEW
+  // array every call, and zustand v5 dropped the memoised selector that made
+  // that safe — without it this re-renders forever.
+  const queue    = useEPurseStore(useShallow(selectUnreviewedQueue));
   const groups   = useEPurseStore((s) => s.groups);
   const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
   const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);

@@ -1,9 +1,11 @@
 // =============================================================================
 // SMS service — Android-only bridge to the device inbox
 // -----------------------------------------------------------------------------
-// Two libraries are used together:
-//   • react-native-get-sms-android        → query existing inbox messages
-//   • react-native-android-sms-listener   → subscribe to live SMS as they arrive
+// Backed by ONE vendored native module, `EPurseSms` (plugins/android/SmsModule.kt),
+// which replaced two unmaintained npm packages that AGP 8 could no longer build.
+// It provides both halves:
+//   • EPurseSms.listInbox(minDate, maxCount) → existing inbox messages
+//   • the 'ePurse:smsReceived' device event   → live SMS as they arrive
 //
 // On iOS (Apple does not allow third-party apps to read SMS) and on web /
 // Expo Go (no native module), every export below safely no-ops or returns a
@@ -13,29 +15,17 @@
 // doesn't know about the store, keeping it easy to test in isolation.
 // =============================================================================
 
-import { Platform, PermissionsAndroid } from 'react-native';
+import { Platform, PermissionsAndroid, NativeModules, DeviceEventEmitter } from 'react-native';
 
-// ---- safe dynamic require ---------------------------------------------------
-// We require the native modules lazily so that bundling them on iOS / Expo Go
-// (where they don't exist) doesn't crash the app.
-let SmsAndroid = null;
-let SmsListener = null;
-if (Platform.OS === 'android') {
-  try {
-    // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
-    SmsAndroid = require('react-native-get-sms-android');
-  } catch (e) {
-    console.warn('[smsService] react-native-get-sms-android not linked', e?.message);
-  }
-  try {
-    // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
-    SmsListener = require('react-native-android-sms-listener').default;
-  } catch (e) {
-    console.warn('[smsService] react-native-android-sms-listener not linked', e?.message);
-  }
+const SMS_RECEIVED_EVENT = 'ePurse:smsReceived';
+
+// Absent on iOS/web and in Expo Go, which is exactly what `smsSupported` reports.
+const EPurseSms = Platform.OS === 'android' ? NativeModules.EPurseSms ?? null : null;
+if (Platform.OS === 'android' && !EPurseSms) {
+  console.warn('[smsService] native module EPurseSms is not linked');
 }
 
-export const smsSupported = Platform.OS === 'android' && !!SmsAndroid && !!SmsListener;
+export const smsSupported = Platform.OS === 'android' && !!EPurseSms;
 
 // =============================================================================
 // Permissions
@@ -46,7 +36,7 @@ export const smsSupported = Platform.OS === 'android' && !!SmsAndroid && !!SmsLi
  *
  * NOTE: On Android 10+ READ_SMS and RECEIVE_SMS share the same permission
  * group — granting one grants both. We only gate on READ_SMS because:
- *   • It is the permission `react-native-get-sms-android` actually needs.
+ *   • It is the permission the inbox query actually needs.
  *   • On many OEM ROMs (MIUI, One UI, etc.) RECEIVE_SMS still returns
  *     `never_ask_again` via PermissionsAndroid even after the user tapped
  *     "Allow", so checking both causes a false-negative.
@@ -137,30 +127,13 @@ export const requestSmsPermission = async () => {
 export const readInbox = (sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000) => {
   if (!smsSupported) return Promise.resolve([]);
 
-  // 60 s — large enough for 2 000 messages to parse + serialize to JSON,
-  // but still a hard upper bound so the UI never hangs forever.
+  // 60 s — generous enough for a heavy inbox, but still a hard upper bound so
+  // the UI never hangs forever.
   const READ_TIMEOUT_MS = 60_000;
 
-  const nativeRead = new Promise((resolve, reject) => {
-    const filter = JSON.stringify({
-      box:       'inbox',
-      selection: `date >= ${sinceMs}`,   // ← SQL WHERE: database-level filter
-      minDate:   sinceMs,                // ← belt-and-suspenders Java filter
-      sortOrder: 'date ASC',             // oldest → newest for chronological ingest
-      maxCount:  2000,
-    });
-    SmsAndroid.list(
-      filter,
-      (failure) => reject(new Error(failure)),
-      (_count, smsList) => {
-        try {
-          const parsed = JSON.parse(smsList || '[]');
-          resolve(Array.isArray(parsed) ? parsed : []);
-        } catch (_) {
-          resolve([]);
-        }
-      }
-    );
+  const nativeRead = EPurseSms.listInbox(sinceMs, 2000).catch((e) => {
+    console.warn('[smsService] listInbox failed', e?.message);
+    return [];
   });
 
   const timeout = new Promise((resolve) =>
@@ -184,7 +157,7 @@ export const readInbox = (sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000) => {
  */
 export const subscribeToIncomingSms = (handler) => {
   if (!smsSupported) return () => {};
-  const subscription = SmsListener.addListener((message) => {
+  const subscription = DeviceEventEmitter.addListener(SMS_RECEIVED_EVENT, (message) => {
     try {
       handler({
         originatingAddress: message?.originatingAddress || '',

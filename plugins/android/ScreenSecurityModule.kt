@@ -39,7 +39,9 @@ class ScreenSecurityModule(private val reactContext: ReactApplicationContext) :
   }
 
   private fun applyIfPossible() {
-    val activity = currentActivity ?: return
+    // RN 0.80+ removed the synthetic `currentActivity` property on the module;
+    // it lives on the context now.
+    val activity = reactContext.currentActivity ?: return
     val secure = desiredSecure ?: return
     activity.runOnUiThread {
       if (secure) {
