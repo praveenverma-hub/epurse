@@ -138,17 +138,30 @@ the flags in `src/constants/buildVariant.ts`:
 - `-prod` → **EAS cloud**, real signing credentials, distributable.
 
 ```bash
-npm run build:dev-test      # local dev client (Metro attached)
-npm run build:dev-prod      # EAS dev client, shareable
+# on THIS machine
+npm run build:stage-test        # plain Gradle -> APK, DEBUG-SIGNED (sideload only)
+npm run build:prod-test         # plain Gradle -> AAB, verification only
+npm run build:dev-test          # dev client with Metro attached
 
-npm run build:stage-test    # local release APK
-npm run build:stage-prod    # EAS APK for testers
+# on THIS machine, through the EAS pipeline — real signing, NO cloud quota
+npm run build:stage-prod-local  # APK you can actually hand to a tester
+npm run build:prod-local        # AAB you can actually upload to Play
 
-npm run build:prod-test     # local AAB — verification only
-npm run build:prod          # EAS AAB for Play
-
-npm run build:ios           # EAS, stage profile
+# on EAS cloud (uses a build from your monthly quota)
+npm run build:dev-prod
+npm run build:stage-prod
+npm run build:prod
+npm run build:ios
 ```
+
+**Out of free EAS builds?** Use the `-local` variants. `eas build --local` runs the exact
+same pipeline with the same credentials, just on your machine, and **local builds do not
+count against the EAS build quota**. That is the replacement for the old `build:local`
+script. It needs the Android SDK and a JDK installed locally, and it is slower than the
+cloud on a first run.
+
+The `-test` targets are *not* a substitute: they are plain Gradle and therefore
+debug-signed, so Play will reject them.
 
 `prod-test` is worth knowing about: it is the only way to exercise the
 **production** code paths locally. `dev` and `stage` differ from `prod` precisely

@@ -2422,6 +2422,13 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   usages are all sheets, modals, tabs or staggered lists, which are fine.
 - Sep-19-2026: **All 5 tabs + Profile swept on device — zero JS errors.**
 
+- Sep-19-2026: **restored the local EAS build** — the rename had dropped the old
+  `build:local` (`eas build --local`), replacing it only with plain-Gradle `-test` targets,
+  which are DEBUG-SIGNED and so not a substitute. New `--eas-local` flag +
+  `npm run build:stage-prod-local` / `build:prod-local`: same EAS pipeline and the same
+  signing credentials, run on this machine, and **local builds do not count against the
+  EAS build quota** — which matters once the free cloud builds are used up.
+
 **Open**
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
   clean on an emulator. STILL unverified because an emulator cannot do them: a live SMS
