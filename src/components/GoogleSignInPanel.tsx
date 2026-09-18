@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useGoogleSession } from '../hooks/useGoogleSession';
+import { IS_DEV_BUILD } from '../constants/buildVariant';
 import GradientButtonBase from './GradientButton';
 import type { GoogleProfile } from '../backup/googleAuth';
 
@@ -45,7 +46,7 @@ const ERROR_COPY: Record<string, string> = {
 
 const GoogleSignInPanel: React.FC<Props> = ({ title, subtitle, onSuccess, compact = false, disabled = false }) => {
   const theme = useTheme();
-  const { googleAccount, pending, error, signIn } = useGoogleSession();
+  const { googleAccount, pending, error, signIn, devBypass } = useGoogleSession();
 
   const handlePress = async () => {
     try {
@@ -93,7 +94,12 @@ const GoogleSignInPanel: React.FC<Props> = ({ title, subtitle, onSuccess, compac
     </Pressable>
   );
 
-  const action = googleAccount ? connected : compact ? outlineButton : (
+  // In a dev build, the real button is hidden entirely — only the debug skip
+  // below is shown, since real Google sign-in needs Cloud Console setup
+  // (scopes, test users) that's easy to have broken mid-development and was
+  // blocking work on everything else. IS_DEV_BUILD is false in preview/store
+  // builds, where the real button always renders as normal.
+  const action = googleAccount ? connected : IS_DEV_BUILD ? null : compact ? outlineButton : (
     <GradientButton
       title="Sign In With Google"
       onPress={handlePress}
@@ -103,10 +109,22 @@ const GoogleSignInPanel: React.FC<Props> = ({ title, subtitle, onSuccess, compac
     />
   );
 
+  const handleDevBypass = () => {
+    const account = devBypass();
+    if (account) onSuccess?.(account);
+  };
+
+  const devSkip = !googleAccount && IS_DEV_BUILD ? (
+    <Pressable onPress={handleDevBypass} disabled={disabled} hitSlop={8} style={styles.devSkip}>
+      <Text style={[styles.devSkipText, { color: theme.textSecondary }]}>Skip sign-in (Debug)</Text>
+    </Pressable>
+  ) : null;
+
   if (compact) {
     return (
       <View style={styles.compactContainer}>
         {action}
+        {devSkip}
         {errorText ? <Text style={[styles.error, { color: theme.danger }]}>{errorText}</Text> : null}
       </View>
     );
@@ -120,6 +138,7 @@ const GoogleSignInPanel: React.FC<Props> = ({ title, subtitle, onSuccess, compac
       <Text style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
       {subtitle ? <Text style={[styles.subtitle, { color: theme.textSecondary }]}>{subtitle}</Text> : null}
       {action}
+      {devSkip}
       {errorText ? <Text style={[styles.error, { color: theme.danger }]}>{errorText}</Text> : null}
     </View>
   );
@@ -149,6 +168,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm, paddingVertical: spacing.sm,
   },
   connectedText: { ...typography.small, fontWeight: '600', flexShrink: 1 },
+  devSkip: { alignItems: 'center', paddingVertical: spacing.sm },
+  devSkipText: { ...typography.tiny, textDecorationLine: 'underline' },
 });
 
 export default GoogleSignInPanel;

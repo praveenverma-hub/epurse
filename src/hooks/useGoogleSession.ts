@@ -12,6 +12,7 @@ import { useCallback, useState } from 'react';
 import * as googleAuth from '../backup/googleAuth';
 import { useEPurseStore } from '../store/ePurseStore';
 import { suppressAppLockOnce } from '../utils/appLockSuppress';
+import { IS_DEV_BUILD } from '../constants/buildVariant';
 
 export function useGoogleSession() {
   const googleAccount = useEPurseStore((s: any) => s.googleAccount);
@@ -48,7 +49,21 @@ export function useGoogleSession() {
     setGoogleAccount(null);
   }, [setGoogleAccount]);
 
-  return { googleAccount, isLoggedIn, sessionExpired, pending, error, signIn, signOut };
+  // IS_DEV_BUILD-only escape hatch (local Metro dev / EAS "development" client
+  // ONLY — never a preview build someone else might run): real Google sign-in
+  // needs Cloud Console setup (scopes, test users) that's easy to have broken
+  // mid-development — this keeps that from blocking work on everything else.
+  // A login bypass is more sensitive than the app's other IS_PREVIEW_BUILD-gated
+  // debug tools, so it stays on the narrower flag on purpose.
+  const devBypass = useCallback(() => {
+    if (!IS_DEV_BUILD) return null;
+    const account = { email: 'dev-bypass@local', name: 'Dev Bypass', picture: null };
+    setGoogleAccount(account);
+    setSessionExpired(false);
+    return account;
+  }, [setGoogleAccount, setSessionExpired]);
+
+  return { googleAccount, isLoggedIn, sessionExpired, pending, error, signIn, signOut, devBypass };
 }
 
 export default useGoogleSession;
