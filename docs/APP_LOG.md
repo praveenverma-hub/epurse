@@ -2429,6 +2429,21 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   signing credentials, run on this machine, and **local builds do not count against the
   EAS build quota** — which matters once the free cloud builds are used up.
 
+- Sep-19-2026: **reminders were dead on SDK 57 — two bugs, one visible.**
+  (1) `expo-notifications` now REQUIRES a `type` entry on a trigger object; our
+  `trigger: { date }` threw `TypeError: The 'trigger' object you provided is invalid`.
+  Fixed to `{ type: Notifications.SchedulableTriggerInputTypes.DATE, date }` at both call
+  sites in `utils/notifications.js`. `trigger: null` (fire immediately) is still valid.
+  (2) **`ReminderFormScreen.handleSave` had no try/catch**, so the throw skipped
+  `setSaving(false)` and the button sat on "Setting…" forever with no message — the symptom
+  the user actually saw. Now `try/catch/finally`, so a scheduler failure surfaces as a toast
+  and the button can never stick. It was the ONLY form hand-rolling a submit flag without a
+  `finally` (`useSubmitGuard` already does this correctly; Onboarding and MonthlyRecapCard
+  have their own `finally`). Verified end-to-end on device: reminder saves, form closes,
+  "Next: Tomorrow · 9:00 am" listed, zero errors.
+  **This also silently broke `reconcileReminders`, which runs on EVERY launch/foreground.**
+- Sep-19-2026: **SMS capture and app lock confirmed WORKING on a real device build.**
+
 **Open**
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
   clean on an emulator. STILL unverified because an emulator cannot do them: a live SMS

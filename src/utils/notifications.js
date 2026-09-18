@@ -78,7 +78,10 @@ export async function scheduleReminderAt({ title, body, fireAt }) {
       sticky: false,
       ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
     },
-    trigger: { date: new Date(when) },
+    // `type` is REQUIRED: expo-notifications rejects a trigger object without a
+    // `type` (or `channelId`) entry — a bare `{ date }` throws a TypeError, which
+    // is what silently broke every scheduled reminder on the SDK-57 upgrade.
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(when) },
   });
 }
 
@@ -119,7 +122,10 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
       priority: Notifications.AndroidNotificationPriority?.HIGH,
       ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
     },
-    trigger: { date: new Date(when) },
+    // `type` is REQUIRED: expo-notifications rejects a trigger object without a
+    // `type` (or `channelId`) entry — a bare `{ date }` throws a TypeError, which
+    // is what silently broke every scheduled reminder on the SDK-57 upgrade.
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(when) },
   });
 }
 

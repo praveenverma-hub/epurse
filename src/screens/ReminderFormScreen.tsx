@@ -183,9 +183,12 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleSave = useCallback(async () => {
     if (!canSave) return;
     setSaving(true);
+    // try/finally so the button can NEVER stay stuck on "Setting…". Without it an
+    // throw from the scheduler skipped `setSaving(false)` and the form was dead
+    // with no message — which is exactly how the SDK-57 trigger change presented.
+    try {
     const granted = await requestNotificationPermissions();
     if (!granted) {
-      setSaving(false);
       toast.warning('Permission required', 'Allow notifications in your device settings to set reminders.');
       return;
     }
@@ -205,7 +208,6 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
       person: person || undefined,
       replaceId: reminderId ?? null,
     });
-    setSaving(false);
     if (!record) {
       // The OS refused every occurrence — almost always a moment that has just
       // passed. Say so instead of closing as if it worked.
@@ -217,6 +219,12 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
       repeat === REPEAT.ONCE ? fullWhen(record.anchorAt) : describeRepeat(record.anchorAt, repeat),
     );
     navigation.goBack();
+    } catch (e: any) {
+      console.warn('[ReminderForm] scheduleReminder threw', e?.message);
+      toast.error('Could not set reminder', 'Something went wrong scheduling it. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   }, [canSave, kind, title, body, repeat, when, sourceKey, existing, reminderId, isEdit,
       hasBalance, amount, person, scheduleReminder, toast, navigation]);
 
