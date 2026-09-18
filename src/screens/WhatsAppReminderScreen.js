@@ -693,7 +693,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   bannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'flex-end',
     paddingRight: spacing.md,

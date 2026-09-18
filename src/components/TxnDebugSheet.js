@@ -107,7 +107,7 @@ export default TxnDebugSheet;
 
 const styles = StyleSheet.create({
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#00000070',
   },
   sheet: {

@@ -816,7 +816,7 @@ const styles = StyleSheet.create({
 
   // Overlay (approve / reject)
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',

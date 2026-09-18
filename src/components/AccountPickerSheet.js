@@ -91,7 +91,7 @@ export default AccountPickerSheet;
 
 const makeStyles = (t) =>
   StyleSheet.create({
-    scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: '#00000066' },
+    scrim: { ...StyleSheet.absoluteFill, backgroundColor: '#00000066' },
     sheet: {
       position: 'absolute',
       bottom: 0, left: 0, right: 0,

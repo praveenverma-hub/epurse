@@ -31,8 +31,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   Easing,
-  FadeInUp,
-  ZoomIn,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -125,23 +123,23 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
           {/* ── Region B: identity + progress + balances ─────────────── */}
-          <Animated.View
-            entering={FadeInUp.springify().damping(22).stiffness(160)}
-            style={styles.heroCard}
-          >
+          {/* No `entering` animation here on purpose. React Navigation already
+              animates this pushed screen in; a second entrance nested inside it
+              left the hero card absent for the whole push, so the screen slid in
+              with a hole where the card belongs and the card snapped in after.
+              Reanimated 4 + the New Architecture made that visible (Sep-19-26).
+              No other PUSHED screen animates its own content in. */}
+          <View style={styles.heroCard}>
           <View style={styles.heroCardInner}>
             <LinearGradient
               colors={D.heroGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
 
             <View style={styles.profileRow}>
-              <Animated.View
-                entering={ZoomIn.springify().damping(18).stiffness(220)}
-                style={styles.avatarWrap}
-              >
+              <View style={styles.avatarWrap}>
                 <TouchableOpacity
                   onPress={go('MyProfile')}
                   activeOpacity={0.85}
@@ -158,7 +156,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                   </LinearGradient>
                 </TouchableOpacity>
                 <LevelChip level={level} styles={styles} D={D} />
-              </Animated.View>
+              </View>
 
               <View style={styles.profileMeta}>
                 <Text style={styles.profileGreet}>Hey,</Text>
@@ -248,7 +246,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               </View>
             </View>
           </View>
-          </Animated.View>
+          </View>
 
           {/* ── Region C: destinations ───────────────────────────────── */}
           {/* No group LABELS. Two cards separated by a gap already read as two
@@ -385,7 +383,7 @@ const XpBar: React.FC<{ progress: number; D: RewardPalette; styles: any }> = ({ 
           colors={[D.goldGlow, D.primary]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       </Animated.View>
     </View>

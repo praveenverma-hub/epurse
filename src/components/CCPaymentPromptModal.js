@@ -290,7 +290,7 @@ const makeStyles = (t) => {
 
   return StyleSheet.create({
     scrim: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: '#00000066',
     },
     sheet: {

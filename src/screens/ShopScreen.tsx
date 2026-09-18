@@ -269,7 +269,7 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins, D
         colors={D.cardGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
 
       <View style={styles.cardContent}>
@@ -356,7 +356,7 @@ const BuyButton: React.FC<{
       colors={canAfford ? [D.primary, '#E64A0F'] : [D.cardElevated, D.card]}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
-      style={StyleSheet.absoluteFillObject}
+      style={StyleSheet.absoluteFill}
     />
     <Text style={[styles.buyBtnText, !canAfford && styles.buyBtnTextDisabled]}>Unlock</Text>
     <View style={styles.buyBtnPriceRow}>
@@ -590,12 +590,12 @@ function makeStyles(D: RewardPalette) {
 
     // ── Locked overlay ─────────────────────────────────────────────────────
     lockOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       alignItems: 'center',
       justifyContent: 'center',
     },
     lockOverlayTint: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: D.lockTint,
     },
     lockBadge: {

@@ -270,7 +270,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000',
   },
   sheet: {

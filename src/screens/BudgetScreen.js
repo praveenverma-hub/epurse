@@ -592,7 +592,7 @@ const styles = StyleSheet.create({
   // ── Category drill-down sheet (also shares pickerBackdrop/Sheet/Handle/Empty
   //     below — the "Add Category" picker moved to BudgetPlanScreen) ──
   pickerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#00000060',
     justifyContent: 'flex-end',
   },

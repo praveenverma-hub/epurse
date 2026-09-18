@@ -175,8 +175,8 @@
 //     alignItems:      'center',
 //     justifyContent:  'center',
 //   },
-//   squareGlow:    { ...StyleSheet.absoluteFillObject },
-//   squareLayer:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+//   squareGlow:    { ...StyleSheet.absoluteFill },
+//   squareLayer:   { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
 //   squareNumber:  { color: '#FFFFFF', fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 20 },
 //   squareCaption: { color: 'rgba(255,255,255,0.78)', fontSize: 8, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 1 },
 // });

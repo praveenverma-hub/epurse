@@ -106,7 +106,13 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
   const merchantBubbles = useMemo(() => getMerchantBubbles(visibleTxns, date), [visibleTxns, date]);
   const allSubscriptions = useMemo(() => detectSubscriptions(visibleTxns), [visibleTxns]);
 
-  const breakdown = useEPurseStore((s) => s.getCategoryBreakdown(date));
+  // useMemo, NOT a selector: getCategoryBreakdown builds a fresh collection every
+  // call, and zustand v5 compares snapshots by reference — as a selector this
+  // re-rendered forever. The sibling getters below are fine: they reduce to numbers.
+  const breakdown = useMemo(
+    () => useEPurseStore.getState().getCategoryBreakdown(date),
+    [date, transactions, groups, categories]
+  );
   const monthSpend = useEPurseStore((s) => s.getMonthlySpend(date));
   const monthIncome = useEPurseStore((s) => s.getMonthlyIncome(date));
   const monthRefund = useEPurseStore((s) => s.getMonthlyRefunds(date));

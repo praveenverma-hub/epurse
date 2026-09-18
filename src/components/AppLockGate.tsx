@@ -110,11 +110,11 @@ const AppLockGate: React.FC = () => {
 
   // Not hydrated yet: cover with a blank surface (we don't know if lock is on)
   // rather than a lock screen that flashes for the majority who have it off.
-  if (!hydrated) return <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.background, zIndex: 999 }]} />;
+  if (!hydrated) return <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background, zIndex: 999 }]} />;
   if (!appLockEnabled || unlocked) return null;
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, styles.overlay, { backgroundColor: theme.card }]}>
+    <View style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: theme.card }]}>
       <View style={[styles.iconCircle, { backgroundColor: theme.primary + '1A' }]}>
         <Ionicons name="lock-closed" size={28} color={theme.primary} />
       </View>

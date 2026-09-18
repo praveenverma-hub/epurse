@@ -258,7 +258,7 @@ const styles = StyleSheet.create<{
   confetti: ViewStyle;
 }>({
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000000B8',
   },
   sheetWrap: {
@@ -347,7 +347,7 @@ const styles = StyleSheet.create<{
     letterSpacing: 0.4,
   },
   confettiOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 999,
     overflow: 'hidden',
   },

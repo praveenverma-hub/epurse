@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
 
   // ── Category picker (bottom sheet) ──
   pickerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#00000060',
     justifyContent: 'flex-end',
   },

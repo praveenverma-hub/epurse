@@ -733,7 +733,7 @@ const styles = StyleSheet.create({
   // Centred (pushed-screen) title — absolutely centred over the row. The side
   // padding keeps a long title truncating instead of running under the chevron.
   stdTitleCentreWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,

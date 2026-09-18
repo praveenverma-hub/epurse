@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
   body:      { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl, gap: spacing.sm },
 
   bannerWrap: { borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.sm },
-  bannerOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', padding: spacing.md },
+  bannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'flex-end', padding: spacing.md },
   // Painted flat on the fixed indigo art, so these two stay white by design.
   bannerPill: { backgroundColor: '#0000004D', borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   bannerTitle: { ...typography.bodyBold, color: '#fff', fontWeight: '800' },

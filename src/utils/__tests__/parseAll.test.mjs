@@ -108,6 +108,12 @@ if (hookConditional.length) {
 // Fix by defaulting OUTSIDE the selector (`?? EMPTY_ARRAY` from constants/empty),
 // by wrapping the call in `useShallow`, or — when the result is a derived object
 // — by selecting raw state and computing in a `useMemo`.
+// Store getters VERIFIED to reduce to a primitive, so they are safe to call
+// inside a selector. Add here only after checking the getter's return.
+const PRIMITIVE_STORE_GETTERS = new Set([
+  'getMonthlySpend', 'getMonthlyIncome', 'getMonthlyRefunds',
+  'getTotalLent', 'getTotalBorrowed',
+]);
 const allocatingSelector = [];
 for (const f of files) {
   const src = readFileSync(f, 'utf8')
@@ -123,6 +129,16 @@ for (const f of files) {
     }
     const body = src.slice(hook.lastIndex, i - 1);
     if (body.includes('useShallow')) continue;
+    // A selector that CALLS a store method is only safe if that method returns a
+    // primitive — `s.getCategoryBreakdown(date)` builds a fresh collection and
+    // looped the whole Insights tab. The call is opaque here, so known-primitive
+    // getters are allowlisted and anything new must be checked and added.
+    const methodCall = body.match(/=>\s*\w+\.(\w+)\s*\(/);
+    if (methodCall && !PRIMITIVE_STORE_GETTERS.has(methodCall[1])) {
+      const line = src.slice(0, m.index).split('\n').length;
+      allocatingSelector.push(`${f}:${line}  s.${methodCall[1]}() — returns a collection? use useMemo, or allowlist it`);
+      continue;
+    }
     if (/\?\?\s*[[{]|\|\|\s*[[{]|=>\s*[[{]|\.(filter|map|sort|slice|concat|flatMap)\s*\(|Object\.(keys|values|entries)\s*\(/.test(body)) {
       const line = src.slice(0, m.index).split('\n').length;
       allocatingSelector.push(`${f}:${line}  ${body.replace(/\s+/g, ' ').slice(0, 70)}`);
@@ -137,6 +153,39 @@ if (allocatingSelector.length) {
   pass++;
 }
 
+// ── APIs removed by an RN upgrade ──────────────────────────────────────────
+// `StyleSheet.absoluteFillObject` was REMOVED in React Native 0.86 (only
+// `absoluteFill` remains). Reading it yields `undefined`, and React Native
+// silently ignores `undefined` in a style array — `{...undefined}` is `{}` too.
+// So every overlay using it quietly lost `position: 'absolute'` and dropped into
+// normal flow: on the SDK-57 upgrade (Sep-19-26) that pushed the tab bar to 75%
+// height, exposed LoginGate below it, and un-filled ProfileScreen's hero
+// gradient. 38 usages, 27 files, and NOT ONE error or warning anywhere.
+//
+// Entries here are exact member expressions that no longer exist. Add to this
+// list whenever an upgrade removes one — a removed API that fails silently is
+// far more expensive than one that throws.
+const REMOVED_APIS = [
+  ['StyleSheet.absoluteFillObject', 'use StyleSheet.absoluteFill (removed in RN 0.86)'],
+];
+const removedUsage = [];
+for (const f of files) {
+  const src = readFileSync(f, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  src.split('\n').forEach((line, i) => {
+    for (const [api, advice] of REMOVED_APIS) {
+      if (line.includes(api)) removedUsage.push(`${f}:${i + 1}  ${api} — ${advice}`);
+    }
+  });
+}
+if (removedUsage.length) {
+  failures.push({ f: 'removed-apis', msg: 'removed RN API still referenced — see below' });
+  removedUsage.forEach((l) => console.log(`  ${C.red}✗ removed API${C.reset}\n      ${l}`));
+} else {
+  console.log(`  ${C.green}✓ no removed RN APIs referenced${C.reset}`);
+  pass++;
+}
+
 console.log(`\n${'─'.repeat(34)}`);
-console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 2} passed${C.reset}`);
+console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 3} passed${C.reset}`);
 process.exit(failures.length === 0 ? 0 : 1);

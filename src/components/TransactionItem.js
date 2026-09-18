@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
   // Group watermark — clip layer fills the card and matches its rounded shape so the
   // oversized emoji is cut cleanly at the card's edges (only ~60% shows).
   groupWatermarkClip: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radius.lg,
     overflow: 'hidden',
   },

@@ -1572,7 +1572,7 @@ const styles = StyleSheet.create({
 
   // ── Sheet overlay ──────────────────────────────────────────────────────────
   sheetOverlay: { flex: 1, justifyContent: 'flex-end' },
-  backdrop:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
+  backdrop:     { ...StyleSheet.absoluteFill, backgroundColor: '#000' },
   // Shadow lives on the animated SHELL (see `sheetStyle`'s render comment
   // above) — `overflow: 'hidden'` on `sheet` below, on the SAME view, would
   // clip it to nothing (iOS) / a hard box (Android elevation).

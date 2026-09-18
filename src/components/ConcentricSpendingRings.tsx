@@ -345,8 +345,8 @@ const ConcentricSpendingRings: React.FC<Props> = ({
           </Canvas>
 
           {/* Tip badges are rendered by the <Ring /> components via portal-like overlay.
-              They sit absolutely inside this wrapping View thanks to the absoluteFillObject style. */}
-          <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+              They sit absolutely inside this wrapping View thanks to the absoluteFill style. */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {visible.map((ringData, i) => (
               <RingTipOverlay
                 key={`tip-${ringData.parentCategory}`}
@@ -361,7 +361,7 @@ const ConcentricSpendingRings: React.FC<Props> = ({
 
           {/* Centre label */}
           <View
-            style={[StyleSheet.absoluteFillObject, styles.centerOverlay]}
+            style={[StyleSheet.absoluteFill, styles.centerOverlay]}
             pointerEvents="none"
           >
             <Text style={styles.centerLabel}>{centerHeading}</Text>

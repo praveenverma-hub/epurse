@@ -173,7 +173,7 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: '#000000CC', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  dismiss: { ...StyleSheet.absoluteFillObject, zIndex: -1 },
+  dismiss: { ...StyleSheet.absoluteFill, zIndex: -1 },
   // Shadow + sizing live here; `overflow: 'hidden'` (needed to clip `wash`'s
   // gradient to the rounded corner) moved to `sheetInner` — on the SAME view
   // it clipped this shadow to nothing (iOS) / a hard box (Android elevation).
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     overflow: 'hidden',
   },
-  wash: { ...StyleSheet.absoluteFillObject, height: 190 },
+  wash: { ...StyleSheet.absoluteFill, height: 190 },
 
   medallion: {
     width: 78, height: 78, borderRadius: 39,

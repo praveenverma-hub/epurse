@@ -35,12 +35,12 @@ const LoginGate: React.FC = () => {
 
   // Not hydrated yet: we don't know hasOnboarded/isLoggedIn — cover with a
   // blank surface rather than flash the gate for users who won't see it.
-  if (!hydrated) return <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.background, zIndex: 1000 }]} />;
+  if (!hydrated) return <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background, zIndex: 1000 }]} />;
   if (!hasOnboarded) return null; // fresh installs: the onboarding slide owns this
   if (isLoggedIn) return null;
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, styles.overlay, { backgroundColor: theme.card }]}>
+    <View style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: theme.card }]}>
       <GoogleSignInPanel
         title={sessionExpired ? 'Sign Back In' : 'Sign In To Continue'}
         subtitle={sessionExpired

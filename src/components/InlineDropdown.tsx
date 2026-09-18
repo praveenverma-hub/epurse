@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
   triggerChevron: { marginLeft: 4 },
   triggerText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   triggerValue: { fontWeight: '800' },
-  backdrop: { ...StyleSheet.absoluteFillObject },
+  backdrop: { ...StyleSheet.absoluteFill },
   menu: {
     position: 'absolute',
     paddingVertical: spacing.xs,

@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   textOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

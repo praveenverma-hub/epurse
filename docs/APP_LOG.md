@@ -2385,6 +2385,43 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Sep-19-2026: **Dashboard verified rendering on an Android emulator** — header, carousel
   and the auto-modal queue (EPC claim) all correct, zero JS errors in logcat.
 
+- Sep-19-2026: **`StyleSheet.absoluteFillObject` WAS REMOVED IN RN 0.86** — only
+  `absoluteFill` remains. It evaluated to `undefined`, and RN silently ignores `undefined`
+  in a style array (`{...undefined}` is `{}` too), so **38 usages across 27 files quietly
+  lost `position: 'absolute'` and dropped into normal flow.** Symptoms the user reported:
+  the bottom tab bar floating ~25% up the screen with LoginGate visible below it (the gate
+  was laid out AFTER the navigator instead of overlaying it — device bounds confirmed
+  `[0,1890][1080,2400]` instead of `[0,0][1080,2400]`), and ProfileScreen's hero card
+  looking wrong because its `LinearGradient` no longer filled the card. Every modal
+  backdrop, bottom sheet and overlay in the app was affected. **Zero errors or warnings.**
+  Fixed by a global rename to `StyleSheet.absoluteFill`; verified on device.
+- Sep-19-2026: `test:parse` now also lints for **removed RN APIs** (a named list, currently
+  `absoluteFillObject`). A removed API that fails silently costs far more than one that
+  throws — add to the list on every upgrade.
+
+- Sep-19-2026: **Insights tab crashed with the same zustand-v5 loop** —
+  `AnalyticsScreen:109` did `useEPurseStore((s) => s.getCategoryBreakdown(date))`.
+  Calling a store METHOD inside a selector is only safe if that method returns a
+  primitive; `getCategoryBreakdown` builds a fresh collection. Its three siblings
+  (`getMonthlySpend`/`getMonthlyIncome`/`getMonthlyRefunds`) reduce to numbers and are
+  fine. Fixed with `useMemo` + `getState()`. **A full sweep found only 6 such call sites
+  app-wide and this was the only unsafe one.**
+- Sep-19-2026: `test:parse`'s zustand lint now also flags **store-method selectors**
+  against a `PRIMITIVE_STORE_GETTERS` allowlist — the previous version could not see
+  `s.someMethod()` because there is no `.filter()` or `?? []` to match on.
+  Negative-tested.
+
+- Sep-19-2026: **ProfileScreen's hero-card + avatar `entering` animations removed.**
+  They are pre-existing code (`FadeInUp.springify()` / `ZoomIn.springify()`), but
+  Reanimated 3 → 4 on the New Architecture changed when they run: the entrance now plays
+  *during* React Navigation's push transition, so the screen slid in with a **hole where
+  the hero card belongs** and the card snapped in afterwards. Confirmed by temporarily
+  stretching them to 4s and capturing mid-transition frames. React Navigation already
+  animates a pushed screen; a second entrance nested inside it is the bug. **No other
+  PUSHED screen in the app animates its own content in** — the remaining `entering=`
+  usages are all sheets, modals, tabs or staggered lists, which are fine.
+- Sep-19-2026: **All 5 tabs + Profile swept on device — zero JS errors.**
+
 **Open**
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
   clean on an emulator. STILL unverified because an emulator cannot do them: a live SMS

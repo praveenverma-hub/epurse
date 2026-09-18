@@ -208,7 +208,7 @@ const makeStyles = (t) => {
   const SUCCESS = t.success;
 
   return StyleSheet.create({
-    scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: '#00000066' },
+    scrim: { ...StyleSheet.absoluteFill, backgroundColor: '#00000066' },
     sheet: {
       position: 'absolute',
       bottom: 0,

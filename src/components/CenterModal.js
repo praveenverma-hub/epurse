@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacing.xl,
   },
-  dismiss: { ...StyleSheet.absoluteFillObject },
+  dismiss: { ...StyleSheet.absoluteFill },
   card: {
     width: '100%',
     maxWidth: 380,
