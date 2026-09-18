@@ -53,7 +53,6 @@
     "@types/react": "~18.2.45",
     "expo": "~50.0.14",
     "expo-auth-session": "~5.4.0",
-    "expo-av": "~13.10.6",
     "expo-clipboard": "~5.0.1",
     "expo-contacts": "~12.8.2",
     "expo-crypto": "~12.8.1",

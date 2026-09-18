@@ -2215,3 +2215,67 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 **Open**
 - No automated coverage for the Rewards or Groups UI screens (documented as accepted
   gaps in their own skills — verify manually after touching either).
+
+---
+
+## Release & Build (Play Store)
+
+**Done**
+- Sep-19-2026: Android release plan written up — `docs/ANDROID_RELEASE.md` (accounts,
+  lead times, store forms, rollout order). Read it before any release work.
+- Sep-19-2026: **permission diet, 21 → 14 requested + 7 explicitly blocked.** Removed
+  `RECORD_AUDIO`/`MODIFY_AUDIO_SETTINGS` (dropped the unused `expo-av` dependency
+  entirely — zero imports), `WRITE_CONTACTS` (we only read), `SYSTEM_ALERT_WINDOW`
+  (stale), `USE_EXACT_ALARM` (Play restricts it to alarm/timer/calendar
+  apps and *disallows publishing* for others), and `ACCESS_FINE_LOCATION` (`locationService.ts` uses `Accuracy.Lowest` and keeps only a
+  city name, so coarse was always enough).
+- Sep-19-2026: **`SCHEDULE_EXACT_ALARM` kept** (it is the permission Google recommends
+  as the alternative to `USE_EXACT_ALARM` — user-granted, no declaration). Without it
+  `expo-notifications` drops to `setAndAllowWhileIdle`, which Android batches and Doze
+  delays by up to ~15 min. Caveat: on Android 14+ it is denied by default and the user
+  must enable "Alarms & reminders" in system settings — consider a prompt deep-linking to
+  `Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM`.
+- Sep-19-2026: **versionCode fixed.** `eas.json` → `cli.appVersionSource: "remote"` (EAS
+  owns the number; `prebuild --clean` can no longer reset it back to 1 and get an upload
+  rejected), plus `android.versionCode` seeded in `app.json` for local builds. Initialise
+  once with `eas build:version:set -p android`.
+- Sep-19-2026: permissions now flow from **`app.json` only** — `android.permissions` plus
+  the new `android.blockedPermissions` (emits `tools:node="remove"`, the only thing that
+  overrides a dependency's own manifest). The committed `AndroidManifest.xml` was
+  rewritten to match and verified with Expo's `AndroidConfig.Manifest` parser.
+
+**Open**
+- **`targetSdk` is 34; Play requires 36 since Aug-31-2026** — uploads are rejected.
+  Cannot be bumped in place: AGP 8.1.1 / Gradle 8.3 here, `compileSdk 36` needs AGP 8.6+ /
+  Gradle 8.7+. Requires an **Expo SDK 50 → 54/55 upgrade**. Extension available to
+  Nov-1-2026. Check the two unmaintained SMS libraries FIRST.
+- **Both SMS packages are unmaintained (last published 2022) and declare the removed
+  `package=` manifest attribute with no `namespace`.** They still compile under the
+  current AGP 8.1.1, but AGP 8.6+ (needed for API 36) is the open question — **test this
+  before any other upgrade work.** Blast radius is one file: `src/services/smsService.js`
+  wraps both behind lazy requires + `smsSupported`. Options: namespace shim (must go in
+  `withEPurseAndroid`, not `android/build.gradle`), `expo-sms-listener` +
+  `@maniac-tech/react-native-expo-read-sms`, or **write our own Expo module** — the
+  `ScreenSecurityModule.kt` pattern already in this repo makes that ~150 lines of Kotlin.
+  `react-native-sms-retriever`/`expo-otp-autofill` are NOT alternatives (SMS Retriever
+  only returns messages carrying our own app hash).
+- `READ_SMS`/`RECEIVE_SMS` need a Play Permissions Declaration + demo video.
+  **Corrected Sep-19-2026:** budget tracking IS a named permitted use case —
+  *"SMS-based money management / apps that track and manage budget"*, eligible for
+  `READ_SMS`+`RECEIVE_SMS`, and it survives the policy revision effective Jan-27-2027.
+  Same exception Axio/Walnut (`com.daamitt.walnut.app`) ships under. Approval still turns
+  on the declaration quality: core-functionality framing, demo video, prominent
+  disclosure, and the on-device argument (the backup allow-list proves raw SMS never
+  leaves the device). Fallbacks (notification listener / manual-only) are insurance now,
+  not an expectation.
+- `android/` is committed *and* was hand-edited, while `build:apk-local` runs
+  `prebuild --clean` and regenerates it. Pick one model; run
+  `npx expo prebuild -p android --clean` once and review the diff before the first
+  store build.
+- `build:apk-local` output is **debug-signed** (stock RN template default). Fine for
+  sideloading, never upload it. EAS production builds sign correctly, and deliberately
+  so: EAS only injects its release signing config while `signingConfigs.release.storeFile`
+  is absent from `build.gradle`, so do not hand-add one.
+- Considered, not done: replace `MediaLibrary.saveToLibraryAsync` in
+  `WhatsAppReminderScreen` with `expo-sharing` — drops 3 storage permissions and the
+  `expo-media-library` dependency.
