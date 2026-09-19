@@ -57,10 +57,8 @@ import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useRewardPalette, type RewardPalette } from '../hooks/useRewardPalette';
 import { radius, shadows, spacing } from '../constants/theme';
-import { STATIC_CONFIG } from '../config/staticConfig';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
 
-const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
-const INVITE_EARN_ENABLED = STATIC_CONFIG.inviteEarn.enabled;
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -76,6 +74,8 @@ interface Props {
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
+  const SHOP_ENABLED = useFeatureFlag('shop');
+  const INVITE_EARN_ENABLED = useFeatureFlag('inviteEarn');
   const D = useRewardPalette();
   const styles = useMemo(() => makeStyles(D), [D]);
 

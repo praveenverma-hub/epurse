@@ -302,10 +302,11 @@ alarming but is the stock React Native template default. What matters is how you
   exactly why you should **not** hand-add a release signing config to `build.gradle`.
   Doing so would silently switch off EAS's signing and put keystore management back
   on you. **Left unchanged deliberately.**
-- **`npm run build:stage-test` / `build:prod-test` (local Gradle):**
+- **`npm run build:stage-test` / `build:dev-test` (local Gradle):**
   this *does* sign with the debug keystore. That is fine for sideloading a test APK
   and fatal if the artifact is ever uploaded — Play rejects debug-signed uploads.
-  Treat those artifacts as test builds only, never store uploads.
+  Treat those artifacts as test builds only, never store uploads. There is no
+  local, debug-signed target for the production environment — see `BUILD.md`.
 
 Actions:
 
@@ -503,34 +504,53 @@ rejection round on the SMS declaration.
 
 ---
 
-## 7. Suggested order of work
+## 7. What is left, in order
 
-Run these three tracks in parallel — the waiting items must start first.
+Updated 2026-09-19. **The engineering blocker is done** — Expo SDK 57, targetSdk 36,
+New Architecture, SMS natives vendored in-repo, release APK building green and running on
+a real device with SMS capture and app lock working. What remains is mostly account
+paperwork and store submission, plus device QA.
 
-**Track A — clock-dependent (start today)**
-1. Apply for D-U-N-S (§1.1)
-2. Register the Play developer account
-3. Set up `support@epurse.co.in` and publish the four web pages (§2)
+**Track A — clock-dependent, start first (nothing else unblocks these)**
+1. **D-U-N-S number** if going the organisation route — up to 30 days, free (§1.1).
+2. **Register the Play developer account** ($25). Org avoids the 12-tester/14-day gate.
+3. **`support@epurse.co.in`** + publish the four pages on the domain (§2):
+   `/privacy`, `/terms`, `/delete-account`, `/`.
 
-**Track B — the big engineering item**
-4. Decide the SMS question (§0.1) — including whether you will build the fallback
-5. Verify the SMS libraries against a newer RN **before** committing to the upgrade
-6. Expo SDK 50 → 54/55, targetSdk to the current Play minimum (§0.2)
-7. Re-verify: `ScreenSecurity` plugin, Reanimated, Skia, `npm test`, release build on a device
+**Track B — device QA (needs a real phone, not an emulator)**
+4. **A MULTIPART bank SMS** — the long kind that arrives as several PDUs. This is the
+   riskiest part of the vendored native module: a botched reassembly TRUNCATES the body
+   and parses into a silently wrong transaction rather than failing (§0.5).
+5. Reminders actually **firing** at the scheduled time (they now schedule correctly;
+   delivery on Android 14+ is inexact unless the user grants "Alarms & reminders" — §3.3).
+6. App lock **hiding the app from the recents thumbnail** (`ScreenSecurity`).
+7. Gesture/worklet behaviour under the New Architecture — especially the `AllocationBar`
+   drag, given the known "a worklet must never call an imported function" trap.
+8. There is no local, debug-signed target for the production environment (`build.sh`
+   has no `prod-test`) — `dev`/`stage` differ from `prod` precisely in what the build
+   flags gate, so a both-flags-false bug can only be caught via an EAS build now
+   (`build:prod-local` is the cheapest one: real signing, no cloud quota).
 
-**Track C — release plumbing (can land any time)**
-8. Real signing config (§3.1) and versioning (§3.2)
-9. Strip unused permissions (§3.3)
-10. Placeholders and flags (§3.4), prominent disclosure (§3.5), account deletion (§0.3)
-11. Store assets (§4)
+**Track C — code, can land any time**
+9. `constants/appMeta.ts` placeholders: `SUPPORT_EMAIL` still `@epurse.app` (§2.1).
+10. **In-app account deletion** + the public `/delete-account` URL — required because
+    login is mandatory (§0.3).
+11. **Prominent disclosure** before the SMS/contacts/location prompts (§3.5).
+12. Flags for the store build: `STATIC_CONFIG.smsDiagnostic` OFF, `rating` ON once listed.
+13. Optional: swap `MediaLibrary.saveToLibraryAsync` for `expo-sharing` — drops 3 storage
+    permissions and a dependency (§3.3).
 
-**Then, in order**
-12. OAuth: all three SHA-1s registered, consent screen published (§0.4)
-13. Internal testing build → verify Google sign-in and Drive backup on a Play-signed build
-14. App content forms (§5.2), including the SMS declaration + video
-15. Closed testing (if required) → staged production rollout
-
----
+**Then, in order (each depends on the one before)**
+14. **`eas credentials`** → generate the upload keystore; record its SHA-1 (§3.1).
+15. **OAuth**: register debug + upload + **Play app-signing** SHA-1s and PUBLISH the
+    consent screen. Miss the third and sign-in fails for every real user (§0.4).
+16. **Internal testing build** via `npm run build:prod` (or `build:prod-local` if the EAS
+    quota is spent) → verify Google sign-in and Drive backup on a Play-signed artifact.
+17. **App content forms** (§5.2): Data Safety, the SMS Permissions Declaration + demo
+    video, data deletion URL, content rating, and **App access** (reviewers are behind a
+    mandatory sign-in wall with no data — give them credentials and a way to see the app
+    populated).
+18. Closed testing if required → **staged production rollout** (10% → 50% → 100%).
 
 ## Open questions for you
 

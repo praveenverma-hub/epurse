@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_APP_VARIANT": "development"
+        "EXPO_PUBLIC_APP_VARIANT": "development",
+        "EXPO_PUBLIC_BUILD_KIND": "prod"
       },
       "android": {
         "buildType": "apk"
@@ -17,7 +18,8 @@
     "stage": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_APP_VARIANT": "stage"
+        "EXPO_PUBLIC_APP_VARIANT": "stage",
+        "EXPO_PUBLIC_BUILD_KIND": "prod"
       },
       "android": {
         "buildType": "apk",
@@ -29,6 +31,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_BUILD_KIND": "prod"
+      },
       "android": {
         "buildType": "app-bundle"
       },

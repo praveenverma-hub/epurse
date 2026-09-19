@@ -35,6 +35,7 @@ import {
 } from '../store/useNotificationStore';
 import { useEPurseStore } from '../store/ePurseStore';
 import SheetCloseButton from './SheetCloseButton';
+import { openStoreListing } from './UpdateRequiredGate';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   aware_savings_claimed: 'gift-outline',
   goal_achieved:         'flag-outline',
   level_up:              'trophy-outline',
+  app_update:            'arrow-up-circle-outline',
 };
 
 const KIND_TINT: Record<NotificationKind, string> = {
@@ -71,6 +73,7 @@ const KIND_TINT: Record<NotificationKind, string> = {
   aware_savings_claimed: '#10B981',
   goal_achieved:         '#14B8A6',
   level_up:              '#7C3AED',
+  app_update:            '#2563EB',
 };
 
 // ─── Time-ago helper ────────────────────────────────────────────────────────
@@ -193,7 +196,13 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
                     if (monthKey) {
                       handleDismiss();
                       openMonthlyRecap(monthKey);
+                      return;
                     }
+                    // app_update is the SOFT nudge — tapping it is the whole point of
+                    // showing it, so it goes straight to the store listing. The sheet
+                    // stays open: the tap opened another app (or a browser), it didn't
+                    // navigate anywhere inside this one.
+                    if (entry.kind === 'app_update') openStoreListing();
                   }}
                   onLongPress={() => dismiss(entry.id)}
                 />

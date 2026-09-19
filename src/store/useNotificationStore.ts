@@ -8,6 +8,8 @@
 //   • aware_savings_claimed — zero-spend bonus actually credited
 //   • goal_achieved         — a goal's lifetime target reached (bonus credited)
 //   • level_up              — Profile Level advanced
+//   • app_update            — a newer build is on the store (the SOFT update
+//                             nudge; the HARD one is UpdateRequiredGate)
 //
 // Rules:
 //   1. Each entry has a `dedupeKey`; adding a new entry with an existing key
@@ -31,7 +33,8 @@ export type NotificationKind =
   | 'aware_streak_reset'
   | 'aware_savings_claimed'
   | 'goal_achieved'
-  | 'level_up';
+  | 'level_up'
+  | 'app_update';
 
 export interface NotificationEntry {
   id:        string;

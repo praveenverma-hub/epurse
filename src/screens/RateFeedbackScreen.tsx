@@ -8,13 +8,12 @@ import { StatusBar } from 'expo-status-bar';
 
 import { spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { STATIC_CONFIG } from '../config/staticConfig';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import { APP_STORE_URL, PLAY_STORE_URL, SUPPORT_EMAIL } from '../constants/appMeta';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import NavListRow from '../components/NavListRow';
 import { hapticLight } from '../utils/haptics';
 
-const RATING_ENABLED = STATIC_CONFIG.rating.enabled;
 
 interface Props {
   navigation: { goBack: () => void };
@@ -22,6 +21,7 @@ interface Props {
 
 const RateFeedbackScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
+  const RATING_ENABLED = useFeatureFlag('rating');
 
   const rateApp = () => {
     hapticLight();

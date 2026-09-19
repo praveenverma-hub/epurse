@@ -2245,20 +2245,9 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   rewritten to match and verified with Expo's `AndroidConfig.Manifest` parser.
 
 **Open**
-- **`targetSdk` is 34; Play requires 36 since Aug-31-2026** — uploads are rejected.
-  Cannot be bumped in place: AGP 8.1.1 / Gradle 8.3 here, `compileSdk 36` needs AGP 8.6+ /
-  Gradle 8.7+. Requires an **Expo SDK 50 → 54/55 upgrade**. Extension available to
-  Nov-1-2026. Check the two unmaintained SMS libraries FIRST.
-- **Both SMS packages are unmaintained (last published 2022) and declare the removed
-  `package=` manifest attribute with no `namespace`.** They still compile under the
-  current AGP 8.1.1, but AGP 8.6+ (needed for API 36) is the open question — **test this
-  before any other upgrade work.** Blast radius is one file: `src/services/smsService.js`
-  wraps both behind lazy requires + `smsSupported`. Options: namespace shim (must go in
-  `withEPurseAndroid`, not `android/build.gradle`), `expo-sms-listener` +
-  `@maniac-tech/react-native-expo-read-sms`, or **write our own Expo module** — the
-  `ScreenSecurityModule.kt` pattern already in this repo makes that ~150 lines of Kotlin.
-  `react-native-sms-retriever`/`expo-otp-autofill` are NOT alternatives (SMS Retriever
-  only returns messages carrying our own app hash).
+- ~~`targetSdk` 34 vs Play's 36~~ **DONE Sep-19-2026** — Expo SDK 57, targetSdk 36.
+- ~~Both SMS packages unmaintained~~ **DONE Sep-19-2026** — removed and vendored into
+  `plugins/android/SmsModule.kt`; confirmed capturing on a real device.
 - `READ_SMS`/`RECEIVE_SMS` need a Play Permissions Declaration + demo video.
   **Corrected Sep-19-2026:** budget tracking IS a named permitted use case —
   *"SMS-based money management / apps that track and manage budget"*, eligible for
@@ -2443,6 +2432,85 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   "Next: Tomorrow · 9:00 am" listed, zero errors.
   **This also silently broke `reconcileReminders`, which runs on EVERY launch/foreground.**
 - Sep-19-2026: **SMS capture and app lock confirmed WORKING on a real device build.**
+- Sep-19-2026: **ProGuard/R8 minification enabled for release builds** — was off
+  (`android.enableMinifyInReleaseBuilds`/`enableShrinkResourcesInReleaseBuilds` both unset →
+  default `false`). Wired via `expo-build-properties` in `app.json` rather than hand-editing
+  `android/app/build.gradle` or `proguard-rules.pro`, because `android/` is CNG-generated and
+  gitignored — anything hand-edited there is silently lost on the next `expo prebuild --clean`.
+  Confirmed the risk was real: the reanimated/turbomodule `-keep` rules already sitting in
+  `proguard-rules.pro` were hand-added before the CNG conversion and are NOT covered by any
+  library's `consumerProguardFiles` (checked every native dep — only `react-native-svg` ships
+  one), so they would vanish on the next clean prebuild the moment minify turned them from
+  harmless to load-bearing. Moved them into `extraProguardRules` on the plugin config, which
+  re-writes them into the generated file on every prebuild — proved this by deleting `android/`
+  and regenerating from scratch. **Not yet device-verified against a real release build** —
+  next `build:prod-test` should be watched for an R8-stripped-class crash before shipping.
+- Sep-19-2026: **added the remote-config / update-gate mechanism** — see
+  `[[project_remote_config_sep2026]]`. New `config/remoteConfig.ts` + `store/useRemoteConfigStore.ts`
+  + `hooks/useFeatureFlag.ts`/`useAppUpdate.ts` + `components/UpdateRequiredGate.tsx`. Fetches one
+  public JSON file from `epurse.co.in` (still the app's ONLY other network call besides Drive
+  backup) that can (a) block a build below `minSupportedVersion` and (b) override 4 of the
+  `STATIC_CONFIG` section switches (`shop`, `inviteEarn`, `rating`, `smsDiagnostic`) without a
+  release. Fails open on every error path. `ProfileScreen`/`ShopScreen`/`WelcomeStreakModal`/
+  `InviteEarnScreen`/`RateFeedbackScreen`/`SettingsScreen` moved their flag reads from a
+  module-scope `const X = STATIC_CONFIG.y.enabled` to `useFeatureFlag('y')`, since a value
+  arriving after module load can never reach a constant captured at import time. `docs/site/
+  app-config.json` is the reference file to publish at `https://epurse.co.in/app-config.json`.
+  Also fixed a pre-existing tsconfig break found along the way: `baseUrl` deprecation (TS 6.0.3,
+  landed with the SDK 57 bump) was erroring `tsc` out before it checked a single file — type
+  checking has been silently non-functional since that upgrade. One-line fix
+  (`ignoreDeprecations: "6.0"`); running it live then also caught a real bug in
+  `constants/empty.ts` (an invalid `readonly never[]` → `any[]` cast) and ~10 more pre-existing
+  errors in unrelated files (untouched — out of scope for this change, flagged for a follow-up).
+- Sep-19-2026: **split remote config into TWO documents** — `app-config.test.json` for every
+  dev/stage build, `app-config.json` for prod, picked by `IS_STAGE_BUILD`. Requested so a lower
+  `minSupportedVersion` or an early flag flip tried on the test file can never reach a real user.
+  AsyncStorage cache key is namespaced by env too, since the app has no `applicationIdSuffix` per
+  variant and could otherwise read the wrong build's cached document for one launch after a
+  sideload swap. Reference files under `docs/site/`.
+- Sep-19-2026: **checked for an iOS equivalent of Android's minify/R8 — there isn't one.**
+  iOS's Xcode Release config already strips/optimises native code by default with nothing exposed
+  to toggle. The one thing genuinely shared across both platforms — Metro's JS-bundle minifier —
+  was already on for both; documented explicitly in `metro.config.js`. Also checked New
+  Architecture for a similar cross-platform gap (Android's `newArchEnabled=true` vs iOS's
+  `Podfile.properties.json` missing the key entirely) — turned out to be dead code: RN ≥0.82
+  hardcodes New Architecture on regardless, the Podfile's own toggle can no longer do anything.
+- Sep-19-2026: **verified "all test builds use test json, all prod builds use prod json"
+  against build.sh's actual 6 named targets — found and fixed a real bug in the process.**
+  `IS_STAGE_BUILD` (which `remoteConfig.ts` picks its document off) only checked
+  `__DEV__ || variant==='stage'`, never `variant==='development'` — unlike `IS_DEV_BUILD` right
+  beside it, breaking the subset invariant its own doc comment claims (`IS_DEV_BUILD` should
+  always imply `IS_STAGE_BUILD`). Fixed. New `buildVariant.test.mjs` (14 checks) pins all 6
+  targets as an explicit contract, including the one that reads backwards at first glance:
+  `prod-test` fetches the PROD document, not the test one, despite the name — it exists
+  specifically to exercise the real production code path locally, and build.sh unsets
+  `EXPO_PUBLIC_APP_VARIANT` for it on purpose to mirror the real store build.
+- Sep-19-2026: **overruled the above — user meant the WHERE axis literally, by target-name
+  suffix**: every "-test" build.sh target (dev-test/stage-test/**prod-test**) fetches the test
+  json; every "-prod"/prod one (dev-prod/stage-prod/prod) fetches prod, `prod-test` included.
+  Re-plumbed off a NEW `EXPO_PUBLIC_BUILD_KIND` env var (`build.sh`'s LOCAL branch exports
+  `'test'`; every `eas.json` profile's `env` block sets `'prod'`) instead of `IS_STAGE_BUILD` —
+  `remoteConfig.ts` no longer imports `constants/buildVariant.ts` at all. 49 tests re-pin the
+  corrected mapping.
+- Sep-19-2026: **the above was itself wrong — reverted.** User: *"we have 3 env -
+  developemnt, stage, prod. so prod build the release one should not have the test."* That's the
+  ENVIRONMENT axis, not the target-name suffix — `prod-test` must fetch the REAL prod document.
+  Removed `EXPO_PUBLIC_BUILD_KIND` from `build.sh`/`eas.json` entirely and restored
+  `resolveRemoteConfigEnv(IS_STAGE_BUILD)`. **Net result matches the design from two entries
+  above** (the one this "fix" walked back) — `prod-test`/`prod` → prod json, the other four
+  targets → test json.
+- Sep-19-2026: **`prod-test` REMOVED as a build.sh target entirely.** User, final and explicit:
+  *"dev-test, stage-test -> test remote config / stage-prod, dev-prod, prod -> prod remote
+  config / and there will be no such thing as prod-test."* Deleting the target resolves the
+  whole back-and-forth above at its root — with no `prod-test`, WHERE and ENVIRONMENT never
+  disagree again, so `resolveRemoteConfigEnv` reads `EXPO_PUBLIC_BUILD_KIND` (the WHERE axis)
+  one more time. `build.sh` lost the `prod-test` case arm/help row/execution branch and its
+  LOCAL-path variant export simplified (only reachable by dev-test/stage-test now); `eas.json`
+  re-gained `EXPO_PUBLIC_BUILD_KIND: "prod"` on all three profiles; `package.json` lost
+  `build:prod-test`. **There is now no local way to exercise the production environment before
+  a store upload** — that used to be `prod-test`'s whole purpose; `build:prod-local` (a real
+  EAS build run locally, no cloud quota) is the closest replacement. `BUILD.md`/
+  `docs/ANDROID_RELEASE.md` updated to match.
 
 **Open**
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders

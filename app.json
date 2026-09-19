@@ -38,7 +38,17 @@
       "expo-sharing",
       "expo-status-bar",
       "expo-web-browser",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "# react-native-reanimated — NOT covered by any shipped consumerProguardFiles; without this R8 strips the classes Reanimated's JNI layer resolves by name, and a release build crashes on first use of a worklet with minify on.\n-keep class com.swmansion.reanimated.** { *; }\n-keep class com.facebook.react.turbomodule.** { *; }\n-keep class com.facebook.react.fabric.** { *; }"
+          }
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,

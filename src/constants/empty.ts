@@ -19,6 +19,6 @@
 // into an unrelated screen.
 // =============================================================================
 
-export const EMPTY_ARRAY: any[] = Object.freeze([]) as any[];
+export const EMPTY_ARRAY: any[] = Object.freeze([]) as unknown as any[];
 
 export const EMPTY_OBJECT: Record<string, any> = Object.freeze({});

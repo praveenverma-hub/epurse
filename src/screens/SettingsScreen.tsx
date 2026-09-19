@@ -39,7 +39,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEPurseStore } from '../store/ePurseStore';
 import { spacing } from '../constants/theme';
 import { THEMES } from '../constants/themes';
-import { STATIC_CONFIG } from '../config/staticConfig';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import { APP_VERSION } from '../constants/appMeta';
 import { useTheme } from '../hooks/useTheme';
 import { useGoogleSession } from '../hooks/useGoogleSession';
@@ -48,8 +48,6 @@ import PlainScreenHeader from '../components/PlainScreenHeader';
 import ThemePickerSheet from '../components/ThemePickerSheet';
 import CenterModal from '../components/CenterModal';
 
-const SMS_DIAGNOSTIC_ENABLED = STATIC_CONFIG.smsDiagnostic.enabled;
-const RATING_ENABLED = STATIC_CONFIG.rating.enabled;
 
 interface Props {
   navigation: { goBack: () => void; navigate: (route: string) => void };
@@ -57,6 +55,8 @@ interface Props {
 
 const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
+  const SMS_DIAGNOSTIC_ENABLED = useFeatureFlag('smsDiagnostic');
+  const RATING_ENABLED = useFeatureFlag('rating');
 
   const themeId = useEPurseStore((s: any) => s.themeId);
   const setThemeId = useEPurseStore((s: any) => s.setThemeId);

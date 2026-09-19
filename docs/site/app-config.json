@@ -1,0 +1,11 @@
+{
+  "minSupportedVersion": "1.0.0",
+  "latestVersion": "1.5.0",
+  "updateMessage": null,
+  "flags": {
+    "shop": false,
+    "inviteEarn": false,
+    "rating": false,
+    "smsDiagnostic": true
+  }
+}

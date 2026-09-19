@@ -13,7 +13,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { colors, radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { STATIC_CONFIG } from '../config/staticConfig';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import { APP_NAME } from '../constants/appMeta';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
@@ -27,7 +27,6 @@ const typography = typographyBase as unknown as Record<string, TextStyle>;
 // every prop. Same local cast the other TS callers use (GoalsScreen, etc).
 const GradientButton: React.FC<{ title: string; onPress: () => void }> = GradientButtonBase as any;
 
-const INVITE_EARN_ENABLED = STATIC_CONFIG.inviteEarn.enabled;
 
 const INVITE_FAQ: FaqItem[] = [
   {
@@ -48,6 +47,7 @@ interface Props {
 
 const InviteEarnScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
+  const INVITE_EARN_ENABLED = useFeatureFlag('inviteEarn');
 
   const invite = () => {
     hapticLight();

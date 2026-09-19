@@ -147,6 +147,22 @@ export const STATIC_CONFIG = {
     /** false (no backend to verify an invite yet): share only, no reward promised. */
     enabled: false,
   },
+
+  /**
+   * `config/remoteConfig.ts` — the one thing in the app that can change after it
+   * ships: a public JSON file on our domain carrying a minimum supported version
+   * and an override for the four SECTION switches above.
+   */
+  remoteConfig: {
+    /**
+     * false → no fetch is ever made, nothing is read from the cache, and every
+     * switch above is exactly its build-time value. The kill switch for the kill
+     * switch: if the mechanism itself ever misbehaves in the field, this is the
+     * one-line revert, and it is also what keeps the "ePurse makes one network
+     * call" claim verifiable by grep.
+     */
+    enabled: true,
+  },
 } as const;
 
 export default STATIC_CONFIG;

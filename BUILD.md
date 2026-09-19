@@ -132,15 +132,20 @@ the flags in `src/constants/buildVariant.ts`:
 | `stage` | `stage` | ❌ | ✅ | debug tools, no bypass |
 | `prod` | *(unset)* | ❌ | ❌ | nothing gated on |
 
-**Where** — who builds and signs it. Changes nothing about the app itself:
+**Where** — who builds and signs it. Also decides which remote-config document the
+app fetches (`EXPO_PUBLIC_BUILD_KIND`, read by `src/config/remoteConfig.ts`):
 
-- `-test` → **this machine**, debug-signed. Sideload only; Play rejects it.
-- `-prod` → **EAS cloud**, real signing credentials, distributable.
+- `-test` → **this machine**, debug-signed. Sideload only; Play rejects it. Fetches
+  the **test** remote-config document.
+- `-prod` → **EAS cloud**, real signing credentials, distributable. Fetches the
+  **real** remote-config document.
+
+There is no `prod-test`: the production environment is only ever built through the
+EAS pipeline (cloud or `--eas-local`), never as a local debug-signed sideload.
 
 ```bash
 # on THIS machine
 npm run build:stage-test        # plain Gradle -> APK, DEBUG-SIGNED (sideload only)
-npm run build:prod-test         # plain Gradle -> AAB, verification only
 npm run build:dev-test          # dev client with Metro attached
 
 # on THIS machine, through the EAS pipeline — real signing, NO cloud quota
@@ -162,12 +167,6 @@ cloud on a first run.
 
 The `-test` targets are *not* a substitute: they are plain Gradle and therefore
 debug-signed, so Play will reject them.
-
-`prod-test` is worth knowing about: it is the only way to exercise the
-**production** code paths locally. `dev` and `stage` differ from `prod` precisely
-in what those flags gate, so a bug that only appears with both flags false will
-not show up in any stage build — and the next place you would find it is a store
-upload.
 
 **Local builds are debug-signed** (the stock React Native template default). EAS
 injects real credentials; see `docs/ANDROID_RELEASE.md` §3.1 for why `build.gradle`

@@ -13,6 +13,10 @@ import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChan
 import { ToastProvider } from './src/components/Toast';
 import AppLockGate from './src/components/AppLockGate';
 import LoginGate from './src/components/LoginGate';
+import UpdateRequiredGate from './src/components/UpdateRequiredGate';
+import { useRemoteConfigStore } from './src/store/useRemoteConfigStore';
+import { useNotificationStore } from './src/store/useNotificationStore';
+import { useAppUpdate } from './src/hooks/useAppUpdate';
 import * as googleAuth from './src/backup/googleAuth';
 
 // =============================================================================
@@ -51,6 +55,57 @@ function NotificationTapBoot() {
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
     return () => sub.remove();
   }, [openMonthlyRecap]);
+  return null;
+}
+
+/**
+ * Reads the cached remote config, then goes looking for a newer one. Cache
+ * first and network second is the order that matters: a section switched off
+ * last week must stay off on a launch with no signal, and the blocking gate
+ * must not flash while a request is in flight.
+ *
+ * `refresh()` throttles itself to once every 30 minutes, so calling it on every
+ * foreground is cheap — the config file changes a few times a year, and the app
+ * only needs to notice within a session or two.
+ */
+function RemoteConfigBoot() {
+  const hydrate = useRemoteConfigStore((s) => s.hydrate);
+  const refresh = useRemoteConfigStore((s) => s.refresh);
+  useEffect(() => {
+    hydrate().then(() => refresh());
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [hydrate, refresh]);
+  return null;
+}
+
+/**
+ * The SOFT half of update handling: a newer version exists, the app works fine,
+ * and the user gets one bell entry about it. The hard half is UpdateRequiredGate.
+ *
+ * Checks for an existing entry before adding rather than relying on `add`'s
+ * dedupe: `add` REPLACES a matching key, which would reset `isRead` and stamp a
+ * fresh `createdAt` on every launch — a notification that keeps coming back
+ * unread until you install. Deduping on the VERSION means the next release
+ * gets its own entry, and the 15-day prune means a long-ignored one eventually
+ * asks again.
+ */
+function AppUpdateNudgeBoot() {
+  const { nudge, latestVersion } = useAppUpdate();
+  const add = useNotificationStore((s) => s.add);
+  useEffect(() => {
+    if (!nudge || !latestVersion) return;
+    const dedupeKey = `app_update:${latestVersion}`;
+    if (useNotificationStore.getState().entries.some((e) => e.dedupeKey === dedupeKey)) return;
+    add({
+      kind: 'app_update',
+      title: 'Update Available',
+      body: `ePurse ${latestVersion} is ready on the store.`,
+      dedupeKey,
+    });
+  }, [nudge, latestVersion, add]);
   return null;
 }
 
@@ -160,6 +215,8 @@ export default function App() {
           <StatusBar style="light" />
           <NotificationBoot />
           <NotificationTapBoot />
+          <RemoteConfigBoot />
+          <AppUpdateNudgeBoot />
           <SmsSyncBoot />
           <CompactionBoot />
           <BudgetRolloverBoot />
@@ -167,6 +224,7 @@ export default function App() {
           <AppNavigator />
           <AppLockGate />
           <LoginGate />
+          <UpdateRequiredGate />
         </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

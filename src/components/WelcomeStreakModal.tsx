@@ -36,11 +36,10 @@ import {
   selectFirstLaunch,
 } from '../store/useRewardStore';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
-import { STATIC_CONFIG } from '../config/staticConfig';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import LiveFlame from './LiveFlame';
 import SheetCloseButton from './SheetCloseButton';
 
-const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
 import { hapticSuccess } from '../utils/haptics';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -52,6 +51,7 @@ const SCREEN_H    = Dimensions.get('window').height;
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const WelcomeStreakModal: React.FC = () => {
+  const SHOP_ENABLED = useFeatureFlag('shop');
   const isFirstLaunch      = useRewardStore(selectFirstLaunch);
   const setFirstLaunchDone = useRewardStore((s) => s.setFirstLaunchDone);
 

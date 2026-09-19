@@ -50,9 +50,8 @@ import PlainScreenHeader from '../components/PlainScreenHeader';
 import FaqAccordion, { type FaqItem } from '../components/FaqAccordion';
 import { useRewardPalette, type RewardPalette } from '../hooks/useRewardPalette';
 import { radius, shadows, spacing } from '../constants/theme';
-import { STATIC_CONFIG } from '../config/staticConfig';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
 
-const SHOP_ENABLED = STATIC_CONFIG.shop.enabled;
 
 const COMING_SOON_FAQ: FaqItem[] = [
   {
@@ -90,6 +89,7 @@ interface Props {
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 const ShopScreen: React.FC<Props> = ({ navigation }) => {
+  const SHOP_ENABLED = useFeatureFlag('shop');
   const D = useRewardPalette();
   const styles = useMemo(() => makeStyles(D), [D]);
 

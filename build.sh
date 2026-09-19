@@ -11,7 +11,10 @@
 #     stage   → IS_STAGE_BUILD true                  (debug tools, no bypass)
 #     prod    → both false                           (nothing gated on)
 #
-#   WHERE      — who BUILDS and SIGNS it. Changes nothing about the app itself.
+#   WHERE      — who BUILDS and SIGNS it. Also decides which remote-config
+#                document the app fetches (EXPO_PUBLIC_BUILD_KIND, read by
+#                src/config/remoteConfig.ts): every "-test" target talks to
+#                the test document, every "-prod"/prod target to the real one.
 #     -test   → plain Gradle on this machine. DEBUG-SIGNED: sideload only.
 #     -prod   → the EAS pipeline, with real signing credentials. Distributable.
 #
@@ -22,11 +25,12 @@
 #
 #   Targets:  dev-test    dev-prod
 #             stage-test  stage-prod
-#             prod-test   prod
+#                         prod
 #
-# `prod-test` exists so the production code paths can be exercised locally —
-# it is the only way to catch a "works in stage, breaks in prod" bug before
-# a store upload, since those two differ precisely in what the flags gate.
+# There is no `prod-test` — every "-test" target is a debug-signed sideload
+# talking to the test remote-config document; a production ENVIRONMENT build
+# is only ever produced (and only ever fetches the real config) through the
+# EAS pipeline, cloud or --eas-local.
 #
 # Signing: see docs/ANDROID_RELEASE.md §3.1 for why build.gradle must be left
 # alone rather than given a release signingConfig.
@@ -57,20 +61,19 @@ for arg in "$@"; do
     dev-prod)    ENV="development"; LOCAL=false ; TARGET="$arg" ;;
     stage-test)  ENV="stage";       LOCAL=true  ; TARGET="$arg" ;;
     stage-prod)  ENV="stage";       LOCAL=false ; TARGET="$arg" ;;
-    prod-test)   ENV="production";  LOCAL=true  ; TARGET="$arg" ;;
     prod|prod-prod) ENV="production"; LOCAL=false; TARGET="prod" ;;
     --eas-local) EAS_LOCAL=true ;;
     --ios)       PLATFORM="ios" ;;
-    -h|--help)   sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo -e "${YELLOW}unknown option: $arg${RESET} (try --help)"; exit 1 ;;
   esac
 done
 
 if [ -z "$TARGET" ]; then
   echo -e "${RED}Pick a target:${RESET}"
-  echo -e "  ${BOLD}dev-test${RESET}    ${DIM}local dev client${RESET}        ${BOLD}dev-prod${RESET}    ${DIM}EAS dev client${RESET}"
-  echo -e "  ${BOLD}stage-test${RESET}  ${DIM}local APK${RESET}               ${BOLD}stage-prod${RESET}  ${DIM}EAS APK for testers${RESET}"
-  echo -e "  ${BOLD}prod-test${RESET}   ${DIM}local AAB (verify only)${RESET} ${BOLD}prod${RESET}        ${DIM}EAS AAB for Play${RESET}"
+  echo -e "  ${BOLD}dev-test${RESET}    ${DIM}local dev client${RESET}  ${BOLD}dev-prod${RESET}    ${DIM}EAS dev client${RESET}"
+  echo -e "  ${BOLD}stage-test${RESET}  ${DIM}local APK${RESET}         ${BOLD}stage-prod${RESET}  ${DIM}EAS APK for testers${RESET}"
+  echo -e "  ${BOLD}prod${RESET}        ${DIM}EAS AAB for Play${RESET}"
   echo -e "${DIM}  add --eas-local to a -prod target to run EAS here (real signing, no cloud quota)${RESET}"
   exit 1
 fi
@@ -112,15 +115,16 @@ fi
 echo -e "${YELLOW}${BOLD}⚠ Built here, so DEBUG-SIGNED. Sideload only — never upload to Play.${RESET}"
 echo ""
 
-# production deliberately leaves the variant UNSET, matching eas.json: an empty
-# string would still be a defined value to `process.env`.
-if [ "$ENV" != "production" ]; then
-  export EXPO_PUBLIC_APP_VARIANT="$ENV"
-  echo -e "${DIM}EXPO_PUBLIC_APP_VARIANT=${ENV}${RESET}"
-else
-  unset EXPO_PUBLIC_APP_VARIANT
-  echo -e "${DIM}EXPO_PUBLIC_APP_VARIANT unset (production)${RESET}"
-fi
+# LOCAL is only ever true for dev-test/stage-test now (production has no
+# "-test" target), so ENV is always "development" or "stage" here.
+export EXPO_PUBLIC_APP_VARIANT="$ENV"
+echo -e "${DIM}EXPO_PUBLIC_APP_VARIANT=${ENV}${RESET}"
+
+# The WHERE-axis signal src/config/remoteConfig.ts reads to pick its
+# remote-config document: every "-test" target fetches the test document.
+# The matching 'prod' value is set per eas.json build profile instead.
+export EXPO_PUBLIC_BUILD_KIND="test"
+echo -e "${DIM}EXPO_PUBLIC_BUILD_KIND=test${RESET}"
 
 # android/ is generated and no longer committed, so it may simply not be here.
 if [ ! -d android ]; then
@@ -137,12 +141,6 @@ case "$TARGET" in
     cd android && ./gradlew assembleRelease
     echo ""
     echo -e "${GREEN}${BOLD}✔ APK${RESET} ${DIM}android/app/build/outputs/apk/release/app-release.apk${RESET}"
-    ;;
-  prod-test)
-    cd android && ./gradlew bundleRelease
-    echo ""
-    echo -e "${GREEN}${BOLD}✔ AAB${RESET} ${DIM}android/app/build/outputs/bundle/release/app-release.aab${RESET}"
-    echo -e "${YELLOW}  Debug-signed — Play will reject it. Use 'npm run build:prod' for a real store bundle.${RESET}"
     ;;
 esac
 echo ""
