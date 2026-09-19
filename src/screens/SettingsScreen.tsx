@@ -65,7 +65,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
   const deleteAllUserData = useEPurseStore((s: any) => s.deleteAllUserData);
-  const { googleAccount, signOut, deleteAccount } = useGoogleSession();
+  const { signOut, deleteAccount } = useGoogleSession();
 
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -197,8 +197,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
           <NavListRow
             icon="log-out-outline"
             label="Logout"
-            hint={googleAccount?.email}
-            hintTone="warn"
             chevron={false}
             divided
             onPress={() => setConfirmLogout(true)}
@@ -206,8 +204,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
           <NavListRow
             icon="trash-outline"
             label="Delete Account"
-            hint="Erases everything on this device"
-            hintTone="warn"
             chevron={false}
             divided
             onPress={() => setConfirmDelete(true)}

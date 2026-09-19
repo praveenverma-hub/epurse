@@ -85,7 +85,7 @@ const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
                 { borderColor: theme.divider, color: theme.textPrimary, backgroundColor: theme.background },
                 nameDraft.length > 0 && !nameValid && { borderColor: theme.danger },
               ]}
-              placeholder="e.g. Praveen Verma"
+              placeholder="Enter your name"
               placeholderTextColor={theme.textSecondary}
               value={nameDraft}
               onChangeText={(t) => setNameDraft(sanitizeName(t))}

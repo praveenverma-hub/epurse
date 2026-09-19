@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delete Your Account &amp; Data — ePurse</title>
+<meta name="description" content="How to delete your ePurse account and data, on-device and in Google Drive.">
+<style>
+  :root {
+    --ink: #1a1f2b;
+    --ink-soft: #4b5563;
+    --line: #e5e7eb;
+    --card: #f8f9fb;
+    --accent: #FF5A1F;
+    --accent-soft: #FFF1EA;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #f1f2f4;
+      --ink-soft: #b6bac2;
+      --line: #2a2e37;
+      --card: #1c1f27;
+      --accent-soft: #2b1f18;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #f1f2f4;
+    --ink-soft: #b6bac2;
+    --line: #2a2e37;
+    --card: #1c1f27;
+    --accent-soft: #2b1f18;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: Canvas;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+  header { margin-bottom: 32px; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: var(--accent); flex-shrink: 0;
+  }
+  .brand-name { font-weight: 700; font-size: 17px; letter-spacing: -0.2px; }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.3px; }
+  .lede { color: var(--ink-soft); font-size: 15px; margin: 0; }
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 28px 0;
+    font-size: 15px;
+  }
+  .callout strong { display: block; margin-bottom: 4px; }
+  h2 {
+    font-size: 18px;
+    margin: 36px 0 12px;
+    letter-spacing: -0.2px;
+  }
+  .step {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .step-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+  .step p { margin: 4px 0 0; color: var(--ink-soft); font-size: 14.5px; }
+  ol.plain, ul.plain { margin: 8px 0 0; padding-left: 20px; }
+  ol.plain li, ul.plain li { margin-bottom: 6px; font-size: 14.5px; color: var(--ink-soft); }
+  code {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 13.5px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 4px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-soft); font-weight: 600; width: 34%; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">ePurse</div>
+    </div>
+    <h1>Delete Your Account &amp; Data</h1>
+    <p class="lede">ePurse has no backend server — everything it knows about you lives in one of two places: on your device, or in your own Google Drive. This page covers deleting both, whether or not you still have the app installed.</p>
+  </header>
+
+  <div class="callout">
+    <strong>There is nothing on our servers to delete, because we don't have a server.</strong>
+    ePurse never uploads your transactions, messages, or contacts anywhere. Deleting your data means clearing it from your device and, if you used backup, from your own Drive — steps only you can take, which is exactly what this page walks through.
+  </div>
+
+  <h2>Option 1 — In the app (fastest, if you still have it installed)</h2>
+  <div class="step">
+    <div class="step-title">Settings → Logout → Delete Account &amp; Data</div>
+    <p>Open ePurse, go to <strong>Settings</strong>, and tap <strong>Delete Account &amp; Data</strong> below Logout. Confirm once. This immediately:</p>
+    <ul class="plain">
+      <li>Erases every transaction, account, budget, goal, and reminder stored on your device</li>
+      <li>Signs you out and revokes ePurse's access to your Google account</li>
+      <li>Returns the app to a fresh, signed-out state</li>
+    </ul>
+    <p>This does <strong>not</strong> delete a Drive backup you made earlier — see Option 2 for that, since it lives in your own Drive, not ours.</p>
+  </div>
+
+  <h2>Option 2 — Delete your Drive backup</h2>
+  <p style="color:var(--ink-soft); font-size:14.5px; margin-top:-4px;">Only relevant if you ever used ePurse's optional backup. It writes one file to <strong>your own</strong> Google Drive — we never see it unencrypted, and we can't delete it for you remotely.</p>
+  <div class="step">
+    <div class="step-title">Find and remove it yourself</div>
+    <ol class="plain">
+      <li>Open <a href="https://drive.google.com" target="_blank" rel="noopener">drive.google.com</a> and sign in with the account you used in ePurse</li>
+      <li>Search for <code>epurse-backup</code></li>
+      <li>Select the file(s) and delete them (and empty Trash, if you want it gone immediately rather than after 30 days)</li>
+    </ol>
+  </div>
+
+  <h2>Option 3 — Don't have the app anymore?</h2>
+  <div class="step">
+    <div class="step-title">Revoke ePurse's access from your Google account</div>
+    <p>This is the one step that works with no app installed. It immediately cuts off anything ePurse could otherwise do with your Google sign-in.</p>
+    <ol class="plain">
+      <li>Go to <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a></li>
+      <li>Find <strong>ePurse</strong> and select <strong>Remove Access</strong></li>
+    </ol>
+    <p>Then follow Option 2 above to remove any backup file left in your Drive. On-device data from an uninstalled copy of the app is already gone with the uninstall — Android does not keep app data around afterward.</p>
+  </div>
+  <div class="step">
+    <div class="step-title">Or, email us directly</div>
+    <p>If you'd rather have us confirm it for you: <a href="mailto:support@epurse.co.in?subject=Delete%20my%20account">support@epurse.co.in</a>. We'll reply with the exact steps above for your situation — there's no separate request form because there's no account record on our side to look up.</p>
+  </div>
+
+  <h2>What is retained, and for how long</h2>
+  <table>
+    <tr><th>SMS message text</th><td>Never leaves your device. The parsed transaction (merchant, amount, date) is kept in the app's normal retention window; the raw message text itself is dropped after that window regardless of whether you delete your account.</td></tr>
+    <tr><th>Contacts</th><td>Read only to label people in splits/lending — never stored anywhere but your device, gone the moment you delete your account or uninstall.</td></tr>
+    <tr><th>Location</th><td>A coarse city label only, attached to individual transactions on your device — never coordinates, never uploaded.</td></tr>
+    <tr><th>Google account identity</th><td>Your name/email/photo, held only long enough to show you're signed in. Deleted on sign-out, deletion, or if you revoke access via Google.</td></tr>
+    <tr><th>Drive backup</th><td>An encrypted file in <em>your own</em> Drive, containing parsed values only (never raw SMS). Retained until you delete it — see Option 2.</td></tr>
+    <tr><th>On any ePurse server</th><td>Nothing. There is no backend.</td></tr>
+  </table>
+
+  <footer>
+    ePurse · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms</a> · <a href="mailto:support@epurse.co.in">support@epurse.co.in</a>
+  </footer>
+
+</div>
+</body>
+</html>

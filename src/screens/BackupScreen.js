@@ -445,7 +445,7 @@ const BackupScreen = ({ navigation, route }) => {
                       accessibilityRole="button"
                       accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
                     >
-                      <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textMuted} />
+                      <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={theme.textMuted} />
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -468,7 +468,7 @@ const BackupScreen = ({ navigation, route }) => {
                         accessibilityRole="button"
                         accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
                       >
-                        <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textMuted} />
+                        <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={theme.textMuted} />
                       </TouchableOpacity>
                     </View>
                     {/* The stronger option, offered but not pushed: most people

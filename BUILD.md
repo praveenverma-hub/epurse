@@ -44,27 +44,38 @@ When it finishes (~10 min in the cloud) EAS gives you a download URL. Open it on
 
 ---
 
-## Crash reporting (Sentry) — one-time setup
+## Crash reporting (Sentry)
 
-Wired up (`src/config/sentry.ts`, `App.js`, the `@sentry/react-native` plugin in
-`app.json`, `metro.config.js`) but inert until three real values replace the
-placeholders — `initSentry()` deliberately no-ops while the DSN is still the
-placeholder string, so nothing crashes or half-works in the meantime:
+**Done** — DSN (`src/config/sentry.ts`), org + project slugs (`app.json`'s
+`@sentry/react-native` plugin entry), wiring in `App.js` and `metro.config.js`.
+Crashes reach the dashboard; this was verified end-to-end on a device.
 
-1. Free account at https://sentry.io, new project → platform "React Native".
-2. **DSN** (Project Settings → Client Keys (DSN)) → `src/config/sentry.ts`,
-   replace `SENTRY_DSN`. Not a secret — fine to commit.
-3. **Org slug + project slug** (visible in the project's URL) → `app.json`,
-   the `@sentry/react-native` plugin entry (`organization`/`project`).
-4. **Auth token** (Settings → Auth Tokens, scope `project:releases`) — used
-   only to upload source maps during a release build, so a minified prod
-   crash resolves to a real file/line instead of gibberish. Never put this in
-   `app.json` (the plugin warns if you do). Instead:
-   ```bash
-   eas secret:create --scope project --name SENTRY_AUTH_TOKEN --value <token>
-   ```
-   For a local Gradle build (`build.sh`), export it in your shell before
-   building instead: `export SENTRY_AUTH_TOKEN=<token>`.
+**Auth token: done too** (2026-09-20) — source maps upload on release builds,
+verified end-to-end (`Uploaded files to Sentry`). Org `praveen-verma`, project
+`epurse`.
+
+If it ever needs replacing: https://praveen-verma.sentry.io/settings/auth-tokens/
+→ *Create New Token*, scope `project:releases`. It starts with `sntrys_`. A
+32-char hex string is a DSN *client key*, NOT an auth token — Sentry rejects
+those with `401 Invalid token`, and that failure is **fatal to the build**
+(`sentry.gradle` has no allow-failure option). It lives in two places, neither
+ever committed:
+
+- **Local builds** (`./build.sh dev-test` / `stage-test`) read `.env.local`,
+  which is gitignored:
+  ```
+  SENTRY_AUTH_TOKEN=sntrys_...
+  ```
+  `build.sh` sources it automatically. With **no** token set it exports
+  `SENTRY_DISABLE_AUTO_UPLOAD=true` and skips the upload rather than failing,
+  so a missing token never blocks a local build.
+
+- **Cloud/EAS builds** don't read `.env.local` — they need an EAS variable:
+  ```bash
+  eas env:create --name SENTRY_AUTH_TOKEN --value <token> --visibility secret \
+    --scope project --environment production --environment preview
+  ```
+  `secret` visibility means it is readable only on the builder, never in the UI.
 
 ---
 

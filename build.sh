@@ -126,6 +126,21 @@ echo -e "${DIM}EXPO_PUBLIC_APP_VARIANT=${ENV}${RESET}"
 export EXPO_PUBLIC_BUILD_KIND="test"
 echo -e "${DIM}EXPO_PUBLIC_BUILD_KIND=test${RESET}"
 
+# Sentry's Gradle step uploads source maps on every RELEASE build and FAILS the
+# whole build without a token — so a local build needs one too, not just EAS.
+# `.env.local` is gitignored; cloud builds read the matching EAS secret instead.
+# Without it, skip the upload rather than die: a local sideload does not need
+# symbolicated stack traces, and a hard failure here would block testing.
+if [ -f .env.local ]; then
+  set -a; . ./.env.local; set +a
+fi
+if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+  export SENTRY_DISABLE_AUTO_UPLOAD=true
+  echo -e "${DIM}no SENTRY_AUTH_TOKEN — skipping source-map upload${RESET}"
+else
+  echo -e "${DIM}SENTRY_AUTH_TOKEN loaded — source maps will upload${RESET}"
+fi
+
 # android/ is generated and no longer committed, so it may simply not be here.
 if [ ! -d android ]; then
   echo -e "${YELLOW}android/ missing — generating it first${RESET}"

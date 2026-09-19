@@ -2625,9 +2625,79 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   app-signing SHA-1 remains open, blocked on the Play account/app existing.
 
 **Open**
+- Sep-19-2026: **fixed the splash screen showing small and centered instead of
+  full-screen.** Root cause wasn't `resizeMode` (that only ever affects iOS's
+  storyboard splash — confirmed by reading the plugin source) — Android 12+'s
+  OS-level splash is ALWAYS a small centered icon on a solid colour, a platform
+  restriction no app config can override. Added `SplashOverlay.js`, mounted at
+  the root above every other gate: holds the native splash via
+  `SplashScreen.preventAutoHideAsync()`, immediately swaps in a real full-screen
+  `cover`ed image once JS is ready, and keeps it up until the persisted store
+  finishes rehydrating (the one real loading gap this app has) instead of
+  handing off to the gates' own blank `!hydrated` fallback. Also fixed
+  `resizeMode: "contain"` → `"cover"` in `app.json` for iOS's splash while in
+  there.
+- Sep-19-2026: **found the REAL cause of the cold-start black flash** (the above
+  JS overlay did not fix it — two wrong diagnoses before this one).
+  `Theme.App.SplashScreen`'s `postSplashScreenTheme` is `AppTheme`, and the
+  generated `AppTheme` carried **no `android:windowBackground`** — so the moment
+  the native splash dismissed, the window went black and stayed black until
+  React's first frame. No React component can cover that window; the gap exists
+  precisely because JS hasn't painted yet. Fixed natively:
+  `withSplashWindowBackground` in `plugins/withEPurseAndroid.js` sets
+  `android:windowBackground` → `@color/splashscreen_background` on `AppTheme`,
+  so the boot gap paints brand orange and the launch reads as one continuous
+  surface. Verified via `expo prebuild` + reading the generated `styles.xml`.
+  **Needs a native rebuild** — JS-only reloads show nothing. Regression came in
+  with the SDK 50→57 / New Architecture native-project regeneration.
+- Sep-20-2026: **fixed the native splash mark rendering tiny (~18dp).** Separate
+  bug from the black flash above, and this one was an ASSET-SHAPE problem, not an
+  OS restriction. `assets/splash.png` is a 1242x2436 full-screen artwork (orange
+  ground + mark + "ePurse" wordmark + tagline). Android's splash slot wants a
+  square ICON, and `withAndroidSplashImages.js` `contain`s whatever it is given
+  into an `imageWidth`-sized box (default **100dp**): 1242x2436 contained into
+  100x100 lands at 51x100dp, of which the mark itself is only ~18dp. That is
+  exactly the "image still in center small size" report — the file is big, it is
+  the wrong SHAPE.
+  Fix, entirely inside the stock expo-splash-screen plugin (no custom splash):
+  new `assets/splash-icon.png`, a 440x440 transparent cut-out of just the mark,
+  wired under the plugin's `android` key (`android?: Partial<AndroidSplashConfig>`)
+  so iOS keeps using the full-bleed artwork in its storyboard. With
+  `imageWidth: 140` the mark now renders **138x126dp** inside the 288dp canvas
+  (measured off the generated drawables), 187dp on the diagonal — just inside
+  Android's 192dp guidance circle for an icon with no icon-background.
+  Also set the Android-only `backgroundColor` to `#FE6D1C`, sampled from the
+  artwork immediately beside the mark (`#FF5A1F` is the MARK's orange, not the
+  artwork ground's). Verified with `expo prebuild` +
+  `:app:processReleaseResources` BUILD SUCCESSFUL. **Needs a native rebuild.**
+  `splash-icon.png` is DERIVED from `splash.png` — the mark separates from the
+  ground because the logo orange is `(255,90,31)` while the ground gradient is
+  `G>=102` in that region; regenerate it the same way if the artwork changes.
+
+- Sep-20-2026: **cut the launch from three screens to one.** User report, with a
+  screenshot: *"i still see 3 screen before home — first the expo splash with
+  image centered, then the black screen, then possible the plugin one. i want to
+  see the expo splash only."* The screenshot settled which layer was which by
+  arithmetic: the little rectangle measured 134x262px on a 1080x2400 screen,
+  aspect 0.51 — exactly `splash.png`'s 1242/2436 — and the old config contained
+  that whole artwork into a 100dp box, i.e. 51x100dp = 134x263px on a 411dp-wide
+  device. So it was the OS splash, from a build predating the fix above, NOT the
+  plugin's window background.
+  The third screen was real though: `withSplashWindowBackground` was painting the
+  full-screen brand artwork (mark + wordmark + tagline) as `AppTheme`'s
+  `windowBackground`, which reads as a visibly different second splash after the
+  OS one. It now re-uses **`@drawable/splashscreen_logo`** — the very drawable
+  the OS splash renders — centred on the same `@color/splashscreen_background`,
+  so the post-splash window is pixel-identical to the splash it replaces. One
+  continuous splash, no black gap, no second image. The `drawable-nodpi` copy of
+  `splash.png` is gone. Verified: `expo prebuild`, both `AppTheme` and
+  `Theme.App.SplashScreen` now reference the same drawable + colour in the
+  generated `styles.xml`, `:app:processReleaseResources` BUILD SUCCESSFUL.
+
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
   clean on an emulator. STILL unverified: a live SMS arriving, a MULTIPART bank SMS
   reassembling whole, reminders actually firing, the new WhatsApp banner-share flow,
-  and the new account-deletion flow end-to-end (including the Google revoke actually
-  reaching Google). Sentry crash reporting and real Google sign-in are now both
-  confirmed working end-to-end. Skia/Reanimated render fine.
+  the new account-deletion flow end-to-end (including the Google revoke actually
+  reaching Google), and the new full-screen splash overlay. Sentry crash reporting
+  and real Google sign-in are now both confirmed working end-to-end. Skia/Reanimated
+  render fine.

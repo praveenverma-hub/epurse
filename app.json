@@ -15,7 +15,12 @@
         {
           "image": "./assets/splash.png",
           "resizeMode": "contain",
-          "backgroundColor": "#FF5A1F"
+          "backgroundColor": "#FF5A1F",
+          "android": {
+            "image": "./assets/splash-icon.png",
+            "imageWidth": 140,
+            "backgroundColor": "#FE6D1C"
+          }
         }
       ],
       "./plugins/withEPurseAndroid",
@@ -53,7 +58,7 @@
         "@sentry/react-native",
         {
           "organization": "praveen-verma",
-          "project": "react-native"
+          "project": "epurse"
         }
       ]
     ],

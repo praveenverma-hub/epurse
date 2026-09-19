@@ -14,6 +14,7 @@
 // version always matches the installed Expo SDK. See `expo-doctor`.
 const {
   withAndroidColors,
+  withAndroidStyles,
   withDangerousMod,
   withMainApplication,
   AndroidConfig,
@@ -31,6 +32,78 @@ const withIconBackground = (config) =>
     );
     return cfg;
   });
+
+// ── Splash: hold the OS splash's own artwork until React paints ─────────
+// Until the SDK 50→57 bump this app configured its splash through the legacy
+// top-level `expo.splash` key, which generated a drawable and set it as the main
+// theme's `windowBackground`. The migration moved the config to the
+// `expo-splash-screen` plugin, which targets Android 12+'s icon-only
+// SplashScreen API and sets NO `windowBackground` on `AppTheme` at all.
+//
+// `Theme.App.SplashScreen`'s `postSplashScreenTheme` IS `AppTheme`, so the moment
+// the OS splash is dismissed the window has nothing to paint and falls back to
+// black, holding there until React's first frame — the reported black flash.
+//
+// This has to be fixed natively, NOT in JS: during that window React has not
+// rendered anything yet, so no component can paint over it (a JS overlay was
+// tried first and could not — it only made the gap longer).
+//
+// It deliberately re-uses `@drawable/splashscreen_logo`, the exact drawable the
+// OS splash itself renders, centred on the same `@color/splashscreen_background`.
+// The post-splash window is therefore pixel-identical to the splash it replaces,
+// so the launch reads as ONE continuous splash rather than a second one — the
+// earlier version of this painted the full-screen brand artwork here instead,
+// which showed up as a visibly different second screen.
+const SPLASH_WINDOW_BG = 'splashscreen_window_bg';
+
+const withSplashWindowBackground = (config) => {
+  config = withDangerousMod(config, [
+    'android',
+    (cfg) => {
+      const resDir = path.join(
+        cfg.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res',
+      );
+      // expo-splash-screen generates one per density; if it produced none, the
+      // reference below would be a dangling resource and fail at AAPT with a
+      // much less obvious message.
+      const haveLogo = fs
+        .readdirSync(resDir)
+        .some((d) => d.startsWith('drawable-')
+          && fs.existsSync(path.join(resDir, d, 'splashscreen_logo.png')));
+      if (!haveLogo) {
+        throw new Error(
+          'withEPurseAndroid: no splashscreen_logo drawable was generated — '
+          + "check the expo-splash-screen plugin's `image` in app.json.",
+        );
+      }
+
+      const drawableDir = path.join(resDir, 'drawable');
+      fs.mkdirSync(drawableDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(drawableDir, `${SPLASH_WINDOW_BG}.xml`),
+        `<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <item android:drawable="@color/splashscreen_background" />
+  <item>
+    <bitmap android:src="@drawable/splashscreen_logo" android:gravity="center" />
+  </item>
+</layer-list>
+`,
+      );
+      return cfg;
+    },
+  ]);
+
+  return withAndroidStyles(config, (cfg) => {
+    cfg.modResults = AndroidConfig.Styles.assignStylesValue(cfg.modResults, {
+      add: true,
+      name: 'android:windowBackground',
+      value: `@drawable/${SPLASH_WINDOW_BG}`,
+      parent: AndroidConfig.Styles.getAppThemeGroup(),
+    });
+    return cfg;
+  });
+};
 
 // ScreenSecurity — the FLAG_SECURE bridge module AppLockGate calls to keep the
 // app's content out of the recent-apps thumbnail. It lives in hand-written
@@ -110,6 +183,7 @@ const withPackagesRegistered = (config) =>
 
 module.exports = function withEPurseAndroid(config) {
   config = withIconBackground(config);
+  config = withSplashWindowBackground(config);
   config = withNativeSources(config);
   config = withPackagesRegistered(config);
   return config;
