@@ -1,6 +1,10 @@
-const { getDefaultConfig } = require('@expo/metro-config');
+// Sentry's wrapper around getDefaultConfig — needed so the bundle carries
+// what the source-map upload (app.json's @sentry/react-native plugin) needs
+// to de-minify a release stack trace. A no-op for anything Sentry itself
+// isn't sending (dev, or before the real DSN is filled in).
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 
-const config = getDefaultConfig(__dirname);
+const config = getSentryExpoConfig(__dirname);
 
 // JS bundle minification (Metro's terser transform) is genuinely PLATFORM-LESS:
 // one Metro build graph, minified whenever `dev: false`, whichever platform is

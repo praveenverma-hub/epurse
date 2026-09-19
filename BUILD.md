@@ -44,6 +44,30 @@ When it finishes (~10 min in the cloud) EAS gives you a download URL. Open it on
 
 ---
 
+## Crash reporting (Sentry) — one-time setup
+
+Wired up (`src/config/sentry.ts`, `App.js`, the `@sentry/react-native` plugin in
+`app.json`, `metro.config.js`) but inert until three real values replace the
+placeholders — `initSentry()` deliberately no-ops while the DSN is still the
+placeholder string, so nothing crashes or half-works in the meantime:
+
+1. Free account at https://sentry.io, new project → platform "React Native".
+2. **DSN** (Project Settings → Client Keys (DSN)) → `src/config/sentry.ts`,
+   replace `SENTRY_DSN`. Not a secret — fine to commit.
+3. **Org slug + project slug** (visible in the project's URL) → `app.json`,
+   the `@sentry/react-native` plugin entry (`organization`/`project`).
+4. **Auth token** (Settings → Auth Tokens, scope `project:releases`) — used
+   only to upload source maps during a release build, so a minified prod
+   crash resolves to a real file/line instead of gibberish. Never put this in
+   `app.json` (the plugin warns if you do). Instead:
+   ```bash
+   eas secret:create --scope project --name SENTRY_AUTH_TOKEN --value <token>
+   ```
+   For a local Gradle build (`build.sh`), export it in your shell before
+   building instead: `export SENTRY_AUTH_TOKEN=<token>`.
+
+---
+
 ## Option 3 — Local APK (fastest CI, requires Android SDK)
 
 If you have Android Studio + the Android SDK installed locally:

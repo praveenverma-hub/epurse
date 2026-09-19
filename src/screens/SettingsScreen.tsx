@@ -37,6 +37,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { Storage } from '../utils/storage';
 import { spacing } from '../constants/theme';
 import { THEMES } from '../constants/themes';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
@@ -63,14 +64,34 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const showMonthlyRecap = useEPurseStore((s: any) => s.showMonthlyRecap);
   const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
-  const { googleAccount, signOut } = useGoogleSession();
+  const deleteAllUserData = useEPurseStore((s: any) => s.deleteAllUserData);
+  const { googleAccount, signOut, deleteAccount } = useGoogleSession();
 
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleLogout = async () => {
     setConfirmLogout(false);
     await signOut();
+  };
+
+  /**
+   * "Delete Account & Data" — docs/ANDROID_RELEASE.md §0.3/§7 item 10. Order:
+   * revoke Google FIRST (network, can fail — see revokeAndSignOut's own
+   * best-effort contract), then the two LOCAL wipes, which cannot fail in a
+   * way that should block anything. `Storage.wipeEverything()` runs even
+   * though `deleteAllUserData()` just wiped the same key, because zustand's
+   * persist middleware writes on every `set()` — this is the belt-and-
+   * suspenders pass that also catches `useRewardStore`/`useNotificationStore`
+   * /the remote-config cache, none of which `deleteAllUserData` (ePurseStore-
+   * only) touches.
+   */
+  const handleDeleteAccount = async () => {
+    setConfirmDelete(false);
+    await deleteAccount();
+    deleteAllUserData();
+    await Storage.wipeEverything();
   };
 
   const excludedCount = (excludedExpenseParents || []).length;
@@ -182,6 +203,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             divided
             onPress={() => setConfirmLogout(true)}
           />
+          <NavListRow
+            icon="trash-outline"
+            label="Delete Account"
+            hint="Erases everything on this device"
+            hintTone="warn"
+            chevron={false}
+            divided
+            onPress={() => setConfirmDelete(true)}
+          />
         </>
       </ScrollView>
 
@@ -202,6 +232,18 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         onPrimary={handleLogout}
         onSecondary={() => setConfirmLogout(false)}
         onClose={() => setConfirmLogout(false)}
+      />
+
+      <CenterModal
+        visible={confirmDelete}
+        title="Delete Account?"
+        message="This permanently erases every transaction, account, budget, goal, and reminder on this device, and disconnects your Google account. This does not delete a Drive backup — see epurse.co.in/delete-account for that. This cannot be undone."
+        primaryText="Delete"
+        secondaryText="Cancel"
+        destructive
+        onPrimary={handleDeleteAccount}
+        onSecondary={() => setConfirmDelete(false)}
+        onClose={() => setConfirmDelete(false)}
       />
     </SafeAreaView>
   );

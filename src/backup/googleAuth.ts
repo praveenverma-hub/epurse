@@ -183,6 +183,33 @@ export async function signOut(): Promise<void> {
 }
 
 /**
+ * "Delete Account & Data"'s Google half — unlike plain `signOut`, this also
+ * revokes the refresh token at Google's end (`DISCOVERY.revocationEndpoint`,
+ * defined but never called elsewhere in this file), so the grant is actually
+ * severed rather than merely forgotten on this device. Revoking a refresh
+ * token also invalidates any access token derived from it, so nothing else
+ * needs revoking separately.
+ *
+ * The revoke call is BEST-EFFORT: offline, an already-invalid token, or
+ * Google's endpoint being unreachable must never block deletion — the user
+ * asked to delete their account, and failing that closed (leaving local data
+ * intact because a network call failed) would be the wrong failure mode.
+ * `signOut()` still runs unconditionally after, so local state is always
+ * clean even when the network step isn't.
+ */
+export async function revokeAndSignOut(): Promise<void> {
+  const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+  if (refreshToken) {
+    try {
+      await AuthSession.revokeAsync({ token: refreshToken, clientId: clientId() }, DISCOVERY);
+    } catch {
+      // Best-effort — see the doc comment above.
+    }
+  }
+  await signOut();
+}
+
+/**
  * Read `email`/`name`/`picture` out of the id_token for display. NOT verified —
  * only ever shown as identity in the UI, never trusted for a security decision,
  * so signature verification would be ceremony without benefit.

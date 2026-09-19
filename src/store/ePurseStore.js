@@ -1050,6 +1050,12 @@ export const useEPurseStore = create(
       isLoggedIn: false,
       googleAccount: null,   // { email, name, picture } | null — persisted, for instant display
       sessionExpired: false, // true = was logged in, got kicked out mid-session (vs. never signed in)
+      // Transient, not persisted: true for exactly one LoginGate render, right
+      // after deleteAllUserData() — a THIRD message distinct from sessionExpired
+      // ("your Google session expired") since nothing expired here, the user
+      // chose this. Cleared the moment they sign in again (mirrors sessionExpired's
+      // own clear points in useGoogleSession's signIn/devBypass).
+      justDeletedAccount: false,
 
       // One-time onboarding nudge: ask the user to anchor their real bank balances
       // on the Accounts screen. Auto-suppressed once any account has been anchored,
@@ -1263,6 +1269,7 @@ export const useEPurseStore = create(
       /** The ONE setter for Google identity — isLoggedIn always derives from it, can't desync. */
       setGoogleAccount: (account) => set({ googleAccount: account || null, isLoggedIn: !!account }),
       setSessionExpired: (v) => set({ sessionExpired: !!v }),
+      setJustDeletedAccount: (v) => set({ justDeletedAccount: !!v }),
 
       /** Stamp the moment onboarding completes (defaults to now). */
       setUserOnboardedAt: (ts) => set({ userOnboardedAt: ts ?? Date.now() }),
@@ -5611,6 +5618,107 @@ export const useEPurseStore = create(
           pendingCelebration: null,
           lastMidmonthNudgeMonth: null,
           xp: 0,
+          reviewStreak: { current: 0, best: 0, lastReviewDate: null },
+        }),
+
+      /**
+       * "Delete Account & Data" (docs/ANDROID_RELEASE.md §0.3/§7 item 10) —
+       * NOT `resetAll` above, which is a debug convenience (CategoriesScreen's
+       * "Reset all data") that reseeds demo-adjacent defaults and has drifted
+       * out of sync with `partialize`'s actual field list (missing goals,
+       * groups, googleAccount, hasOnboarded, and a dozen more — checked by
+       * diffing the two directly). This one is modeled off `partialize`
+       * FIELD-FOR-FIELD instead, precisely so nothing persisted can survive it.
+       *
+       * Deliberately does NOT touch `hasOnboarded`: `AppNavigator` reads it
+       * only ONCE at mount to pick `initialRouteName`, so flipping it here
+       * would neither switch the mounted stack back to Onboarding NOR leave
+       * `LoginGate` covering the screen (`LoginGate` explicitly steps aside
+       * when `!hasOnboarded`, on the assumption the Onboarding slide owns
+       * that state) — the user would be left on whatever screen they were on,
+       * wiped underneath them, nothing covering it. Leaving it `true` routes
+       * through the exact same "Sign In To Continue" overlay path the app
+       * already uses for a live token revocation (AuthSessionBoot), just
+       * with `justDeletedAccount` true instead of `sessionExpired` so the
+       * copy doesn't claim a session "expired" when the user chose this.
+       *
+       * Google's SecureStore tokens and any Drive-side revoke are a SEPARATE
+       * concern (`googleAuth.revokeAndSignOut`) — this only owns what's in
+       * THIS store. The caller (SettingsScreen) runs both.
+       */
+      deleteAllUserData: () =>
+        set({
+          accounts: [],
+          transactions: [],
+          archivedTransactions: [],
+          monthlyAggregates: {},
+          categories: DEFAULT_CATEGORIES,
+          customParents: [],
+          customChildren: [],
+          userCustomRules: {},
+          lentBorrowed: [],
+          groups: [],
+          activeGroupZoneId: null,
+          declinedAccountLinks: [],
+          excludedExpenseParents: [],
+          goals: [],
+          goalPlan: null,
+          lastGoalPlan: null,
+          goalContributions: [],
+          goalHistory: {},
+          userName: '',
+          userPhones: [],
+          userOnboardedAt: null,
+          smsAutoImport: false,
+          lastSmsSync: null,
+          lastSmsDate: null,
+          lastCompactedAt: null,
+          suppressedSmsIds: [],
+          ccHandledSmsIds: [],
+          ccBills: {},
+          ccDueReminderIds: {},
+          ccCycleHeadsUpNotified: {},
+          pendingCCPayment: null,
+          pendingCCPaymentQueue: [],
+          manualTxnSeq: 0,
+          smsPermissionGranted: false,
+          contactsPermissionGranted: false,
+          // Identity — the ONE place besides setGoogleAccount that sets these
+          // two together, so they can never desync mid-deletion.
+          isLoggedIn: false,
+          googleAccount: null,
+          sessionExpired: false,
+          justDeletedAccount: true,
+          anchorNudgeDismissed: false,
+          themeId: DEFAULT_THEME_ID,
+          darkMode: false,
+          appLockEnabled: false,
+          showWeeklySummary: true,
+          weeklyRecapHandled: null,
+          pendingWeeklyRecap: null,
+          showMonthlyRecap: true,
+          recapMonthHandled: null,
+          monthlyRecapCardDismissed: null,
+          pendingMonthlyRecap: null,
+          recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
+          reminders: [],
+          reminderNotifIds: {},
+          notificationPrefs: {
+            ccBillDue: true, ccCycleHeadsUp: true, ccPayment: true,
+            subscriptionHike: true, budgetBreach: true, midmonthNudge: true,
+            monthlyRecap: true,
+          },
+          subscriptionHikesNotified: [],
+          budget: null,
+          budgetHistory: {},
+          lastBudgetPlan: null,
+          budgetStreak: { current: 0, best: 0, lastResetMonth: null },
+          budgetBreachNotified: {},
+          pendingCelebration: null,
+          lastMidmonthNudgeMonth: null,
+          xp: 0,
+          welcomeReviewSeen: false,
+          planBannerDismissed: false,
           reviewStreak: { current: 0, best: 0, lastReviewDate: null },
         }),
     }),

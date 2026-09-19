@@ -69,6 +69,7 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, BUTTON_H } from '../constants/theme';
 import { useEPurseStore, selectAccountLinkSuggestions } from '../store/ePurseStore';
 import GoogleSignInPanel from '../components/GoogleSignInPanel';
+import CenterModal from '../components/CenterModal';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { requestLocationPermission } from '../services/locationService';
@@ -161,6 +162,22 @@ const SLIDES: Slide[] = [
     body: 'Build lasting wealth habits with Aware Run and earn Reality Points for staying on budget. Accumulate ePurse Coins to unlock custom themes.',
   },
 ];
+
+/**
+ * Play's "prominent disclosure" requirement, in one place: WHAT is accessed
+ * and WHY, shown before the matching OS permission dialog — see the
+ * `handleGetStarted` / `proceedFromDisclosure` split below. `smsSupported` is
+ * a plain module-level constant (`Platform.OS === 'android'`), so this can be
+ * built once rather than re-computed per render.
+ */
+const DISCLOSURE_MESSAGE = [
+  smsSupported
+    ? '• SMS — reads bank and card messages ON THIS DEVICE to detect transactions automatically. Message text is processed on-device; it is never uploaded as raw text.'
+    : null,
+  '• Contacts — lets you pick people when splitting an expense or tracking money lent/borrowed.',
+  '• Location — tags a transaction with the city it happened in, from your device\'s approximate location.',
+  '\nEach is optional — skip any of them here or later and grant it from Settings whenever you\'re ready.',
+].filter(Boolean).join('\n\n');
 
 // =============================================================================
 // Inline SVG icons (theme-tinted, no icon dependency)
@@ -296,6 +313,12 @@ export default function OnboardingDeck({
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sweepLabel, setSweepLabel] = useState<string | null>(null);
+  // Play policy requires this disclosure to appear BEFORE the runtime SMS/
+  // contacts/location prompts, not just somewhere in the app — see docs/
+  // ANDROID_RELEASE.md §3.5. Gates the SAME permission block that used to
+  // fire straight off "Get Started"; nothing about the permissions themselves
+  // changed, only that a user now sees why before the OS dialog appears.
+  const [showDisclosure, setShowDisclosure] = useState(false);
 
   const totalPages = SLIDES.length + 1; // info slides + registration (name + Google sign-in)
   const registrationIndex = SLIDES.length;
@@ -338,47 +361,65 @@ export default function OnboardingDeck({
     [navigation],
   );
 
-  const handleGetStarted = useCallback(async () => {
+  // "Get Started" no longer requests anything itself — it only surfaces the
+  // disclosure. The actual permission cascade moved to `proceedFromDisclosure`,
+  // fired from that modal's own buttons, so the OS dialogs cannot appear before
+  // the user has seen why (Play policy §3.5 — see DISCLOSURE_MESSAGE above).
+  const handleGetStarted = useCallback(() => {
     if (!formValid || submitting || !isLoggedIn) return;
     Keyboard.dismiss();
+    setShowDisclosure(true);
+  }, [formValid, submitting, isLoggedIn]);
+
+  /**
+   * @param withPermissions false when the user dismissed the disclosure
+   *   instead of continuing — same "denial is non-fatal" contract the
+   *   permissions already had individually: skip the WHOLE cascade rather
+   *   than firing OS dialogs the user just told us to skip past. They can
+   *   still grant everything later from Settings.
+   */
+  const proceedFromDisclosure = useCallback(async (withPermissions: boolean) => {
+    setShowDisclosure(false);
     setSubmitting(true);
     try {
       setUserName?.(name.trim());
       // Capture the absolute onboarding timestamp — drives the 24h widget rule.
       setUserOnboardedAt?.(Date.now());
 
-      // Trigger the native SMS permission sheet (Android). On other platforms
-      // there's nothing to request, so we proceed straight through.
-      if (smsSupported) {
-        try {
-          const res = await requestSmsPermission();
-          if (res?.granted) {
-            setSmsPermissionGranted?.(true);
-            // Back-fill 3 months of accounts/transactions so the next screen
-            // ("Is this yours?") has the discovered cards to confirm.
-            await runInitialInboxSweep(
-              { ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions, capOnboardingQueue },
-              (p) => setSweepLabel(p.label),
-            );
+      if (withPermissions) {
+        // Trigger the native SMS permission sheet (Android). On other platforms
+        // there's nothing to request, so we proceed straight through.
+        if (smsSupported) {
+          try {
+            const res = await requestSmsPermission();
+            if (res?.granted) {
+              setSmsPermissionGranted?.(true);
+              // Back-fill 3 months of accounts/transactions so the next screen
+              // ("Is this yours?") has the discovered cards to confirm.
+              await runInitialInboxSweep(
+                { ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions, capOnboardingQueue },
+                (p) => setSweepLabel(p.label),
+              );
+            }
+          } catch {
+            /* permission denied / dismissed — continue; user can grant later */
           }
-        } catch {
-          /* permission denied / dismissed — continue; user can grant later */
         }
-      }
 
-      // Ask for the remaining runtime permissions up-front while the user is in
-      // the "grant access" mindset, so the app is fully wired on first launch:
-      //   • Location — lets live incoming SMS stamp each transaction with where
-      //     it happened (getLocationIfGranted, never prompts later).
-      //   • Contacts — powers the split-with / Lent-Borrowed people picker.
-      // Each is isolated so denying one never blocks the others, and a denial
-      // is non-fatal — the matching feature simply stays dormant until granted.
-      try { await requestLocationPermission(); } catch { /* optional */ }
-      try { await requestContactsPermission(); } catch { /* optional */ }
-      //   • Notifications — budget breaches, mid-month nudges, CC-bill-due and
-      //     subscription-hike alerts all silently no-op without this grant, so we
-      //     ask up-front rather than lazily on the first borrow reminder.
-      try { await requestNotificationPermissions(); } catch { /* optional */ }
+        // Ask for the remaining runtime permissions up-front while the user is in
+        // the "grant access" mindset, so the app is fully wired on first launch:
+        //   • Location — lets live incoming SMS stamp each transaction with where
+        //     it happened (getLocationIfGranted, never prompts later).
+        //   • Contacts — powers the split-with / Lent-Borrowed people picker.
+        // Each is isolated so denying one never blocks the others, and a denial
+        // is non-fatal — the matching feature simply stays dormant until granted.
+        try { await requestLocationPermission(); } catch { /* optional */ }
+        try { await requestContactsPermission(); } catch { /* optional */ }
+        //   • Notifications — budget breaches, mid-month nudges, CC-bill-due and
+        //     subscription-hike alerts all silently no-op without this grant, so we
+        //     ask up-front rather than lazily on the first borrow reminder.
+        try { await requestNotificationPermissions(); } catch { /* optional */ }
+      }
 
       setHasOnboarded?.(true);
       navAfter(accountFilterRoute);
@@ -387,8 +428,7 @@ export default function OnboardingDeck({
       setSubmitting(false);
     }
   }, [
-    formValid, submitting, isLoggedIn, name, setUserName,
-    setUserOnboardedAt, setSmsPermissionGranted, setHasOnboarded,
+    name, setUserName, setUserOnboardedAt, setSmsPermissionGranted, setHasOnboarded,
     ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions,
     capOnboardingQueue, navAfter, accountFilterRoute,
   ]);
@@ -538,6 +578,21 @@ export default function OnboardingDeck({
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Play policy §3.5 — must appear BEFORE the SMS/contacts/location OS
+          dialogs, never after. "Not Now" and the backdrop both skip the WHOLE
+          permission cascade (see proceedFromDisclosure's withPermissions arg),
+          matching how each permission already fails open on its own. */}
+      <CenterModal
+        visible={showDisclosure}
+        title="Before You Continue"
+        message={DISCLOSURE_MESSAGE}
+        primaryText="Continue"
+        onPrimary={() => proceedFromDisclosure(true)}
+        secondaryText="Not Now"
+        onSecondary={() => proceedFromDisclosure(false)}
+        onClose={() => proceedFromDisclosure(false)}
+      />
     </SafeAreaView>
   );
 }

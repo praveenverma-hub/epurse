@@ -37,6 +37,23 @@ export const Storage = {
       console.warn('Storage.clearAll failed', e);
     }
   },
+  /**
+   * "Delete Account & Data"'s storage half — deliberately NOT `clearAll()`,
+   * which only removes keys starting with `PREFIX`. That convention isn't
+   * actually followed everywhere: `useNotificationStore`'s persist key is
+   * `'ePurse_notifications_v1'` (underscore, no colon), which `clearAll()`
+   * would silently leave behind. This app has no third-party AsyncStorage
+   * usage to preserve — it's the only thing writing to it — so for a
+   * deletion, the bulletproof answer is everything, not a prefix match that
+   * can drift out of sync with what a future store actually names its key.
+   */
+  async wipeEverything() {
+    try {
+      await AsyncStorage.clear();
+    } catch (e) {
+      console.warn('Storage.wipeEverything failed', e);
+    }
+  },
 };
 
 export const STORAGE_KEYS = {

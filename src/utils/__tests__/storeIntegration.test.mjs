@@ -3953,5 +3953,139 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     st().getGoalFunded(recurring) === 6000 + 8000);
 }
 
+// ── deleteAllUserData wipes EVERY partialize-persisted field ───────────────
+// "Delete Account & Data" (docs/ANDROID_RELEASE.md §0.3/§7 item 10) — this is
+// the test that makes the doc comment's claim ("modeled off partialize
+// FIELD-FOR-FIELD") checkable rather than asserted. Written data-driven, not
+// as 60 individual checks, specifically so `resetAll`'s own drift (missing
+// goals/groups/googleAccount/hasOnboarded and a dozen more, found while
+// building this) can't quietly happen again here — a field added to
+// `partialize` without a matching default here fails LOUD, not silently.
+{
+  reset();
+  // Dirty every persisted field with a non-default, distinguishable value.
+  // hasOnboarded is DELIBERATELY dirtied too, to prove the action leaves it
+  // alone — see deleteAllUserData's own doc comment for why that's required,
+  // not incidental.
+  useStore.setState({
+    accounts: [{ id: 'a1' }],
+    transactions: [{ id: 't1' }],
+    archivedTransactions: [{ id: 'at1' }],
+    monthlyAggregates: { '2026-01': {} },
+    categories: [{ id: 'custom' }],
+    customParents: [{ id: 'cp1' }],
+    customChildren: [{ id: 'cc1' }],
+    userCustomRules: { r1: {} },
+    lentBorrowed: [{ id: 'lb1' }],
+    groups: [{ id: 'g1' }],
+    activeGroupZoneId: 'zone1',
+    declinedAccountLinks: ['1111:2222'],
+    excludedExpenseParents: ['bills'],
+    goals: [{ id: 'goal1' }],
+    goalPlan: { salary: 99999 },
+    lastGoalPlan: { salary: 88888 },
+    goalContributions: [{ id: 'gc1' }],
+    goalHistory: { goal1: {} },
+    userName: 'Dirty Name',
+    userPhones: ['9999999999'],
+    userOnboardedAt: 12345,
+    smsAutoImport: true,
+    lastSmsSync: 12345,
+    lastSmsDate: 12345,
+    lastCompactedAt: 12345,
+    suppressedSmsIds: ['id1'],
+    ccHandledSmsIds: ['id2'],
+    ccBills: { '1111': {} },
+    ccDueReminderIds: { '1111:x': 'notif' },
+    ccCycleHeadsUpNotified: { a1: '2026-01' },
+    pendingCCPayment: { fake: true },
+    pendingCCPaymentQueue: [{ id: 'q1' }],
+    manualTxnSeq: 42,
+    smsPermissionGranted: true,
+    contactsPermissionGranted: true,
+    isLoggedIn: true,
+    googleAccount: { email: 'dirty@example.com', name: 'Dirty', picture: null },
+    sessionExpired: true,
+    justDeletedAccount: false,
+    anchorNudgeDismissed: true,
+    themeId: 'carbon',
+    darkMode: true,
+    appLockEnabled: true,
+    showWeeklySummary: false,
+    weeklyRecapHandled: 'w1',
+    pendingWeeklyRecap: { id: 'pw1' },
+    showMonthlyRecap: false,
+    recapMonthHandled: '2026-01',
+    monthlyRecapCardDismissed: '2026-01',
+    pendingMonthlyRecap: { id: 'pm1' },
+    recapOptions: { includePrivate: false, includeGroups: false, includeTxnList: true },
+    reminders: [{ id: 'r1' }],
+    reminderNotifIds: { r1: 'n1' },
+    notificationPrefs: {
+      ccBillDue: false, ccCycleHeadsUp: false, ccPayment: false,
+      subscriptionHike: false, budgetBreach: false, midmonthNudge: false,
+      monthlyRecap: false,
+    },
+    subscriptionHikesNotified: ['sub1'],
+    budget: { total: 50000 },
+    budgetHistory: { '2026-01': {} },
+    lastBudgetPlan: { total: 40000 },
+    budgetStreak: { current: 5, best: 10, lastResetMonth: '2026-01' },
+    budgetBreachNotified: { '2026-01': true },
+    pendingCelebration: { id: 'pc1' },
+    lastMidmonthNudgeMonth: '2026-01',
+    xp: 999,
+    welcomeReviewSeen: true,
+    planBannerDismissed: true,
+    reviewStreak: { current: 3, best: 7, lastReviewDate: '2026-01-01' },
+    // The one field the action must NOT touch.
+    hasOnboarded: true,
+  });
+
+  useStore.getState().deleteAllUserData();
+  const s = useStore.getState();
+
+  const expectedDefaults = {
+    accounts: [], transactions: [], archivedTransactions: [], monthlyAggregates: {},
+    customParents: [], customChildren: [], userCustomRules: {}, lentBorrowed: [],
+    groups: [], activeGroupZoneId: null, declinedAccountLinks: [], excludedExpenseParents: [],
+    goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {},
+    userName: '', userPhones: [], userOnboardedAt: null, smsAutoImport: false,
+    lastSmsSync: null, lastSmsDate: null, lastCompactedAt: null,
+    suppressedSmsIds: [], ccHandledSmsIds: [], ccBills: {}, ccDueReminderIds: {},
+    ccCycleHeadsUpNotified: {}, pendingCCPayment: null, pendingCCPaymentQueue: [],
+    manualTxnSeq: 0, smsPermissionGranted: false, contactsPermissionGranted: false,
+    isLoggedIn: false, googleAccount: null, sessionExpired: false, justDeletedAccount: true,
+    anchorNudgeDismissed: false, darkMode: false, appLockEnabled: false,
+    showWeeklySummary: true, weeklyRecapHandled: null, pendingWeeklyRecap: null,
+    showMonthlyRecap: true, recapMonthHandled: null, monthlyRecapCardDismissed: null,
+    pendingMonthlyRecap: null, reminders: [], reminderNotifIds: {},
+    subscriptionHikesNotified: [], budget: null, budgetHistory: {}, lastBudgetPlan: null,
+    budgetBreachNotified: {}, pendingCelebration: null, lastMidmonthNudgeMonth: null,
+    xp: 0, welcomeReviewSeen: false, planBannerDismissed: false,
+  };
+  const mismatches = Object.entries(expectedDefaults)
+    .filter(([k, v]) => JSON.stringify(s[k]) !== JSON.stringify(v))
+    .map(([k]) => k);
+  check('every simple-default field returns to its create()-time value',
+    mismatches.length === 0, `still dirty: ${mismatches.join(', ')}`);
+
+  check('categories reset to DEFAULT_CATEGORIES, not the dirtied list',
+    Array.isArray(s.categories) && !s.categories.some((c) => c.id === 'custom') && s.categories.length > 1);
+  check('themeId resets to the default theme, not the dirtied one',
+    s.themeId !== 'carbon' && typeof s.themeId === 'string');
+  check('recapOptions resets to its true default object',
+    s.recapOptions.includePrivate === true && s.recapOptions.includeGroups === true && s.recapOptions.includeTxnList === false);
+  check('notificationPrefs resets to all-on',
+    Object.values(s.notificationPrefs).every((v) => v === true));
+  check('budgetStreak resets to zeroed',
+    s.budgetStreak.current === 0 && s.budgetStreak.best === 0 && s.budgetStreak.lastResetMonth === null);
+  check('reviewStreak resets to zeroed',
+    s.reviewStreak.current === 0 && s.reviewStreak.best === 0 && s.reviewStreak.lastReviewDate === null);
+
+  check('hasOnboarded is left UNTOUCHED (still true) — LoginGate depends on this, not reset to false',
+    s.hasOnboarded === true);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

@@ -3,8 +3,15 @@ import { StatusBar } from 'expo-status-bar';
 import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as Sentry from '@sentry/react-native';
 
 import * as Notifications from 'expo-notifications';
+import { initSentry } from './src/config/sentry';
+
+// Runs once at module load, before anything else in this file — catches
+// crashes as early in boot as possible. See src/config/sentry.ts for why
+// it's a no-op under __DEV__.
+initSentry();
 
 import AppNavigator from './src/navigation/AppNavigator';
 import { useSmsSync } from './src/hooks/useSmsSync';
@@ -207,7 +214,7 @@ function BudgetRolloverBoot() {
   return null;
 }
 
-export default function App() {
+function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -230,3 +237,8 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+// Sentry.wrap adds a root-level error boundary (reports uncaught render
+// errors) and touch-event breadcrumbs — a no-op if Sentry was never
+// initialized (dev, or the DSN placeholder still in place).
+export default Sentry.wrap(App);

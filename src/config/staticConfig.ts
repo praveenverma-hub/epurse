@@ -126,8 +126,14 @@ export const STATIC_CONFIG = {
 
   /** `SmsDiagnosticScreen` — a debug tool, not a user feature. */
   smsDiagnostic: {
-    /** false pulls the Settings row and the screen's reachability. */
-    enabled: true,
+    /**
+     * false pulls the Settings row and the screen's reachability. Off for the
+     * store build (docs/ANDROID_RELEASE.md §3.4/§7 item 12) — remotely
+     * re-enabled for dev/stage via `useFeatureFlag`/`REMOTE_FLAG_KEYS`
+     * (`docs/site/app-config.test.json` keeps it `true`) so it's still
+     * reachable for testers without shipping it on by default.
+     */
+    enabled: false,
   },
 
   /** `ShopScreen` — the EPC widget catalogue. */

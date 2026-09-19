@@ -5,8 +5,7 @@ import appJson from '../../app.json';
 export const APP_NAME = appJson.expo.name;
 export const APP_VERSION = appJson.expo.version;
 
-// TODO: replace with the real support inbox before shipping Help & Support.
-export const SUPPORT_EMAIL = 'support@epurse.app';
+export const SUPPORT_EMAIL = 'support@epurse.co.in';
 
 // TODO: fill in the real numeric App Store id once ePurse is listed.
 // STATIC_CONFIG.rating.enabled gates the "Rate ePurse" row until then.

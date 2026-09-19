@@ -523,22 +523,54 @@ paperwork and store submission, plus device QA.
    and parses into a silently wrong transaction rather than failing (§0.5).
 5. Reminders actually **firing** at the scheduled time (they now schedule correctly;
    delivery on Android 14+ is inexact unless the user grants "Alarms & reminders" — §3.3).
-6. App lock **hiding the app from the recents thumbnail** (`ScreenSecurity`).
-7. Gesture/worklet behaviour under the New Architecture — especially the `AllocationBar`
-   drag, given the known "a worklet must never call an imported function" trap.
+6. ~~App lock **hiding the app from the recents thumbnail** (`ScreenSecurity`).~~
+   **Confirmed working on a real device (2026-09-19).**
+7. ~~Gesture/worklet behaviour under the New Architecture — especially the
+   `AllocationBar` drag, given the known "a worklet must never call an imported
+   function" trap.~~ **Confirmed working on a real device (2026-09-19).**
 8. There is no local, debug-signed target for the production environment (`build.sh`
    has no `prod-test`) — `dev`/`stage` differ from `prod` precisely in what the build
    flags gate, so a both-flags-false bug can only be caught via an EAS build now
    (`build:prod-local` is the cheapest one: real signing, no cloud quota).
 
 **Track C — code, can land any time**
-9. `constants/appMeta.ts` placeholders: `SUPPORT_EMAIL` still `@epurse.app` (§2.1).
-10. **In-app account deletion** + the public `/delete-account` URL — required because
-    login is mandatory (§0.3).
-11. **Prominent disclosure** before the SMS/contacts/location prompts (§3.5).
-12. Flags for the store build: `STATIC_CONFIG.smsDiagnostic` OFF, `rating` ON once listed.
-13. Optional: swap `MediaLibrary.saveToLibraryAsync` for `expo-sharing` — drops 3 storage
-    permissions and a dependency (§3.3).
+9. ~~`constants/appMeta.ts` placeholders: `SUPPORT_EMAIL` still `@epurse.app` (§2.1).~~
+   **Done (2026-09-19)** — `support@epurse.co.in`.
+10. ~~**In-app account deletion** + the public `/delete-account` URL — required
+    because login is mandatory (§0.3).~~ **Done (2026-09-19).** Settings gained a
+    "Delete Account & Data" row below Logout (`CenterModal` confirm, destructive),
+    wired to a NEW `deleteAllUserData` store action modeled field-for-field off
+    `partialize` (not the pre-existing `resetAll`, which had drifted — see §7 note
+    below) + `googleAuth.revokeAndSignOut` (actually revokes at Google's end, not
+    just a local forget) + `Storage.wipeEverything` (`AsyncStorage.clear()`, to also
+    catch `useRewardStore`/`useNotificationStore`, which don't share `ePurseStore`'s
+    persist-key prefix). `LoginGate` gained a third message
+    (`justDeletedAccount`) so it doesn't claim "your data is untouched" right after
+    the user deleted it. `docs/site/delete-account.html` written — publish it at
+    `https://epurse.co.in/delete-account`. Covered by a data-driven test asserting
+    EVERY `partialize` field individually (`test:store`).
+11. ~~**Prominent disclosure** before the SMS/contacts/location prompts (§3.5).~~ **Done
+    (2026-09-19).** `OnboardingExperience`'s "Get Started" no longer requests SMS/
+    contacts/location itself — it opens a `CenterModal` disclosure first (WHAT is
+    accessed, WHY, and that each is optional), and the permission cascade only fires
+    from that modal's own "Continue". Dismissing it ("Not Now"/backdrop) skips the
+    whole cascade rather than firing OS dialogs after the user just declined.
+12. ~~Flags for the store build: `STATIC_CONFIG.smsDiagnostic` OFF, `rating` ON once
+    listed.~~ **`smsDiagnostic` done (2026-09-19)** — build-time default now `false`,
+    remotely re-enabled for dev/stage via `app-config.test.json`. `rating` correctly
+    LEFT `false` — there is still no store listing to rate.
+13. ~~Optional: swap `MediaLibrary.saveToLibraryAsync` for `expo-sharing`.~~ **Done
+    (2026-09-19)**, with a correction to this item's own premise: only 1 of the "3
+    storage permissions" was actually `expo-media-library`'s — `READ_MEDIA_IMAGES`,
+    the one Play's Data Safety form flags as "Photos and videos" access, now gone
+    along with the whole runtime consent prompt. The other two
+    (`READ_EXTERNAL_STORAGE`/`WRITE_EXTERNAL_STORAGE`, both `maxSdkVersion="32"`) turn
+    out to belong to `expo-file-system` (used elsewhere, staying, and capped to
+    Android ≤12L regardless). `WhatsAppReminderScreen.js`'s banner-share flow changed
+    shape slightly to keep working without it: capture → native OS share sheet
+    (`Sharing.shareAsync`, no permission needed) → THEN the WhatsApp text link opens,
+    with a short confirm step in between explaining the two-part hand-off. Not yet
+    exercised on a device with WhatsApp installed.
 
 **Then, in order (each depends on the one before)**
 14. **`eas credentials`** → generate the upload keystore; record its SHA-1 (§3.1).
@@ -551,6 +583,34 @@ paperwork and store submission, plus device QA.
     mandatory sign-in wall with no data — give them credentials and a way to see the app
     populated).
 18. Closed testing if required → **staged production rollout** (10% → 50% → 100%).
+
+**Added 2026-09-19, not in the original numbered list — crash reporting (Sentry).**
+`@sentry/react-native` wired end-to-end: `src/config/sentry.ts` (`initSentry`,
+`environment` tagged dev/stage/production off `constants/buildVariant.ts`),
+called at the top of `App.js` + `Sentry.wrap(App)` for a root error boundary,
+the `@sentry/react-native` config plugin in `app.json`, and `metro.config.js`
+switched to `getSentryExpoConfig` (needed to de-minify a release stack trace
+once the source maps are uploaded). Deliberately **crash-only** — no
+performance tracing (`tracesSampleRate: 0`), no session replay,
+`sendDefaultPii: false` — usage/screen analytics is a separate decision,
+deferred (more privacy-policy/Data-Safety surface than crash reporting alone
+justifies for MVP). `initSentry()` no-ops under `__DEV__`. **Done (2026-09-19)**
+— real DSN, org slug (`praveen-verma`), and project slug (`react-native`) are
+all in place, and delivery was confirmed end-to-end via a temporary debug
+crash button (since removed). Only `SENTRY_AUTH_TOKEN` (an EAS secret, never
+committed — BUILD.md's "Crash reporting (Sentry)" section) is still missing —
+without it crashes still reach Sentry fine, just with minified stack traces
+instead of readable file/line. **Also**: once the privacy policy page (§2.2)
+is actually drafted, it needs a line disclosing Sentry (crash logs / device
+diagnostics) as a third-party processor — the Play Data Safety form (§5.2,
+item 17) will need the same declaration.
+
+**Found, not fixed (out of scope, non-blocking):** `CategoriesScreen`'s "Reset all
+data" button (`resetAll` in `ePurseStore.js`) is a pre-existing debug convenience,
+not the release feature above — and it has drifted out of sync with `partialize`,
+missing ~15 fields including `goals`, `groups`, `googleAccount`, and `hasOnboarded`.
+Harmless today (it's a dev tool, not user-facing), but worth a look before it's
+mistaken for equivalent to "Delete Account & Data" — it is not.
 
 ## Open questions for you
 

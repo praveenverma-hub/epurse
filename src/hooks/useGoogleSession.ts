@@ -20,6 +20,7 @@ export function useGoogleSession() {
   const sessionExpired = useEPurseStore((s: any) => s.sessionExpired);
   const setGoogleAccount = useEPurseStore((s: any) => s.setGoogleAccount);
   const setSessionExpired = useEPurseStore((s: any) => s.setSessionExpired);
+  const setJustDeletedAccount = useEPurseStore((s: any) => s.setJustDeletedAccount);
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<googleAuth.AuthError | null>(null);
@@ -35,6 +36,7 @@ export function useGoogleSession() {
       const account = await googleAuth.signIn();
       setGoogleAccount(account.email ? account : null);
       setSessionExpired(false);
+      setJustDeletedAccount(false);
       return account;
     } catch (e) {
       setError(e as googleAuth.AuthError);
@@ -42,10 +44,28 @@ export function useGoogleSession() {
     } finally {
       setPending(false);
     }
-  }, [setGoogleAccount, setSessionExpired]);
+  }, [setGoogleAccount, setSessionExpired, setJustDeletedAccount]);
 
   const signOut = useCallback(async () => {
     await googleAuth.signOut();
+    setGoogleAccount(null);
+  }, [setGoogleAccount]);
+
+  /**
+   * The Google half of "Delete Account & Data" (SettingsScreen owns the rest:
+   * `deleteAllUserData()` + `Storage.wipeEverything()`). Unlike `signOut`,
+   * this REVOKES the grant at Google's end rather than only forgetting it
+   * locally — see `googleAuth.revokeAndSignOut`'s own doc comment for why
+   * that's the more correct behaviour for an actual deletion.
+   *
+   * NAME COLLISION, not the same thing: `s.deleteAccount(accountId)` on
+   * `ePurseStore` deletes one FINANCIAL account (a bank/card). This deletes
+   * the user's Google grant. Different modules, different `accountId`-less
+   * signature, but worth a second look at a call site before assuming which
+   * one a bare `deleteAccount` import means.
+   */
+  const deleteAccount = useCallback(async () => {
+    await googleAuth.revokeAndSignOut();
     setGoogleAccount(null);
   }, [setGoogleAccount]);
 
@@ -60,10 +80,11 @@ export function useGoogleSession() {
     const account = { email: 'dev-bypass@local', name: 'Dev Bypass', picture: null };
     setGoogleAccount(account);
     setSessionExpired(false);
+    setJustDeletedAccount(false);
     return account;
-  }, [setGoogleAccount, setSessionExpired]);
+  }, [setGoogleAccount, setSessionExpired, setJustDeletedAccount]);
 
-  return { googleAccount, isLoggedIn, sessionExpired, pending, error, signIn, signOut, devBypass };
+  return { googleAccount, isLoggedIn, sessionExpired, pending, error, signIn, signOut, deleteAccount, devBypass };
 }
 
 export default useGoogleSession;

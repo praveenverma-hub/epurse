@@ -16,7 +16,9 @@
 // isLoggedIn flips true, on sign-in AND on logout alike.
 //
 // Unlike AppLockGate, this is NOT wired to AppState — it must not re-prompt on
-// every background/foreground cycle, only for the two events above.
+// every background/foreground cycle, only for the three events above (the
+// third being deleteAllUserData — see its own doc comment in ePurseStore.js
+// for why hasOnboarded is left untouched and this is the overlay it relies on).
 // =============================================================================
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -32,6 +34,7 @@ const LoginGate: React.FC = () => {
   const hasOnboarded = useEPurseStore((s: any) => s.hasOnboarded) as boolean;
   const isLoggedIn = useEPurseStore((s: any) => s.isLoggedIn) as boolean;
   const sessionExpired = useEPurseStore((s: any) => s.sessionExpired) as boolean;
+  const justDeletedAccount = useEPurseStore((s: any) => s.justDeletedAccount) as boolean;
 
   // Not hydrated yet: we don't know hasOnboarded/isLoggedIn — cover with a
   // blank surface rather than flash the gate for users who won't see it.
@@ -39,14 +42,20 @@ const LoginGate: React.FC = () => {
   if (!hasOnboarded) return null; // fresh installs: the onboarding slide owns this
   if (isLoggedIn) return null;
 
+  // Three distinct reasons to be here, three distinct messages — a session that
+  // "expired" and data that the user just chose to delete are not the same
+  // event, and telling someone their untouched data survived a deletion they
+  // just confirmed would be actively wrong, not just imprecise.
+  const title = justDeletedAccount ? 'Account Deleted' : sessionExpired ? 'Sign Back In' : 'Sign In To Continue';
+  const subtitle = justDeletedAccount
+    ? 'Your data has been deleted from this device. Sign in to start fresh.'
+    : sessionExpired
+      ? 'Your Google session expired. Sign in again to keep using ePurse.'
+      : 'ePurse now requires a Google sign-in. Your data on this device is untouched.';
+
   return (
     <View style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: theme.card }]}>
-      <GoogleSignInPanel
-        title={sessionExpired ? 'Sign Back In' : 'Sign In To Continue'}
-        subtitle={sessionExpired
-          ? 'Your Google session expired. Sign in again to keep using ePurse.'
-          : 'ePurse now requires a Google sign-in. Your data on this device is untouched.'}
-      />
+      <GoogleSignInPanel title={title} subtitle={subtitle} />
     </View>
   );
 };

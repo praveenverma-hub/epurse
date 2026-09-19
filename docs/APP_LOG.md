@@ -2512,10 +2512,110 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   EAS build run locally, no cloud quota) is the closest replacement. `BUILD.md`/
   `docs/ANDROID_RELEASE.md` updated to match.
 
+- Sep-19-2026: **app lock hiding from recents, and `AllocationBar` drag under the New
+  Architecture — both CONFIRMED WORKING on a real device.**
+- Sep-19-2026: **prominent disclosure added before the SMS/contacts/location prompts**
+  (docs/ANDROID_RELEASE.md §3.5, Play policy requirement). `OnboardingExperience`'s
+  "Get Started" split in two: it now only opens a `CenterModal` explaining what's
+  accessed and why; the actual permission cascade (previously fired straight off the
+  button) moved to `proceedFromDisclosure`, called from that modal's "Continue".
+  Dismissing the modal ("Not Now" or the backdrop) skips the WHOLE cascade — same
+  "denial is non-fatal" contract each permission already had individually, just
+  applied one level up.
+- Sep-19-2026: **dropped `expo-media-library`** — its one call site
+  (`WhatsAppReminderScreen.js`'s banner-share flow) now uses `expo-sharing` (already
+  a dependency, lazy-required per `exportService.ts`'s own convention) instead of
+  `MediaLibrary.saveToLibraryAsync`. Correcting the premise that motivated this: only
+  `READ_MEDIA_IMAGES` was actually `expo-media-library`'s to drop (confirmed via a
+  clean `prebuild` — checked the generated manifest before and after). The other two
+  storage permissions this was tracked against turned out to belong to
+  `expo-file-system` (used elsewhere, staying, and `maxSdkVersion="32"` — capped to
+  Android ≤12L regardless). Still a real win: `READ_MEDIA_IMAGES` is the one Play's
+  Data Safety form flags as "Photos and videos" access, and the whole runtime consent
+  prompt for it is gone. Flow changed shape to compensate: capture → OS share sheet
+  (no permission needed) → a confirm step → the WhatsApp text link, instead of a
+  silent background save + "go find it in your gallery" instruction. Not yet
+  exercised on a device with WhatsApp installed.
+
+- Sep-19-2026: **flipped `STATIC_CONFIG.smsDiagnostic` default to `false`** for the
+  store build (docs/ANDROID_RELEASE.md §7 item 12) — remains reachable for dev/stage
+  testers via `app-config.test.json`'s remote override. `rating` correctly left off;
+  there's still no store listing.
+- Sep-19-2026: **"Delete Account & Data" shipped** (§0.3/§7 item 10) — Settings gained
+  a real deletion action below Logout, not just Logout. New `deleteAllUserData` store
+  action (modeled field-for-field off `partialize`, NOT the pre-existing `resetAll`,
+  which turned out to have drifted — see the §7 footnote) +
+  `googleAuth.revokeAndSignOut` (actually revokes the Google grant, `signOut` only
+  forgot it locally) + a new `Storage.wipeEverything` (`AsyncStorage.clear()` — the
+  narrower `clearAll()` would have missed `useNotificationStore`'s persist key,
+  which doesn't share `ePurseStore`'s prefix). `LoginGate` gained a third message
+  (`justDeletedAccount`) so it stops claiming "your data is untouched" right after
+  the user deleted it. `docs/site/delete-account.html` written for the mandatory
+  public URL — not yet published. Also fixed the `SUPPORT_EMAIL` placeholder
+  (`@epurse.app` → `@epurse.co.in`, item 9) since the new page needed a real address.
+  A new data-driven test in `test:store` dirties every `partialize` field and asserts
+  each one individually returns to its true default — this is what actually caught
+  `resetAll`'s drift, by being the first thing to check the FULL field list at all.
+
+- Sep-19-2026: **crash reporting wired (Sentry)** — `@sentry/react-native`
+  installed, `src/config/sentry.ts` added (`initSentry`, environment tagged
+  dev/stage/production), called at the top of `App.js` with `Sentry.wrap(App)`
+  for a root error boundary, plus the `@sentry/react-native` Expo config
+  plugin and `metro.config.js`'s `getSentryExpoConfig` (for readable release
+  stack traces once source maps upload). Crash-only on purpose — no
+  performance tracing, no session replay, `sendDefaultPii: false` — keeping
+  third-party data collection as narrow as possible; usage/screen analytics
+  stays a separate, deferred decision. Currently a no-op everywhere: the DSN,
+  Sentry org slug, and project slug are all still placeholders (`initSentry()`
+  checks for the placeholder and skips `Sentry.init` entirely), and the
+  source-map upload needs a `SENTRY_AUTH_TOKEN` EAS secret that doesn't exist
+  yet. See BUILD.md's "Crash reporting (Sentry)" section for the 3 real values
+  + the secret needed to turn it on.
+- Sep-19-2026: **real DSN added, smoke-tested on an emulator.** Found and fixed a
+  real build bug in the process: `@sentry/react-native`'s error-handler integration
+  imports `promise/setimmediate/done` directly, but `promise` was only present
+  nested under `react-native`'s own `node_modules` (npm never hoisted it to the
+  top level) — Metro couldn't resolve it, and `assembleRelease` failed at the JS
+  bundling step. Added `promise` as a direct dependency to force the hoist; build
+  now succeeds. Verified via a real `assembleRelease` sideload (not a Metro-connected
+  dev client, since `initSentry()` is intentionally a no-op under `__DEV__`) with a
+  temporary crash trigger: `adb logcat` confirmed `RNSentry` initialized with the
+  real DSN and the correct native integrations (`UncaughtExceptionHandlerIntegration`,
+  `SendCachedEnvelopeIntegration`), and the thrown error was caught as a genuine
+  `FATAL EXCEPTION`. **Could not confirm actual delivery to Sentry's servers** —
+  this emulator has no working DNS resolution at all right now (a plain
+  `ping google.com` also fails, and Play Services logs the same
+  `UnknownHostException` independently), so the crash may never have left the
+  device. Needs a real device (or an emulator with working DNS) to confirm a
+  crash actually lands in the Sentry dashboard.
+- Sep-19-2026: **permanent "Test Sentry Crash" debug row added** (Settings, below
+  "Delete Account") — replaces the one-off boot-timer crash trigger used for the
+  first smoke test above (which was itself the cause of a separate "app closes on
+  the sign-in screen" report — it fired 5s after boot regardless of screen, and
+  sign-in is the first thing mandatory login shows). `IS_STAGE_BUILD`-gated, same
+  convention as every other debug tool in the app (`AccountDetailsScreen`/
+  `DashboardScreen`'s debug long-presses, `CategoriesScreen`'s reset button) —
+  invisible in a real production build, always available in dev/stage to re-test
+  crash reporting on demand instead of rebuilding with temporary code each time.
+- Sep-19-2026: **Sentry delivery CONFIRMED end-to-end.** The emulator's broken DNS
+  turned out to be the AVD itself, not the host machine (the Mac resolved
+  `google.com` fine the whole time) — a cold boot (`adb emu kill` + relaunch with
+  `-no-snapshot-load`) cleared it. Retested "Test Sentry Crash" with working
+  network: the issue landed in the Sentry dashboard, confirmed by the user. The
+  debug row and its `IS_STAGE_BUILD` import have now been removed from
+  `SettingsScreen.tsx` — it did its job; no permanent test-crash affordance is
+  needed in the app.
+- Sep-19-2026: **org/project slugs filled in** — `app.json`'s `@sentry/react-native`
+  plugin entry now has the real values (`praveen-verma` / `react-native`), verified
+  via a clean `expo prebuild` writing them into `sentry.properties`. Only
+  `SENTRY_AUTH_TOKEN` (an EAS secret, never committed — see BUILD.md) is still
+  needed before a release build actually uploads source maps; without it,
+  crashes still reach Sentry fine, just with minified stack traces.
+
 **Open**
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
-  clean on an emulator. STILL unverified because an emulator cannot do them: a live SMS
-  arriving, a MULTIPART bank SMS reassembling whole, app lock hiding from recents, and
-  reminders actually firing. Skia/Reanimated render fine.
-- The New Architecture changes gesture/worklet semantics — re-check the drag interactions
-  (`AllocationBar`) given the known "a worklet must never call an imported function" trap.
+  clean on an emulator. STILL unverified: a live SMS arriving, a MULTIPART bank SMS
+  reassembling whole, reminders actually firing, the new WhatsApp banner-share flow,
+  and the new account-deletion flow end-to-end (including the Google revoke actually
+  reaching Google). Sentry crash reporting is now confirmed working end-to-end.
+  Skia/Reanimated render fine.

@@ -28,7 +28,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { captureRef } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library';
 import Svg, {
   Path, Circle, Rect, Ellipse,
   Defs, LinearGradient as SvgGradient, Stop,
@@ -417,7 +416,6 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
   const [dueDateKey, setDueDateKey] = useState(null);
   const [customDate, setCustomDate] = useState('');
   const [msgOverride, setMsgOverride] = useState(null);
-  const [bannerSaved, setBannerSaved] = useState(false);
   const [confirm, setConfirm] = useState(null);
 
   const activeTheme = REMINDER_THEMES.find((t) => t.id === themeId) || REMINDER_THEMES[0];
@@ -443,18 +441,28 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
   }, [themeId]);
 
   const handleSend = useCallback(async () => {
-    // 1. Capture the banner and save to gallery so the user can attach it in WhatsApp
+    // 1. Capture the banner and hand it to the OS share sheet — the user picks
+    // WhatsApp (or Save, or anywhere else) themselves. No MediaLibrary, no
+    // storage permission: this is the ONLY feature in the app that used to
+    // need one (see docs/ANDROID_RELEASE.md §3.4 item 13). Lazy `require`,
+    // matching exportService.ts's own convention for this same module — it
+    // prevents a requireNativeModule() crash if the binary hasn't been
+    // rebuilt yet after `npm install`, and expo-sharing (unlike MediaLibrary)
+    // needs no permission grant, so there's nothing to check beforehand.
     let bannerCaptured = false;
     try {
       const uri = await captureRef(bannerRef, { format: 'jpg', quality: 0.92 });
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status === 'granted') {
-        await MediaLibrary.saveToLibraryAsync(uri);
-        setBannerSaved(true);
-        bannerCaptured = true;
+      bannerCaptured = true;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const Sharing = require('expo-sharing');
+      if (await Sharing.isAvailableAsync()) {
+        // Awaited: the share sheet is its own modal, so this blocks until the
+        // user picks a target or dismisses it — THEN we move on to the text.
+        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share reminder banner' });
       }
     } catch (_) {
-      // Capture failure is non-fatal — proceed to open WA without the image
+      // Capture or share failure/cancellation is non-fatal — proceed to open
+      // WA with the text regardless; the image step is a bonus, not a gate.
     }
 
     // 2. Build WhatsApp URL with pre-filled message text
@@ -470,11 +478,13 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
       return;
     }
 
-    // 3. Show attach hint if we saved the banner, then open WA
+    // 3. If the banner was captured, confirm before WA reopens for the text —
+    // otherwise the sheet-then-WA sequence reads as WhatsApp opening twice
+    // for no reason. No image → straight through, same as before.
     if (bannerCaptured) {
       setConfirm({
-        title:       '📸 Banner saved to gallery!',
-        message:     'In WhatsApp, tap the 📎 (attachment) button and pick the banner from your gallery to send it along with the message.',
+        title:       '💬 Ready to send',
+        message:     'Next, WhatsApp opens with your message ready. If you shared or saved the banner, attach it to the same chat.',
         primaryText: 'Open WhatsApp',
         onConfirm:   () => {
           setConfirm(null);
