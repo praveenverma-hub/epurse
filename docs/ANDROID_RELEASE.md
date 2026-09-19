@@ -573,9 +573,27 @@ paperwork and store submission, plus device QA.
     exercised on a device with WhatsApp installed.
 
 **Then, in order (each depends on the one before)**
-14. **`eas credentials`** → generate the upload keystore; record its SHA-1 (§3.1).
+14. ~~**`eas credentials`** → generate the upload keystore; record its SHA-1 (§3.1).~~
+    **Done (2026-09-19).** Keystore named "epurse", set as the default Android build
+    credentials (shared across dev/stage/prod EAS builds — only `production` actually
+    needs it to stay stable). Upload SHA-1: `C9:A8:2D:6F:2B:67:A9:2D:A2:B9:2C:58:2E:FE:02:8D:DF:3D:48:38`.
 15. **OAuth**: register debug + upload + **Play app-signing** SHA-1s and PUBLISH the
     consent screen. Miss the third and sign-in fails for every real user (§0.4).
+    **Partially done (2026-09-19)** — debug (`5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`)
+    and upload SHA-1s added to the Android OAuth client for `com.epurse.app`. Still
+    open: (a) Play app-signing SHA-1 — blocked on the Play account existing (#1/#2);
+    (b) consent screen publish status — not yet checked; (c) whether Google's Custom
+    URI Scheme restriction (Oct 2023+, new Android clients only) affects this specific
+    client — **ruled out (2026-09-19)**: a real (non-bypass) sign-in on a debug-signed
+    build reached Google's actual "Sign in to continue to ePurse" page cleanly, no
+    error — confirms both the custom-scheme redirect AND the single client_id holding
+    multiple SHA-1s (debug + upload) both work in practice, whatever the Console UI's
+    single-field form suggested. Still unconfirmed: whether the consent screen is fully
+    published (needs someone to actually complete a sign-in with a real account and see
+    if it's blocked as "unverified"/testing-only). **Confirmed (2026-09-19)**: real
+    account sign-in completed successfully, no "unverified app" block — consent screen
+    is live. #15 is closed except for the Play app-signing SHA-1, which stays open
+    until the Play account + app exist (#1/#2).
 16. **Internal testing build** via `npm run build:prod` (or `build:prod-local` if the EAS
     quota is spent) → verify Google sign-in and Drive backup on a Play-signed artifact.
 17. **App content forms** (§5.2): Data Safety, the SMS Permissions Declaration + demo

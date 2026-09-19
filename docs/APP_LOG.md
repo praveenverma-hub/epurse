@@ -2612,10 +2612,22 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   needed before a release build actually uploads source maps; without it,
   crashes still reach Sentry fine, just with minified stack traces.
 
+- Sep-19-2026: **real Google sign-in confirmed end-to-end (§7 item 15).** Upload
+  keystore generated via `eas credentials` (named "epurse", set as default Android
+  build credentials), debug + upload SHA-1s added to the existing Android OAuth
+  client for `com.epurse.app`. Tested on a debug-signed local build (not the dev
+  bypass): the real "Sign In With Google" button opened Chrome, reached Google's
+  actual consent page ("Sign in to continue to ePurse"), and completed a real
+  account login successfully — no "unverified app" block, no client/redirect error.
+  This settles what was a genuinely open question (whether one Android OAuth client
+  can serve multiple signing certs with a single hardcoded client_id, despite the
+  Console UI only showing one SHA-1 field) — it does, in practice. Only the Play
+  app-signing SHA-1 remains open, blocked on the Play account/app existing.
+
 **Open**
 - **Partially device-verified (Sep-19-2026):** the app boots and the Dashboard renders
   clean on an emulator. STILL unverified: a live SMS arriving, a MULTIPART bank SMS
   reassembling whole, reminders actually firing, the new WhatsApp banner-share flow,
   and the new account-deletion flow end-to-end (including the Google revoke actually
-  reaching Google). Sentry crash reporting is now confirmed working end-to-end.
-  Skia/Reanimated render fine.
+  reaching Google). Sentry crash reporting and real Google sign-in are now both
+  confirmed working end-to-end. Skia/Reanimated render fine.

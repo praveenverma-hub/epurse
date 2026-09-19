@@ -43,6 +43,7 @@ import {
   removeRemoteBackup, getPreRestoreSnapshot, undoRestore,
 } from '../backup/backupService';
 import PlainScreenHeader from '../components/PlainScreenHeader';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 const MIN_PASSWORD = 8;
 
@@ -98,6 +99,8 @@ const BackupScreen = ({ navigation, route }) => {
   const [pw, setPw]             = useState('');
   const [pw2, setPw2]           = useState('');
   const [pwErr, setPwErr]       = useState('');
+  const [showPw, setShowPw]     = useState(false);
+  const { submit: submitPasswordGuarded, submitting: submittingPassword } = useSubmitGuard();
   // Recovery key mode (backup only). `saved` gates the submit: a key the user
   // hasn't stored is worse than a password, because there's nothing to remember.
   const [recoveryKey, setRecoveryKey] = useState(null);
@@ -136,7 +139,7 @@ const BackupScreen = ({ navigation, route }) => {
   };
 
   const openPassword = (mode, file) => {
-    setPw(''); setPw2(''); setPwErr('');
+    setPw(''); setPw2(''); setPwErr(''); setShowPw(false);
     setRecoveryKey(null); setKeySaved(false);
     setPwSheet({ mode, file });
   };
@@ -171,6 +174,11 @@ const BackupScreen = ({ navigation, route }) => {
       return;
     }
     const file = pwSheet?.file;
+    // Yield one tick so the button's loading state actually paints before
+    // encryption (CPU-bound, on this thread) blocks it — otherwise this and
+    // the sheet-close below land in the same React commit and the spinner
+    // never gets a frame.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     setPwSheet(null);
 
     if (mode === 'backup') {
@@ -418,27 +426,51 @@ const BackupScreen = ({ navigation, route }) => {
               </>
             ) : (
               <>
-                <TextInput
-                  value={pw}
-                  onChangeText={(t) => { setPw(t); setPwErr(''); }}
-                  placeholder={pwSheet?.mode === 'backup' ? 'Backup password' : 'Password or recovery key'}
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry={pwSheet?.mode === 'backup'}
-                  autoCapitalize="none"
-                  autoFocus
-                  style={[styles.input, !!pwErr && styles.inputError]}
-                />
+                <View style={styles.inputWrap}>
+                  <TextInput
+                    value={pw}
+                    onChangeText={(t) => { setPw(t); setPwErr(''); }}
+                    placeholder={pwSheet?.mode === 'backup' ? 'Backup password' : 'Password or recovery key'}
+                    placeholderTextColor={colors.textMuted}
+                    secureTextEntry={pwSheet?.mode === 'backup' && !showPw}
+                    autoCapitalize="none"
+                    autoFocus
+                    style={[styles.input, pwSheet?.mode === 'backup' && styles.inputWithEye, !!pwErr && styles.inputError]}
+                  />
+                  {pwSheet?.mode === 'backup' ? (
+                    <TouchableOpacity
+                      onPress={() => setShowPw((v) => !v)}
+                      hitSlop={8}
+                      style={styles.eyeBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
+                    >
+                      <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
                 {pwSheet?.mode === 'backup' ? (
                   <>
-                    <TextInput
-                      value={pw2}
-                      onChangeText={(t) => { setPw2(t); setPwErr(''); }}
-                      placeholder="Confirm password"
-                      placeholderTextColor={colors.textMuted}
-                      secureTextEntry
-                      autoCapitalize="none"
-                      style={[styles.input, !!pwErr && styles.inputError]}
-                    />
+                    <View style={styles.inputWrap}>
+                      <TextInput
+                        value={pw2}
+                        onChangeText={(t) => { setPw2(t); setPwErr(''); }}
+                        placeholder="Confirm password"
+                        placeholderTextColor={colors.textMuted}
+                        secureTextEntry={!showPw}
+                        autoCapitalize="none"
+                        style={[styles.input, styles.inputWithEye, !!pwErr && styles.inputError]}
+                      />
+                      <TouchableOpacity
+                        onPress={() => setShowPw((v) => !v)}
+                        hitSlop={8}
+                        style={styles.eyeBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
+                      >
+                        <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
                     {/* The stronger option, offered but not pushed: most people
                         will pick a password, and a key they lose is unrecoverable. */}
                     <TouchableOpacity onPress={useRecoveryKey}>
@@ -454,8 +486,9 @@ const BackupScreen = ({ navigation, route }) => {
 
             <GradientButton
               title={pwSheet?.mode === 'backup' ? 'Encrypt & upload' : 'Unlock & restore'}
-              disabled={!!recoveryKey && !keySaved}
-              onPress={submitPassword}
+              disabled={submittingPassword || (!!recoveryKey && !keySaved)}
+              loading={submittingPassword}
+              onPress={() => submitPasswordGuarded(submitPassword)}
               style={{ marginTop: spacing.sm }}
             />
           </View>
@@ -539,7 +572,13 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: colors.background, borderRadius: radius.md,
     paddingHorizontal: spacing.md, paddingVertical: spacing.md,
-    marginBottom: spacing.sm, color: colors.textPrimary, ...typography.body,
+    color: colors.textPrimary, ...typography.body,
+  },
+  inputWrap: { position: 'relative', marginBottom: spacing.sm },
+  inputWithEye: { paddingRight: spacing.xl + spacing.md },
+  eyeBtn: {
+    position: 'absolute', right: spacing.sm, top: 0, bottom: 0,
+    justifyContent: 'center', alignItems: 'center', width: spacing.xl,
   },
   inputError: { borderWidth: 1.5, borderColor: colors.danger },
   keyBox: {
