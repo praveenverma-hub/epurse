@@ -61,21 +61,32 @@ those with `401 Invalid token`, and that failure is **fatal to the build**
 (`sentry.gradle` has no allow-failure option). It lives in two places, neither
 ever committed:
 
-- **Local builds** (`./build.sh dev-test` / `stage-test`) read `.env.local`,
-  which is gitignored:
+- **Anything that runs on this machine** — both the plain-Gradle `-test`
+  targets and `eas build --local` — reads `.env.local`, which is gitignored:
   ```
   SENTRY_AUTH_TOKEN=sntrys_...
   ```
-  `build.sh` sources it automatically. With **no** token set it exports
-  `SENTRY_DISABLE_AUTO_UPLOAD=true` and skips the upload rather than failing,
-  so a missing token never blocks a local build.
+  `build.sh` sources it and exports it **before** it dispatches, which matters:
+  that dispatch is an `exec`, so anything below it never runs. With **no** token
+  it exports `SENTRY_DISABLE_AUTO_UPLOAD=true` and skips the upload rather than
+  failing, so a missing token never blocks a build here.
 
-- **Cloud/EAS builds** don't read `.env.local` — they need an EAS variable:
+- **Cloud EAS builds** don't see this machine's environment at all. They read an
+  EAS variable:
   ```bash
   eas env:create --name SENTRY_AUTH_TOKEN --value <token> --visibility secret \
     --scope project --environment production --environment preview
   ```
   `secret` visibility means it is readable only on the builder, never in the UI.
+  **Each build profile in `eas.json` must name its `environment`** (`stage` →
+  `preview`, `production` → `production`, `development` → `development`) or EAS
+  has no idea which set of variables to load and injects none of them.
+
+  A `secret` variable is **not** available to `eas build --local`, even with the
+  profile's `environment` set — EAS only decrypts secrets on a real builder.
+  Confirmed two ways: `eas env:exec preview '...'` cannot read it, and the local
+  build job's payload carries `buildCredentials` but no `environmentSecrets`.
+  That is exactly why local EAS builds fall back to `.env.local` above.
 
 ---
 

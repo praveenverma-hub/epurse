@@ -95,6 +95,32 @@ else WHERE="EAS cloud"; fi
 echo -e "  builds on ${BOLD}${WHERE}${RESET}"
 echo ""
 
+# ── Sentry ────────────────────────────────────────────────────────
+# Sentry's Gradle step uploads source maps on every RELEASE build and FAILS the
+# whole build without a token (sentry.gradle has no allow-failure option).
+#
+# This MUST stay above the EAS dispatch below: that dispatch `exec`s, replacing
+# this process, so anything after it never runs. It used to sit further down and
+# therefore only ever applied to the plain-Gradle "-test" targets — every EAS
+# build died on `:app:...SentryUpload`.
+#
+# Where the token comes from, per target:
+#   -test          this file, from gitignored .env.local
+#   --eas-local    the same, forwarded from this shell by the local build plugin
+#                  (EAS *secrets* are decrypted only on a real builder, so the
+#                  EAS variable is NOT readable here — verified with env:exec)
+#   cloud          the EAS variable, via each profile's `environment` in eas.json
+# Exports here do not reach a cloud builder, so they cannot suppress its upload.
+if [ -f .env.local ]; then
+  set -a; . ./.env.local; set +a
+fi
+if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+  export SENTRY_DISABLE_AUTO_UPLOAD=true
+  echo -e "${DIM}no SENTRY_AUTH_TOKEN here — source-map upload skipped${RESET}"
+else
+  echo -e "${DIM}SENTRY_AUTH_TOKEN loaded — source maps will upload${RESET}"
+fi
+
 # ── EAS ──────────────────────────────────────────────────────────────────────
 # eas.json owns the env vars and the signing credentials; never duplicate them.
 if ! $LOCAL; then
@@ -125,21 +151,6 @@ echo -e "${DIM}EXPO_PUBLIC_APP_VARIANT=${ENV}${RESET}"
 # The matching 'prod' value is set per eas.json build profile instead.
 export EXPO_PUBLIC_BUILD_KIND="test"
 echo -e "${DIM}EXPO_PUBLIC_BUILD_KIND=test${RESET}"
-
-# Sentry's Gradle step uploads source maps on every RELEASE build and FAILS the
-# whole build without a token — so a local build needs one too, not just EAS.
-# `.env.local` is gitignored; cloud builds read the matching EAS secret instead.
-# Without it, skip the upload rather than die: a local sideload does not need
-# symbolicated stack traces, and a hard failure here would block testing.
-if [ -f .env.local ]; then
-  set -a; . ./.env.local; set +a
-fi
-if [ -z "$SENTRY_AUTH_TOKEN" ]; then
-  export SENTRY_DISABLE_AUTO_UPLOAD=true
-  echo -e "${DIM}no SENTRY_AUTH_TOKEN — skipping source-map upload${RESET}"
-else
-  echo -e "${DIM}SENTRY_AUTH_TOKEN loaded — source maps will upload${RESET}"
-fi
 
 # android/ is generated and no longer committed, so it may simply not be here.
 if [ ! -d android ]; then

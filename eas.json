@@ -5,6 +5,7 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal",
       "env": {
@@ -16,6 +17,7 @@
       }
     },
     "stage": {
+      "environment": "preview",
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_APP_VARIANT": "stage",
@@ -30,6 +32,7 @@
       }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_BUILD_KIND": "prod"
