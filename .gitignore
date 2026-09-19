@@ -30,3 +30,7 @@ web-build/
 # withEPurseAndroid on every prebuild. Run `npm run setup` to regenerate.
 /android/
 /ios/
+
+# EAS local build drops its artifact in the project root
+build-*.apk
+build-*.aab
