@@ -31,6 +31,7 @@ web-build/
 /android/
 /ios/
 
-# EAS local build drops its artifact in the project root
-build-*.apk
-build-*.aab
+# Build artifacts: EAS local drops its own in the project root, and hand-signed
+# APKs land here too. None of these ever belong in the repo.
+*.apk
+*.aab
