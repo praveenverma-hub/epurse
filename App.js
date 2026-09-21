@@ -21,6 +21,15 @@ import { ToastProvider } from './src/components/Toast';
 import AppLockGate from './src/components/AppLockGate';
 import LoginGate from './src/components/LoginGate';
 import UpdateRequiredGate from './src/components/UpdateRequiredGate';
+// `src/components/SplashOverlay.tsx` (branded gradient/bubbles/wordmark on
+// Android) is DELIBERATELY not wired in here — Sep-22-2026: on-device video +
+// logcat proved it, but a separate render artifact between the native splash
+// and onboarding (a plain gradient with no mark/text) survived both a
+// resizeMode change and a full uninstall/reinstall, meaning it isn't
+// SplashOverlay's own image at all — most likely an OS-level window
+// transition effect outside app control. Kept as a file, unused, in case a
+// future attempt wants it back — see the component's own doc + the
+// splash-screen memory before touching this again.
 import { useRemoteConfigStore } from './src/store/useRemoteConfigStore';
 import { useNotificationStore } from './src/store/useNotificationStore';
 import { useAppUpdate } from './src/hooks/useAppUpdate';
@@ -214,9 +223,14 @@ function BudgetRolloverBoot() {
   return null;
 }
 
+// Whatever's behind the native splash's own exit fade is this root view, so it
+// must never be the platform default (black on Android) — same brand violet
+// the splash ends on, so a slow first frame still reads as "still the splash".
+const ROOT_BG = '#5B3CC4';
+
 function App() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: ROOT_BG }}>
       <SafeAreaProvider>
         <ToastProvider>
           <StatusBar style="light" />

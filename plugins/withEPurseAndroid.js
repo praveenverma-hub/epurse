@@ -22,7 +22,7 @@ const {
 const fs = require('fs');
 const path = require('path');
 
-const ICON_BG = '#FF5A1F';
+const ICON_BG = '#321F70';
 
 const withIconBackground = (config) =>
   withAndroidColors(config, (cfg) => {
@@ -138,7 +138,20 @@ const withNativeSources = (config) =>
       fs.mkdirSync(destDir, { recursive: true });
       for (const file of KOTLIN_SOURCES) {
         const src = path.join(__dirname, 'android', file);
-        fs.writeFileSync(path.join(destDir, file), fs.readFileSync(src, 'utf8'));
+        const contents = fs.readFileSync(src, 'utf8');
+        // The vendored files declare `package com.epurse.app` (the base
+        // identity) — since Sep-2026 the 4 non-prod build variants apply an
+        // `applicationIdSuffix` (see app.config.js), so `pkg` here can be
+        // e.g. `com.epurse.app.stest`. Kotlin resolves same-package
+        // references by the DECLARED `package` line, not by directory, so
+        // leaving the vendored declaration as-is compiles these classes into
+        // the wrong package and MainApplication.kt (generated under the real
+        // `pkg`) fails with "Unresolved reference".
+        const rewritten = contents.replace(
+          /^package com\.epurse\.app$/m,
+          `package ${pkg}`,
+        );
+        fs.writeFileSync(path.join(destDir, file), rewritten);
       }
       return cfg;
     },

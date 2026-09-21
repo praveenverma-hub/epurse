@@ -14,12 +14,12 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#FF5A1F",
+          "resizeMode": "cover",
+          "backgroundColor": "#5B3CC4",
           "android": {
             "image": "./assets/splash-icon.png",
-            "imageWidth": 140,
-            "backgroundColor": "#FE6D1C"
+            "imageWidth": 132,
+            "backgroundColor": "#5B3CC4"
           }
         }
       ],
@@ -74,7 +74,8 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FF5A1F"
+        "backgroundImage": "./assets/adaptive-icon-background.png",
+        "backgroundColor": "#321F70"
       },
       "package": "com.epurse.app",
       "versionCode": 1,

@@ -152,11 +152,15 @@ echo -e "${DIM}EXPO_PUBLIC_APP_VARIANT=${ENV}${RESET}"
 export EXPO_PUBLIC_BUILD_KIND="test"
 echo -e "${DIM}EXPO_PUBLIC_BUILD_KIND=test${RESET}"
 
-# android/ is generated and no longer committed, so it may simply not be here.
-if [ ! -d android ]; then
-  echo -e "${YELLOW}android/ missing — generating it first${RESET}"
-  npx expo prebuild -p android
-fi
+# android/ is generated and no longer committed. Always regenerate (not just
+# "if missing") — app.config.js picks the package name, app name and launcher
+# icon from EXPO_PUBLIC_APP_VARIANT/BUILD_KIND (exported above), so a stale
+# android/ left over from a DIFFERENT target would otherwise keep the wrong
+# variant's identity baked in.
+echo -e "${DIM}prebuilding android/ for this variant...${RESET}"
+npx expo prebuild --clean -p android
+PACKAGE_NAME="$(grep -m1 'applicationId ' android/app/build.gradle | sed -E "s/.*applicationId [\"'](.*)[\"'].*/\1/")"
+echo -e "${DIM}applicationId: ${PACKAGE_NAME}${RESET}"
 
 case "$TARGET" in
   dev-test)
@@ -165,8 +169,22 @@ case "$TARGET" in
     ;;
   stage-test)
     cd android && ./gradlew assembleRelease
+    cd "$ROOT"
+    APK="android/app/build/outputs/apk/release/app-release.apk"
     echo ""
-    echo -e "${GREEN}${BOLD}✔ APK${RESET} ${DIM}android/app/build/outputs/apk/release/app-release.apk${RESET}"
+    echo -e "${GREEN}${BOLD}✔ APK${RESET} ${DIM}${APK}${RESET}"
+
+    DEVICE_COUNT="$(adb devices | grep -c $'\tdevice$' || true)"
+    if [ "$DEVICE_COUNT" -ge 1 ]; then
+      echo -e "${DIM}installing to connected device/emulator (${PACKAGE_NAME})...${RESET}"
+      # -r: reinstall/keep data if this exact package is already on the device.
+      # Variant package names never collide, so dev-test/stage-test/prod all
+      # coexist side by side instead of overwriting one another.
+      adb install -r "$APK"
+    else
+      echo -e "${YELLOW}no device/emulator connected — skipping install. Run manually:${RESET}"
+      echo -e "  adb install -r ${APK}"
+    fi
     ;;
 esac
 echo ""

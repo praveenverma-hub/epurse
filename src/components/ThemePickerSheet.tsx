@@ -4,9 +4,9 @@
 // Pulled out of SettingsScreen (Sep-14-26), as part of making every Settings
 // row behave the same way: tap a row, get a screen or a sheet, never inline
 // content sitting directly on the Settings list. A theme swatch grid is a
-// short, self-contained, non-growing decision (ui-consistency §2b) — five
-// tiles, nothing conditional, nowhere further to navigate — so it's a sheet,
-// not a pushed screen.
+// short, self-contained, non-growing decision (ui-consistency §2b) — a handful
+// of tiles, nothing conditional, nowhere further to navigate — so it's a
+// sheet, not a pushed screen.
 // =============================================================================
 
 import React from 'react';

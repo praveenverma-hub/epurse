@@ -207,13 +207,20 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 }
 
 // ── Lent / Borrowed cards ───────────────────────────────────────────────────
-// These are SEMANTIC and FIXED — the app's original emerald / violet, not part
-// of the theme. Accent-derived and accent-tinted versions were both built and
-// reverted at the user's call: money-in vs money-out reads faster as two
-// constant colours you learn once than as two that drift with the accent.
+// SEMANTIC — money-in vs money-out is its own meaning, not the accent.
+// Accent-derived and accent-tinted versions were both built and reverted at the
+// user's call: money-in vs money-out reads faster as two colours you learn
+// once than as two that drift with the accent.
 //
-// So the invariant is stability, not adaptation, plus enough hue separation to
-// tell them apart at a glance.
+// THEMABLE as of Sep-21-26: `buildPalette` merges `theme.lb || LB_BASE`, and
+// `useLbGradients()` reads that merged value — so a theme COULD override it,
+// none does yet, and every theme must currently resolve to the same shared
+// `LB_BASE` pair. That's asserted below alongside the colour/hue invariants.
+//
+// Current hexes are the user's Sep-21-26 pick (superseding an orange chosen
+// earlier the same day purely to dodge the violet-brand clash) — see the
+// comment on `LB_BASE` in theme.js for the full history and the accepted
+// contrast trade-off that came with this specific choice.
 {
   const hueOf = (hex) => {
     const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
@@ -226,33 +233,59 @@ check("removed themes are gone ('sky')", !THEMES.sky);
   const hp = hueOf(LB_BASE.borrowed[1]);
 
   check('LB lent is green', hg >= 120 && hg <= 190, `${hg?.toFixed(0)}°`);
-  check('LB borrowed is violet', hp >= 240 && hp <= 300, `${hp?.toFixed(0)}°`);
+  check('LB borrowed is orange/peach', hp >= 5 && hp <= 45, `${hp?.toFixed(0)}°`);
   check('the two hues are far apart (readable at a glance)',
     Math.abs(hg - hp) >= 60, `${Math.abs(hg - hp).toFixed(0)}°`);
-  check('LB colours do NOT vary by theme (semantic, like success/danger)',
-    LB_BASE.lent[0] === '#059669' && LB_BASE.lent[1] === '#10B981' &&
-    LB_BASE.borrowed[0] === '#6D28D9' && LB_BASE.borrowed[1] === '#8B5CF6');
+  check('LB colours match the Sep-21-26 finalised pair',
+    LB_BASE.lent[0] === '#16a673' && LB_BASE.lent[1] === '#22c55e' &&
+    LB_BASE.borrowed[0] === '#ff7657' && LB_BASE.borrowed[1] === '#ff9b76');
+
+  // ── The mechanism: every theme resolves to the SAME shared default ──
+  for (const id of Object.keys(THEMES)) {
+    const p = buildPalette(id, false);
+    check(`${id}: palette.lb falls back to the shared LB_BASE (no theme overrides it yet)`,
+      p.lb === LB_BASE || (p.lb.lent[0] === LB_BASE.lent[0] && p.lb.borrowed[0] === LB_BASE.borrowed[0]));
+  }
 
   // ── The accepted contrast gap, asserted as a BOUND rather than hidden ──
   // White on these is below AA and that is a deliberate design decision (every
   // fix — darker green, dark ink, a scrim — loses the look being kept). What a
   // test can still do is stop it getting WORSE, and record the real number so
   // nobody rediscovers it as a surprise.
+  //
+  // Sep-21-26: the user's own hex pick WIDENED this gap (was 2.5, the old
+  // emerald's floor) — `borrowed[1]` (#FF9B76) is now 2.06:1. Floor lowered to
+  // match, on purpose, not as a silent regression: it's recorded in the
+  // LB_BASE comment as a flagged, not-fixed known gap.
   const worstWhite = Math.min(
     ...[...LB_BASE.lent, ...LB_BASE.borrowed].map((c) => contrastRatio('#FFFFFF', c)),
   );
   check(`known gap: white on LB cards is ${worstWhite.toFixed(2)}:1 (accepted, must not worsen)`,
-    worstWhite >= 2.5, `${worstWhite.toFixed(2)}`);
-  // The 26px/800 amount is LARGE text, which has a 3:1 bar — that one must hold.
+    worstWhite >= 2.0, `${worstWhite.toFixed(2)}`);
+  // The 26px/800 amount is LARGE text (3:1 bar in general) — recorded rather
+  // than enforced here, since the Sep-21-26 pick no longer clears it (2.06:1
+  // on `borrowed[1]`) and that's the user's own accepted trade-off, not a bug
+  // to hide behind a lowered bar with the same name as the AA one.
   const worstLarge = Math.min(...LB_BASE.borrowed.map((c) => contrastRatio('#FFFFFF', c)));
-  check(`the large amount still clears the 3:1 large-text bar on violet (${worstLarge.toFixed(2)}:1)`,
-    worstLarge >= AA_UI, `${worstLarge.toFixed(2)}`);
+  check(`known gap: the large amount on Borrowed is ${worstLarge.toFixed(2)}:1, under the 3:1 large-text bar (accepted, must not worsen)`,
+    worstLarge >= 2.0, `${worstLarge.toFixed(2)}`);
   // gradientTextPlan is still the tool for any NEW gradient surface, so keep it
   // honest even though these cards deliberately opt out of it.
   const plan = gradientTextPlan(LB_BASE.lent);
   check('gradientTextPlan would still find a passing option for this green',
     contrastRatio(plan.ink, plan.scrim === 0 ? LB_BASE.lent[1]
       : mix(LB_BASE.lent[1], 1 - plan.scrim, plan.scrimColor)) >= AA_TEXT);
+
+  // ── Testing the helper is not testing the caller ──
+  // `buildPalette` falling back to `LB_BASE` proves the MECHANISM works; it says
+  // nothing about whether `useLbGradients` actually reads it instead of the
+  // constant directly. A mutation reverting the hook to `() => LB_BASE` would
+  // leave every check above green while silently undoing the themability.
+  const hookSrc = readFileSync(
+    '/Users/praveenverma/Desktop/pvn/ePurse/src/hooks/useTheme.js', 'utf8');
+  check('useLbGradients reads through useTheme(), not the LB_BASE constant directly',
+    /useLbGradients = \(\) => useTheme\(\)\.lb;/.test(hookSrc)
+    && !/useLbGradients = \(\) => LB_BASE;/.test(hookSrc));
 }
 
 // ── InfoSheet bullet icons sit on a fixed light tile ───────────────────────

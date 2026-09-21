@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { STATIC_CONFIG } from '../config/staticConfig';
+import { LB_BASE } from './theme';
 
 /**
  * Whether a theme is allowed to bring its own canvas (see staticConfig). Read
@@ -180,18 +181,51 @@ export const THEMES = {
     gradientStart: '#4F46E5',
     gradientEnd: '#6366F1',
   },
+  /**
+   * Violet — the new brand accent (Sep-21-26 rebrand), and the app icon's own
+   * colours: Deep Violet → Primary Violet → Bright Violet is the exact "epurse
+   * Primary Gradient" from the brand spec, so the header/hero a user sees on
+   * first launch matches the icon they tapped to get there.
+   *
+   * `gradientStops` carries all three stops (see Platinum for why every
+   * consumer has to read `gradientStops`, never the start/end pair alone) —
+   * unlike Platinum's this one is a plain linear ramp, no interior highlight.
+   *
+   * The brand brief also specifies full light/dark SURFACE tokens (background,
+   * card, borders, text — not just the accent) and a "Focus/clarity" gradient
+   * for icon/brand storytelling only. Neither is wired here: surfaces are
+   * shared across every theme via LIGHT_NEUTRALS/DARK_NEUTRALS today (see
+   * `docs/DARK_MODE.md` — per-theme canvases are gated behind
+   * `STATIC_CONFIG.theme.canvasThemes`, off until that migration lands), and
+   * the focus gradient has no current consumer. Both are recorded in
+   * `docs/BRAND_PALETTE.md` so the exact hexes survive to that later pass
+   * instead of being re-derived from a screenshot.
+   */
+  violet: {
+    id: 'violet',
+    label: 'Violet',
+    swatch: '#5B3CC4',
+    primary: '#5B3CC4',
+    primaryDark: '#321F70',
+    primaryLight: '#7B4DFF',
+    gradientStart: '#321F70',
+    gradientEnd: '#7B4DFF',
+    gradientStops: ['#321F70', '#5B3CC4', '#7B4DFF'],
+  },
 };
 
 /**
- * Ocean blue (Aug-26, user's call — was 'orange').
+ * Violet (Sep-21-26, brand rebrand — was 'blue'/Ocean).
  *
  * This only affects a FRESH install and anyone who has never touched the theme
  * picker: `themeId` is persisted, so an existing user keeps whatever they chose.
  * That's deliberate — silently repainting someone's app is worse than an
  * inconsistent default. It's also what `migrate`'s `state.themeId ?? DEFAULT`
- * fallback means: absent, not "reset me".
+ * fallback means: absent, not "reset me". No store migration needed for this
+ * change specifically, same as the Ocean switch it replaces — no existing key
+ * was renamed or removed.
  */
-export const DEFAULT_THEME_ID = 'blue';
+export const DEFAULT_THEME_ID = 'violet';
 
 // ----- Neutrals (light) -----------------------------------------------------
 export const LIGHT_NEUTRALS = {
@@ -232,9 +266,9 @@ export const STATUS_COLORS = {
   danger: '#EF4444',
   warning: '#F59E0B',
   info: '#3B82F6',
-  // Bank-brand gradient (AccountDetailsScreen tints a card by issuer).
-  // NOT the Lent/Borrowed pair any more — that derives from the theme via
-  // useLbGradients; the purple half of the old pair is gone with it.
+  // Bank-brand gradient (AccountDetailsScreen tints a card by issuer) — NOT
+  // the Lent/Borrowed pair, which lives on the palette's own `lb` key (see
+  // `buildPalette` below) and is a different green.
   gradientGreenStart: '#059669',
   gradientGreenEnd: '#10B981',
   gradientBlueStart: '#1E40AF',
@@ -271,6 +305,12 @@ export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
     // Every gradient consumer reads `gradientStops`, so a theme can be a simple
     // pair OR a multi-stop ramp without any call site knowing the difference.
     gradientStops: theme.gradientStops || [theme.gradientStart, theme.gradientEnd],
+    // Lent/Borrowed is THEMABLE (Sep-21-26) — a theme may carry its own `lb`
+    // override; none does yet, so every theme falls back to the same finalised
+    // `LB_BASE` pair. Same shape as `gradientStops` above: one shared default
+    // until a theme actually needs to differ. See the comment on `LB_BASE` in
+    // `constants/theme.js` for why these two specific hexes were chosen.
+    lb: theme.lb || LB_BASE,
     darkMode: effectiveDark,
   };
 };

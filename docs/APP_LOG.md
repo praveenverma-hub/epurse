@@ -2017,6 +2017,78 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `BackupScreen` was swept too in a first pass, then reverted — it's a Profile-hub sibling of
   Settings (its own top-level destination, not nested under it), caught on report ("why are you
   changing in backup screen").
+- **Sep-21-2026: purple brand rebrand — new app icon + splash + Violet theme (new default).** App
+  icon uses the user's two `easyappicon.com` exports **directly** (a first pass rebuilt the
+  mark/gradient with PIL to match the brand hexes exactly; the user asked to use the real files
+  instead — see `feedback_use_provided_assets_directly` memory). `assets/icon.png` /
+  `assets/favicon.png` are straight resizes (filled/outlined export respectively), no
+  recomposition. **`assets/adaptive-icon.png` went through two real bug fixes after device
+  reports**: first shipped as the same full-bleed filled export used directly as the Android
+  adaptive foreground — looked fine in a static mask-crop preview, but broke on a real emulator
+  ("only inner e visible") because Android's actual adaptive-icon renderer assumes safe-zone
+  padding that a full-bleed image doesn't have; reverted to a proper transparent mark (alpha-
+  extracted from the outlined export) inset to ~58%, verified against circle + rounded-square +
+  simulated-extra-zoom previews this time. Second fix: the extracted mark was translucent (linear
+  darkness→alpha formula never reached full 255 for this purple's actual tone) — replaced with a
+  threshold remap, alpha now genuinely 0-255. `assets/adaptive-icon-background.png` is the user's
+  own gradient export (`android_adaptive_background_432.png`, from a separately-supplied splash
+  kit) rather than a self-computed one. **Splash screen** (`assets/splash.png` +
+  `assets/splash-icon.png`) replaced with the same splash kit's real files — `android.imageWidth`
+  RE-DERIVED to 132 (not the old 140) since the new mark has no built-in padding, verified by
+  measuring the actual generated drawable after `expo prebuild --clean`; splash background is the
+  gradient's centerColor `#5B3CC4` (the OS splash API only accepts a flat colour, so the kit's
+  gradient XML drawable was deliberately not used there — would reopen the earlier "3 screens at
+  launch" bug). **The splash then gained the wordmark "ePurse" + tagline "Financial Clarity
+  Pays Off" + translucent bubbles**, set in Nunito ExtraBold/Medium (SIL OFL, baked into the
+  PNG — the app still ships no custom fonts; SF Pro Rounded and Arial Rounded were rejected on
+  licensing, not looks). Because Android's OS splash is icon-only by platform mandate,
+  **`src/components/SplashOverlay.tsx` is back** (removed in Sep-2026, re-adopted deliberately
+  at the user's request) — it paints the branded art at `zIndex: 2000`, and `resizeMode` returned
+  to `"cover"` to match. Went through two device-verified bug fixes the same day: (1) the overlay
+  unmounts only on `hydrated && minTimeElapsed` (1200ms floor) — hydration alone let a fast device
+  skip the branded art entirely, since the store could finish rehydrating before the component
+  ever rendered once; (2) `hideAsync()` fires only once BOTH the Image's `onLoad` and `onLayout`
+  have fired AND a double `requestAnimationFrame` confirms a real frame was submitted — calling it
+  straight from `onLoad` raced Android's splash-exit fade (which starts immediately, doesn't wait
+  for RN) and produced a reported "splash, black, splash again, bubbles" sequence. **Device-verified
+  on a real `assembleRelease` build** (the original report was from a debug/dev-client build with an
+  11.6s cold start — a distinct boot path; release measured ~1.0s with zero black frames across 30+
+  captures). Found and fixed a second, smaller issue the same way: the branded art's fine detail
+  (mark/wordmark/tagline) needed more real time than two animation frames to finish rendering on
+  this hardware, held as a flat ~500-600ms gap before this fix — `EXTRA_PAINT_SETTLE_MS` (400ms)
+  resolved it, re-verified as a smooth fade rather than a static plateau. Full mechanism + the
+  "verify against a real render, not just a plausible formula" lesson in
+  `docs/BRAND_PALETTE.md` and the theme/splash memory files. 6th accent theme added
+  (`violet`, `src/constants/themes.js`) using the exact brand gradient as its
+  `gradientStops`, now `DEFAULT_THEME_ID` (fresh installs only — existing users keep their
+  chosen theme, same rule as the earlier Ocean default switch). **Lent/Borrowed finalised to
+  the brand brief's own card colours** (`LB_BASE` in `theme.js`) — `lent` `#16A673→#22C55E`,
+  `borrowed` `#FF7657→#FF9B76` (passed through violet, then a stopgap orange, before landing
+  here the same day). **Also made LB themable** — `buildPalette` now returns `lb: theme.lb ||
+  LB_BASE`, and `useLbGradients()` reads that instead of the constant directly; no theme
+  overrides it yet, so every accent shows the same pair, but the mechanism now supports one
+  differing later. Known gap: white on `borrowed`'s light end is 2.06:1, under the old 2.5
+  floor and the 3:1 large-text bar — the user's own hex choice, flagged not fixed, bounded by
+  a test at the new floor. Full brand spec (icon direction, light/dark surface tokens,
+  financial semantic colours, feature→colour mapping) recorded in `docs/BRAND_PALETTE.md` —
+  most of it is reference only, not yet wired (needs the same surface migration
+  `docs/DARK_MODE.md` is blocked on). `npm run test:contrast` (288 checks) covers the new
+  theme, the LB colours, and the themability mechanism.
+- **Sep-22-2026: `SplashOverlay.tsx` unplugged again — Android back to plain icon-only
+  splash.** User retested on their own device after the fixes above and still saw a
+  branded-but-broken frame ("splash, then bubble bg with no icon/text, then onboarding").
+  Re-investigated with `adb shell screenrecord` + logcat (screenshots were too coarse to
+  catch it). Found and fixed a real regression — `MIN_DISPLAY_MS` counted from component
+  MOUNT, not from `painted`, so on a slow cold start (3-7s+ measured just for RN's first
+  frame) the timer could elapse before the image even loaded, skipping the branded art
+  entirely. Fixing that then exposed the actual symptom: a heavily zoomed-in crop of pure
+  gradient, no mark/text. Tried `resizeMode="contain"` (cannot crop by definition) and a
+  full uninstall/reinstall (rules out a stale image cache) — neither changed it at all,
+  which rules out `SplashOverlay`'s own image code as the cause; most likely an OS-level
+  window-transition effect outside app control. Per the user's explicit call, `App.js` no
+  longer renders `SplashOverlay` or calls `preventAutoHideAsync()` — the component FILE is
+  kept as-is (not deleted) for a future attempt, just not wired in. Verified clean after
+  unplugging: fresh install, cold launch, straight to onboarding, no extra screens.
 - **Sep-14-2026: four new Settings sections + one on the Profile hub** — Security (app-open
   Face ID/Fingerprint lock, new shared `AppLockGate` mounted at the App.js root,
   `appLockEnabled` in the store), About (identity + version from `app.json`), Help & Support
@@ -2221,6 +2293,31 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Release & Build (Play Store)
 
 **Done**
+- Sep-22-2026: **build-variant badges + side-by-side installs.** `app.json` split into
+  `app.base.json` (the untouched PROD identity) + `app.config.js` (reads
+  `EXPO_PUBLIC_APP_VARIANT`/`BUILD_KIND`, same vars `build.sh`/`eas.json` already export
+  per target). The 4 non-prod targets — `dev-test`/`dev-prod`/`stage-test`/`stage-prod` —
+  each get their own `applicationIdSuffix` (`.dtest`/`.dprod`/`.stest`/`.sprod`), app name
+  ("ePurse D-Test" etc.) and a colour-coded diagonal corner-ribbon launcher icon
+  (`assets/variants/`, safe-zone-verified so the badge survives a circular-mask
+  launcher), so all 5 targets install side by side on one device without overwriting each
+  other. `build.sh`'s local branch now always `prebuild --clean`s (not just when
+  `android/` is missing) and `stage-test` auto-installs via `adb` when a device is
+  connected. Fixed two real bugs this surfaced (both from `android.package` finally
+  varying at runtime, previously always `com.epurse.app`): `appMeta.ts`'s static
+  `import ... from '../../app.json'` (Metro couldn't resolve the renamed file — fixed to
+  import `app.base.json`, which is also the semantically correct fix since the Play Store
+  link/in-app name must stay the real app's, not a variant's suffixed one), and
+  `withEPurseAndroid.js`'s vendored Kotlin sources carrying a hardcoded
+  `package com.epurse.app` line that no longer matched the folder they were copied into
+  (now rewritten to the real resolved package at prebuild time). Verified end-to-end:
+  `com.epurse.app`, `.stest` and `.dtest` all installed simultaneously on the same
+  emulator. **Open**: `stage-test`/`stage-prod`'s real Google Sign-In will fail under
+  their new package names until a matching OAuth Android client is registered in Google
+  Cloud Console (same debug-keystore SHA-1, new package name) — see
+  `docs/ANDROID_RELEASE.md` §0.4. `dev-test`/`dev-prod` are unaffected (login bypassed
+  there). `dev-prod`/`stage-prod` (the EAS-built variants) share the identical config
+  resolution but weren't build-tested here (EAS builds consume the account's cloud quota).
 - Sep-19-2026: Android release plan written up — `docs/ANDROID_RELEASE.md` (accounts,
   lead times, store forms, rollout order). Read it before any release work.
 - Sep-19-2026: **permission diet, 21 → 14 requested + 7 explicitly blocked.** Removed

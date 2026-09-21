@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
 # ePurse — Setup / Restore Script
-# Usage: ./setup.sh [--clean] [--ios] [--no-install] [--no-verify]
+# Usage: ./setup.sh [--clean] [--no-ios] [--no-install] [--no-verify]
 #
-# The inverse of ./clean.sh — puts back everything a clean removed:
-# dependencies, the native project, and (on macOS) CocoaPods.
+# The exact inverse of ./clean.sh — puts back everything a clean removed:
+# dependencies, BOTH native projects, and (on macOS) CocoaPods.
 #
-#   (default)     npm install → expo prebuild (android) → verify
-#   --clean       prebuild --clean: delete android/ and regenerate from scratch.
-#                 Use after changing app.json, a config plugin, or plugins/android/*.kt.
-#   --ios         also prebuild ios/ and run pod install (macOS only)
+#   (default)     npm install → expo prebuild (android + ios) → pods → verify
+#   --clean       prebuild --clean: delete android//ios/ and regenerate from
+#                 scratch. Use after changing app.json, a config plugin, or
+#                 plugins/android/*.kt.
+#   --no-ios      android only — skip ios/ and CocoaPods
 #   --no-install  skip npm install (native regeneration only)
 #   --no-verify   skip the import/doctor checks at the end
 #
@@ -34,17 +35,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 DO_CLEAN=false
-DO_IOS=false
+DO_IOS=true
 DO_INSTALL=true
 DO_VERIFY=true
 
 for arg in "$@"; do
   case "$arg" in
     --clean)      DO_CLEAN=true ;;
+    --no-ios)     DO_IOS=false ;;
+    # iOS is restored by default now; accepted so older invocations still work.
     --ios)        DO_IOS=true ;;
     --no-install) DO_INSTALL=false ;;
     --no-verify)  DO_VERIFY=false ;;
-    -h|--help)    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo -e "${YELLOW}unknown option: $arg${RESET} (try --help)"; exit 1 ;;
   esac
 done
@@ -71,11 +74,14 @@ else
   note "skipping npm install (--no-install)"
 fi
 
-# ── 2. Native project ────────────────────────────────────────────────────────
-# android/ is GENERATED. Hand-written natives live in plugins/android/ and are
-# copied back by withEPurseAndroid on every prebuild.
-PLATFORMS="android"
-$DO_IOS && PLATFORMS="android,ios"
+# ── 2. Native projects ───────────────────────────────────────────────────────
+# android/ and ios/ are both GENERATED and gitignored. Hand-written natives live
+# in plugins/android/ and are copied back by withEPurseAndroid on every prebuild.
+#
+# `-p` takes ios | android | all and NOTHING else: a comma-separated
+# "android,ios" falls through expo's resolvePlatformOption default branch and
+# becomes a single bogus platform name. That was a real latent bug here.
+if $DO_IOS; then PLATFORMS="all"; else PLATFORMS="android"; fi
 
 step "Generating native project (${PLATFORMS})"
 if $DO_CLEAN; then
@@ -92,8 +98,10 @@ if $DO_IOS; then
   if [ "$(uname)" != "Darwin" ]; then
     warn "not macOS — skipping pod install"
   else
-    npx pod-install
-    ok "pods installed"
+    # Non-fatal: iOS is restored by default now, so a machine without a working
+    # CocoaPods must not abort a setup that was really about Android.
+    npx pod-install && ok "pods installed" \
+      || warn "pod install failed — ios/ is generated but has no Pods (fine for Android work)"
   fi
 fi
 

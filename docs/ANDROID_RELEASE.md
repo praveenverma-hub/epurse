@@ -153,6 +153,20 @@ non-sensitive scope, so publishing it should not require Google's app
 verification review — but confirm that in Cloud Console, because if verification
 *is* demanded it is a multi-week process.
 
+**Sep-22-2026: the 4 non-prod build variants each have their own package name**
+(`com.epurse.app.dtest`/`.dprod`/`.stest`/`.sprod`, see §build.sh and
+`app.config.js`) so they can be installed side by side without overwriting one
+another. An OAuth Android client is keyed on (package name, SHA-1) — a new
+package name has **no matching client**, so real Google Sign-In will fail on
+any of these 4 until you register one. `dev-test`/`dev-prod` don't need this:
+`IS_DEV_BUILD` bypasses login there ("Skip sign-in (Debug)"). `stage-test`/
+`stage-prod` DO exercise real sign-in, so if you need that to work under the
+new package names, add an Android OAuth client per package in Cloud Console
+using the same debug-keystore SHA-1 already registered for `com.epurse.app`
+(`5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25` —
+`keytool -list -v -keystore android/app/debug.keystore -storepass android`).
+The real `prod` target's package (`com.epurse.app`) is unchanged and unaffected.
+
 ### 0.5 SMS capture — **vendored into our own native module (2026-09-19)**
 
 Both npm packages are gone. `react-native-get-sms-android` (2.1.0) and

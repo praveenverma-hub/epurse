@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
 # =============================================================================
 # ePurse — Clean Script
-# Usage: ./clean.sh [--deps] [--native] [--gradle] [--all] [--dry-run]
+# Usage: ./clean.sh [--cache] [--deps] [--native] [--android] [--pods] [--gradle] [--dry-run]
 #
-# Clears the caches that survive a dependency change and then lie to you. The
-# failure mode is always the same shape: a build that fails on something you
-# already fixed, or succeeds on something you already deleted.
+# Removes everything that is INSTALLED or GENERATED, so the tree is back to what
+# git actually tracks. This script only ever DELETES — it never installs or
+# regenerates. `./setup.sh` is its exact inverse and puts all of it back.
 #
-#   (default)   Everything safe: caches + android + pods. Fast, fixes most cases.
+#   (default)   Full clean: caches + node_modules + android/ + ios/.
+#               Restore with `npm run setup`.
 #
-#   Targeted — pass any of these to clean ONLY that:
+#   Targeted — pass any of these to clean ONLY that (the fast paths):
 #   --cache     Metro/Haste, watchman, .expo, node_modules/.cache
-#   --android   android/build, app/build, .gradle, .cxx (+ stops gradle daemons)
-#   --pods      ios/Pods, Podfile.lock, ios/build
-#   --deps      Reinstall node_modules. For "Unable to resolve module X" where X
-#               really is installed, or after changing a native dependency.
-#   --native    Regenerate android/ via `expo prebuild --clean`. android/ is
-#               GENERATED — see docs/ANDROID_RELEASE.md. Only hand-written
-#               natives in plugins/android/ survive, copied back by the plugin.
+#   --deps      node_modules
+#   --native    android/ and ios/ — both are GENERATED from app.json + plugins
+#               (see docs/ANDROID_RELEASE.md). Hand-written natives live in
+#               plugins/android/ and are copied back by withEPurseAndroid on the
+#               next prebuild, so nothing hand-written is lost here.
+#   --android   android build output only (build, app/build, .gradle, .cxx) —
+#               keeps android/ itself, for a stale-Gradle fix with no reinstall
+#   --pods      ios/Pods, Podfile.lock, ios/build — keeps ios/ itself
 #   --gradle    Also clear Gradle's GLOBAL caches (~/.gradle). Slow to rebuild
-#               (re-downloads dependencies), so it is never part of --all.
-#   --all       = default + --deps + --native
+#               (re-downloads dependencies), so it is never part of the default.
 #   --dry-run   Print what would be removed and touch nothing.
 # =============================================================================
 
@@ -41,7 +42,7 @@ DO_DEPS=false
 DO_NATIVE=false
 DO_GRADLE=false
 DRY_RUN=false
-# Targeted flags. If none are passed, all three run — that is the default sweep.
+# Targeted flags. If none are passed, the default full clean runs instead.
 DO_CACHE=false
 DO_ANDROID=false
 DO_PODS=false
@@ -52,12 +53,14 @@ for arg in "$@"; do
     --cache)   DO_CACHE=true;   TARGETED=true ;;
     --android) DO_ANDROID=true; TARGETED=true ;;
     --pods)    DO_PODS=true;    TARGETED=true ;;
-    --deps)    DO_DEPS=true ;;
-    --native)  DO_NATIVE=true ;;
+    --deps)    DO_DEPS=true;    TARGETED=true ;;
+    --native)  DO_NATIVE=true;  TARGETED=true ;;
     --gradle)  DO_GRADLE=true ;;
-    --all)     DO_DEPS=true; DO_NATIVE=true ;;
+    # Kept as an alias: --all used to mean "default + deps + native", which IS
+    # the default now. Accepting it keeps old muscle memory and docs working.
+    --all)     TARGETED=false ;;
     --dry-run) DRY_RUN=true ;;
-    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo -e "${YELLOW}unknown option: $arg${RESET} (try --help)"; exit 1 ;;
   esac
 done
@@ -67,8 +70,11 @@ echo -e "${CYAN}${BOLD}╔══════════════════
 echo -e "${CYAN}${BOLD}║          ePurse  ·  Clean            ║${RESET}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════╝${RESET}"
 $DRY_RUN && echo -e "${YELLOW}dry run — nothing will be deleted${RESET}"
+# The default is a FULL clean: caches, dependencies and both native projects.
+# `--android`/`--pods` are not included — they clean build output *inside*
+# android//ios/, which is pointless when those directories are being removed.
 if ! $TARGETED; then
-  DO_CACHE=true; DO_ANDROID=true; DO_PODS=true
+  DO_CACHE=true; DO_DEPS=true; DO_NATIVE=true
 fi
 
 echo ""
@@ -141,32 +147,36 @@ if $DO_GRADLE; then
   nuke "$HOME"/.gradle/caches/build-cache-* "$HOME"/.gradle/caches/transforms-*
 fi
 
-# ── 4. Optional: dependencies ────────────────────────────────────────────────
+# ── 4. Dependencies ──────────────────────────────────────────────────────────
+# Removed, NOT reinstalled. This script deletes and setup.sh restores; doing
+# half of setup's job here is what made the two scripts stop being inverses.
 if $DO_DEPS; then
   step "node_modules"
   nuke node_modules
-  if ! $DRY_RUN; then
-    note "reinstalling…"
-    npm install --no-audit --no-fund
-    note "dependencies reinstalled"
-  fi
 fi
 
-# ── 5. Optional: regenerate the native project ───────────────────────────────
+# ── 5. The native projects ───────────────────────────────────────────────────
+# Both are GENERATED from app.json + the config plugins and are gitignored, so
+# removing them loses nothing: `setup.sh` prebuilds them back, and the
+# hand-written natives in plugins/android/ are copied in by withEPurseAndroid.
 if $DO_NATIVE; then
-  step "Regenerating android/ ${DIM}(expo prebuild --clean)${RESET}"
-  if $DRY_RUN; then
-    note "would run: npx expo prebuild --clean -p android"
-  else
-    npx expo prebuild --clean -p android
-    note "android/ regenerated from app.json + plugins"
+  step "Native projects (android/, ios/)"
+  # A live daemon holds the old JDK/AGP config and open file handles under
+  # android/ — stop it before the directory goes.
+  if ! $DRY_RUN && [ -x android/gradlew ]; then
+    (cd android && ./gradlew --stop >/dev/null 2>&1) || true
+    note "gradle daemons stopped"
   fi
+  nuke android ios
 fi
 
 echo ""
 echo -e "${GREEN}${BOLD}✔ Clean complete${RESET}"
-$DO_NATIVE || echo -e "${DIM}  Native config changed? re-run with --native${RESET}"
-$DO_DEPS   || echo -e "${DIM}  Dependency changed? re-run with --deps${RESET}"
-echo -e "${DIM}  Restore with: npm run setup${RESET}"
+if $DO_DEPS || $DO_NATIVE; then
+  echo -e "${DIM}  node_modules / native projects are GONE — restore before building:${RESET}"
+  echo -e "${DIM}  npm run setup${RESET}"
+else
+  echo -e "${DIM}  Caches only. Full clean (deps + native): ./clean.sh${RESET}"
+fi
 echo -e "${DIM}  Then build  : npm run build:stage-test   (debug-signed, never upload)${RESET}"
 echo ""

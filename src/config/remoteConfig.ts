@@ -93,11 +93,11 @@ export const REMOTE_CONFIG_URL: string = resolveRemoteConfigUrl(REMOTE_CONFIG_EN
 
 /**
  * AsyncStorage key (via `utils/storage`, which adds the `@ePurse:` prefix).
- * Namespaced by env: the app's package id is the SAME across dev/stage/prod
- * (see `app.json` — there is no `applicationIdSuffix`), so sideloading a
- * stage build over a prod install, or back, shares one AsyncStorage. Without
- * the suffix, a stage device could read prod's cached document (or vice
- * versa) for one launch after a swap, before the next `refresh()` corrects it.
+ * Namespaced by env regardless: since Sep-2026 (see `app.config.js`) the 4
+ * non-prod targets each carry their own `applicationIdSuffix`, so they're
+ * already OS-level isolated from `prod` and from each other — but keep the
+ * per-env key anyway as defense in depth (e.g. a future target that reuses a
+ * package id, or a manual override) rather than relying on that isolation.
  */
 export const resolveRemoteConfigCacheKey = (env: RemoteConfigEnv): string => `remoteConfig:${env}`;
 export const REMOTE_CONFIG_CACHE_KEY: string = resolveRemoteConfigCacheKey(REMOTE_CONFIG_ENV);

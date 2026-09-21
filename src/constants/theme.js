@@ -312,24 +312,41 @@ export const readableOn = (bg, color, min = 4.5) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Semantic card colours — FIXED, not part of the theme
+// Semantic card colours — the SHARED DEFAULT, now plumbed through the theme
 // -----------------------------------------------------------------------------
-// Money-in and money-out are their own meaning, like success/danger, so they get
-// their own constant colours rather than the accent. Two alternatives were built
-// and reverted (Aug-10): both cards derived from the accent, then the originals
-// tinted 15% toward it. Both measured fine; both were wrong. A colour you learn
-// once is faster to read than one that shifts with a setting, and the originals
-// are simply the more restful pair.
+// Money-in and money-out are their own meaning, like success/danger, so they
+// don't derive from the accent. Two alternatives were built and reverted
+// (Aug-10): both cards derived from the accent, then the originals tinted 15%
+// toward it. Both measured fine; both were wrong. A colour you learn once is
+// faster to read than one that shifts with a setting.
 //
-// KNOWN GAP, deliberately accepted: white on the light end of the emerald is
-// 2.54:1, under the 4.5:1 minimum for the small helper line. Every fix — a
-// darker green, dark ink, a scrim — was tried and each loses the look this is
-// keeping. The 26px amount is large text and clears its 3:1 bar. Bounded by a
-// test so it can't quietly get worse; see ui-consistency §7.
+// THEMABLE as of Sep-21-26: `buildPalette` (`constants/themes.js`) merges
+// `theme.lb || LB_BASE` into every palette, and `useLbGradients()` reads that
+// merged value rather than this constant directly. No theme defines its own
+// `lb` yet, so every accent still shows this exact pair — "themable, same
+// colour for now" per the user's call, not a design reversal. If a theme ever
+// needs its own LB pair (the way Carbon owns its canvas), give it an `lb` key
+// in `THEMES` and this fallback keeps every other theme unchanged.
+//
+// Current hexes (Sep-21-26, brand palette's "You Lent" / "You Borrowed" cards,
+// user's own pick, superseding the Sep-21-26 orange chosen earlier the same
+// day to avoid the violet-brand clash):
+//   lent     #16A673 → #22C55E  (emerald/green — money coming to you)
+//   borrowed #FF7657 → #FF9B76  (peach/coral — money you owe)
+//
+// KNOWN GAP, WORSENED by this change — flagged, not fixed, since the user
+// finalised these exact hexes: white text on the LIGHTEST stop
+// (`borrowed[1]`, #FF9B76) is only **2.06:1**, under both the previous
+// accepted floor (2.5, the old emerald's gap) and the 3:1 large-text bar the
+// 26px amount relies on. Every card still renders white-on-colour, no scrim —
+// if this reads as too washed out on device, the fix is either a slightly
+// deeper `borrowed[1]` or routing the amount through `gradientTextPlan()`
+// (unused here on purpose today, see ui-consistency §7). Bounded by a test at
+// the new, lower floor so it can't get WORSE than this without a decision.
 // ─────────────────────────────────────────────────────────────────────────────
 export const LB_BASE = {
-  lent:     ['#059669', '#10B981'],   // emerald — money coming to you
-  borrowed: ['#6D28D9', '#8B5CF6'],   // violet  — money you owe
+  lent:     ['#16a673', '#22c55e'],   // emerald — money coming to you
+  borrowed: ['#ff7657', '#ff9b76'],   // peach/coral — money you owe
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

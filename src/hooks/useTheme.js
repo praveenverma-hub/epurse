@@ -10,7 +10,6 @@
 import { useMemo } from 'react';
 import { useEPurseStore } from '../store/ePurseStore';
 import { buildPalette } from '../constants/themes';
-import { LB_BASE } from '../constants/theme';
 
 export const useTheme = () => {
   const themeId  = useEPurseStore((s) => s.themeId);
@@ -29,18 +28,20 @@ export const useTheme = () => {
 export const useGradient = () => useTheme().gradientStops;
 
 /**
- * The Lent / Borrowed gradient pair — the app's original emerald and violet,
- * FIXED, not theme-derived.
+ * The Lent / Borrowed gradient pair — semantic (money-in vs money-out), not
+ * accent-derived, same reasoning as `success`/`danger`. Tried and reverted
+ * (Aug-10): making them the accent, and then tinting them 15% toward it. Both
+ * were measurably fine and both looked wrong — money-in vs money-out reads
+ * faster as two colours you learn once than as two that drift with the accent.
  *
- * Tried and reverted (Aug-10): making them the accent, and then tinting them 15%
- * toward it. Both were measurably fine and both looked wrong — the user's call
- * was that the originals are the more soothing pair, and money-in vs money-out
- * reads faster as two constant colours you learn once than as two that drift
- * with the accent. Treat these as semantic, like success/danger: NOT part of the
- * theme (ui-consistency §7).
+ * THEMABLE as of Sep-21-26 (`buildPalette`'s `lb` key, `constants/themes.js`):
+ * a theme MAY carry its own `lb` override; none does yet, so every theme reads
+ * the same finalised `LB_BASE` pair (`constants/theme.js`) via the fallback.
+ * Reads through `useTheme()` rather than the constant directly so a future
+ * per-theme override actually reaches this hook without another call-site sweep.
  *
  * Still a hook, and still the single source, because the same pair was
  * hard-coded in three files — the Dashboard widget, LentBorrowedScreen's header
  * and LbPersonScreen's submit button — which is how they drift apart.
  */
-export const useLbGradients = () => LB_BASE;
+export const useLbGradients = () => useTheme().lb;
