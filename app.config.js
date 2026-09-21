@@ -35,6 +35,21 @@ const VARIANT_KEY = resolveVariantKey();
 
 const VARIANT_LABELS = { dtest: 'D-Test', dprod: 'D-Prod', stest: 'S-Test', sprod: 'S-Prod' };
 
+// Every non-prod variant gets its own badged launcher icon EXCEPT `sprod` —
+// stage-prod is the closest thing to a release candidate (real EAS signing,
+// same pipeline prod uses), and the user wants it to look exactly like the
+// real listing rather than carry a debug-style ribbon.
+const BADGED_ICON_KEYS = new Set(['dtest', 'dprod', 'stest']);
+
+// Likewise, `sprod` keeps the BARE package id (`com.epurse.app`, same as
+// prod) instead of an `applicationIdSuffix` — user's explicit call, so a
+// stage-prod install is a true drop-in stand-in for the real app. Trade-off,
+// stated plainly: this means stage-prod and prod can no longer be installed
+// side by side (same package = same install slot); installing one replaces
+// the other. dtest/dprod/stest are unaffected and still get their own
+// package so those three stay side-by-side-installable with prod.
+const SUFFIXED_PACKAGE_KEYS = new Set(['dtest', 'dprod', 'stest']);
+
 // No app.json exists any more, so the `config` the function form normally
 // receives is just Expo's package.json-derived defaults (e.g. name: "epurse",
 // lowercase, from this repo's package.json) — NOT something to merge over
@@ -43,17 +58,23 @@ module.exports = () => {
   if (!VARIANT_KEY) return { expo: base.expo };
 
   const label = VARIANT_LABELS[VARIANT_KEY];
+  const badged = BADGED_ICON_KEYS.has(VARIANT_KEY);
+  const suffixPackage = SUFFIXED_PACKAGE_KEYS.has(VARIANT_KEY);
   return {
     expo: {
       ...base.expo,
       name: `ePurse ${label}`,
-      icon: `./assets/variants/icon-${VARIANT_KEY}.png`,
+      icon: badged ? `./assets/variants/icon-${VARIANT_KEY}.png` : base.expo.icon,
       android: {
         ...base.expo.android,
-        package: `${base.expo.android.package}.${VARIANT_KEY}`,
+        package: suffixPackage
+          ? `${base.expo.android.package}.${VARIANT_KEY}`
+          : base.expo.android.package,
         adaptiveIcon: {
           ...base.expo.android.adaptiveIcon,
-          foregroundImage: `./assets/variants/adaptive-icon-${VARIANT_KEY}.png`,
+          foregroundImage: badged
+            ? `./assets/variants/adaptive-icon-${VARIANT_KEY}.png`
+            : base.expo.android.adaptiveIcon.foregroundImage,
         },
       },
     },
