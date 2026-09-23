@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { colors, radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, radius, searchFill, shadows, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButtonBase from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
@@ -272,7 +272,7 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
               )}
 
               <TextInput
-                style={styles.search}
+                style={[styles.search, { backgroundColor: searchFill(theme) }]}
                 placeholder="Search contacts…"
                 placeholderTextColor={colors.textMuted}
                 value={query}

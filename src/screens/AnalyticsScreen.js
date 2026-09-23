@@ -504,7 +504,7 @@ const SummaryStat = ({ label, value }) => (
 const SummaryStatLight = ({ label, value }) => (
   <View style={styles.statBoxLight}>
     <Text style={styles.statLabelLight}>{label}</Text>
-    <Text style={[styles.statValueLight, value < 0 && { color: colors.danger }]}>
+    <Text style={[styles.statValueLight, value < 0 && { color: colors.expense }]}>
       {formatCurrency(value)}
     </Text>
   </View>

@@ -167,7 +167,7 @@ const GroupCard: React.FC<{
 
   const owed = item.net > 0.005;
   const owe  = item.net < -0.005;
-  const netColor = owed ? theme.success : owe ? theme.textSecondary : theme.textMuted;
+  const netColor = owed ? theme.lent : owe ? theme.textSecondary : theme.textMuted;
   // Shared groups only, and only when the two figures actually differ.
   const showOfTotal = item.shared && item.groupTotal - item.personalShare > 0.005;
 

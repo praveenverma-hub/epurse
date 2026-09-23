@@ -136,12 +136,12 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, myName }: TxnDeta
     !!excludedExpenseParents?.length &&
     excludedExpenseParents.includes(parentCatIdForTxn(txn as any, catMaps));
   const sign = isCredit ? '+' : '−';
-  const amountColor = isCredit ? colors.success : colors.textPrimary;
+  const amountColor = isCredit ? colors.income : colors.textPrimary;
 
   const badges: { label: string; bg: string; color: string }[] = [];
   if (txn.isIgnored) badges.push({ label: 'IGNORED', bg: `${colors.warning}22`, color: colors.warning });
   if (!txn.isIgnored && txn.isHidden) badges.push({ label: 'PRIVATE', bg: `${colors.textMuted}26`, color: colors.textSecondary });
-  if (txn.isRefund) badges.push({ label: 'REFUND', bg: `${colors.success}1A`, color: colors.success });
+  if (txn.isRefund) badges.push({ label: 'REFUND', bg: colors.incomeSoft, color: colors.income });
   // No SPLIT badge here: this sheet renders the full per-person breakdown below, headed
   // "Split N ways", so a chip saying the same word is pure duplication. (The badge is still
   // right on a transaction ROW — see TransactionItem — where there's no breakdown to read.)

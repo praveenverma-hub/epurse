@@ -1538,6 +1538,61 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 **Done**
 - LentBorrowed refactor (May-2026): multi-select filters, account chip nav, LB exclusion
   from totals, contact/phone linking, per-person net balance.
+- Sep-24-2026: LB person screen's pinned Settle footer sat flush against the home indicator —
+  its SafeAreaView only claims the top edge, so the footer now pays its own bottom inset
+  (`Math.max(insets.bottom, spacing.md)`, same pattern as BudgetPlanScreen's footer).
+- Sep-24-2026: FIXED real crash — `BudgetSummary.tsx` (Home's budget card) called 3 `useMemo`s
+  AFTER a conditional early return ("no budget yet"), a Rules-of-Hooks violation. The Home tab stays
+  mounted behind Insights/BudgetPlan, so the instant a first-ever plan was SAVED, this still-mounted
+  card's hook count changed mid-render → "Rendered more hooks than during the previous render" —
+  matches the user's exact report ("breaks when I add a plan with none existing" + Reset "not
+  working", which was really this same crash surfacing downstream). All hooks now run
+  unconditionally and are null-safe; the empty-state branch moved to after every hook call.
+- Sep-24-2026: FIXED real crash — `expo-contacts`'s default export moved to a new class-based
+  API in this SDK; its old function-based API (`getContactsAsync`, used by every contact picker in
+  the app) now THROWS at runtime. `contactsService.js` now imports from `expo-contacts/legacy`
+  instead. Also found (not yet fixed): `exportService.ts` has the same failure mode against
+  `expo-file-system` (`FS.cacheDirectory` no longer exists) — CSV/PDF export and the monthly recap
+  PDF are broken the same way; confirmed via `tsc`, not yet reported by the user.
+- Sep-23-2026: LB direction chips ("I lent"/"I borrowed") and matching row/empty-state icons →
+  diagonal `arrow-up-right-box-outline`/`arrow-down-left-box-outline` (was straight up/down, and a
+  literal unicode ↑/↓ in the chip label text). Add-entry sheet's ScrollViews get bottom padding so
+  the submit button's own shadow stops clipping at the scroll edge; "Add entry" → "Add Entry".
+- Sep-23-2026: Title Case now ENFORCED at the component level, not just per-caller — new
+  `titleCaseLabel()` util (gentle: only capitalises a wholly-lowercase word, so acronyms/dynamic
+  values pass through) wired into `GradientButton` (every button's title) and `SectionHeader`
+  (every heading, ReactNode titles excepted). Fixes existing misses for free, e.g. "Your backup" →
+  "Your Backup", "By category" → "By Category" — no call-site edits needed. NavListRow/CenterModal/
+  chips NOT yet covered — same util is ready to wire in if a future sweep wants them too.
+- Sep-23-2026: LB tab's inline Add button is now OUTLINED (border + tinted text, no fill) via
+  a new `submitOutlined` prop on `LbEntryForm`; the add SHEET's button (LbPersonScreen) stays filled.
+  LbPersonScreen: the header's "+" moved onto "Transaction History"'s trailing slot (was a top-bar
+  icon); the entry count moved the other way, onto the hero's "Last activity" line.
+- Sep-23-2026: settled-person panel placement now goes by whichever DIRECTION was most
+  recently active (the entry with the latest date/createdAt/settledAt), not "ever had a lent
+  entry" — the old rule always put a mixed-history settled person under Lent.
+- Sep-23-2026: LB detail-page entry colour re-based three times — first to literal cash direction
+  (credit/debit), then to "is this the user's own real money" per the user's own reasoning: Lent
+  and Repaid (real money leaving) are negative; Borrowed and Received-back (not really yours, or
+  your own money returning) are plain — then the "negative" colour moved off the app's generic
+  `colors.expense` red onto LB's own `theme.borrowed` coral, so Lent now reads the same peach as a
+  Borrowed row, not a new red. Sign still follows cash direction. Group lines keep the balance
+  framing (lent=green/borrowed=peach) unchanged.
+- Sep-23-2026: person names on LB cards are Title Case for DISPLAY regardless of typed
+  casing — new `titleCaseName()` in utils/format.js; `firstName()` (toasts) now routes through it
+  too. Applied to LentBorrowedScreen/LbPersonScreen person cards + GroupsScreen's balance cards
+  and settle toasts (same shared ledger). Storage/input fields untouched, display-only.
+- Sep-23-2026: LB person detail screen revamp — avatar gets a thin direction-coloured
+  ring; all-settled state shows a success tick in place of ₹0; new "Total Dealt / Lent-Borrowed"
+  summary card (Home Income/Refunds treatment, on white); "Transaction History" heading; entries
+  are now ONE card with hairline dividers (was N separate shadowed cards) + a per-row direction
+  icon (arrow-up/down, checkmark for settled/repaid); hero hint shows last activity date instead
+  of "tap to edit" copy.
+- Sep-23-2026: Home "You Lent / You Borrowed" cards → pastel fill + coloured ink (`LB_CARD`,
+  `useLbCard()`, tokens on `colors.lentCard*`/`borrowCard*`); LB amounts on white cards use
+  `lent` `#16A673` / `borrowed` `#FF7657`. LB header + add buttons keep `LB_BASE`.
+- Sep-23-2026: Lent/Borrowed tab switch — selected pill is now solid white with its label
+  in that side's colour (green Lent / peach Borrowed, via `readableOn`), was translucent white.
 - Split payer model: plain splits get a group-style "Who paid?"; a non-me payer books a
   memo (no balance movement, a `borrowed` row) instead of a real debit.
 - Settle + CC balances (Jul-2026): new countable `repayment` category (superseded — see
@@ -1997,6 +2052,9 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Profile, Settings & Theme
 
 **Done**
+- Sep-23-2026: violet is the main theme — store v35 moves every saved theme onto violet once
+  (later picks stick); static /gradient were still orange , now violet;
+  hardcoded brand-orange in 6 components → live theme; PDF export/recap accent → violet.
 - Settings moved out of the long-press menu into a real `SettingsScreen` (theme picker,
   Backup moved out to its own destination).
 - Profile revamp: hub screen with a destination list, `ShopScreen`, `RemindersScreen`
@@ -2116,6 +2174,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## UI Consistency / Navigation
 
 **Done**
+- Sep-23-2026: money colours use the new financial semantics — income/expense for generic
+  credit/debit amounts & refund badges, lent/borrowed for every LB + group-debt amount and chip
+  (was success green / raw `#EF4444` red / info blue). `FINANCE_COLORS` mirrors them onto `theme.*`.
+- Sep-23-2026: all 5 search inputs share one fill — `searchFill(theme)`, a light primary
+  tint that follows the theme; LinkContactModal's 🔍 emoji → Ionicons.
 - Canonical section headings, shared `EmptyState`/`InfoIcon`/`EditIcon`, type-canonical
   icons matching the tab bar, `CollapsingHeaderScreen` for every themed gradient header.
 - Tab bar: themed active ink via `readableOn`, `tabBarClearance` shared constant, fixed

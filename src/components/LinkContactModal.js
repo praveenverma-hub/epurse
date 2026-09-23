@@ -22,7 +22,9 @@ import {
   Platform,
 } from 'react-native';
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, searchFill, spacing, typography, shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import GradientButton from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
 import { fetchContactsForPicker } from '../services/contactsService';
@@ -76,6 +78,7 @@ const LinkContactModal = ({
   onSkip,            // () => void
   onClose,           // () => void
 }) => {
+  const theme = useTheme();
   const suggestions = suggestedPersons || [];
   const [contacts, setContacts]           = useState([]);
   const [loading, setLoading]             = useState(false);
@@ -201,8 +204,8 @@ const LinkContactModal = ({
           ) : (
             <>
               {/* ── Search input ── */}
-              <View style={styles.searchRow}>
-                <Text style={styles.searchIcon}>🔍</Text>
+              <View style={[styles.searchRow, { backgroundColor: searchFill(theme) }]}>
+                <Ionicons name="search-outline" size={17} color={theme.textMuted} style={styles.searchIcon} />
                 <TextInput
                   value={query}
                   onChangeText={(v) => { setQuery(v); setPhoneError(''); }}
@@ -364,7 +367,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.divider,
   },
-  searchIcon: { fontSize: 16, marginRight: spacing.sm },
+  searchIcon: { marginRight: spacing.sm },
   searchInput: {
     flex: 1,
     paddingVertical: spacing.md,

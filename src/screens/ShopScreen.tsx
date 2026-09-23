@@ -353,7 +353,7 @@ const BuyButton: React.FC<{
     accessibilityLabel={`Unlock for ${cost} EPC`}
   >
     <LinearGradient
-      colors={canAfford ? [D.primary, '#E64A0F'] : [D.cardElevated, D.card]}
+      colors={canAfford ? [D.primary, D.primaryDark] : [D.cardElevated, D.card]}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
       style={StyleSheet.absoluteFill}

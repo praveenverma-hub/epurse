@@ -163,7 +163,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
             {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
             <Text style={[styles.headline, styles.headlineFlex]}>{title}</Text>
           </View>
-          {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
+          {eyebrow ? <Text style={[styles.eyebrow, { color: primary }]}>{eyebrow}</Text> : null}
 
           {/* Capped + scrollable: a sheet with several bullets can otherwise
               run past the screen (nothing above scrolled), clipping the CTA
@@ -184,7 +184,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
                         <Text style={styles.bulletBadgeText}>{b.emoji}</Text>
                       </View>
                     ) : (
-                      <View style={styles.bulletDot} />
+                      <View style={[styles.bulletDot, { backgroundColor: primary }]} />
                     )}
                     <View style={styles.bulletText}>
                       <Text style={styles.bulletLabel}>{b.label}</Text>
@@ -280,7 +280,6 @@ const styles = StyleSheet.create({
   },
   headlineFlex: { flex: 1 },
   eyebrow: {
-    color:         '#FF5A1F',
     fontSize:      11,
     fontWeight:    '800',
     letterSpacing: 0.8,
@@ -306,7 +305,6 @@ const styles = StyleSheet.create({
     width:           7,
     height:          7,
     borderRadius:    3.5,   // exactly half of 7 — a true circle, not a squarish dot
-    backgroundColor: '#FF5A1F',
     marginTop:       7,
   },
   // Emoji badge (used when a bullet has an `emoji`) — small rounded tile.

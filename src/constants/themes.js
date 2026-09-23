@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { STATIC_CONFIG } from '../config/staticConfig';
-import { LB_BASE } from './theme';
+import { LB_BASE, LB_CARD, colors as STATIC_COLORS } from './theme';
 
 /**
  * Whether a theme is allowed to bring its own canvas (see staticConfig). Read
@@ -275,6 +275,12 @@ export const STATUS_COLORS = {
   gradientBlueEnd: '#3B82F6',
 };
 
+// ----- Financial semantics (theme-agnostic) ---------------------------------
+// Sourced from the static `colors` block so there is ONE definition. Money
+// direction must read the same whatever accent is picked.
+const FINANCE_KEYS = ['income', 'incomeSoft', 'expense', 'expenseSoft', 'lent', 'lentSoft', 'borrowed', 'borrowedSoft'];
+export const FINANCE_COLORS = Object.fromEntries(FINANCE_KEYS.map((k) => [k, STATIC_COLORS[k]]));
+
 // ----- Build a full palette from themeId + darkMode -------------------------
 export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
   const theme = THEMES[themeId] || THEMES[DEFAULT_THEME_ID];
@@ -302,6 +308,7 @@ export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
     ...theme,
     ...neutrals,
     ...STATUS_COLORS,
+    ...FINANCE_COLORS,
     // Every gradient consumer reads `gradientStops`, so a theme can be a simple
     // pair OR a multi-stop ramp without any call site knowing the difference.
     gradientStops: theme.gradientStops || [theme.gradientStart, theme.gradientEnd],
@@ -311,6 +318,7 @@ export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
     // until a theme actually needs to differ. See the comment on `LB_BASE` in
     // `constants/theme.js` for why these two specific hexes were chosen.
     lb: theme.lb || LB_BASE,
+    lbCard: theme.lbCard || LB_CARD,
     darkMode: effectiveDark,
   };
 };

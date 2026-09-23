@@ -132,7 +132,7 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
                 {iPaid ? (
                   othersOwe.length > 0 ? (
                     othersOwe.map((s) => (
-                      <Text key={s.memberId} style={[styles.oweLine, { color: colors.success }]}>
+                      <Text key={s.memberId} style={[styles.oweLine, { color: colors.lent }]}>
                         {s.name} owes you {formatCurrency(Number(s.shareAmount) || 0)}
                       </Text>
                     ))
@@ -141,7 +141,7 @@ export default function GroupTxnDetailSheet({ txn, onClose, onEdit }: GroupTxnDe
                   )
                 ) : (
                   myShare > 0 ? (
-                    <Text style={[styles.oweLine, { color: colors.danger }]}>
+                    <Text style={[styles.oweLine, { color: colors.borrowed }]}>
                       You owe {payerName} {formatCurrency(myShare)}
                     </Text>
                   ) : (

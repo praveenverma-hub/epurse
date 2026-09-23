@@ -33,6 +33,7 @@ import {
   ChildCat,
 } from '../constants/twoTierCategories';
 import { useCategoryTree } from '../hooks/useCategoryTree';
+import { useTheme } from '../hooks/useTheme';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.62;
@@ -60,6 +61,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
   onClose,
   onSave,
 }) => {
+  const theme = useTheme();
   const categoryTree = useCategoryTree();   // built-ins + user's custom categories
   const [selectedParent, setSelectedParent] = useState<ParentCat | null>(null);
   const [selectedChild, setSelectedChild] = useState<ChildCat | null>(null);
@@ -245,7 +247,7 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
           {/* Save button */}
           <View style={styles.footer}>
             <TouchableOpacity
-              style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+              style={[styles.saveBtn, { backgroundColor: theme.primary }, !canSave && styles.saveBtnDisabled]}
               onPress={() => {
                 if (canSave) onSave(selectedParent!.label, selectedChild!.label);
               }}
@@ -381,7 +383,6 @@ const styles = StyleSheet.create({
     borderTopColor: '#F4F5F7',
   },
   saveBtn: {
-    backgroundColor: '#FF5A1F',
     borderRadius: radius.lg,
     paddingVertical: 16,
     alignItems: 'center',

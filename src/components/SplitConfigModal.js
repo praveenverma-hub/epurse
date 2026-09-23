@@ -12,7 +12,8 @@ import {
   Linking,
 } from 'react-native';
 
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, radius, searchFill, spacing, typography } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import GradientButton from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
@@ -30,6 +31,7 @@ import {
  * `onApply(others, meta)` where meta = { mode: 'percent'|'amount', myPercent?: number, myAmount?: number }
  */
 const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
+  const theme = useTheme();
   const toast = useToast();
   const [confirm, setConfirm] = useState(null);
   const [contacts, setContacts] = useState([]);
@@ -478,7 +480,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
                 onChangeText={setQuery}
                 placeholder="Search name or number"
                 placeholderTextColor={colors.textMuted}
-                style={styles.search}
+                style={[styles.search, { backgroundColor: searchFill(theme) }]}
               />
 
               {loading ? (

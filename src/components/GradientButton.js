@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
+import { titleCaseLabel } from '../utils/format';
 
 const GradientButton = ({
   title,
@@ -37,7 +38,9 @@ const GradientButton = ({
         ) : (
           <>
             {icon}
-            <Text style={[styles.text, { color: palette.textOnGradient }, textStyle]}>{title}</Text>
+            <Text style={[styles.text, { color: palette.textOnGradient }, textStyle]}>
+              {titleCaseLabel(title)}
+            </Text>
           </>
         )}
       </LinearGradient>

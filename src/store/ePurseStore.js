@@ -5727,7 +5727,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 34,
+      version: 35,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -6395,6 +6395,12 @@ export const useEPurseStore = create(
               epcEarned: g.epcEarned ?? 0,
             })),
           };
+        }
+
+        // v35: violet is THE brand theme from here on — one-time move of every
+        // saved theme onto it. Picking another theme afterwards still sticks.
+        if (version < 35) {
+          state = { ...state, themeId: DEFAULT_THEME_ID };
         }
 
         return state;

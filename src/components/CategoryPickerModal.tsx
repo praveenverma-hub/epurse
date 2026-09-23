@@ -757,11 +757,11 @@ const styles = StyleSheet.create({
     borderColor: colors.textSecondary + '33',
   },
   refundBtnOn: {
-    backgroundColor: colors.success + '1A',
-    borderColor: colors.success + '66',
+    backgroundColor: colors.incomeSoft,
+    borderColor: colors.income + '66',
   },
   refundText: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
-  refundTextOn: { color: colors.success },
+  refundTextOn: { color: colors.income },
   // Base for the group action button (icon + label on one row).
   groupBtnBase: {
     borderRadius: radius.md,

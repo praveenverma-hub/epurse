@@ -190,7 +190,7 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
 
   const cat = categories.find((c) => c.id === txn.categoryId);
   const isDebit = txn.type === 'debit';
-  const amountColor = isDebit ? colors.danger : colors.success;
+  const amountColor = isDebit ? colors.expense : colors.income;
 
   return (
     <View

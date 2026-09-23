@@ -73,26 +73,25 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
     [budget, transactions, groups, excludedExpenseParents, getBudgetUsage],
   );
 
-  // Empty state - no budget set
-  if (!budget || !usage) {
-    return (
-      <TouchableOpacity style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.primary + '44' }]} onPress={onPress} activeOpacity={0.85}>
-        <View style={[styles.emptyLeft, { backgroundColor: theme.background }]}>
-          <Text style={styles.emptyEmoji}>📋</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>Plan your budget</Text>
-          <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
-            Set caps for categories you care about. Track spend in real time.
-          </Text>
-        </View>
-        <Text style={[styles.emptyArrow, { color: theme.primary }]}>›</Text>
-      </TouchableOpacity>
-    );
-  }
-
   // STATE MACHINE CALCULATIONS
+  //
+  // This — and `status`/`ringColorValue` below — used to sit AFTER an early
+  // "no budget yet" return, which is a Rules-of-Hooks violation: a hook must
+  // run on EVERY render, never conditionally. The empty-state render called
+  // fewer hooks than the "has a budget" render, so the exact moment a plan
+  // was first created — the empty card re-rendering into the real one, same
+  // component instance — React saw the hook count change mid-flight and threw
+  // "Rendered more hooks than during the previous render." All three hooks
+  // now run unconditionally and are null-safe for when there's no `usage` yet;
+  // the actual "show the empty card instead" branch moved below, after every
+  // hook has been called — conditional RENDERING is fine, conditional HOOKS
+  // are not.
   const { totalSpent, isBudgetExhausted, overageAmount, daysRemaining, displayCategories } = useMemo(() => {
+    if (!usage) {
+      return { totalSpent: 0, isBudgetExhausted: false, overageAmount: 0, daysRemaining: 0, displayCategories: [] as Array<{
+        id: string; name: string; emoji: string; allocated: number; spent: number; color: string; isEssential: boolean;
+      }> };
+    }
     const totalActual = usage.total.actual;
     const totalCap = usage.total.cap || 0;
     const exhausted = totalCap > 0 && totalActual >= totalCap;
@@ -148,10 +147,10 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   // Mirror BudgetScreen's hero-card logic exactly so the two cards can never
   // disagree: same cap guard, same pct, same days-elapsed basis — all taken
   // straight from the shared getBudgetUsage() selector.
-  const hasCap = usage.total.cap != null && usage.total.cap > 0;
-  const pctVal = hasCap ? usage.total.pct : 0;
+  const hasCap = !!usage && usage.total.cap != null && usage.total.cap > 0;
+  const pctVal = hasCap && usage ? usage.total.pct : 0;
   const progressRatio = Math.min(pctVal / 100, 1.0);
-  const daysElapsedPct = usage.daysElapsedPct;
+  const daysElapsedPct = usage ? usage.daysElapsedPct : 0;
   const status = useMemo(() => computeStatus(pctVal, daysElapsedPct, hasCap, theme), [pctVal, daysElapsedPct, hasCap, theme]);
   const ringColorValue = useMemo(() => ringColor(pctVal, daysElapsedPct, theme), [pctVal, daysElapsedPct, theme]);
 
@@ -167,10 +166,30 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
     const fromCat = displayCategories.find((c) => c.id === fromId);
     const toCat = displayCategories.find((c) => c.id === toId);
     if (!fromCat || !toCat) return;
-    
+
     updateBudgetCategory(fromId, fromCat.allocated - amount);
     updateBudgetCategory(toId, toCat.allocated + amount);
   };
+
+  // Empty state - no budget set — every hook above has now run unconditionally
+  // (see the comment on the first useMemo), so it's safe to branch on the
+  // RENDER OUTPUT here.
+  if (!budget || !usage) {
+    return (
+      <TouchableOpacity style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.primary + '44' }]} onPress={onPress} activeOpacity={0.85}>
+        <View style={[styles.emptyLeft, { backgroundColor: theme.background }]}>
+          <Text style={styles.emptyEmoji}>📋</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>Plan your budget</Text>
+          <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
+            Set caps for categories you care about. Track spend in real time.
+          </Text>
+        </View>
+        <Text style={[styles.emptyArrow, { color: theme.primary }]}>›</Text>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <TouchableOpacity

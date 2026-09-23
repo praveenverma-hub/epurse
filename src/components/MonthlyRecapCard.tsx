@@ -22,7 +22,7 @@ import { exportMonthlyRecap } from '../services/recapExport';
 interface Palette {
   card: string; primary: string; divider: string; background: string;
   textPrimary: string; textSecondary: string; textMuted: string;
-  success: string; danger: string;
+  success: string; danger: string; income: string; expense: string;
 }
 
 export interface MonthlyRecapCardProps {
@@ -103,7 +103,7 @@ const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({ monthKey, isNew, on
       <View style={styles.hero}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.heroLabel}>{netPositive ? 'Net saved' : 'Overspent'}</Text>
-          <Text style={[styles.heroVal, { color: netPositive ? theme.success : theme.danger }]} numberOfLines={1}>
+          <Text style={[styles.heroVal, { color: netPositive ? theme.income : theme.expense }]} numberOfLines={1}>
             {formatCurrency(Math.abs(net))}
           </Text>
         </View>

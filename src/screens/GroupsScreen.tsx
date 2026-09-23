@@ -27,7 +27,7 @@ import { colors, radius, spacing, typography as typographyBase, shadows } from '
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme, useGradient } from '../hooks/useTheme';
-import { formatCurrency, monthKey } from '../utils/format';
+import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
 import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
@@ -252,7 +252,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
     setConfirm({
       title: 'Settle up',
       message:
-        `${pb.person} · ${formatCurrency(Math.abs(pb.net))}\n\n` +
+        `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}\n\n` +
         `Settles this group's portion only — their balance in other groups and direct splits stays untouched.`,
       primaryText: 'Settle',
       secondaryText: 'Cancel',
@@ -260,7 +260,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
       onPrimary: () => {
         settleGroupPersonBalance(selectedGroupId, pb.personKey);
         setConfirm(null);
-        toast.success('Settled', `${pb.person} · ${formatCurrency(Math.abs(pb.net))}`);
+        toast.success('Settled', `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}`);
       },
       onSecondary: () => setConfirm(null),
     });
@@ -419,7 +419,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
                             <Text style={styles.balancesSummaryTitle}>
                               Balances · {groupBalances.length} {groupBalances.length === 1 ? 'person' : 'people'}
                             </Text>
-                            <Text style={[styles.balancesSummarySub, { color: netBalance >= 0 ? colors.success : colors.danger }]}>
+                            <Text style={[styles.balancesSummarySub, { color: netBalance >= 0 ? colors.lent : colors.borrowed }]}>
                               {Math.abs(netBalance) < 0.01
                                 ? 'Settled up · tap to view'
                                 : netBalance > 0
@@ -585,8 +585,8 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
                         <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.balanceName} numberOfLines={1}>{pb.person}</Text>
-                        <Text style={[styles.balanceSub, { color: owesYou ? colors.success : colors.danger }]}>
+                        <Text style={styles.balanceName} numberOfLines={1}>{titleCaseName(pb.person)}</Text>
+                        <Text style={[styles.balanceSub, { color: owesYou ? colors.lent : colors.borrowed }]}>
                           {owesYou ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(pb.net))}
                         </Text>
                       </View>
@@ -717,13 +717,13 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
         visible={!!settleTarget}
         title="Repay from which account?"
         subtitle={settleTarget
-          ? `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
+          ? `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
           : undefined}
         accounts={accounts}
         onSelect={(accountId: string) => {
           if (selectedGroupId && settleTarget) {
             settleGroupPersonBalance(selectedGroupId, settleTarget.personKey, { accountId });
-            toast.success('Settled', `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))}`);
+            toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
           }
           setSettleTarget(null);
         }}
@@ -731,7 +731,7 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
         onSkip={() => {
           if (selectedGroupId && settleTarget) {
             settleGroupPersonBalance(selectedGroupId, settleTarget.personKey);
-            toast.success('Settled', `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))}`);
+            toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
           }
           setSettleTarget(null);
         }}

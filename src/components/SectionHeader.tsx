@@ -24,6 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import InfoIcon from './InfoIcon';
 import { colors, spacing, typography as typographyBase } from '../constants/theme';
+import { titleCaseLabel } from '../utils/format';
 import type { TextStyle } from 'react-native';
 
 // The JS theme widens fontWeight to `string`; cast so spreading typography.* is
@@ -65,7 +66,12 @@ const SectionHeader = ({
     <View style={styles.row}>
       <Ionicons name={icon} size={17} color={accentColor || colors.textSecondary} style={styles.icon} />
       {/* flex + numberOfLines so a long title can't push the trailing slot off-row. */}
-      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      {/* Every heading is Title Case (ui-consistency rule) — enforced HERE so a new
+          card's title doesn't depend on the caller remembering. A ReactNode title
+          (DashboardScreen's count-suffixed one) passes through untouched. */}
+      <Text style={styles.title} numberOfLines={1}>
+        {typeof title === 'string' ? titleCaseLabel(title) : title}
+      </Text>
       {onInfo ? (
         <TouchableOpacity
           onPress={onInfo}

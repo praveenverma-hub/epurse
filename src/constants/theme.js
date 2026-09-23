@@ -17,43 +17,180 @@
  * **`docs/DARK_MODE.md`**. Read it before touching colour here.
  */
 export const colors = {
-  // Primary palette (Swiggy-style warm orange)
-  primary: '#FF5A1F',
-  primaryDark: '#E64A0F',
-  primaryLight: '#FF7E45',
+  // =========================================================
+  // ePurse Brand
+  // Violet is the identity — not the color of every component.
+  // =========================================================
+  primary: '#5B3CC4',
+  primaryDark: '#321F70',
+  primaryLight: '#7B4DFF',
 
-  // Accent gradients
-  gradientStart: '#FF5A1F',
-  gradientEnd: '#FC8019',
-  gradientBlueStart: '#1E40AF',
-  gradientBlueEnd: '#3B82F6',
-  gradientGreenStart: '#059669',
-  gradientGreenEnd: '#10B981',
+  // Supporting brand shades
+  lavender: '#B58CFF',
+  lavenderSoft: '#F0EBFF',
+  lavenderSurface: '#F5F2FD',
 
+  // Secondary brand accent — use sparingly
+  peach: '#FF9B76',
+  peachDark: '#D96847',
+  peachSoft: '#FFF1EC',
+
+  // =========================================================
+  // Primary Brand Gradient
+  // Best for headers, primary CTAs, selected premium surfaces.
+  // =========================================================
+  gradientStart: '#321F70',
+  gradientMid: '#5B3CC4',
+  gradientEnd: '#7B4DFF',
+
+  // =========================================================
+  // Supporting Gradients
+  // These are functional accents, not competing brand themes.
+  // =========================================================
+
+  // Information / accounts / data visualization
+  gradientBlueStart: '#315FA8',
+  gradientBlueEnd: '#5B8DEF',
+
+  // Positive / received / savings
+  gradientGreenStart: '#12856E',
+  gradientGreenEnd: '#20B486',
+
+  // Lent — money expected back
+  gradientLentStart: '#16A673',
+  gradientLentEnd: '#4fdc83',
+
+  // Borrowed — money to return
+  gradientBorrowStart: '#FF7657',
+  gradientBorrowEnd: '#FF9B76',
+
+
+  // Lent / Borrowed summary card (Home) — pastel fill, coloured ink
+  lentCardStart: '#DFF8EF',
+  lentCardEnd: '#B9F3DE',
+  lentCardText: '#2E8D78',
+  borrowCardStart: '#FFEFE9',
+  borrowCardEnd: '#FFD7CC',
+  borrowCardText: '#D67656',
+
+  // Soft premium/insight gradient
+  gradientSoftStart: '#F5F0FF',
+  gradientSoftEnd: '#FFF3ED',
+
+  // =========================================================
   // Surfaces
+  // Warm-neutral with a very subtle violet character.
+  // =========================================================
   background: '#F4F5F7',
   card: '#FFFFFF',
   cardAlt: '#FAFAFB',
-  divider: '#EAECEE',
-  // Border for OUTLINED form controls (inputs, select rows, chips). Deliberately
-  // darker than `divider`: divider is tuned to separate rows inside a filled card,
-  // and at that lightness an unfilled control has no visible edge at all.
-  inputBorder: '#D7DADE',
+  surfaceSecondary: '#F5F2FD',
+  surfaceElevated: '#FFFFFF',
 
+  divider: '#ECE9F1',
+  border: '#E4E0EB',
+
+  // Strong enough for unfilled form controls while staying soft.
+  inputBorder: '#D7DADE',
+  inputBackground: '#F7F5FA',
+
+  // =========================================================
   // Text
-  textPrimary: '#1C1C1E',
-  textSecondary: '#6B7280',
-  textMuted: '#9CA3AF',
+  // Slight violet undertone instead of harsh pure black.
+  // =========================================================
+  textPrimary: '#181525',
+  textSecondary: '#625D70',
+  textMuted: '#8B8796',
+  textDisabled: '#B8B3C1',
   textOnGradient: '#FFFFFF',
 
-  // Status
-  success: '#10B981',
-  danger: '#EF4444',
-  warning: '#F59E0B',
-  info: '#3B82F6',
+  // =========================================================
+  // General Status
+  // =========================================================
+  success: '#18A878',
+  danger: '#D9363E',
+  warning: '#E6A52F',
+  info: '#4285D4',
 
+  successSoft: '#E8F7F1',
+  dangerSoft: '#FDEBEC',
+  warningSoft: '#FFF5DD',
+  infoSoft: '#EBF2FC',
+
+  // =========================================================
+  // Financial Semantics
+  // Keep these consistent throughout the entire app.
+  // =========================================================
+
+  // Income / money coming in
+  income: '#18A878',
+  incomeSoft: '#E8F7F1',
+
+  // Expense — actual spending
+  expense: '#E05252',
+  expenseSoft: '#FDEEEE',
+
+  // Savings
+  savings: '#159A8A',
+  savingsSoft: '#E7F7F4',
+
+  // Lent — somebody owes the user
+  lent: '#16A673',
+  lentSoft: '#E8F7F3',
+
+  // Borrowed — user needs to return money
+  // Intentionally coral rather than danger red.
+  borrowed: '#FF7657',
+  borrowedSoft: '#FFF1EC',
+
+  // Budget
+  budget: '#E6A52F',
+  budgetSoft: '#FFF5DD',
+
+  // Rewards / EP Coins
+  reward: '#F2C45C',
+  rewardSoft: '#FFF8DF',
+
+  // Review queue / needs attention
+  review: '#E6A52F',
+  reviewSoft: '#FFF5DD',
+
+  // Active Run / streak
+  activeRun: '#FF7657',
+  activeRunSoft: '#FFF0EB',
+
+  // =========================================================
+  // Budget Progress States
+  // Important: 90–100% should NOT make every card red.
+  // =========================================================
+  budgetNormal: '#6D4AE2',
+  budgetNormalTrack: '#E9E3F9',
+
+  budgetNearLimit: '#E6A52F',
+  budgetNearLimitSoft: '#FFF5DD',
+
+  budgetOver: '#E05252',
+  budgetOverSoft: '#FDEEEE',
+
+  budgetRemaining: '#18A878',
+
+  // =========================================================
+  // Interactive states
+  // =========================================================
+  link: '#5B3CC4',
+  focus: '#7B4DFF',
+
+  selectedBackground: '#F0EBFF',
+  pressedBackground: '#E8E1F7',
+
+  disabledBackground: '#ECE9F1',
+  disabledText: '#9B96A5',
+
+  // =========================================================
   // Misc
-  shadow: '#000000',
+  // =========================================================
+  shadow: '#211834',
+  overlay: '#181525',
 };
 
 export const spacing = {
@@ -264,6 +401,13 @@ export const mix = (fg, alpha, bg = colors.card) => {
   return toHex(f.map((c, i) => c * a + b[i] * (1 - a)));
 };
 
+/**
+ * THE fill for every search input: a light tint of the active theme's primary,
+ * flattened over `card` so it follows theme + dark-mode switches.
+ */
+export const SEARCH_FILL_ALPHA = 0.08;
+export const searchFill = (theme) => mix(theme.primary, SEARCH_FILL_ALPHA, theme.card);
+
 /** WCAG relative luminance, 0 (black) → 1 (white). */
 export const luminance = (color) => {
   const rgb = toRgb(color);
@@ -344,9 +488,24 @@ export const readableOn = (bg, color, min = 4.5) => {
 // (unused here on purpose today, see ui-consistency §7). Bounded by a test at
 // the new, lower floor so it can't get WORSE than this without a decision.
 // ─────────────────────────────────────────────────────────────────────────────
+// Hexes live on `colors.gradientLent*` / `gradientBorrow*` — edit them there.
 export const LB_BASE = {
-  lent:     ['#16a673', '#22c55e'],   // emerald — money coming to you
-  borrowed: ['#ff7657', '#ff9b76'],   // peach/coral — money you owe
+  lent:     [colors.gradientLentStart, colors.gradientLentEnd],       // emerald — money coming to you
+  borrowed: [colors.gradientBorrowStart, colors.gradientBorrowEnd],   // peach/coral — money you owe
+};
+
+// The Home summary card's pastel treatment — built from `colors`, edit it there.
+export const LB_CARD = {
+  lent: {
+    background: [colors.lentCardStart, colors.lentCardEnd],
+    text: colors.lentCardText,     // title + subtitle
+    amount: colors.lent,
+  },
+  borrowed: {
+    background: [colors.borrowCardStart, colors.borrowCardEnd],
+    text: colors.borrowCardText,
+    amount: colors.borrowed,
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

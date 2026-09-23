@@ -236,9 +236,9 @@ check("removed themes are gone ('sky')", !THEMES.sky);
   check('LB borrowed is orange/peach', hp >= 5 && hp <= 45, `${hp?.toFixed(0)}°`);
   check('the two hues are far apart (readable at a glance)',
     Math.abs(hg - hp) >= 60, `${Math.abs(hg - hp).toFixed(0)}°`);
-  check('LB colours match the Sep-21-26 finalised pair',
-    LB_BASE.lent[0] === '#16a673' && LB_BASE.lent[1] === '#22c55e' &&
-    LB_BASE.borrowed[0] === '#ff7657' && LB_BASE.borrowed[1] === '#ff9b76');
+  check('LB colours match the Sep-23-26 pair',
+    [...LB_BASE.lent, ...LB_BASE.borrowed].map((h) => h.toLowerCase()).join()
+      === '#16a673,#4fdc83,#ff7657,#ff9b76');
 
   // ── The mechanism: every theme resolves to the SAME shared default ──
   for (const id of Object.keys(THEMES)) {

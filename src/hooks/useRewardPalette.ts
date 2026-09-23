@@ -68,6 +68,7 @@ export const useRewardPalette = () => {
     goldInk:       readableOn(goldSurface, REWARD_GOLD, 4.5),
     successInk:    readableOn(successSurface, theme.success, 4.5),
     primary:       theme.primary,
+    primaryDark:   theme.primaryDark,
     success:       theme.success,
     heroGradient:  dark ? ['#1B2342', '#0F1428'] : ['#FFFFFF', '#F1F3F7'],
     cardGradient:  dark ? ['#1A2138', '#10162A'] : ['#FFFFFF', '#F7F8FA'],

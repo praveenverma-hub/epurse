@@ -59,7 +59,7 @@ const alpha = (hex: string, a: number): string => {
   return h + Math.round(a * 255).toString(16).padStart(2, '0');
 };
 
-const POS = '#12A150', NEG = '#E5484D', ACCENT = '#FF5A1F', ACCENT2 = '#FC8019', INK = '#14161B', MUTED = '#838B99', LINE = '#E7E9EE', FIELD = '#F6F7F9';
+const POS = '#12A150', NEG = '#E5484D', ACCENT = '#5B3CC4', ACCENT2 = '#7B4DFF', INK = '#14161B', MUTED = '#838B99', LINE = '#E7E9EE', FIELD = '#F6F7F9';
 
 // Donut SVG from category slices.
 function donutSvg(cats: Cat[], total: number): string {

@@ -45,3 +45,6 @@ export const useGradient = () => useTheme().gradientStops;
  * and LbPersonScreen's submit button — which is how they drift apart.
  */
 export const useLbGradients = () => useTheme().lb;
+
+/** The Home Lent/Borrowed summary card: pastel fill + ink per side (`LB_CARD`). */
+export const useLbCard = () => useTheme().lbCard;

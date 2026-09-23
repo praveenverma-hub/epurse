@@ -107,7 +107,10 @@ the accent orthogonal to it. Carbon would then be the accent that also *defaults
 
 ## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×5, 2026-09-17)
 
-**51 files · 926 references.** Sep-17: -1 (927→926) — Google login. The new `GoogleSignInPanel`/
+**51 files · 931 references.** Sep-23 (5th pass): +2 (929→931) — the LB direction chips' new inactive-icon colour (`colors.textSecondary`, in LbEntryForm.js). Sep-23 (4th pass): -1 (930→929) — moving the entry-count text off the "Transaction History" header (now the Add button's slot) onto the hero hint dropped its own `colors.*` style. Sep-23 (3rd pass): back to 930 — the same row's colour moved off `colors.expense` onto `theme.borrowed` (LB's own coral, not the app's red) per the user's follow-up; that's a theme read, not a static ref, so the +1 from the 2nd pass reverts. Sep-23: +4 (926→930) — LbPersonScreen's
+new "Total Dealt" summary card, single-card entry list (divider, icon tiles) and settled-state
+tick all read the static `colors` object, matching this screen's existing (pre-migration)
+convention. Sep-17: -1 (927→926) — Google login. The new `GoogleSignInPanel`/
 `LoginGate` components are fully theme-reactive (`useTheme()`, zero static refs); `BackupScreen.js`
 lost its "Disconnect" row (now the app-level Logout in Settings, per the shared
 single-session-sign-out design) along with its `colors.danger`-based `linkDanger` style, for a net

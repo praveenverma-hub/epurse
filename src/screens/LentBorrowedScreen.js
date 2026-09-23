@@ -16,9 +16,9 @@ import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import EmptyState from '../components/EmptyState';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography, shadows } from '../constants/theme';
 import { useTheme, useLbGradients } from '../hooks/useTheme';
-import { formatCurrency, formatOutstanding, firstName } from '../utils/format';
+import { formatCurrency, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import AccountPickerSheet from '../components/AccountPickerSheet';
@@ -152,22 +152,31 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       const active = allBalances.filter((p) => (k === 'lent' ? p.net > 0 : p.net < 0));
       const recentlySettled = allBalances.filter((p) => {
         if (p.net !== 0 || !p.entries.length) return false;
-        // Recency includes `createdAt` (when the row was recorded), not just `date`,
-        // which the user can backdate. Without it, settling a months-old debt today
-        // dropped the person off BOTH panels the instant they hit zero — the entry
-        // was saved, but nothing on this screen showed it.
-        const mostRecent = Math.max(
-          ...p.entries.map((e) => {
-            const d = new Date(e.date).getTime() || 0;
-            const c = e.createdAt ? new Date(e.createdAt).getTime() || 0 : 0;
-            const s = e.settledAt ? new Date(e.settledAt).getTime() || 0 : 0;
-            return Math.max(d, c, s);
-          })
-        );
-        if (nowMs - mostRecent > THREE_MONTHS_MS) return false;
-        const hasLent = p.entries.some((e) => e.kind === 'lent');
-        const hasBorrowed = p.entries.some((e) => e.kind === 'borrowed');
-        return k === 'lent' ? hasLent : (hasBorrowed && !hasLent);
+        // Recency includes `createdAt` (when the row was recorded) and `settledAt`
+        // (when a settle fired), not just `date`, which the user can backdate.
+        // Without it, settling a months-old debt today dropped the person off BOTH
+        // panels the instant they hit zero — the entry was saved, but nothing on
+        // this screen showed it. Also tracks WHICH entry is most recent, not just
+        // the timestamp — see below.
+        let latest = null;
+        let latestMs = -Infinity;
+        for (const e of p.entries) {
+          const ms = Math.max(
+            new Date(e.date).getTime() || 0,
+            e.createdAt ? new Date(e.createdAt).getTime() || 0 : 0,
+            e.settledAt ? new Date(e.settledAt).getTime() || 0 : 0,
+          );
+          if (ms > latestMs) { latestMs = ms; latest = e; }
+        }
+        if (nowMs - latestMs > THREE_MONTHS_MS) return false;
+        // Which panel a settled person surfaces on: whichever DIRECTION was most
+        // recently active, not "ever had a lent entry" — that older rule always
+        // favoured Lent for anyone with a mixed history, even someone who'd mostly
+        // borrowed from you with one incidental lend years back. A settle/repaid
+        // entry belongs to its origin's side (lent_settled → Lent, borrow_repaid →
+        // Borrowed) since it's the same relationship resolving, not a new one.
+        const family = (latest.kind === 'lent' || latest.kind === 'lent_settled') ? 'lent' : 'borrowed';
+        return k === family;
       });
       return [...active, ...recentlySettled];
     };
@@ -199,7 +208,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       const isFullySettled = pb.net === 0;
       const netAbs = Math.abs(pb.net);
       const netLabel = pb.net > 0 ? 'owes you' : 'you owe';
-      const netColor = pb.net > 0 ? colors.success : '#EF4444';
+      const netColor = pb.net > 0 ? theme.lent : theme.borrowed;
 
       // The card is a pure summary now — tapping it opens this person's own ledger
       // screen (LbPersonScreen), which owns the entry list, the per-entry edit and
@@ -236,7 +245,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
-                {pb.person || 'Unknown'}
+                {titleCaseName(pb.person) || 'Unknown'}
               </Text>
               {pb.phone ? (
                 <Text style={styles.personPhone} numberOfLines={1}>{pb.phone}</Text>
@@ -309,7 +318,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         </View>
       );
     },
-    [navigation, remindedKeys, theme.primary]
+    [navigation, remindedKeys, theme]
   );
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
@@ -321,12 +330,13 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       onSubmit={handleAdd}
       theme={theme}
       submitColors={gradFor(k)}
+      submitOutlined
     />
   );
 
   const renderEmpty = (k) => (
     <EmptyState
-      icon={k === 'lent' ? 'arrow-up-circle-outline' : 'arrow-down-circle-outline'}
+      icon={k === 'lent' ? 'arrow-up-right-box-outline' : 'arrow-down-left-box-outline'}
       title={k === 'lent' ? 'Nothing lent out' : 'Nothing borrowed'}
       subtitle={
         k === 'lent'
@@ -363,11 +373,13 @@ const LentBorrowedScreen = ({ route, navigation }) => {
             <Toggle
               label="Lent"
               active={kind === 'lent'}
+              tint={lbGradients.lent[0]}
               onPress={() => setKind('lent')}
             />
             <Toggle
               label="Borrowed"
               active={kind === 'borrowed'}
+              tint={lbGradients.borrowed[0]}
               onPress={() => setKind('borrowed')}
             />
           </View>
@@ -466,15 +478,17 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   );
 };
 
-const Toggle = ({ label, active, onPress }) => (
+// Selected pill is solid white with the label in its side's colour — a pill
+// filled with that colour would vanish into the matching header gradient.
+const Toggle = ({ label, active, tint, onPress }) => (
   <TouchableOpacity
     onPress={onPress}
-    style={[styles.toggle, active && { backgroundColor: '#FFFFFF22' }]}
+    style={[styles.toggle, active && styles.toggleActive]}
   >
     <Text
       style={[
         styles.toggleText,
-        active && { color: '#fff', fontWeight: '700' },
+        active && { color: readableOn('#FFFFFF', tint, 3), fontWeight: '700' },
       ]}
     >
       {label}
@@ -518,6 +532,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: radius.pill,
   },
+  toggleActive: { backgroundColor: '#FFFFFF' },
   toggleText: { color: '#FFFFFFCC', ...typography.bodyBold },
 
 

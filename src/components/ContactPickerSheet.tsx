@@ -16,7 +16,7 @@ import {
   Modal, View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Linking,
 } from 'react-native';
 
-import { radius, spacing, shadows, typography as typographyBase } from '../constants/theme';
+import { radius, searchFill, spacing, shadows, typography as typographyBase } from '../constants/theme';
 import type { TextStyle } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 import SheetCloseButton from './SheetCloseButton';
@@ -110,7 +110,7 @@ const ContactPickerSheet: React.FC<Props> = ({ visible, onSelect, onClose, title
                 onChangeText={setQuery}
                 placeholder="Search name or number…"
                 placeholderTextColor={theme.textMuted}
-                style={[styles.search, { color: theme.textPrimary, borderColor: theme.divider, backgroundColor: theme.background }]}
+                style={[styles.search, { color: theme.textPrimary, borderColor: theme.divider, backgroundColor: searchFill(theme) }]}
               />
               {loading ? (
                 <ActivityIndicator style={styles.loading} color={theme.primary} />

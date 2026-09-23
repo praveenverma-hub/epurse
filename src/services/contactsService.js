@@ -3,7 +3,13 @@
 // =============================================================================
 
 import { Platform } from 'react-native';
-import * as Contacts from 'expo-contacts';
+// `expo-contacts`'s DEFAULT export moved to a new class-based API in this SDK —
+// its re-exported OLD functions (`getContactsAsync`, `Fields`, …) are stubs that
+// THROW at runtime now ("Use Contact.getAll() or import from expo-contacts/legacy").
+// `getPermissionsAsync`/`requestPermissionsAsync` are unaffected either way, but
+// importing everything from `/legacy` keeps this file on ONE Contacts namespace
+// instead of two, and is the module's own suggested drop-in fix.
+import * as Contacts from 'expo-contacts/legacy';
 import { suppressAppLockOnce } from '../utils/appLockSuppress';
 
 export async function getContactsPermissionStatus() {

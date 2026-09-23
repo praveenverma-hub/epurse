@@ -47,7 +47,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
   // so de-emphasise its amount so it doesn't read as a real outflow. Covers both a
   // group memo and a plain split whose payer isn't me (isSplitMemo).
   const isMemo = isMemoTxn(txn);
-  const amountColor = isCredit ? colors.success : (isMemo ? colors.textMuted : colors.textPrimary);
+  const amountColor = isCredit ? colors.income : (isMemo ? colors.textMuted : colors.textPrimary);
   const displayAmount = isCredit ? txn.amount : debitDisplayAmount(txn);
   // In a group, a 0 personal share means I owe nothing → "Not involved".
   // Exception: if I'm the payer (fronted the bill, e.g. Full-owed split), I AM
@@ -350,8 +350,8 @@ function truncateGroupName(name) {
 // Chip styling for a group expense's lent/borrow framing — same palette as the
 // LENT/BORROWED status chips below so a group debt reads identically to a direct one.
 const GROUP_LB_CHIP = {
-  lent:     { label: 'LENT',     bg: colors.success + '18', border: colors.success + '55', text: colors.success },
-  borrowed: { label: 'BORROWED', bg: colors.info + '18',    border: colors.info + '55',    text: colors.info },
+  lent:     { label: 'LENT',     bg: colors.lentSoft,     border: colors.lent + '55',     text: colors.lent },
+  borrowed: { label: 'BORROWED', bg: colors.borrowedSoft, border: colors.borrowed + '55', text: colors.borrowed },
 };
 
 function getStatusChip(txn) {
@@ -361,10 +361,13 @@ function getStatusChip(txn) {
   if (categoryId === 'self' || txn?.childCategory === 'Self') {
     return { label: 'SELF', bg: '#6B72801A', border: '#6B728055', text: '#6B7280' };
   }
-  if (categoryId === 'lent') return { label: 'LENT', bg: colors.success + '18', border: colors.success + '55', text: colors.success };
-  if (categoryId === 'borrowed') return { label: 'BORROWED', bg: colors.info + '18', border: colors.info + '55', text: colors.info };
-  if (categoryId === 'lent_settled') return { label: 'SETTLED', bg: '#14B8A61A', border: '#14B8A655', text: '#0F766E' };
-  if (categoryId === 'borrow_repaid') return { label: 'REPAID', bg: '#6366F11A', border: '#6366F155', text: '#4F46E5' };
+  // Settled/repaid keep their side's colour — the label carries the state.
+  if (categoryId === 'lent' || categoryId === 'lent_settled') {
+    return { label: categoryId === 'lent' ? 'LENT' : 'SETTLED', bg: colors.lentSoft, border: colors.lent + '55', text: colors.lent };
+  }
+  if (categoryId === 'borrowed' || categoryId === 'borrow_repaid') {
+    return { label: categoryId === 'borrowed' ? 'BORROWED' : 'REPAID', bg: colors.borrowedSoft, border: colors.borrowed + '55', text: colors.borrowed };
+  }
   return null;
 }
 

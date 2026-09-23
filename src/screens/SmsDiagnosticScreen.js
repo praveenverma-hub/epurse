@@ -27,7 +27,7 @@ import {
 } from '../services/smsService';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
-import { useGradient } from '../hooks/useTheme';
+import { useGradient, useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 import CenterModal from '../components/CenterModal';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
@@ -37,6 +37,7 @@ const STATUS = { idle: 'idle', running: 'running', done: 'done', error: 'error' 
 export default function SmsDiagnosticScreen({ navigation }) {
   // Was the STATIC orange constant, so this screen ignored the theme entirely.
   const gradient = useGradient();
+  const theme = useTheme();
   const ingestMessage           = useEPurseStore((s) => s.ingestMessage);
   const setSmsPermissionGranted = useEPurseStore((s) => s.setSmsPermissionGranted);
   const setLastSmsSync          = useEPurseStore((s) => s.setLastSmsSync);
@@ -217,7 +218,7 @@ export default function SmsDiagnosticScreen({ navigation }) {
           disabled={status === STATUS.running}
         >
           <LinearGradient
-            colors={['#FF9F46', '#FF5A1F']}
+            colors={gradient}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             style={styles.runBtnGradient}
           >
@@ -250,7 +251,7 @@ export default function SmsDiagnosticScreen({ navigation }) {
           <View style={styles.statsRow}>
             <StatCard label="Raw messages" value={rawMessages.length > 0 ? '≥ 10 shown' : '0'} color="#6366F1" />
             <StatCard label="Parsed" value={parsedCount} color="#10B981" />
-            <StatCard label="Imported" value={importedCount} color="#FF5A1F" />
+            <StatCard label="Imported" value={importedCount} color={theme.primary} />
           </View>
         )}
 

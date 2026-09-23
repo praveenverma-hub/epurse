@@ -441,8 +441,8 @@ const styles = StyleSheet.create({
   contextCount:   { fontSize: 15, fontWeight: '800' as const, color: colors.textPrimary },
   contextFilters: { fontSize: 11, fontWeight: '500' as const, color: colors.textSecondary, lineHeight: 14 },
   contextTotals:  { alignItems: 'flex-end' as const, gap: 3 },
-  totalDebit:     { fontSize: 11, fontWeight: '700' as const, color: colors.danger },
-  totalCredit:    { fontSize: 11, fontWeight: '700' as const, color: colors.success },
+  totalDebit:     { fontSize: 11, fontWeight: '700' as const, color: colors.expense },
+  totalCredit:    { fontSize: 11, fontWeight: '700' as const, color: colors.income },
 
   // ── Section label
   sectionLabel: {

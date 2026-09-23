@@ -16,6 +16,7 @@ import {
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import SheetCloseButton from './SheetCloseButton';
 import { shadows } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ interface Props {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export const SmartRuleModal: React.FC<Props> = ({ rule, onAutomate, onDismiss }) => {
+  const theme = useTheme();
   if (!rule) return null;
 
   return (
@@ -74,7 +76,7 @@ export const SmartRuleModal: React.FC<Props> = ({ rule, onAutomate, onDismiss })
 
         <Text style={styles.title}>
           {'We noticed you always tag '}
-          <Text style={styles.merchantHighlight}>{rule.merchant}</Text>
+          <Text style={[styles.merchantHighlight, { color: theme.primary }]}>{rule.merchant}</Text>
           {' as:'}
         </Text>
 
@@ -153,7 +155,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   merchantHighlight: {
-    color: '#FF5A1F',
     fontWeight: '700',
   },
   categoryPreview: {

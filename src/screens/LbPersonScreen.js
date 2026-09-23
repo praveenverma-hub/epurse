@@ -17,22 +17,23 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal,
+  View, Text, StyleSheet, TouchableOpacity, Modal,
   KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme, useLbGradients } from '../hooks/useTheme';
-import { formatCurrency, formatDate, formatOutstanding, firstName } from '../utils/format';
+import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
 import { FormField, FormTextInput, FormAmountInput } from '../components/FormField';
 import DateField from '../components/DateField';
 import GradientButton from '../components/GradientButton';
+import SectionHeader from '../components/SectionHeader';
 import SheetCloseButton from '../components/SheetCloseButton';
 import CenterModal from '../components/CenterModal';
 import AccountPickerSheet from '../components/AccountPickerSheet';
@@ -48,10 +49,29 @@ const LOCK_REASON = {
   txn:   'From a bank transaction — edit the transaction',
 };
 
+// Row icon NAME only — same direction language as the LB tab's toggle/empty-state
+// icons (arrow-up = lent, arrow-down = borrowed, checkmark = settled/repaid).
+// Colour is NOT decided here: it's whatever colour the row's amount already
+// uses, passed in by the caller, so the icon can never disagree with the figure
+// beside it (lent_settled/borrow_repaid follow the SIGN, same as the amount —
+// not their "family", which is what a separate lookup here used to draw wrong).
+const ROW_ICON_NAME = {
+  lent: 'arrow-up-right-box-outline',
+  borrowed: 'arrow-down-left-box-outline',
+  lent_settled: 'checkmark-circle-outline',
+  borrow_repaid: 'checkmark-circle-outline',
+};
+const rowIconName = (entry) =>
+  entry.isGroupLine ? 'people-outline' : (ROW_ICON_NAME[entry.kind] || 'swap-horizontal-outline');
+
 const LbPersonScreen = ({ route, navigation }) => {
   const theme = useTheme();
   const lbGradients = useLbGradients();
   const toast = useToast();
+  // The SafeAreaView below only claims the TOP edge (its white fill has to match
+  // the header bar — see the styles comment), so the pinned Settle footer pays
+  // its own bottom inset here, same pattern as BudgetPlanScreen's footer.
+  const insets = useSafeAreaInsets();
   const personKey = route.params?.personKey;
 
   const getPersonBalances     = useEPurseStore((s) => s.getPersonBalances);
@@ -128,8 +148,21 @@ const LbPersonScreen = ({ route, navigation }) => {
     () => getPersonBalances().find((p) => p.personKey === personKey)?.net ?? 0,
     [getPersonBalances, personKey],
   );
-  const netColor = net > 0 ? colors.success : net < 0 ? '#EF4444' : colors.textSecondary;
-  const netLabel = net > 0 ? 'owes you' : net < 0 ? 'you owe' : 'all settled';
+  const isSettled = net === 0;
+  const netColor = net > 0 ? theme.lent : net < 0 ? theme.borrowed : theme.success;
+  const netLabel = net > 0 ? 'owes you' : net < 0 ? 'you owe' : 'All Settled';
+
+  // Sum of every 'lent' + 'borrowed' entry, once each — the actual loans, not the
+  // settle/repaid rows that just clear them. Counting those too would double an
+  // amount that's settled (the origin AND its counterpart both add it in), so
+  // this is deliberately the simpler, smaller number: "how much have you lent or
+  // borrowed with this person, ever" rather than every ledger row summed blind.
+  const totalDealt = (person.entries || [])
+    .filter((e) => e.kind === 'lent' || e.kind === 'borrowed')
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  // displayEntries is sorted most-recent-first (see above), so its head IS the
+  // last activity — no second pass over the raw entries needed.
+  const lastActivityDate = displayEntries[0]?.date || null;
 
   // ── Settle the person's FULL net ────────────────────────────────────────────
   const handleSettlePress = useCallback(() => {
@@ -260,14 +293,37 @@ const LbPersonScreen = ({ route, navigation }) => {
   }, [deleteLentBorrowedEntry, toast, person, freshNet]);
 
   // ── Rows ────────────────────────────────────────────────────────────────────
-  const renderEntry = useCallback(({ item: entry }) => {
-    const positive   = isPositiveEntry(entry.kind);
-    const entryColor = positive ? colors.success : '#EF4444';
-    const sign       = positive ? '+' : '−';
+  const renderEntry = useCallback((entry) => {
+    // A ledger row here is a TRANSACTION CARD, coloured from the perspective of
+    // the user's OWN money, not the balance it helps or the literal direction
+    // alone. LB money is mostly temporary — Borrowed money isn't really yours
+    // (you owe it back) and Received-back money is just your own money
+    // returning (never a gain) — so both stay PLAIN. Lent and Repaid are the
+    // two moments your own real money actually leaves your account, so those
+    // are the ones that read as a loss — but the app's generic expense red is
+    // the wrong red for it (that's reserved for real spending); this is still
+    // an LB row, so it takes LB's OWN "money leaving" colour, `theme.borrowed`
+    // (the coral the brand palette picked specifically to avoid danger red).
+    // `isPositiveEntry` answers the net-worth question ("is this good for my
+    // balance") and stays exactly that for the actual balance math (see the
+    // group total above); it's the wrong question here, so this is deliberately
+    // its own, separate call. The SIGN still follows literal cash direction
+    // (+ arriving, − leaving) regardless.
+    //
+    // A group line is a running NET for that group, not one movement, so it
+    // keeps the balance framing (lent/borrowed colours) instead.
+    const isOutflow = entry.kind === 'lent' || entry.kind === 'borrow_repaid'; // your own money leaving
+    const entryColor = entry.isGroupLine
+      ? (entry.kind === 'lent' ? theme.lent : theme.borrowed)
+      : (isOutflow ? theme.borrowed : colors.textPrimary);
+    const sign = entry.isGroupLine
+      ? (entry.kind === 'lent' ? '+' : '−')
+      : (isOutflow ? '−' : '+');
     const editable   = !entry.isGroupLine && !entry.groupId && !entry.sourceTxnId;
     const lockReason = entry.isGroupLine || entry.groupId
       ? LOCK_REASON.group
       : entry.sourceTxnId ? LOCK_REASON.txn : null;
+    const iconName = rowIconName(entry);
 
     const primaryText = entry.isGroupLine
       ? `Group · ${entry.groupName}`
@@ -280,11 +336,15 @@ const LbPersonScreen = ({ route, navigation }) => {
 
     return (
       <TouchableOpacity
+        key={entry.id}
         style={[styles.entryCard, entry.settledAt && styles.entrySettled]}
         activeOpacity={editable ? 0.75 : 1}
         disabled={!editable}
         onPress={() => setEditEntry(entry)}
       >
+        <View style={[styles.entryIconTile, { backgroundColor: entryColor + '18' }]}>
+          <Ionicons name={iconName} size={18} color={entryColor} />
+        </View>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
           <Text style={styles.entryTitle} numberOfLines={1}>{primaryText}</Text>
           <Text style={styles.entrySub} numberOfLines={1}>{subText}</Text>
@@ -310,7 +370,7 @@ const LbPersonScreen = ({ route, navigation }) => {
         ) : null}
       </TouchableOpacity>
     );
-  }, [theme.primary]);
+  }, [theme]);
 
   if (!person) {
     return (
@@ -347,54 +407,106 @@ const LbPersonScreen = ({ route, navigation }) => {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{person.person || 'Unknown'}</Text>
-        {/* Takes the place of the layout spacer, so it costs no width and the title
-            stays truly centred (both sides are one backBtn wide). */}
-        <TouchableOpacity
-          onPress={() => {
-            // Pre-pick the likelier direction: if you already owe them, the next
-            // entry is usually another borrow. Still one tap to flip.
-            setAddKind(net < 0 ? 'borrowed' : 'lent');
-            setAddOpen(true);
-          }}
-          hitSlop={10}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel={`Add an entry with ${person.person || 'this person'}`}
-        >
-          <Ionicons name="add" size={26} color={theme.primary} />
-        </TouchableOpacity>
+        <Text style={styles.title} numberOfLines={1}>{titleCaseName(person.person) || 'Unknown'}</Text>
+        {/* Plain spacer — the Add action now lives on "Transaction History" below,
+            not up here. Still costs no width, so the title stays truly centred
+            (both sides are one backBtn wide). */}
+        <View style={styles.backBtn} />
       </View>
 
-      <FlatList
-        data={displayEntries}
-        keyExtractor={(e) => e.id}
-        renderItem={renderEntry}
+      <ScrollView
         style={styles.body}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <View style={styles.hero}>
-            <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
-              <Text style={[styles.avatarText, { color: theme.primary }]}>
+      >
+        <View style={styles.hero}>
+          <View style={[styles.avatarRing, { borderColor: netColor }]}>
+            <View style={[styles.avatar, { backgroundColor: netColor + '22' }]}>
+              <Text style={[styles.avatarText, { color: netColor }]}>
                 {(person.person || '?').charAt(0).toUpperCase()}
               </Text>
             </View>
+          </View>
+          {isSettled ? (
+            <Ionicons
+              name="checkmark-circle"
+              size={40}
+              color={theme.success}
+              style={styles.heroTick}
+              accessibilityLabel="All settled"
+            />
+          ) : (
             <Text style={[styles.heroAmt, { color: netColor }]} numberOfLines={1}>
               {formatCurrency(netAbs)}
             </Text>
-            <Text style={[styles.heroLabel, { color: netColor }]}>{netLabel}</Text>
-            {person.phone ? <Text style={styles.heroPhone}>{person.phone}</Text> : null}
+          )}
+          <Text style={[styles.heroLabel, { color: netColor }]}>{netLabel}</Text>
+          {person.phone ? <Text style={styles.heroPhone}>{person.phone}</Text> : null}
+          {lastActivityDate ? (
             <Text style={styles.heroHint}>
-              {displayEntries.length} {displayEntries.length === 1 ? 'entry' : 'entries'} · tap one
-              to edit, or + to add another
+              Last activity {formatDate(lastActivityDate)} · {displayEntries.length}{' '}
+              {displayEntries.length === 1 ? 'entry' : 'entries'}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Same segmented-surface treatment as Home's Income/Refunds card, on a
+            white surface here (this screen has no gradient header to sit on). */}
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryCell}>
+            <Text style={styles.summaryLabel}>TOTAL INVOLVED</Text>
+            <Text style={styles.summaryValue} numberOfLines={1}>{formatCurrency(totalDealt)}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryCell}>
+            <Text style={styles.summaryLabel}>
+              {net > 0 ? 'TOTAL LENT' : net < 0 ? 'TOTAL BORROWED' : 'SETTLED'}
+            </Text>
+            <Text style={[styles.summaryValue, { color: netColor }]} numberOfLines={1}>
+              {formatCurrency(netAbs)}
             </Text>
           </View>
-        }
-      />
+        </View>
+
+        <SectionHeader
+          icon="time-outline"
+          title="Transaction History"
+          style={styles.historyHeader}
+          right={
+            <TouchableOpacity
+              onPress={() => {
+                // Pre-pick the likelier direction: if you already owe them, the
+                // next entry is usually another borrow. Still one tap to flip.
+                setAddKind(net < 0 ? 'borrowed' : 'lent');
+                setAddOpen(true);
+              }}
+              hitSlop={10}
+              style={[styles.historyAddBtn, { backgroundColor: theme.primary + '18' }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Add an entry with ${person.person || 'this person'}`}
+            >
+              <Ionicons name="add" size={16} color={theme.primary} />
+              <Text style={[styles.historyAddBtnText, { color: theme.primary }]}>Add</Text>
+            </TouchableOpacity>
+          }
+        />
+
+        <View style={styles.entriesCard}>
+          {displayEntries.length === 0 ? (
+            <Text style={styles.noEntriesText}>No transactions with this person yet.</Text>
+          ) : (
+            displayEntries.map((entry, i) => (
+              <React.Fragment key={entry.id}>
+                {renderEntry(entry)}
+                {i < displayEntries.length - 1 ? <View style={styles.entryDivider} /> : null}
+              </React.Fragment>
+            ))
+          )}
+        </View>
+      </ScrollView>
 
       {net !== 0 ? (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           <View style={{ flex: 1, marginRight: spacing.sm }}>
             <Text style={styles.footerLabel} numberOfLines={1}>
               {net > 0 ? 'Total owed to you' : 'Total you owe'}
@@ -453,7 +565,14 @@ const LbPersonScreen = ({ route, navigation }) => {
             <Text style={[styles.sheetTitle, styles.addSheetTitle]} numberOfLines={1}>
               New entry with {firstName(person.person) || 'this person'}
             </Text>
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {/* paddingBottom gives the submit button's OWN elevated shadow (shadows.elevated
+                spills ~22px below it) room to render before the ScrollView's scrollable
+                bounds clip it — without it, the shadow was cut flat at the button's edge. */}
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.addSheetScrollContent}
+            >
               <LbEntryForm
                 kind={addKind}
                 onKindChange={setAddKind}
@@ -465,7 +584,7 @@ const LbPersonScreen = ({ route, navigation }) => {
                 onSubmit={handleAddEntry}
                 theme={theme}
                 submitColors={addKind === 'lent' ? lbGradients.lent : lbGradients.borrowed}
-                submitLabel="Add entry"
+                submitLabel="Add Entry"
                 hideHeading
                 // The sheet already provides the card surface + padding.
                 style={styles.addFormInSheet}
@@ -563,7 +682,13 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
             Edit {ENTRY_LABEL[entry.kind] || 'entry'}
           </Text>
 
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {/* Same shadow-clipping fix as the add sheet — "Save changes" is a
+              GradientButton too. */}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.addSheetScrollContent}
+          >
             {/* Amount + date share a row, matching the LB add form's layout. */}
             <FormField label="Amount">
               <View style={styles.amountRow}>
@@ -664,27 +789,95 @@ const styles = StyleSheet.create({
   // This one is a single contact's profile (avatar → net → phone), and a centred
   // profile block is the shape that reads as "this person".
   hero: { alignItems: 'center', marginBottom: spacing.lg },
-  avatar: {
-    width: 56, height: 56, borderRadius: 28,
+  // Thin halo around the avatar, coloured by direction (lent/borrowed) or by
+  // success once settled. The avatar's own fill + initial match the ring colour
+  // (set inline) rather than the fixed violet tint, so the two read as one
+  // coloured badge instead of a status ring around an unrelated brand colour.
+  avatarRing: {
+    width: 68, height: 68, borderRadius: 34,
+    borderWidth: 2,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: spacing.sm,
   },
+  avatar: {
+    width: 56, height: 56, borderRadius: 28,
+    alignItems: 'center', justifyContent: 'center',
+  },
   avatarText: { fontSize: 22, fontWeight: '800' },
   heroAmt:   { fontSize: 32, fontWeight: '800', letterSpacing: -0.5, textAlign: 'center' },
+  // Same slot as heroAmt when settled — a tick standing in for "₹0", not a
+  // number that would just read as "nothing to show".
+  heroTick:  { marginTop: 2 },
   heroLabel: { ...typography.small, fontWeight: '700', marginTop: 2, textAlign: 'center' },
   heroPhone: { ...typography.small, color: colors.textSecondary, marginTop: spacing.xs },
   heroHint:  { ...typography.tiny, color: colors.textMuted, marginTop: spacing.sm, textAlign: 'center' },
 
+  // ── Total dealt / current side — same segmented-surface idea as Home's
+  // Income/Refunds card, rebuilt on a white surface (this screen has no
+  // gradient header for it to sit on).
+  summaryCard: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    marginBottom: spacing.lg,
+    overflow: 'hidden',
+    ...shadows.card,
+  },
+  summaryCell: { flex: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  summaryDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+    marginVertical: spacing.sm,
+  },
+  summaryLabel: {
+    ...typography.tiny, color: colors.textSecondary, fontWeight: '800', letterSpacing: 0.8,
+  },
+  summaryValue: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 3 },
+
+  historyHeader: { marginBottom: spacing.sm },
+  // Add-entry action, moved here from the top header bar. Icon + label (not an
+  // icon alone) — "Add" on its own reads as a stray glyph beside a heading in a
+  // way it wouldn't as a lone FAB, where the position already says what it does.
+  historyAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  historyAddBtnText: { ...typography.tiny, fontWeight: '700' },
+
+  // ── ONE card holding every entry, rows separated by a hairline instead of
+  // each row being its own shadowed card — a ledger reads as one list, not as
+  // a stack of separate objects.
+  entriesCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    ...shadows.card,
+  },
+  noEntriesText: {
+    ...typography.small, color: colors.textMuted, padding: spacing.lg, textAlign: 'center',
+  },
+  entryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+    marginLeft: spacing.md + 36 + spacing.sm, // clears the icon tile, matches the text column start
+  },
   entryCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
     padding: spacing.md,
-    marginBottom: spacing.sm,
-    ...shadows.card,
   },
   entrySettled: { opacity: 0.6 },
+  // Symbol tile — same idea as CategoryIcon, sized to the row rather than a
+  // transaction card's larger 44px version.
+  entryIconTile: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
   entryTitle: { ...typography.bodyBold, color: colors.textPrimary },
   entrySub:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   entryAmt:   { ...typography.bodyBold, fontWeight: '800', flexShrink: 0 },
@@ -706,7 +899,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingTop: spacing.md,
+    // paddingBottom is set inline — it's the larger of the home-indicator inset
+    // or this same spacing.md, so the button never sits flush against a notch.
     backgroundColor: colors.card,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.divider,
@@ -735,6 +930,9 @@ const styles = StyleSheet.create({
   // into a hole above the direction chips. The edit sheet starts with a field and
   // keeps the full gap.
   addSheetTitle: { marginBottom: spacing.sm },
+  // Room for the submit button's elevated shadow — see the comment at its
+  // ScrollView. Shared by both sheets (add + edit); both end on one.
+  addSheetScrollContent: { paddingBottom: spacing.lg + spacing.sm },
   // Matches LbEntryForm's amountRow — the amount and the date button must not read
   // as one merged field (see the note there).
   amountRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

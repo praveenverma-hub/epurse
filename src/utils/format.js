@@ -83,8 +83,46 @@ export const formatOutstanding = (net, name) => {
     : `You owe ${who} ${formatCurrency(-net)} in total`;
 };
 
+/**
+ * Title-case a person's name for DISPLAY — "rohit sharma" / "ROHIT SHARMA" both
+ * read as "Rohit Sharma" on a card. Never touches stored data or the name field
+ * while it's being typed (that would fight the user's cursor); call it only at
+ * render time, on whatever a card/toast is about to show.
+ */
+export const titleCaseName = (raw) => {
+  const s = String(raw ?? '').trim();
+  if (!s) return s;
+  return s.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+};
+
 /** First name only — toasts and chips read better without a full legal name. */
-export const firstName = (full) => (full || '').trim().split(/\s+/)[0] || (full || '').trim();
+export const firstName = (full) =>
+  titleCaseName((full || '').trim().split(/\s+/)[0] || (full || '').trim());
+
+/**
+ * Title-case a UI LABEL (a button, a heading) for DISPLAY — the app-wide rule is
+ * every screen/section heading, button and chip is Title Case (see ui-consistency
+ * skill). This is the enforcement point: a component that renders caller-supplied
+ * text as a label routes it through here so a caller that typed "add entry"
+ * still SHOWS "Add Entry", instead of relying on every call site remembering.
+ *
+ * Deliberately gentler than `titleCaseName` above: it only capitalises a word
+ * that's WHOLLY lowercase, and leaves any word alone that already has an
+ * uppercase letter or a digit/currency/percent in it. That's what keeps it safe
+ * on the kind of text these components actually carry — an acronym ("PDF",
+ * "CSV", "EPC"), a proper noun, or a dynamic value ("₹500", "3 days") — none of
+ * which a blunt "capitalise every word" pass could tell apart from a plain word.
+ * Prose (a subtitle, a toast, a sentence) is explicitly OUT of scope for the
+ * Title Case rule and must not be routed through this.
+ */
+export const titleCaseLabel = (text) => {
+  const s = String(text ?? '');
+  if (!s) return s;
+  return s
+    .split(' ')
+    .map((word) => (word && !/[0-9₹%A-Z]/.test(word) ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ');
+};
 
 export const monthKey = (date) => {
   const d = new Date(date);

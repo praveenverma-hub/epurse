@@ -43,7 +43,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, searchFill, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import SheetCloseButton from '../components/SheetCloseButton';
@@ -837,7 +837,7 @@ const TransactionsScreen = ({ navigation, route }) => {
           </Pressable>
         </View>
 
-        <View style={styles.searchBar}>
+        <View style={[styles.searchBar, { backgroundColor: searchFill(theme) }]}>
           <Ionicons name="search-outline" size={17} color={colors.textMuted} />
           <TextInput
             style={styles.searchInput}

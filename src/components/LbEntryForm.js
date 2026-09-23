@@ -18,6 +18,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   StyleSheet,
   Text,
   TextInput,
@@ -27,7 +28,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import {
   INPUT_LIMITS,
@@ -63,6 +64,11 @@ const ContactPickIcon = ({ size = 18, color = colors.primary }) => (
  *                       Only called once the form has validated.
  * @param hideHeading    Suppress the form's own title (the shell already has one).
  *                       The "already settled" toggle stays either way.
+ * @param submitOutlined Render the submit button OUTLINED (border + tinted text, no
+ *                       fill) instead of the default filled gradient — the LB tab's
+ *                       inline form uses this; the add SHEET (LbPersonScreen) keeps
+ *                       the filled button, since it's the one clear action in a
+ *                       focused sheet rather than a secondary control on a list.
  */
 const LbEntryForm = ({
   kind,
@@ -72,6 +78,7 @@ const LbEntryForm = ({
   theme,
   submitColors,
   submitLabel = 'Add',
+  submitOutlined = false,
   hideHeading = false,
   style,
 }) => {
@@ -200,13 +207,15 @@ const LbEntryForm = ({
       {onKindChange ? (
         <FormChipRow style={styles.kindRow}>
           <FormChip
-            label="↑ I lent"
+            label="I Lent"
+            icon={<Ionicons name="arrow-up-right-box-outline" size={15} color={kind === 'lent' ? theme.primary : colors.textSecondary} />}
             active={kind === 'lent'}
             onPress={() => onKindChange('lent')}
             accentColor={theme.primary}
           />
           <FormChip
-            label="↓ I borrowed"
+            label="I Borrowed"
+            icon={<Ionicons name="arrow-down-left-box-outline" size={15} color={kind === 'borrowed' ? theme.primary : colors.textSecondary} />}
             active={kind === 'borrowed'}
             onPress={() => onKindChange('borrowed')}
             accentColor={theme.primary}
@@ -290,13 +299,32 @@ const LbEntryForm = ({
         maxLength={INPUT_LIMITS.NOTE_MAX}
       />
       {formErr ? <Text style={styles.formErrText}>{formErr.text}</Text> : null}
-      <GradientButton
-        title={submitLabel}
-        onPress={handleSubmit}
-        loading={submitting}
-        colors={submitColors}
-        style={{ marginTop: spacing.sm }}
-      />
+      {submitOutlined ? (
+        <TouchableOpacity
+          onPress={handleSubmit}
+          disabled={submitting}
+          activeOpacity={0.75}
+          style={[
+            styles.outlinedSubmit,
+            { borderColor: theme[kind] },
+            submitting && { opacity: 0.6 },
+          ]}
+        >
+          {submitting ? (
+            <ActivityIndicator color={theme[kind]} />
+          ) : (
+            <Text style={[styles.outlinedSubmitText, { color: theme[kind] }]}>{submitLabel}</Text>
+          )}
+        </TouchableOpacity>
+      ) : (
+        <GradientButton
+          title={submitLabel}
+          onPress={handleSubmit}
+          loading={submitting}
+          colors={submitColors}
+          style={{ marginTop: spacing.sm }}
+        />
+      )}
 
       <ContactPickerSheet
         visible={contactSheetVisible}
@@ -418,6 +446,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '700',
   },
+  // Secondary treatment of the submit button (ui-consistency §button-hierarchy):
+  // border + tinted text, no fill — same height/radius/padding as GradientButton's
+  // `btn` so swapping variants never shifts the row it sits in.
+  outlinedSubmit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    marginTop: spacing.sm,
+  },
+  outlinedSubmitText: { ...typography.bodyBold, fontWeight: '700' },
 });
 
 export default LbEntryForm;

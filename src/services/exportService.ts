@@ -232,14 +232,14 @@ export function buildPDFHTML(
        background:#fff;color:#1C1C1E;padding:36px 44px;font-size:13px;line-height:1.55}
   /* ── Header */
   .hdr{display:flex;justify-content:space-between;align-items:flex-start;
-       padding-bottom:18px;border-bottom:3px solid #FF5A1F;margin-bottom:20px}
-  .brand{font-size:26px;font-weight:900;color:#FF5A1F;letter-spacing:-0.5px}
+       padding-bottom:18px;border-bottom:3px solid #5B3CC4;margin-bottom:20px}
+  .brand{font-size:26px;font-weight:900;color:#5B3CC4;letter-spacing:-0.5px}
   .brand-sub{font-size:12px;color:#6B7280;margin-top:4px}
   .hdr-right{text-align:right;font-size:11px;color:#9CA3AF;line-height:1.8}
   .hdr-right strong{color:#1C1C1E;font-size:13px;font-weight:700}
   /* ── Filter chips */
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
-  .chip{background:#FFF3EE;color:#FF5A1F;font-size:11px;font-weight:700;
+  .chip{background:#F0EBFF;color:#5B3CC4;font-size:11px;font-weight:700;
         padding:3px 10px;border-radius:999px;border:1px solid #FFD8C9}
   /* ── Summary */
   .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:26px}

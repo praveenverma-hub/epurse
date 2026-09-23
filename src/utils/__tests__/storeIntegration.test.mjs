@@ -2175,24 +2175,31 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('the Gold accent is really gone', !THEMES.amber);
   check('…and Carbon took its slot', !!THEMES.carbon && THEMES.carbon.label === 'Carbon');
 
+  // `migrate` runs the WHOLE chain from the given version, so since v35 every
+  // pre-35 store ends on violet (see the v35 block below). What v26 still owes:
+  // a Gold user never lands on a dangling id the picker can't select.
   const gold = migrate({ themeId: 'amber' }, 25);
-  check('a Gold user is moved onto Carbon, not reset to the default',
-    gold.themeId === 'carbon', `${gold.themeId}`);
-  check('…which is a real theme the picker can select',
-    !!THEMES[gold.themeId], `${gold.themeId}`);
-
-  // Everyone else is untouched — a migration that rewrites a valid choice is a
-  // worse bug than the one it fixes.
-  for (const id of Object.keys(THEMES)) {
-    const kept = migrate({ themeId: id }, 25);
-    check(`'${id}' is left alone`, kept.themeId === id, `${kept.themeId}`);
-  }
+  check('a Gold user ends on a real theme the picker can select',
+    !!THEMES[gold.themeId] && gold.themeId !== 'amber', `${gold.themeId}`);
   const fresh = migrate({ themeId: DEFAULT_THEME_ID }, 25);
   check('the default survives the migration', fresh.themeId === DEFAULT_THEME_ID);
+}
 
-  // Idempotent: a store already at 26 must not be touched again.
-  const twice = migrate(migrate({ themeId: 'amber' }, 25), 26);
-  check('running it twice is a no-op', twice.themeId === 'carbon', `${twice.themeId}`);
+// ── v35: violet is THE brand theme — one-time move of every saved theme ─────
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const { THEMES, DEFAULT_THEME_ID } =
+    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+  check('violet is the default theme', DEFAULT_THEME_ID === 'violet');
+  for (const id of Object.keys(THEMES)) {
+    const moved = migrate({ themeId: id }, 34);
+    check(`a saved '${id}' moves onto violet`, moved.themeId === 'violet', `${moved.themeId}`);
+  }
+  // A theme picked AFTER the move is the user's choice — it must stick.
+  for (const id of Object.keys(THEMES)) {
+    const kept = migrate({ themeId: id }, 35);
+    check(`'${id}' chosen after v35 is left alone`, kept.themeId === id, `${kept.themeId}`);
+  }
 }
 
 // ── v27: 'repayment' category MERGED into 'borrow_repaid' (Sep-2026) ────────

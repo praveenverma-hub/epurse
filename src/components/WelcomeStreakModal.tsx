@@ -37,6 +37,7 @@ import {
 } from '../store/useRewardStore';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
+import { useTheme } from '../hooks/useTheme';
 import LiveFlame from './LiveFlame';
 import SheetCloseButton from './SheetCloseButton';
 
@@ -51,6 +52,7 @@ const SCREEN_H    = Dimensions.get('window').height;
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const WelcomeStreakModal: React.FC = () => {
+  const theme = useTheme();
   const SHOP_ENABLED = useFeatureFlag('shop');
   const isFirstLaunch      = useRewardStore(selectFirstLaunch);
   const setFirstLaunchDone = useRewardStore((s) => s.setFirstLaunchDone);
@@ -161,7 +163,7 @@ const WelcomeStreakModal: React.FC = () => {
               {SHOP_ENABLED ? REWARD_COPY.WELCOME_DESCRIPTION : REWARD_COPY.WELCOME_DESCRIPTION_SHOP_COMING_SOON}
             </Text>
 
-            <Pressable style={styles.cta} onPress={dismissEarly}>
+            <Pressable style={[styles.cta, { backgroundColor: theme.primary }]} onPress={dismissEarly}>
               <Text style={styles.ctaText}>{REWARD_COPY.WELCOME_CTA}</Text>
             </Pressable>
           </View>
@@ -223,7 +225,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 36,
     paddingVertical:   13,
     borderRadius:      16,   // radius.lg — pill is for chips only
-    backgroundColor:   '#FF5A1F',
   },
   ctaText: {
     color:         '#FFFFFF',

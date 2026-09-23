@@ -529,8 +529,8 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
           <View style={styles.infoRow}>
             <WhatsAppIcon size={18} />
             <Text style={styles.infoName} numberOfLines={1}>{person || 'Someone'}</Text>
-            <View style={[styles.amtBadge, { backgroundColor: '#25D36618' }]}>
-              <Text style={styles.amtBadgeText}>{formatCurrency(amount)} pending</Text>
+            <View style={[styles.amtBadge, { backgroundColor: theme.lentSoft }]}>
+              <Text style={[styles.amtBadgeText, { color: theme.lent }]}>{formatCurrency(amount)} pending</Text>
             </View>
           </View>
           {phone ? (
@@ -690,7 +690,7 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 4 },
   infoName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },
   amtBadge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
-  amtBadgeText: { ...typography.tiny, color: '#10B981', fontWeight: '700' },
+  amtBadgeText: { ...typography.tiny, fontWeight: '700' },
   phoneHint: { ...typography.tiny, color: colors.textSecondary, marginBottom: spacing.sm },
   noPhoneHint: { ...typography.tiny, color: colors.textMuted, fontStyle: 'italic', marginBottom: spacing.sm },
 
