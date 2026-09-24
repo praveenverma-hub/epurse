@@ -70,11 +70,10 @@ const SECTION_INFO = {
   },
 };
 
-const AnalyticsScreen = ({ navigation, headerless = false }) => {
+const AnalyticsScreen = ({ navigation, headerless = false, monthOffset = 0 }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const tabBarScroll = useTabBarScroll();
-  const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
   const [infoKey, setInfoKey] = useState(null); // which section explainer is open
   // Group carousel focus — null = all spending. Drives the reactive line + bar charts.
   const [focusedGroupId, setFocusedGroupId] = useState(null);
@@ -211,8 +210,6 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
       .sort((a, b) => b.total - a.total);
   }, [transactions, date, groups, accounts]);
 
-  const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-
   // Empty-state flags. `noDataEver` = truly fresh user (no transactions at all)
   // → one prominent placeholder. Otherwise each section handles its own month
   // having no data (e.g. browsing back to a quiet month).
@@ -233,43 +230,17 @@ const AnalyticsScreen = ({ navigation, headerless = false }) => {
           onBack={() => navigation.goBack()}
           title="Analytics"
           renderHero={() => (
-            <>
-              <View style={styles.monthSwitcher}>
-                <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
-                  <Text style={styles.arrow}>‹</Text>
-                </TouchableOpacity>
-                <Text style={styles.monthLabel}>{monthLabel}</Text>
-                <TouchableOpacity
-                  onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
-                  disabled={monthOffset === 0}
-                >
-                  <Text style={[styles.arrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <SummaryStat label="Spent" value={monthSpend} />
-                <SummaryStat label="Income" value={monthIncome} />
-                <SummaryStat label="Refunds" value={monthRefund} />
-              </View>
-            </>
+            <View style={styles.summaryRow}>
+              <SummaryStat label="Spent" value={monthSpend} />
+              <SummaryStat label="Income" value={monthIncome} />
+              <SummaryStat label="Refunds" value={monthRefund} />
+            </View>
           )}
         />
       ) : (
-        /* headerless — plain strip, no gradient (InsightsScreen already provides one) */
+        /* headerless — plain strip, no gradient (InsightsScreen already provides
+           one, month switcher included — this screen just reads `monthOffset`). */
         <View style={styles.headerlessStrip}>
-          <View style={styles.monthSwitcherLight}>
-            <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)}>
-              <Text style={styles.arrowLight}>‹</Text>
-            </TouchableOpacity>
-            <Text style={styles.monthLabelLight}>{monthLabel}</Text>
-            <TouchableOpacity
-              onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
-              disabled={monthOffset === 0}
-            >
-              <Text style={[styles.arrowLight, monthOffset === 0 && { opacity: 0.3 }]}>›</Text>
-            </TouchableOpacity>
-          </View>
           <View style={styles.summaryRowLight}>
             <SummaryStatLight label="Spent"   value={monthSpend} />
             <SummaryStatLight label="Income"  value={monthIncome} />
@@ -627,19 +598,6 @@ const ProgressRing = ({ category, size = 70, stroke = 7 }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
-  monthSwitcher: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.lg,
-    backgroundColor: '#FFFFFF22',
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  arrow: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  monthLabel: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
-
   summaryRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   statBox: {
     flex: 1,
@@ -720,20 +678,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.md,
   },
-  monthSwitcherLight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
-  },
-  arrowLight:      { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
-  monthLabelLight: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   summaryRowLight: { flexDirection: 'row', gap: spacing.sm },
   statBoxLight: {
     flex: 1,

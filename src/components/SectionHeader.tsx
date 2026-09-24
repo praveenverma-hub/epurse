@@ -56,11 +56,18 @@ type Props = {
    * hand-rolling their own row before this existed.
    */
   right?: React.ReactNode;
+  /**
+   * `md` (default) — the canonical `h3` tier used everywhere. `sm` steps the
+   * title down to `bodyBold` (15/600, same weight, 2px smaller) for a card
+   * whose title reads as a full sentence rather than a short label, where h3
+   * comes across as shouty. Still bold, still a heading — not a new tier.
+   */
+  size?: 'md' | 'sm';
   style?: StyleProp<ViewStyle>;
 };
 
 const SectionHeader = ({
-  icon, title, a11yTitle, subtitle, accentColor, onInfo, right, style,
+  icon, title, a11yTitle, subtitle, accentColor, onInfo, right, size = 'md', style,
 }: Props) => (
   <View style={style}>
     <View style={styles.row}>
@@ -69,7 +76,7 @@ const SectionHeader = ({
       {/* Every heading is Title Case (ui-consistency rule) — enforced HERE so a new
           card's title doesn't depend on the caller remembering. A ReactNode title
           (DashboardScreen's count-suffixed one) passes through untouched. */}
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={[styles.title, size === 'sm' && styles.titleSm]} numberOfLines={1}>
         {typeof title === 'string' ? titleCaseLabel(title) : title}
       </Text>
       {onInfo ? (
@@ -93,6 +100,7 @@ const styles = StyleSheet.create({
   // Fixed-width slot so every title starts at the same x whatever the glyph (§5).
   icon: { width: 20, textAlign: 'center' },
   title: { ...typography.h3, color: colors.textPrimary, flex: 1 },
+  titleSm: { ...typography.bodyBold, color: colors.textPrimary },
   subtitle: {
     ...typography.small,
     color: colors.textSecondary,

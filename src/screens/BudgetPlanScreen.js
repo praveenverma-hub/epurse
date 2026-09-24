@@ -88,6 +88,9 @@ const BudgetPlanScreen = ({ navigation }) => {
   const [localCats, setLocalCats] = useState(() => (isEdit ? seedFromSavedPlan() : seedFromHistory()));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [removeConfirm, setRemoveConfirm] = useState(null);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
   // Sum of the category caps being edited — the total is derived, never typed.
   const localTotal = useMemo(
@@ -108,14 +111,29 @@ const BudgetPlanScreen = ({ navigation }) => {
   }, [getParentCategoryAverage]);
 
   const handleRemoveCat = useCallback((catId) => {
-    setLocalCats((prev) => prev.filter((c) => c.catId !== catId));
-  }, []);
+    const cat = categoryById.get(catId);
+    setRemoveConfirm({ catId, name: cat?.name || 'this category' });
+  }, [categoryById]);
+
+  const confirmRemoveCat = useCallback(() => {
+    setLocalCats((prev) => prev.filter((c) => c.catId !== removeConfirm.catId));
+    setRemoveConfirm(null);
+  }, [removeConfirm]);
 
   const resetLocalState = useCallback(() => {
     setLocalCats(isEdit ? seedFromSavedPlan() : seedFromHistory());
   }, [isEdit, seedFromSavedPlan, seedFromHistory]);
 
-  const savePlan = useCallback(() => {
+  const requestReset = useCallback(() => {
+    setResetConfirmOpen(true);
+  }, []);
+
+  const confirmReset = useCallback(() => {
+    resetLocalState();
+    setResetConfirmOpen(false);
+  }, [resetLocalState]);
+
+  const requestSavePlan = useCallback(() => {
     // Every listed category must have a cap > 0.
     if (localCats.length > 0) {
       const hasEmpty = localCats.some(({ cap }) => {
@@ -131,13 +149,17 @@ const BudgetPlanScreen = ({ navigation }) => {
         return;
       }
     }
+    setSaveConfirmOpen(true);
+  }, [localCats]);
 
+  const confirmSavePlan = useCallback(() => {
     // Build the plan; the store derives the (non-editable) total from the sum.
     const perCategory = {};
     localCats.forEach(({ catId, cap }) => {
       const num = parseInt(cap, 10);
       if (Number.isFinite(num) && num > 0) perCategory[catId] = num;
     });
+    setSaveConfirmOpen(false);
     submit(() => {
       setBudget({ perCategory });
       toast.success(isEdit ? 'Plan updated' : 'Plan created');
@@ -184,7 +206,6 @@ const BudgetPlanScreen = ({ navigation }) => {
               <Text style={styles.totalReadonlyValue}>
                 ₹{localTotal.toLocaleString('en-IN')}
               </Text>
-              <Text style={styles.totalReadonlyTag}>auto</Text>
             </View>
             <Text style={styles.totalInputHint}>
               Adds up automatically from your category budgets below.
@@ -229,7 +250,7 @@ const BudgetPlanScreen = ({ navigation }) => {
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.catRemoveBtn}
                       >
-                        <Text style={styles.catRemoveText}>✕</Text>
+                        <Ionicons name="remove-circle" size={22} color={colors.danger} />
                       </TouchableOpacity>
                     </View>
                   );
@@ -243,7 +264,7 @@ const BudgetPlanScreen = ({ navigation }) => {
               onPress={() => setPickerOpen(true)}
               activeOpacity={0.75}
             >
-              <Text style={[styles.addCatBtnText, { color: theme.primary }]}>+ Add Category</Text>
+              <Text style={[styles.addCatBtnText, { color: theme.primary }]}>Add Category</Text>
             </TouchableOpacity>
           </View>
 
@@ -261,12 +282,12 @@ const BudgetPlanScreen = ({ navigation }) => {
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={styles.resetBtn}
-              onPress={resetLocalState}
+              onPress={requestReset}
               activeOpacity={0.8}
             >
               <Text style={[styles.resetBtnText, { color: colors.danger }]}>Reset</Text>
             </TouchableOpacity>
-            <GradientButton title="Save Plan" onPress={savePlan} loading={submitting} style={styles.saveBtn} />
+            <GradientButton title="Save Plan" onPress={requestSavePlan} loading={submitting} style={styles.saveBtn} />
           </View>
         </View>
       </SafeAreaView>
@@ -322,6 +343,38 @@ const BudgetPlanScreen = ({ navigation }) => {
         onClose={() => setConfirm(null)}
         onPrimary={() => setConfirm(null)}
       />
+
+      <CenterModal
+        visible={!!removeConfirm}
+        title="Remove Category"
+        message={`Remove ${removeConfirm?.name} from this budget plan?`}
+        destructive
+        primaryText="Remove"
+        onPrimary={confirmRemoveCat}
+        secondaryText="Cancel"
+        onClose={() => setRemoveConfirm(null)}
+      />
+
+      <CenterModal
+        visible={resetConfirmOpen}
+        title="Reset Changes"
+        message="Discard your unsaved edits and revert to the last saved plan?"
+        destructive
+        primaryText="Reset"
+        onPrimary={confirmReset}
+        secondaryText="Cancel"
+        onClose={() => setResetConfirmOpen(false)}
+      />
+
+      <CenterModal
+        visible={saveConfirmOpen}
+        title={isEdit ? 'Update Plan' : 'Save Plan'}
+        message={`Save this ${monthName} budget plan of ₹${localTotal.toLocaleString('en-IN')}?`}
+        primaryText="Save"
+        onPrimary={confirmSavePlan}
+        secondaryText="Cancel"
+        onClose={() => setSaveConfirmOpen(false)}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -362,15 +415,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
   },
   totalReadonlyValue: { flex: 1, fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
-  totalReadonlyTag: {
-    ...typography.tiny, fontWeight: '700', color: colors.textSecondary,
-    backgroundColor: colors.divider, paddingHorizontal: spacing.sm, paddingVertical: 2,
-    borderRadius: radius.pill, textTransform: 'uppercase', letterSpacing: 0.5,
-  },
   totalInputHint: { ...typography.tiny, color: colors.textMuted, marginTop: spacing.xs },
 
   emptyHint: { paddingVertical: spacing.md },
@@ -398,7 +444,6 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   catRemoveBtn:  { padding: 4 },
-  catRemoveText: { fontSize: 14, color: colors.textSecondary },
 
   addCatBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

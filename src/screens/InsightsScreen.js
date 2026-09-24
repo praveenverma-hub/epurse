@@ -8,7 +8,7 @@
 // headerless=true so they skip their own nav headers.
 // =============================================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { TabView } from 'react-native-tab-view';
 
@@ -35,6 +35,20 @@ export default function InsightsScreen({ navigation, route }) {
   const gradient = useGradient();
   const [index, setIndex] = useState(() => keyToIndex(route.params?.defaultTab));
 
+  // Shared month, driving both scenes so "September" means the same thing on
+  // Analytics and Budget rather than each screen tracking its own. Budget only
+  // reads it for a VIEW of past months (via budgetHistory) — it can't be edited
+  // retroactively, so Edit/Remove Plan stay scoped to month 0 inside BudgetScreen.
+  const [monthOffset, setMonthOffset] = useState(0); // 0 = this month, -1 = last month
+  const monthDate = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + monthOffset);
+    return d;
+  }, [monthOffset]);
+  const monthLabel = monthOffset === 0
+    ? monthDate.toLocaleDateString('en-IN', { month: 'long' })
+    : monthDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       const defaultTab = route.params?.defaultTab;
@@ -46,13 +60,14 @@ export default function InsightsScreen({ navigation, route }) {
   const renderScene = ({ route: r }) => {
     switch (r.key) {
       case 'analytics':
-        return <AnalyticsScreen navigation={navigation} headerless />;
+        return <AnalyticsScreen navigation={navigation} headerless monthOffset={monthOffset} />;
       case 'budget':
         return (
           <BudgetScreen
             navigation={navigation}
             headerless
             openPlan={!!route.params?.openPlan}
+            monthOffset={monthOffset}
           />
         );
       default:
@@ -66,23 +81,39 @@ export default function InsightsScreen({ navigation, route }) {
       gradientColors={gradient}
       title="Insights"
       renderHero={() => (
-        <View style={styles.switcher}>
-          {ROUTES.map((t, i) => (
-            <TouchableOpacity
-              key={t.key}
-              style={[styles.switcherBtn, index === i && styles.switcherBtnActive]}
-              onPress={() => setIndex(i)}
-              activeOpacity={0.8}
-            >
-              <Text style={[
-                styles.switcherText,
-                index === i && { color: theme.primary, fontWeight: '700' },
-              ]}>
-                {t.label}
-              </Text>
+        <>
+          <View style={styles.switcher}>
+            {ROUTES.map((t, i) => (
+              <TouchableOpacity
+                key={t.key}
+                style={[styles.switcherBtn, index === i && styles.switcherBtnActive]}
+                onPress={() => setIndex(i)}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  styles.switcherText,
+                  index === i && { color: theme.primary, fontWeight: '700' },
+                ]}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.monthSwitcher}>
+            <TouchableOpacity onPress={() => setMonthOffset((m) => m - 1)} hitSlop={10}>
+              <Text style={styles.monthArrow}>‹</Text>
             </TouchableOpacity>
-          ))}
-        </View>
+            <Text style={styles.monthLabel}>{monthLabel}</Text>
+            <TouchableOpacity
+              onPress={() => setMonthOffset((m) => Math.min(0, m + 1))}
+              disabled={monthOffset === 0}
+              hitSlop={10}
+            >
+              <Text style={[styles.monthArrow, monthOffset === 0 && { opacity: 0.4 }]}>›</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
     />
   );
@@ -121,4 +152,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFFCC',
     fontWeight: '600',
   },
+
+  monthSwitcher: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+    marginTop: spacing.md,
+  },
+  monthArrow: { ...typography.h2, color: '#FFFFFF', fontWeight: '700' },
+  monthLabel: { ...typography.bodyBold, color: '#FFFFFF', fontWeight: '700', minWidth: 100, textAlign: 'center' },
 });

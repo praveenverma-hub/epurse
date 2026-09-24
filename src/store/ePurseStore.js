@@ -5295,16 +5295,30 @@ export const useEPurseStore = create(
         let count = 0;
         for (let i = 1; i <= months; i++) {
           const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          let monthSum = 0;
-          let has = false;
-          get().getCategoryBreakdown(d).forEach((row) => {
-            if ((CAT_MAPS.legacyToParentId[row.id] || row.id) === parentId) {
-              monthSum += row.total; has = true;
-            }
-          });
+          const { total: monthSum, has } = get().getParentCategoryMonthTotal(parentId, d);
           if (has) { total += monthSum; count += 1; }
         }
         return count > 0 ? Math.round(total / count) : 0;
+      },
+
+      /**
+       * Actual spend for a FIRST-LEVEL (parent) budget category in ONE SPECIFIC
+       * month (not an average) — rolls up legacy child ids the same way
+       * `getParentCategoryAverage` does, and is what that loop calls per month.
+       * `has` distinguishes "genuinely ₹0 that month" from "no data at all",
+       * which the average needs to decide whether a month counts toward the
+       * divisor. Powers BudgetCategoryDetailScreen's month-over-month card.
+       */
+      getParentCategoryMonthTotal: (parentId, date = new Date()) => {
+        if (excludedExpenseSet().has(parentId)) return { total: 0, has: false };
+        let total = 0;
+        let has = false;
+        get().getCategoryBreakdown(date).forEach((row) => {
+          if ((CAT_MAPS.legacyToParentId[row.id] || row.id) === parentId) {
+            total += row.total; has = true;
+          }
+        });
+        return { total, has };
       },
 
       /**

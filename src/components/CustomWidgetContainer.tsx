@@ -141,10 +141,10 @@ export const budgetRingColor = (
 ): string => {
   if (!hasCap) return colors.divider;
   if (isGauge) return gaugeColorAt(pct);
-  if (pct >= 100) return colors.danger;
-  if (pct > daysElapsedPct + 10) return colors.danger;
-  if (pct > daysElapsedPct + 5) return colors.warning;
-  return colors.success;
+  if (pct >= 100) return colors.budgetOver;
+  if (pct > daysElapsedPct + 10) return colors.budgetOver;
+  if (pct > daysElapsedPct + 5) return colors.budgetNearLimit;
+  return colors.budgetRemaining;
 };
 
 interface BudgetRingWidgetProps {

@@ -27,8 +27,9 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
-import { formatCompact } from '../utils/format';
-import { PARENT_CATEGORIES, BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
+import { formatCompact, monthKey } from '../utils/format';
+import { computeBudgetStatus } from '../utils/budgetStatus';
+import { BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
 import CenterModal from '../components/CenterModal';
 import {
   BudgetRingWidget,
@@ -43,33 +44,15 @@ import { useToast } from '../components/Toast';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import SectionHeader from '../components/SectionHeader';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const computeStatus = (pct, daysElapsedPct, hasCap) => {
-  if (!hasCap)                    return { key: 'neutral', label: 'No total cap',  color: colors.textMuted,  emoji: '·' };
-  if (pct >= 100)                 return { key: 'over',    label: 'Over budget',   color: colors.danger,     emoji: '🚨' };
-  if (pct > daysElapsedPct + 10)  return { key: 'slow',    label: 'Over pace',     color: colors.danger,     emoji: '⚠' };
-  if (pct > daysElapsedPct + 5)   return { key: 'slow',    label: 'Slow down',     color: colors.warning,    emoji: '⚠' };
-  return                                 { key: 'on',      label: 'On track',      color: colors.success,    emoji: '✅' };
-};
-
 // (A local `ringColor` used to live here. It moved into CustomWidgetContainer as
 //  `budgetRingColor`, next to the two rings it has to agree with — the classic ring keeps
-//  the old pace thresholds, the paid gauge reads its gradient. `computeStatus` above still
+//  the old pace thresholds, the paid gauge reads its gradient. `computeBudgetStatus` still
 //  owns the PACE verdict; that's a separate question from the ring's colour.)
 
 // Budget operates on FIRST-LEVEL (parent) categories only. Children (e.g.
 // Groceries) roll up into their parent (Food & Dining) in the store, so there's
 // no separate "groceries" budget line. BUDGETABLE_IDS is imported (aliased) from
 // twoTierCategories.ts — single source, derived from the tree.
-
-// How many sub-categories are DEFINED under each parent (from the taxonomy, not
-// from spending). A parent is drillable when it has >1 defined sub-category —
-// regardless of whether every sub has spending this month.
-const DEFINED_SUBCOUNT = Object.fromEntries(
-  PARENT_CATEGORIES.map((p) => [p.id, (p.children || []).length]),
-);
-// Sentinel id for the "Unbudgeted expenses" drill-down.
-const UNBUDGETED_ID = '__unbudgeted__';
 
 // Copy for the "how budgeting works" info popover.
 const BUDGET_INFO = {
@@ -79,8 +62,55 @@ const BUDGET_INFO = {
   primaryText: 'Got it',
 };
 
+/**
+ * Reshapes a closed month's `budgetHistory` snapshot ({ totalCap, perCategory:
+ * { catId: { cap, actual } }, totalActual }) into the SAME shape
+ * `getBudgetUsage()` returns, so `renderProgress` below can render a live
+ * month and a historical one through one code path. `daysElapsedPct: 100` /
+ * `daysLeftInMonth: 0` isn't a hack — the month IS fully elapsed, and feeding
+ * that through the existing pace thresholds collapses them to a plain
+ * over/under read, which is exactly right for a month that already closed.
+ * `unbudgeted` isn't captured in the snapshot, so it's 0 — never a real 0/0
+ * card, since that section is already gated on `unbudgeted > 0`.
+ */
+const usageFromHistory = (entry, date) => {
+  const perCategory = {};
+  let totalActual = 0;
+  Object.entries(entry?.perCategory || {}).forEach(([catId, v]) => {
+    const cap    = Number(v?.cap) || 0;
+    const actual = Number(v?.actual) || 0;
+    totalActual += actual;
+    perCategory[catId] = {
+      cap, actual,
+      pct:       cap > 0 ? (actual / cap) * 100 : 0,
+      remaining: Math.max(0, cap - actual),
+      over:      actual > cap,
+      overshoot: Math.max(0, actual - cap),
+    };
+  });
+  const totalCap = entry?.totalCap ?? null;
+  return {
+    monthKey: monthKey(date),
+    total: {
+      cap: totalCap,
+      actual: totalActual,
+      pct: totalCap ? (totalActual / totalCap) * 100 : 0,
+      remaining: totalCap != null ? Math.max(0, totalCap - totalActual) : null,
+      over: totalCap != null && totalActual > totalCap,
+      overshoot: (totalCap != null && totalActual > totalCap) ? (totalActual - totalCap) : 0,
+    },
+    perCategory,
+    allExpense: totalActual,
+    unbudgeted: 0,
+    daysLeftInMonth: 0,
+    daysElapsedPct: 100,
+    dayOfMonth: 0,
+    lastDayOfMonth: 0,
+  };
+};
+
 // ── Screen ────────────────────────────────────────────────────────────────────
-const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
+const BudgetScreen = ({ navigation, headerless = false, openPlan = false, monthOffset = 0 }) => {
   const theme    = useTheme();
   const insets   = useSafeAreaInsets();
   const gradient = useGradient();
@@ -88,22 +118,37 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
   const toast    = useToast();
 
   const budget                  = useEPurseStore((s) => s.budget);
+  const budgetHistory           = useEPurseStore((s) => s.budgetHistory);
   const transactions            = useEPurseStore((s) => s.transactions);
   const budgetStreak            = useEPurseStore((s) => s.budgetStreak);
   const categories              = useEPurseStore((s) => s.categories);
   const clearBudget             = useEPurseStore((s) => s.clearBudget);
   const getBudgetUsage          = useEPurseStore((s) => s.getBudgetUsage);
-  const getBudgetChildBreakdown = useEPurseStore((s) => s.getBudgetChildBreakdown);
   const getUnbudgetedBreakdown  = useEPurseStore((s) => s.getUnbudgetedBreakdown);
   const getCategoryMastery      = useEPurseStore((s) => s.getCategoryMastery);
 
   const [confirm, setConfirm] = useState(null);
 
-  // Drill-down sheet: which budget category's sub-categories to show.
-  const [drillCatId,       setDrillCatId]         = useState(null);
+  // Unbudgeted-expenses drill-down sheet. Budgeted categories no longer use a
+  // sheet — tapping one pushes BudgetCategoryDetailScreen instead.
+  const [unbudgetedOpen, setUnbudgetedOpen] = useState(false);
 
-  // Recomputes when budget OR transactions change so actuals stay live
-  const usage = useMemo(() => getBudgetUsage(), [budget, transactions, getBudgetUsage]);
+  // A past month is a VIEW only — Edit/Remove Plan and the category drill-down
+  // stay scoped to the live (current) plan; you can't edit history.
+  const isHistorical = monthOffset !== 0;
+  const date = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + monthOffset);
+    return d;
+  }, [monthOffset]);
+
+  // Live month reads the same reactive selector as always; a past month reads
+  // its `budgetHistory` snapshot instead (null if that month was never tracked).
+  const usage = useMemo(
+    () => (isHistorical ? usageFromHistory(budgetHistory?.[monthKey(date)], date) : getBudgetUsage()),
+    [isHistorical, budgetHistory, date, budget, transactions, getBudgetUsage],
+  );
+  const hasHistoryEntry = !isHistorical || !!budgetHistory?.[monthKey(date)];
 
   const categoryById = useMemo(() => {
     const map = new Map();
@@ -111,9 +156,13 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     return map;
   }, [categories]);
 
-  const budgetedIds = useMemo(() => Object.keys(budget?.perCategory || {}), [budget]);
+  // Same keys either way — `usage.perCategory` mirrors `budget.perCategory`'s
+  // ids for the live month, and the history snapshot's for a past one.
+  const budgetedIds = useMemo(() => Object.keys(usage?.perCategory || {}), [usage]);
 
-  const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
+  const monthName = monthOffset === 0
+    ? date.toLocaleDateString('en-IN', { month: 'long' })
+    : date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
   const BUDGETABLE = useMemo(() => new Set(BUDGETABLE_IDS), []);
 
@@ -131,35 +180,25 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
 
   const handleResetPlan = useCallback(() => {
     setConfirm({
-      title: 'Reset entire plan?',
+      title: 'Remove Plan?',
       message: 'Removes your total cap and all category caps. Your monthly history stays.',
-      primaryText: 'Reset',
+      primaryText: 'Remove',
       destructive: true,
       secondaryText: 'Cancel',
       onSecondary: () => setConfirm(null),
       onConfirm: () => {
         clearBudget();
         setConfirm(null);
-        toast.success('Plan reset');
+        toast.success('Plan removed');
       },
     });
   }, [clearBudget, toast]);
 
-  // Drill-down: sub-category stats for the tapped budget category (current
-  // month). The special '__unbudgeted__' id drills the unbudgeted slice instead.
-  const isUnbudgetedDrill = drillCatId === UNBUDGETED_ID;
-  const drillCat = isUnbudgetedDrill
-    ? { name: 'Unbudgeted expenses', emoji: null, color: colors.textMuted }
-    : (drillCatId ? categoryById.get(drillCatId) : null);
-  const drillRows = useMemo(() => {
-    if (!drillCatId) return [];
-    if (isUnbudgetedDrill) return getUnbudgetedBreakdown();
-    const rows = getBudgetChildBreakdown(drillCatId);
-    // Exclude rows whose label is the parent category name — those come from
-    // transactions tagged directly to the parent with no child sub-category set.
-    const parentName = categoryById.get(drillCatId)?.name;
-    return parentName ? rows.filter((r) => r.label !== parentName) : rows;
-  }, [drillCatId, isUnbudgetedDrill, getBudgetChildBreakdown, getUnbudgetedBreakdown, transactions, categoryById]);
+  // Unbudgeted-expenses breakdown, current month.
+  const drillRows = useMemo(
+    () => (unbudgetedOpen ? getUnbudgetedBreakdown() : []),
+    [unbudgetedOpen, getUnbudgetedBreakdown, transactions],
+  );
   const drillTotal = useMemo(() => drillRows.reduce((s, r) => s + r.total, 0), [drillRows]);
 
   // The tab keeps this screen mounted, so the gauge would only ever sweep up once —
@@ -182,14 +221,32 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
     const { total, perCategory, daysElapsedPct, daysLeftInMonth } = usage;
     const hasCap   = total.cap != null && total.cap > 0;
     const pctVal   = hasCap ? total.pct : 0;
-    const status   = computeStatus(pctVal, daysElapsedPct, hasCap);
+    const status   = computeBudgetStatus(pctVal, daysElapsedPct, hasCap);
     // Tinted for whichever ring is actually rendering — the gauge's own gradient when
     // the paid widget is on, the classic pace thresholds otherwise.
     const rColor   = budgetRingColor(pctVal, daysElapsedPct, hasCap, isGaugeWidget);
 
-    const paceText = hasCap && total.remaining != null && daysLeftInMonth > 0
-      ? `₹${Math.max(0, Math.round(total.remaining / Math.max(1, daysLeftInMonth))).toLocaleString('en-IN')}/day`
-      : '';
+    const dailyRate = hasCap && total.remaining != null && daysLeftInMonth > 0
+      ? Math.max(0, total.remaining / daysLeftInMonth)
+      : null;
+
+    // Bottom stats row — built as a list so a missing piece (no cap yet, no
+    // unbudgeted spend) just drops its column instead of leaving a gap.
+    const statsCols = [];
+    if (hasCap && total.remaining != null) {
+      statsCols.push({
+        key: 'remaining',
+        value: formatCompact(Math.abs(total.remaining)),
+        label: total.remaining < 0 ? 'Over Budget' : 'Remaining',
+        color: total.remaining < 0 ? colors.budgetOver : colors.budgetRemaining,
+      });
+    }
+    if (dailyRate != null) {
+      statsCols.push({ key: 'perDay', value: `${formatCompact(dailyRate)}/day`, label: 'Per Day', color: colors.textPrimary });
+    }
+    // if (usage.unbudgeted > 0) {
+      statsCols.push({ key: 'unbudgeted', value: formatCompact(usage.unbudgeted), label: 'Unbudgeted', color: colors.textPrimary });
+    // }
 
     const rows = budgetedIds
       .map((catId) => ({ catId, ...(perCategory[catId] || { cap: 0, actual: 0, pct: 0, remaining: 0, over: false }) }))
@@ -214,20 +271,26 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                 </TouchableOpacity>
               </View>
               <Text style={styles.heroDays}>
-                {daysLeftInMonth === 0 ? 'Last day' : `${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'} left`}
+                {isHistorical
+                  ? 'Closed'
+                  : daysLeftInMonth === 0 ? 'Last day' : `${daysLeftInMonth} day${daysLeftInMonth === 1 ? '' : 's'} left`}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              {budgetStreak?.current >= 1 ? (
-                <View style={styles.streakBadge}>
-                  <Text style={styles.streakEmoji}>🏆</Text>
-                  <Text style={styles.streakText}>{budgetStreak.current}mo</Text>
-                </View>
-              ) : null}
-              <TouchableOpacity style={[styles.editPlanBtn, { borderColor: theme.primary }]} onPress={() => navigation.navigate('BudgetPlan')} activeOpacity={0.75}>
-                <Text style={[styles.editPlanText, { color: theme.primary }]}>Edit Plan</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Editing (and the streak, which is about an ongoing run) only makes
+                sense for the live month — a past month is a view, not a form. */}
+            {!isHistorical ? (
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                {budgetStreak?.current >= 1 ? (
+                  <View style={styles.streakBadge}>
+                    <Text style={styles.streakEmoji}>🏆</Text>
+                    <Text style={styles.streakText}>{budgetStreak.current}mo</Text>
+                  </View>
+                ) : null}
+                <TouchableOpacity style={[styles.editPlanBtn, { borderColor: theme.primary }]} onPress={() => navigation.navigate('BudgetPlan')} activeOpacity={0.75}>
+                  <Text style={[styles.editPlanText, { color: theme.primary }]}>Edit Plan</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
 
           {/* Ring + info */}
@@ -255,30 +318,29 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
             <View style={styles.heroInfo}>
               <Text style={styles.heroActual}>{formatCompact(total.actual)}</Text>
               <Text style={styles.heroCap}>
-                {hasCap ? `of ${formatCompact(total.cap)}` : 'spent this month'}
+                {hasCap ? `of ${formatCompact(total.cap)}` : (isHistorical ? 'spent' : 'spent this month')}
               </Text>
               <View style={[styles.statusPill, { backgroundColor: status.color + '18' }]}>
                 <Text style={styles.statusEmoji}>{status.emoji}</Text>
                 <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
               </View>
-              {paceText ? (
-                <Text style={styles.paceText}>⚡ {paceText} · {daysLeftInMonth}d left</Text>
-              ) : null}
-              {hasCap && total.remaining != null ? (
-                <Text style={[styles.remainText, { color: total.remaining < 0 ? colors.danger : colors.success }]}>
-                  {total.remaining < 0
-                    ? `₹${Math.abs(Math.round(total.remaining)).toLocaleString('en-IN')} over`
-                    : `₹${Math.round(total.remaining).toLocaleString('en-IN')} remaining`}
-                </Text>
-              ) : null}
-              {usage.unbudgeted > 0 ? (
-                <View style={styles.unbudgetedHintRow}>
-                  <Ionicons name="file-tray-outline" size={12} color={colors.textMuted} />
-                  <Text style={styles.unbudgetedHint}>{formatCompact(usage.unbudgeted)} unbudgeted</Text>
-                </View>
-              ) : null}
             </View>
           </View>
+
+          {/* Remaining / per-day pace / unbudgeted — value on top, label below */}
+          {statsCols.length > 0 ? (
+            <View style={styles.heroStatsRow}>
+              {statsCols.map((c, i) => (
+                <React.Fragment key={c.key}>
+                  {i > 0 ? <View style={styles.heroStatsDivider} /> : null}
+                  <View style={styles.heroStatsCol}>
+                    <Text style={[styles.heroStatsValue, { color: c.color }]}>{c.value}</Text>
+                    <Text style={styles.heroStatsLabel}>{c.label}</Text>
+                  </View>
+                </React.Fragment>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         {/* ── Per-category rows ── */}
@@ -289,34 +351,20 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
               const cat = categoryById.get(r.catId);
               if (!cat) return null;
               const barColor =
-                r.pct >= 100 ? colors.danger :
-                r.pct >= 85  ? colors.warning :
-                               cat.color ?? colors.info;
-              const mastery = getCategoryMastery(r.catId);
+                r.pct >= 100 ? colors.budgetOver :
+                r.pct >= 85  ? colors.budgetNearLimit :
+                               cat.color ?? colors.budgetNormal;
+              // Mastery is a CURRENT streak, not "as of that month" — showing it
+              // on a historical row would misleadingly imply it still applies.
+              const mastery = isHistorical ? 0 : getCategoryMastery(r.catId);
               const masteryEmoji = mastery >= 6 ? '🥇' : mastery >= 3 ? '⭐' : null;
               return (
                 <TouchableOpacity
                   key={r.catId}
                   style={styles.catCard}
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    // Open the breakdown when this category has SOME spend AND the
-                    // parent defines more than one sub-category — even if not every
-                    // sub has spending (the sheet shows whatever's there). Only block
-                    // when there's nothing to break down (no spend, or a single-sub
-                    // parent like Fuel/Entertainment where a drill is meaningless).
-                    const definedSubs = DEFINED_SUBCOUNT[r.catId] || 0;
-                    if (r.actual > 0 && definedSubs > 1) {
-                      setDrillCatId(r.catId);
-                    } else {
-                      toast.info(
-                        'No sub-category breakdown',
-                        r.actual > 0
-                          ? `${cat.name} has only one sub-category — nothing to break down.`
-                          : `${cat.name} has no spending to drill into this month.`,
-                      );
-                    }
-                  }}
+                  activeOpacity={isHistorical ? 1 : 0.75}
+                  disabled={isHistorical}
+                  onPress={isHistorical ? undefined : () => navigation.navigate('BudgetCategoryDetail', { catId: r.catId })}
                 >
                   <View style={styles.catCardTop}>
                     <Text style={styles.catEmoji}>{cat.emoji}</Text>
@@ -324,7 +372,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                     {masteryEmoji ? <Text style={styles.masteryBadge}>{masteryEmoji}</Text> : null}
                     <View style={{ flex: 1 }} />
                     <Text style={[styles.catPct, { color: barColor }]}>{Math.round(r.pct)}%</Text>
-                    <Text style={styles.catChevron}>›</Text>
+                    {!isHistorical ? <Text style={styles.catChevron}>›</Text> : null}
                   </View>
                   <ProgressBar progress={r.pct / 100} color={barColor} height={7} />
                   <View style={styles.catCardBot}>
@@ -332,7 +380,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                     <Text style={styles.catCapLabel} numberOfLines={1}>{`/ ${formatCompact(r.cap)}`}</Text>
                     <View style={{ flex: 1, minWidth: spacing.sm }} />
                     <Text
-                      style={[styles.catRemain, { color: r.over ? colors.danger : colors.textSecondary }]}
+                      style={[styles.catRemain, { color: r.over ? colors.budgetOver : colors.textSecondary }]}
                       numberOfLines={1}
                     >
                       {r.over
@@ -352,7 +400,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
             <TouchableOpacity
               style={[styles.catCard, styles.unbudgetedCard]}
               activeOpacity={0.75}
-              onPress={() => setDrillCatId(UNBUDGETED_ID)}
+              onPress={() => setUnbudgetedOpen(true)}
             >
               <View style={styles.catCardTop}>
                 <Ionicons name="file-tray-outline" size={18} color={colors.textSecondary} />
@@ -368,15 +416,18 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
           </View>
         ) : null}
 
-        {/* Reset link */}
-        <TouchableOpacity onPress={handleResetPlan} style={styles.resetLink} activeOpacity={0.7}>
-          <Text style={[styles.resetLinkText, { color: colors.danger }]}>Reset plan</Text>
-        </TouchableOpacity>
+        {/* Remove link — the live plan only; there's nothing to remove from a
+            past month's view. */}
+        {!isHistorical ? (
+          <TouchableOpacity onPress={handleResetPlan} style={styles.resetLink} activeOpacity={0.7}>
+            <Text style={[styles.resetLinkText, { color: colors.danger }]}>Remove Plan</Text>
+          </TouchableOpacity>
+        ) : null}
       </>
     );
   };
 
-  // ── Empty state ──────────────────────────────────────────────────────────
+  // ── Empty states ─────────────────────────────────────────────────────────
   const renderEmpty = () => (
     <EmptyState
       icon="clipboard-outline"
@@ -384,6 +435,16 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
       subtitle="Set a monthly budget and track your spending in real time."
       actionLabel={`Create ${monthName} Plan`}
       onAction={() => navigation.navigate('BudgetPlan')}
+    />
+  );
+
+  // A past month with no snapshot — no CTA, since you can't retroactively
+  // track a plan for a month that's already closed.
+  const renderHistoricalEmpty = () => (
+    <EmptyState
+      icon="calendar-outline"
+      title={`No budget data for ${monthName}`}
+      subtitle="A plan wasn't tracked for this month."
     />
   );
 
@@ -418,41 +479,39 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
           // scenes, so the hook belongs here, not on InsightsScreen (which doesn't scroll).
           {...tabBarScroll}
         >
-          {budget ? renderProgress() : renderEmpty()}
+          {isHistorical
+            ? (hasHistoryEntry ? renderProgress() : renderHistoricalEmpty())
+            : (budget ? renderProgress() : renderEmpty())}
         </ScrollView>
       </SafeAreaView>
 
-      {/* Category drill-down — sub-category stats for the tapped budget card */}
+      {/* Unbudgeted-expenses drill-down — breakdown of spend outside the plan */}
       <Modal
-        visible={!!drillCatId}
+        visible={unbudgetedOpen}
         animationType="slide"
         transparent
-        onRequestClose={() => setDrillCatId(null)}
+        onRequestClose={() => setUnbudgetedOpen(false)}
       >
         <TouchableOpacity
           style={styles.pickerBackdrop}
           activeOpacity={1}
-          onPress={() => setDrillCatId(null)}
+          onPress={() => setUnbudgetedOpen(false)}
         >
           <TouchableOpacity activeOpacity={1} style={styles.pickerSheet}>
-            <SheetCloseButton onPress={() => setDrillCatId(null)} variant="absolute" />
+            <SheetCloseButton onPress={() => setUnbudgetedOpen(false)} variant="absolute" />
             <View style={styles.pickerHandle} />
             <View style={styles.drillHeader}>
-              {isUnbudgetedDrill ? (
-                <Ionicons name="file-tray-outline" size={20} color={colors.textSecondary} />
-              ) : (
-                <Text style={styles.drillEmoji}>{drillCat?.emoji}</Text>
-              )}
+              <Ionicons name="file-tray-outline" size={20} color={colors.textSecondary} />
               <Text style={[styles.drillTitle, { flexShrink: 1 }]} numberOfLines={1} ellipsizeMode="tail">
-                {drillCat?.name}
+                Unbudgeted expenses
               </Text>
               <View style={{ flex: 1, minWidth: spacing.sm }} />
               <Text style={styles.drillTotal} numberOfLines={1}>{formatCompact(drillTotal)}</Text>
             </View>
-            <Text style={styles.drillSub}>This month, by sub-category</Text>
+            <Text style={styles.drillSub}>This month, by category</Text>
             <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
               {drillRows.length === 0 ? (
-                <Text style={styles.pickerEmpty}>No spending in this category yet this month.</Text>
+                <Text style={styles.pickerEmpty}>No spending outside your plan yet this month.</Text>
               ) : (
                 drillRows.map((row) => {
                   const pct = drillTotal > 0 ? (row.total / drillTotal) * 100 : 0;
@@ -463,7 +522,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false }) => {
                         <Text style={styles.drillRowAmount}>{formatCompact(row.total)}</Text>
                         <Text style={styles.drillRowPct}>{Math.round(pct)}%</Text>
                       </View>
-                      <ProgressBar progress={pct / 100} color={drillCat?.color ?? colors.info} height={7} />
+                      <ProgressBar progress={pct / 100} color={colors.budgetNormal} height={7} />
                     </View>
                   );
                 })
@@ -558,10 +617,17 @@ const styles = StyleSheet.create({
   },
   statusEmoji: { fontSize: 12 },
   statusLabel: { ...typography.small, fontWeight: '700' },
-  paceText:    { ...typography.tiny, color: colors.textSecondary, marginTop: 4 },
-  remainText:  { ...typography.small, fontWeight: '700', marginTop: 2 },
-  unbudgetedHintRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  unbudgetedHint: { ...typography.tiny, color: colors.textMuted, fontWeight: '600' },
+
+  // Remaining / per-day — sized to the same ~2-line height the old stacked
+  // pace + remaining text took, just laid out as two columns instead.
+  heroStatsRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
+  heroStatsCol: { flex: 1 },
+  // `colors.divider` is tuned for full-width row separators and reads as
+  // near-invisible at hairline width next to bold column text — textMuted at
+  // low alpha keeps it a quiet separator that's still actually visible here.
+  heroStatsDivider: { width: 1, height: 24, backgroundColor: colors.textMuted + '40', marginHorizontal: spacing.md },
+  heroStatsValue: { ...typography.small, fontWeight: '800', color: colors.textPrimary },
+  heroStatsLabel: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
 
   // ── Category section ──
   catSection: { gap: spacing.sm, marginBottom: spacing.lg },
@@ -609,9 +675,8 @@ const styles = StyleSheet.create({
   },
   pickerEmpty: { ...typography.small, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl },
 
-  // ── Category drill-down sheet ──
+  // ── Unbudgeted drill-down sheet ──
   drillHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  drillEmoji:  { fontSize: 22 },
   drillTitle:  { ...typography.h3, color: colors.textPrimary },
   drillTotal:  { ...typography.h3, color: colors.textPrimary, fontWeight: '800' },
   drillSub:    { ...typography.small, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.md },

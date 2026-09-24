@@ -18,6 +18,8 @@ import BackupScreen        from '../screens/BackupScreen';
 import AccountDetailsScreen from '../screens/AccountDetailsScreen';
 import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import BudgetPlanScreen    from '../screens/BudgetPlanScreen';
+import BudgetCategoryDetailScreen from '../screens/BudgetCategoryDetailScreen';
+import TransactionsScreen  from '../screens/TransactionsScreen';
 import LbPersonScreen      from '../screens/LbPersonScreen';
 import SmsDiagnosticScreen from '../screens/SmsDiagnosticScreen';
 import HelpSupportScreen   from '../screens/HelpSupportScreen';
@@ -82,6 +84,12 @@ export default function AppNavigator() {
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />
         <Stack.Screen name="LentBorrowed"   component={LentBorrowedScreen} />
         <Stack.Screen name="BudgetPlan"     component={BudgetPlanScreen} />
+        <Stack.Screen name="BudgetCategoryDetail" component={BudgetCategoryDetailScreen} />
+        {/* Activity, pushed (not the tab) — for deep links that need real back
+            navigation to whatever pushed them, e.g. a Budget category's
+            "View Transactions". The Transactions TAB stays a separate route;
+            this is the same screen component, reached without switching tabs. */}
+        <Stack.Screen name="CategoryTransactions" component={TransactionsScreen} />
         <Stack.Screen name="LbPerson"       component={LbPersonScreen} />
         <Stack.Screen name="SmsDiagnostic" component={SmsDiagnosticScreen} />
         <Stack.Screen name="HelpSupport"   component={HelpSupportScreen} />

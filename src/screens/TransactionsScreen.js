@@ -222,8 +222,12 @@ const TransactionsScreen = ({ navigation, route }) => {
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
 
   // ── Route params ───────────────────────────────────────────────────────────
-  const routePeriod    = route?.params?.initialPeriod;
-  const routeAccountId = route?.params?.accountId ?? null;
+  const routePeriod     = route?.params?.initialPeriod;
+  const routeAccountId  = route?.params?.accountId ?? null;
+  // Deep-link from a Budget category card: pre-filter to that category and,
+  // usually, "This Month" (mThis) — Budget only ever tracks the current month.
+  const routeCategoryId  = route?.params?.categoryId ?? null;
+  const routeDateRangeId = route?.params?.dateRangeId ?? null;
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [search,        setSearch]        = useState('');
@@ -240,10 +244,13 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [sheetVisible,  setSheetVisible]  = useState(false);
   const [exportVisible, setExportVisible] = useState(false);
 
-  // Applied (committed) filters; pre-seed accountId if navigated from AccountDetails
+  // Applied (committed) filters; pre-seed accountId if navigated from AccountDetails,
+  // or category (+ date range) if navigated from a Budget category card.
   const [applied, setApplied] = useState(() => {
     const d = emptyDraft();
-    if (routeAccountId) d.method = new Set([routeAccountId]);
+    if (routeAccountId)  d.method     = new Set([routeAccountId]);
+    if (routeCategoryId) d.categories = new Set([routeCategoryId]);
+    if (routeDateRangeId) d.dateRange = new Set([routeDateRangeId]);
     return d;
   });
 
@@ -287,6 +294,19 @@ const TransactionsScreen = ({ navigation, route }) => {
     const p = route?.params?.initialPeriod;
     if (p) setQuickChip(PERIOD_TO_CHIP[p] ?? 'all');
   }, [route?.params?.initialPeriod]);
+
+  useEffect(() => {
+    const id = route?.params?.categoryId;
+    if (id) {
+      const rangeId = route?.params?.dateRangeId;
+      setApplied((prev) => ({
+        ...prev,
+        categories: new Set([id]),
+        dateRange: rangeId ? new Set([rangeId]) : prev.dateRange,
+      }));
+      setQuickChip('all');
+    }
+  }, [route?.params?.categoryId, route?.params?.dateRangeId]);
 
   // ── StatusBar ──────────────────────────────────────────────────────────────
   useFocusEffect(
@@ -826,7 +846,24 @@ const TransactionsScreen = ({ navigation, route }) => {
       <View style={styles.headerSection}>
 
         <View style={styles.titleRow}>
-          <Text style={styles.screenTitle}>Activity</Text>
+          {/* Pushed (e.g. from a Budget category's "View Transactions", not the
+              Transactions tab): a real back chevron + centered "Transactions",
+              matching every other pushed screen's header. Tab mode keeps its
+              own "Activity" masthead — going back there means nothing. */}
+          {routeCategoryId ? (
+            <>
+              <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.titleBackBtn}>
+                <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+              {/* Absolutely positioned so it centers on the row's full width,
+                  not the leftover space beside the (wider) export pill. */}
+              <View style={styles.screenTitleCenterWrap} pointerEvents="none">
+                <Text style={styles.screenTitle} numberOfLines={1}>Transactions</Text>
+              </View>
+            </>
+          ) : (
+            <Text style={styles.screenTitle}>Activity</Text>
+          )}
           <Pressable
             style={styles.exportPill}
             onPress={() => setExportVisible(true)}
@@ -1407,12 +1444,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
+    position: 'relative',
   },
+  titleBackBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
   screenTitle: {
     fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
     color: '#0F172A',
+  },
+  // Pushed mode: absolutely positioned so it centers on the row's FULL width —
+  // the back chevron and export pill are different widths, so centering it in
+  // the leftover flex space between them (as siblings) reads off-center.
+  screenTitleCenterWrap: {
+    position: 'absolute',
+    left: 0, right: 0, top: 0, bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   exportPill: {
     flexDirection: 'row',
