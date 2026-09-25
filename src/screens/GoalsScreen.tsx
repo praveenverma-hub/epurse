@@ -87,7 +87,7 @@ const typography = typographyBase as unknown as Record<string, TextStyle>;
 
 // GradientButton.js has no TS declarations, so its inferred prop type demands
 // every prop. Same local cast the other TS callers use (AddTransactionScreen,
-// CreateGroupModal).
+// GroupFormScreen).
 const GradientButton: React.FC<{
   title: string;
   onPress: () => void;

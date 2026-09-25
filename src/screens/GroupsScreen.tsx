@@ -1,127 +1,109 @@
 // =============================================================================
-// GroupsScreen — "Groups" tab (2-level: tab → transaction detail sheet).
-// Horizontal tile selector (Swiggy-style) picks the active group; its expense
-// summary + balances + transactions render inline below. FAB adds an expense to
-// the selected group; the first tile creates a new group.
+// GroupsScreen — "Groups" tab, level 1: an overall summary built from real
+// shared-group balances (never a personal group's own tracked spend), an
+// All/Owed-to-you/You-owe filter, and one balance card per group. Tapping a
+// card pushes GroupDetailScreen (level 2: hero, actions, Transactions/Members/
+// Summary tabs). The FAB creates a new group — adding an EXPENSE now lives
+// inside a group's own detail screen.
 // =============================================================================
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  FlatList,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
-import SheetCloseButton from '../components/SheetCloseButton';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
-// The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme, useGradient } from '../hooks/useTheme';
-import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
-import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
+import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
+import { formatCurrency, monthKey } from '../utils/format';
+import { countsForSpend, spendContribution } from '../utils/split';
 import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import FAB from '../components/FAB';
 import EmptyState from '../components/EmptyState';
-import TransactionItemRaw from '../components/TransactionItem';
-import CreateGroupModal, { type CreateGroupData } from '../components/CreateGroupModal';
-import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
-import CategoryPickerModal from '../components/CategoryPickerModal';
-import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
-import CenterModal from '../components/CenterModal';
-import AccountPickerSheet from '../components/AccountPickerSheet';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
-import EditIcon from '../components/EditIcon';
-import MonthDivider from '../components/MonthDivider';
-import { useToast } from '../components/Toast';
-import type { Group, GroupExpenseData } from '../types/group';
 import SectionHeader from '../components/SectionHeader';
+import type { Group } from '../types/group';
 
-/** Mix a hex colour toward white by `amt` (0..1) — used for the soft "glow" on the active tile. */
-function lightenHex(hex: string, amt = 0.4): string {
-  const h = (hex || '#6366F1').replace('#', '');
-  if (h.length < 6) return hex;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  const mix = (c: number) => Math.round(c + (255 - c) * amt);
-  const to2 = (n: number) => n.toString(16).padStart(2, '0');
-  return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
+type Filter = 'all' | 'owed' | 'owe';
+
+function GroupListCardRow({
+  group, net, personalMonth, onPress,
+}: { group: Group; net: number; personalMonth: number; onPress: () => void }) {
+  const isShared = group.type === 'shared';
+  const accent = group.color || '#6366F1';
+  const settled = Math.abs(net) < 0.005;
+  // Shared groups read their state at a glance — a faded wash + thin border of
+  // the SAME colour the balance is printed in (lent/borrowed/settled), the same
+  // fill+border ratio the settled badge elsewhere in the app already uses.
+  // Personal groups have no such state, so they keep the flat card.
+  const stateColor = !isShared ? null : settled ? colors.success : net > 0 ? colors.lent : colors.borrowed;
+  return (
+    // The shadow needs its own OPAQUE shell — Android's `elevation` under a
+    // translucent fill (the state wash) renders as a muddy grey/olive box
+    // instead of a real shadow, which is what a see-through backgroundColor
+    // directly on an elevated view produced here.
+    <View style={styles.groupCardShadow}>
+    <TouchableOpacity
+      style={[styles.groupCard, stateColor ? { backgroundColor: stateColor + '14', borderColor: stateColor + '44' } : null]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <View style={[styles.groupIconTile, { backgroundColor: accent + '22' }]}>
+        <Text style={styles.groupIconEmoji}>{group.emoji || (isShared ? '👥' : '📁')}</Text>
+      </View>
+      <View style={{ flex: 1, marginRight: spacing.sm }}>
+        <Text style={styles.groupCardName} numberOfLines={1}>{group.name}</Text>
+        <Text style={styles.groupCardMeta} numberOfLines={1}>
+          {isShared ? `${group.members?.length ?? 0} members` : 'Personal'}
+          {group.excludeFromTotals ? ' · excluded' : ''}
+        </Text>
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        {isShared ? (
+          settled ? (
+            <Text style={[styles.groupCardBalance, { color: colors.success }]}>Settled up</Text>
+          ) : (
+            <>
+              <Text style={[styles.groupCardBalance, { color: net > 0 ? colors.lent : colors.borrowed }]} numberOfLines={1}>
+                {formatCurrency(Math.abs(net))}
+              </Text>
+              <Text style={[styles.groupCardBalanceLabel, { color: net > 0 ? colors.lent : colors.borrowed }]}>
+                {net > 0 ? 'lent' : 'borrowed'}
+              </Text>
+            </>
+          )
+        ) : (
+          <>
+            <Text style={styles.groupCardBalance} numberOfLines={1}>{formatCurrency(personalMonth)}</Text>
+            <Text style={styles.groupCardBalanceLabel}>this month</Text>
+          </>
+        )}
+      </View>
+    </TouchableOpacity>
+    </View>
+  );
 }
 
-// TransactionItem.js has no TS declarations — cast to the props we use here.
-const TransactionItem = TransactionItemRaw as React.ComponentType<{
-  txn: any;
-  hideGroupChip?: boolean;
-  onPress?: () => void;
-  onPressCategory?: () => void;
-}>;
-
-interface PbEntry { kind: string; amount: number; groupId?: string }
-interface PersonBalance { personKey: string; person: string; net: number; entries?: PbEntry[] }
-interface GroupBalanceRow { personKey: string; person: string; net: number }
-
-interface ConfirmState {
-  title?: string;
-  message?: string;
-  primaryText?: string;
-  secondaryText?: string;
-  destructive?: boolean;
-  onPrimary?: () => void;
-  onSecondary?: () => void;
-}
-
-export default function GroupsScreen({ navigation, route }: { navigation: any; route?: any }) {
+export default function GroupsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const gradient = useGradient();
   const insets = useSafeAreaInsets();
-  const listRef = useRef<FlatList<any>>(null);
   const groups = useEPurseStore((s: any) => s.groups) as Group[];
   const transactions = useEPurseStore((s: any) => s.transactions) as any[];
   const lentBorrowed = useEPurseStore((s: any) => s.lentBorrowed) as any[];
-  const categories = useEPurseStore((s: any) => s.categories) as any[];
-  const createGroup = useEPurseStore((s: any) => s.createGroup) as (d: CreateGroupData) => string;
-  const updateGroup = useEPurseStore((s: any) => s.updateGroup) as (id: string, patches: Partial<Group>) => void;
-  const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
-  const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense) as (id: string, data: GroupExpenseData) => void;
-  const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => PersonBalance[];
-  const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
-  const accounts = useEPurseStore((s: any) => s.accounts) as any[];
-  const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
-  const updateTwoTierCategory = useEPurseStore((s: any) => s.updateTwoTierCategory) as (id: string, parent: string, child: string) => void;
-  const setTransactionHidden = useEPurseStore((s: any) => s.setTransactionHidden) as (id: string, hidden: boolean) => void;
-  const ignoreTransaction = useEPurseStore((s: any) => s.ignoreTransaction) as (id: string) => void;
-  const unignoreTransaction = useEPurseStore((s: any) => s.unignoreTransaction) as (id: string) => void;
-  const deleteTransaction = useEPurseStore((s: any) => s.deleteTransaction) as (id: string) => void;
-  const untagTransactionFromGroup = useEPurseStore((s: any) => s.untagTransactionFromGroup) as (id: string) => void;
-  const activeGroupZoneId = useEPurseStore((s: any) => s.activeGroupZoneId) as string | null;
-  const setGroupZone = useEPurseStore((s: any) => s.setGroupZone) as (id: string | null) => void;
-  const toast = useToast();
+  const { onScroll } = useTabBarScroll();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [createVisible, setCreateVisible] = useState(false);
-  const [editTarget, setEditTarget] = useState<Group | null>(null);
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
-  const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
-  const [detailTxn, setDetailTxn] = useState<any | null>(null);
-  const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
-  const [ccBillTxn, setCcBillTxn] = useState<any | null>(null);
-  const [balancesVisible, setBalancesVisible] = useState(false);
-  const scrollProps = useTabBarScroll();
+  const [filter, setFilter] = useState<Filter>('all');
+  // Reported by CollapsingHeaderScreen once the header has gone light (pinned) —
+  // drives both the status-bar glyph colour and the bar row's own ink.
+  const [headerPinned, setHeaderPinned] = useState(false);
+  useHeaderStatusBar(headerPinned);
 
-  // Groups newest-activity first.
   const orderedGroups = useMemo(
     () => [...groups].sort(
       (a, b) => new Date(b.lastActivityAt || b.createdAt || 0).getTime()
@@ -130,363 +112,124 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
     [groups],
   );
 
-  // Effective selection: explicit pick if it still exists, else most-recent.
-  const selectedGroup = useMemo(() => {
-    if (selectedId) {
-      const found = groups.find((g) => g.id === selectedId);
-      if (found) return found;
+  const hasSharedGroups = useMemo(() => groups.some((g) => g.type === 'shared'), [groups]);
+
+  // Net per GROUP (not per person) — a straight sum of every group-tagged LB
+  // row, regardless of who it's with. This is what makes the top summary and
+  // the chips reflect REAL shared-group balances, never a personal group's own
+  // (unrelated) tracked spend, which never produces a group-tagged LB row.
+  const groupNetById = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const e of lentBorrowed) {
+      if (!e.groupId) continue;
+      const delta = e.kind === 'lent' ? e.amount
+        : e.kind === 'lent_settled' ? -e.amount
+        : e.kind === 'borrowed' ? -e.amount
+        : e.kind === 'borrow_repaid' ? e.amount : 0;
+      m[e.groupId] = (m[e.groupId] || 0) + delta;
     }
-    return orderedGroups[0] || null;
-  }, [selectedId, groups, orderedGroups]);
-  const selectedGroupId = selectedGroup?.id || null;
+    return m;
+  }, [lentBorrowed]);
 
-  // Deep-link: the Analytics "View Details" button navigates here with a
-  // focusGroupId param — preselect that group on focus, then clear the param so
-  // it doesn't re-apply on later visits.
-  useEffect(() => {
-    const apply = () => {
-      const gid = route?.params?.focusGroupId;
-      if (gid && groups.some((g) => g.id === gid)) {
-        setSelectedId(gid);
-        navigation.setParams?.({ focusGroupId: undefined });
-      }
-    };
-    apply();
-    const unsub = navigation.addListener?.('focus', apply);
-    return unsub;
-  }, [navigation, route?.params?.focusGroupId, groups]);
+  const totals = useMemo(() => {
+    let owed = 0, owe = 0;
+    for (const g of groups) {
+      const n = groupNetById[g.id] || 0;
+      if (n > 0.005) owed += n; else if (n < -0.005) owe += -n;
+    }
+    return { owed, owe, net: owed - owe };
+  }, [groups, groupNetById]);
 
-  // Tile order: purely by recency (most recently updated first). We do NOT hoist
-  // the selected tile to the front — that made tiles jump around on every tap.
-  const tileGroups = orderedGroups;
-
-  // Your share per group (live, raw window) for the card primary figure.
-  const myShareByGroup = useMemo(() => {
+  // Personal groups' CURRENT-month total (they're tracked monthly, not all-time).
+  const personalMonthTotalById = useMemo(() => {
+    const now = monthKey(new Date());
     const m: Record<string, number> = {};
     for (const t of transactions) {
       if (!t.groupId || t.isIgnored || !countsForSpend(t)) continue;
-      m[t.groupId] = (m[t.groupId] || 0) + spendContribution(t); // refund nets the group
+      if (monthKey(t.createdAt) !== now) continue;
+      m[t.groupId] = (m[t.groupId] || 0) + spendContribution(t);
     }
     for (const k of Object.keys(m)) if (m[k] < 0) m[k] = 0;
     return m;
   }, [transactions]);
 
-  const groupTxns = useMemo(
-    () => transactions
-      .filter((t) => t.groupId === selectedGroupId && !t.isIgnored)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [transactions, selectedGroupId],
-  );
+  const filteredGroups = useMemo(() => {
+    if (filter === 'owed') return orderedGroups.filter((g) => (groupNetById[g.id] || 0) > 0.005);
+    if (filter === 'owe') return orderedGroups.filter((g) => (groupNetById[g.id] || 0) < -0.005);
+    return orderedGroups;
+  }, [orderedGroups, groupNetById, filter]);
 
-  // Per-calendar-month total for this group (your share via debitDisplayAmount).
-  // Personal-group tracking is monthly — the card headline shows the CURRENT
-  // month and each older month gets its own total on a divider.
-  const groupMonthTotals = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const t of groupTxns) {
-      if (!countsForSpend(t)) continue;
-      m[monthKey(t.createdAt)] = (m[monthKey(t.createdAt)] || 0) + spendContribution(t);
-    }
-    for (const k of Object.keys(m)) if (m[k] < 0) m[k] = 0;
-    return m;
-  }, [groupTxns]);
-  const currentMonthTotal = groupMonthTotals[monthKey(new Date())] || 0;
+  const openCreate = () => navigation.navigate('GroupForm');
 
-  // Transactions with month-boundary dividers (each older month's divider carries
-  // that month's total). No divider above the first/current group; none if one month.
-  const groupListData = useMemo(() => {
-    const out: any[] = [];
-    let lastMonth: string | null = null;
-    for (const t of groupTxns) {
-      const mk = monthKey(t.createdAt);
-      if (lastMonth !== null && mk !== lastMonth) {
-        out.push({ _divider: true, id: `div-${mk}`, monthKey: mk, total: groupMonthTotals[mk] || 0 });
-      }
-      lastMonth = mk;
-      out.push(t);
-    }
-    return out;
-  }, [groupTxns, groupMonthTotals]);
+  const CHIPS: { key: Filter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'owed', label: 'Owed to You' },
+    { key: 'owe', label: 'You Owe' },
+  ];
 
-  // My balances for the selected group, from the global LB ledger.
-  const groupBalances = useMemo<GroupBalanceRow[]>(() => {
-    if (selectedGroup?.type !== 'shared') return [];
-    return getPersonBalances()
-      .map((p) => {
-        const rows = (p.entries || []).filter((e) => e.groupId === selectedGroupId);
-        if (rows.length === 0) return null;
-        const net = rows.reduce((acc, e) => {
-          if (e.kind === 'lent')          return acc + e.amount;
-          if (e.kind === 'lent_settled')  return acc - e.amount;
-          if (e.kind === 'borrowed')      return acc - e.amount;
-          if (e.kind === 'borrow_repaid') return acc + e.amount;
-          return acc;
-        }, 0);
-        return { personKey: p.personKey, person: p.person, net };
-      })
-      .filter((p): p is GroupBalanceRow => !!p && Math.abs(p.net) > 0.005)
-      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
-  }, [getPersonBalances, selectedGroup, selectedGroupId, lentBorrowed]);
+  const isEmpty = groups.length === 0;
 
-  // ── Handlers ──
-  const handleSaveGroup = (data: CreateGroupData) => {
-    if (editTarget) {
-      updateGroup(editTarget.id, data);
-      toast.success('Group updated');
-      setEditTarget(null);
-    } else {
-      const id = createGroup(data);
-      setSelectedId(id);
-      toast.success('Group created');
-    }
-    setCreateVisible(false);
-  };
-
-  const handleSettle = (pb: GroupBalanceRow) => {
-    if (!selectedGroupId) return;
-    // You owe them (net < 0) → repaying is a real expense: pick the paying account.
-    if (pb.net < 0) {
-      setSettleTarget(pb);
-      return;
-    }
-    setConfirm({
-      title: 'Settle up',
-      message:
-        `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}\n\n` +
-        `Settles this group's portion only — their balance in other groups and direct splits stays untouched.`,
-      primaryText: 'Settle',
-      secondaryText: 'Cancel',
-      destructive: true,
-      onPrimary: () => {
-        settleGroupPersonBalance(selectedGroupId, pb.personKey);
-        setConfirm(null);
-        toast.success('Settled', `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}`);
-      },
-      onSecondary: () => setConfirm(null),
-    });
-  };
-
-  const handleEditGroup = () => {
-    if (selectedGroup) { setEditTarget(selectedGroup); setCreateVisible(true); }
-  };
-
-  const handleDeleteGroup = () => {
-    if (!selectedGroup) return;
-    const g = selectedGroup;
-    setConfirm({
-      title: 'Delete group?',
-      message: `"${g.name}" will be removed. Transactions tagged to it won't be deleted — just untagged.`,
-      primaryText: 'Delete',
-      secondaryText: 'Cancel',
-      destructive: true,
-      onPrimary: () => {
-        deleteGroup(g.id);
-        setSelectedId(null);
-        setConfirm(null);
-        toast.success('Group deleted');
-      },
-      onSecondary: () => setConfirm(null),
-    });
-  };
-
-  const openCreate = () => { setEditTarget(null); setCreateVisible(true); };
-
-  // Group Zone toggle — exclusive (one at a time). Toast on switch-on and switch-off.
-  const handleToggleZone = (g: Group, on: boolean) => {
-    setGroupZone(on ? g.id : null);
-    if (on) {
-      toast.info(`${g.name} zone on`, 'New transactions will be added to this group by default.');
-    } else {
-      toast.info(`${g.name} zone off`, `New transactions won't be auto-tagged to this group.`);
-    }
-  };
-
-  // ── Tiles ──
-  const renderTiles = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.tileRow}
-    >
-      {/* Add tile — flat gray, no outline */}
-      <TouchableOpacity style={styles.addTile} onPress={openCreate} activeOpacity={0.8}>
-        <Text style={styles.addTilePlus}>＋</Text>
-        <Text style={styles.addTileLabel} numberOfLines={1}>New</Text>
+  // ONE function for both bar states (ui-consistency §2 rule 2) — `onLight`
+  // decides ink only; the row itself, the handler and the a11y contract never
+  // fork. Expanded = on-gradient (white); pinned = on `theme.card` (dark).
+  const groupsBar = (onLight: boolean) => (
+    <View style={styles.barRow}>
+      <Text
+        style={[styles.barTitle, { color: onLight ? colors.textPrimary : '#fff' }]}
+        numberOfLines={1}
+      >
+        Groups
+      </Text>
+      <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
+        <InfoIcon size={22} color={onLight ? colors.textSecondary : '#FFFFFFCC'} />
       </TouchableOpacity>
-
-      {tileGroups.map((g) => {
-        const active = g.id === selectedGroupId;
-        const accent = g.color || theme.primary;
-        return (
-          <TouchableOpacity
-            key={g.id}
-            // Outer ring with a 1px transparent gap to the fill.
-            style={[styles.tileWrap, { borderColor: active ? accent : colors.divider }]}
-            onPress={() => { setSelectedId(g.id); listRef.current?.scrollToOffset({ offset: 0, animated: true }); }}
-            activeOpacity={0.85}
-          >
-            {active ? (
-              <LinearGradient
-                colors={[lightenHex(accent, 0.5), accent]}
-                start={{ x: 0.5, y: 0 }}
-                end={{ x: 0.5, y: 1 }}
-                style={styles.tileFill}
-              >
-                <Text style={styles.tileEmoji}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
-                <Text style={[styles.tileLabel, styles.tileLabelActive]} numberOfLines={1}>{g.name}</Text>
-              </LinearGradient>
-            ) : (
-              <View style={[styles.tileFill, styles.tileFillIdle]}>
-                <Text style={styles.tileEmoji}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
-                <Text style={[styles.tileLabel, { color: colors.textPrimary }]} numberOfLines={1}>{g.name}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
+    </View>
   );
-
-  // ── Selected group's summary + balances ──
-  const renderHeader = () => {
-    if (!selectedGroup) return <View>{renderTiles()}</View>;
-    const g = selectedGroup;
-    const isShared = g.type === 'shared';
-    const total = g.totalSpend || 0;
-    const myShare = myShareByGroup[g.id] || 0;
-    // Net across everyone in this group: > 0 you're owed, < 0 you owe.
-    const netBalance = groupBalances.reduce((acc, pb) => acc + pb.net, 0);
-
-    return (
-      <View>
-        {renderTiles()}
-
-        {/* Expense summary card — accent on the BOTTOM edge. The whole card (header
-            + amount + balances) opens the members/settle modal; only the Group Zone
-            area below is excluded so its switch keeps working. */}
-        <View style={[styles.expenseCard, { borderBottomColor: (g.color || '#6366F1') + '76' }]}>
-          {(() => {
-            const cardTop = (
-              <>
-                {/* Header strip: group-color tint → white, inset 1px from the card edge */}
-                <LinearGradient
-                  colors={[lightenHex(g.color || '#6366F1', 0.72), '#FFFFFF']}
-                  locations={[0, 1]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                  style={styles.cardHeaderGrad}
-                >
-                  <Text style={styles.cardEmoji}>{g.emoji || (isShared ? '👥' : '📁')}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardName} numberOfLines={1}>{g.name}</Text>
-                    <Text style={styles.cardMeta}>
-                      {isShared ? `${g.members?.length ?? 0} members` : 'Personal'}
-                      {g.excludeFromTotals ? ' · excluded from totals' : ''}
-                    </Text>
-                  </View>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity onPress={handleEditGroup} hitSlop={8} style={styles.cardActionBtn}>
-                      <EditIcon size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                    <View style={styles.cardActionDivider} />
-                    <TouchableOpacity onPress={handleDeleteGroup} hitSlop={8} style={styles.cardActionBtn}>
-                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                    </TouchableOpacity>
-                  </View>
-                </LinearGradient>
-
-                <View style={styles.cardSummary}>
-                  <View style={styles.amountRow}>
-                    {isShared ? (
-                      <>
-                        <Text style={styles.amountBig}>{formatCurrency(myShare)}</Text>
-                        <Text style={styles.amountSub}>your share · of {formatCurrency(total)}</Text>
-                      </>
-                    ) : (
-                      <>
-                        {/* Personal-group tracking is monthly — headline = THIS month;
-                            older months live on the list dividers below. */}
-                        <Text style={styles.amountBig}>{formatCurrency(currentMonthTotal)}</Text>
-                        <Text style={styles.amountSub}>this month</Text>
-                      </>
-                    )}
-                  </View>
-
-                  {isShared && groupBalances.length > 0 && (
-                    <View style={styles.balancesSummary}>
-                      <View style={[{ flex: 1 }, groupBalances.length === 0 && { justifyContent: 'center' }]}>
-                          <>
-                            <Text style={styles.balancesSummaryTitle}>
-                              Balances · {groupBalances.length} {groupBalances.length === 1 ? 'person' : 'people'}
-                            </Text>
-                            <Text style={[styles.balancesSummarySub, { color: netBalance >= 0 ? colors.lent : colors.borrowed }]}>
-                              {Math.abs(netBalance) < 0.01
-                                ? 'Settled up · tap to view'
-                                : netBalance > 0
-                                  ? `You lent ${formatCurrency(netBalance)} · tap to settle`
-                                  : `You borrowed ${formatCurrency(Math.abs(netBalance))} · tap to settle`}
-                            </Text>
-                          </>
-                        </View>
-                      <Text style={styles.balancesChevron}>›</Text>
-                    </View>
-                  )}
-                </View>
-              </>
-            );
-            // Shared groups → the whole top opens the members/settle modal.
-            return isShared ? (
-              <TouchableOpacity activeOpacity={0.85} onPress={() => setBalancesVisible(true)}>
-                {cardTop}
-              </TouchableOpacity>
-            ) : cardTop;
-          })()}
-
-          {/* Group Zone — OUTSIDE the card tap so its switch toggles independently */}
-          <View style={styles.zoneArea}>
-            <View style={styles.zoneRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.zoneTitle}>🧭 Group Zone</Text>
-                <Text style={styles.zoneSub}>Auto-add new transactions to this group</Text>
-              </View>
-              <Switch
-                value={activeGroupZoneId === g.id}
-                onValueChange={(on) => handleToggleZone(g, on)}
-                trackColor={{ true: g.color || theme.primary, false: '#D1D5DB' }}
-                thumbColor="#fff"
-                ios_backgroundColor="#D1D5DB"
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* Transactions sub-header */}
-        <View style={styles.txnHeader}>
-          <SectionHeader icon="receipt-outline" title={`Transactions (${groupTxns.length})`} accentColor={theme.primary} />
-        </View>
-      </View>
-    );
-  };
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
-
       <CollapsingHeaderScreen
-        collapsible={false}
         gradientColors={gradient}
-        title="Groups"
-        headerRight={
-          <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-            <InfoIcon size={22} color="#FFFFFFCC" />
-          </TouchableOpacity>
-        }
+        onCollapseChange={setHeaderPinned}
+        renderBar={() => groupsBar(false)}
+        renderCollapsedBar={() => groupsBar(true)}
+        // The hero is two stacked text/card blocks whose height depends on
+        // whether there's a shared-group summary to show — never pin a real
+        // heroHeight for that (ui-consistency §2a), just estimate the first frame.
+        estimatedHeroHeight={hasSharedGroups ? 170 : 40}
         renderHero={() => (
-          <Text style={styles.subheading}>Track shared and personal transactions</Text>
+          <>
+            <Text style={styles.subheading}>Track shared and personal transactions</Text>
+            {/* The overall summary now lives IN the header — it fades and slides
+                away with the rest of the hero as the header collapses, exactly
+                like Home's Income/Refunds card, rather than sitting as the
+                first card in the scrollable body. */}
+            {hasSharedGroups && (
+              <View style={styles.heroSummaryCard}>
+                <View style={styles.heroSummaryCell}>
+                  <Text style={styles.heroSummaryValue} numberOfLines={1}>{formatCurrency(totals.owed)}</Text>
+                  <Text style={styles.heroSummaryLabel}>YOU ARE OWED</Text>
+                </View>
+                <View style={styles.heroSummaryDivider} />
+                <View style={styles.heroSummaryCell}>
+                  <Text style={styles.heroSummaryValue} numberOfLines={1}>{formatCurrency(totals.owe)}</Text>
+                  <Text style={styles.heroSummaryLabel}>YOU OWE</Text>
+                </View>
+                <View style={styles.heroSummaryDivider} />
+                <View style={styles.heroSummaryCell}>
+                  <Text style={styles.heroSummaryValue} numberOfLines={1}>{formatCurrency(Math.abs(totals.net))}</Text>
+                  <Text style={styles.heroSummaryLabel}>{totals.net >= 0 ? 'NET TO RECEIVE' : 'NET TO PAY'}</Text>
+                </View>
+              </View>
+            )}
+          </>
         )}
+        contentContainerStyle={isEmpty
+          ? styles.emptyContainer
+          : [styles.list, { paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 96 }]}
+        onScroll={onScroll}
       >
-      {groups.length === 0 ? (
-        <View style={styles.emptyContainer}>
+        {isEmpty ? (
           <EmptyState
             icon="people-outline"
             title="No groups yet"
@@ -494,199 +237,56 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
             actionLabel="Create first group"
             onAction={openCreate}
           />
-        </View>
-      ) : (
-        <FlatList
-          ref={listRef}
-          data={groupListData}
-          style={styles.flatList}
-          keyExtractor={(t) => t.id}
-          ListHeaderComponent={renderHeader()}
-          renderItem={({ item: t }) =>
-            t._divider ? (
-              // Month boundary — a rounded container in the middle carries that
-              // month's total (personal-group tracking is monthly).
-              <MonthDivider monthKey={t.monthKey} total={t.total} />
-            ) : (
-              // The card's LENT/BORROWED chip now conveys who-paid framing (was a "Paid by X"
-              // line here); the full payer + per-member breakdown lives in the detail sheet.
-              <TransactionItem
-                txn={t}
-                hideGroupChip
-                onPress={() => setDetailTxn(t)}
-                onPressCategory={() => setCategoryTxn(t)}
-              />
-            )
-          }
-          ListEmptyComponent={
-            <EmptyState
-              compact
-              icon="receipt-outline"
-              title="No transactions yet"
-              subtitle={'Tap + to add one, or tag existing transactions from the Activity tab.'}
-              style={styles.emptyTxn}
-            />
-          }
-          contentContainerStyle={[styles.list, { paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 80 }]}
-          showsVerticalScrollIndicator={false}
-          {...scrollProps}
-        />
-      )}
-      </CollapsingHeaderScreen>
-
-      {/* FAB → add a transaction to the selected group (full screen) */}
-      {selectedGroup && (
-        <FAB
-          onPress={() => navigation.navigate('AddGroupExpense', { groupId: selectedGroupId })}
-          icon="+"
-          bottomInset={TAB_BAR_HEIGHT + insets.bottom}
-        />
-      )}
-
-      <CreateGroupModal
-        visible={createVisible}
-        group={editTarget}
-        onClose={() => { setCreateVisible(false); setEditTarget(null); }}
-        onSave={handleSaveGroup}
-      />
-
-      <GroupTxnDetailSheet
-        txn={detailTxn}
-        onClose={() => setDetailTxn(null)}
-        onEdit={(t: any) => {
-          setDetailTxn(null);
-          navigation.navigate('AddGroupExpense', { groupId: t.groupId, editTxnId: t.id });
-        }}
-      />
-
-      {/* Member balances + settle — opened from the group card (kept off the card
-          so a long member list never stretches it). */}
-      <Modal
-        visible={balancesVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setBalancesVisible(false)}
-      >
-        <View style={styles.sheetBackdrop}>
-          <TouchableOpacity style={styles.sheetDismiss} activeOpacity={1} onPress={() => setBalancesVisible(false)} />
-          <SheetCloseButton onPress={() => setBalancesVisible(false)} />
-          <View style={styles.balancesSheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle} numberOfLines={1}>
-              {selectedGroup?.emoji || '👥'} {selectedGroup?.name} · Balances
-            </Text>
-            {groupBalances.length > 0 ? (
-              <ScrollView style={styles.balancesSheetList} showsVerticalScrollIndicator={false}>
-                {groupBalances.map((pb) => {
-                  const owesYou = pb.net > 0;
+        ) : (
+          <>
+            {hasSharedGroups && (
+              <View style={styles.chipRow}>
+                {CHIPS.map((c) => {
+                  const active = filter === c.key;
                   return (
-                    <View key={pb.personKey} style={styles.balanceRow}>
-                      <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
-                        <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.balanceName} numberOfLines={1}>{titleCaseName(pb.person)}</Text>
-                        <Text style={[styles.balanceSub, { color: owesYou ? colors.lent : colors.borrowed }]}>
-                          {owesYou ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(pb.net))}
-                        </Text>
-                      </View>
-                      <TouchableOpacity style={[styles.settleBtn, { borderColor: theme.primary }]} onPress={() => handleSettle(pb)}>
-                        <Text style={[styles.settleBtnTxt, { color: theme.primary }]}>Settle</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity
+                      key={c.key}
+                      style={[styles.chip, active && { backgroundColor: theme.primary + '18', borderColor: theme.primary }]}
+                      onPress={() => setFilter(c.key)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.chipTxt, active && { color: theme.primary, fontWeight: '700' }]}>{c.label}</Text>
+                    </TouchableOpacity>
                   );
                 })}
-              </ScrollView>
-            ) : (
-              <Text style={styles.balancesEmpty}>✓ Everyone&apos;s settled up in this group.</Text>
+              </View>
             )}
-            <TouchableOpacity style={styles.balancesClose} onPress={() => setBalancesVisible(false)}>
-              <Text style={styles.balancesCloseTxt}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
-      {/* Manage modal — full parity with a normal transaction (category, Private,
-          Ignore, Delete, Remove-from-group). Split is omitted (it conflicts with the
-          group's own split) and Lent/Borrowed linkage is not offered (the group
-          already posts its own LB legs — onSelectLentBorrow intentionally unset). */}
-      <CategoryPickerModal
-        visible={!!categoryTxn}
-        categories={categories}
-        selectedCategoryId={categoryTxn?.categoryId}
-        selectedParent={categoryTxn?.parentCategory}
-        selectedChild={categoryTxn?.childCategory}
-        isHidden={!!categoryTxn?.isHidden}
-        isIgnored={!!categoryTxn?.isIgnored}
-        canSplit={false}
-        isSplitTxn={false}
-        categoryLocked={!!categoryTxn?.lbLocked}
-        currentGroupId={categoryTxn?.groupId || null}
-        onSelectCategory={(categoryId) => {
-          // "Credit Card Bill" opens the card-picker + reconcile sheet (sets the
-          // category AND optionally credits the paid card) — matches Dashboard/
-          // TransactionsScreen so the card side is never skipped here.
-          if (categoryId === 'cc_bill') {
-            const t = categoryTxn;
-            setCategoryTxn(null);
-            setCcBillTxn(t);
-            return;
-          }
-          if (categoryTxn) updateTransactionCategory(categoryTxn.id, categoryId);
-          setCategoryTxn(null);
-        }}
-        onSelectTwoTier={(parent, child) => {
-          if (categoryTxn) updateTwoTierCategory(categoryTxn.id, parent, child);
-          setCategoryTxn(null);
-        }}
-        onToggleHidden={(hidden) => {
-          if (categoryTxn) setTransactionHidden(categoryTxn.id, hidden);
-          setCategoryTxn(null);
-        }}
-        onIgnore={() => {
-          const t = categoryTxn;
-          setCategoryTxn(null);
-          if (!t) return;
-          setConfirm({
-            title: 'Ignore transaction?',
-            message: 'It will be removed from balances, totals and charts — as if it never happened.',
-            primaryText: 'Ignore',
-            secondaryText: 'Cancel',
-            destructive: true,
-            onPrimary: () => { ignoreTransaction(t.id); setConfirm(null); },
-            onSecondary: () => setConfirm(null),
-          });
-        }}
-        onRestore={() => {
-          if (categoryTxn) unignoreTransaction(categoryTxn.id);
-          setCategoryTxn(null);
-        }}
-        onPressRemoveFromGroup={() => {
-          if (categoryTxn) untagTransactionFromGroup(categoryTxn.id);
-          setCategoryTxn(null);
-        }}
-        onDelete={() => {
-          const t = categoryTxn;
-          setCategoryTxn(null);
-          if (!t) return;
-          setConfirm({
-            title: 'Delete transaction?',
-            message: 'This action cannot be undone.',
-            primaryText: 'Delete',
-            secondaryText: 'Cancel',
-            destructive: true,
-            onPrimary: () => { deleteTransaction(t.id); setConfirm(null); },
-            onSecondary: () => setConfirm(null),
-          });
-        }}
-        onClose={() => setCategoryTxn(null)}
-      />
+            {/* <SectionHeader
+              icon="people-outline"
+              title={`Your Groups (${filteredGroups.length})`}
+              accentColor={theme.primary}
+              style={styles.sectionHeading}
+            /> */}
 
-      <CCBillPaymentSheet
-        txn={ccBillTxn}
-        onClose={() => setCcBillTxn(null)}
-      />
+            {filteredGroups.length === 0 ? (
+              <EmptyState
+                compact
+                icon="funnel-outline"
+                title="No groups match this filter"
+                subtitle="Try a different filter, or create a new group."
+              />
+            ) : (
+              filteredGroups.map((g) => (
+                <GroupListCardRow
+                  key={g.id}
+                  group={g}
+                  net={groupNetById[g.id] || 0}
+                  personalMonth={personalMonthTotalById[g.id] || 0}
+                  onPress={() => navigation.navigate('GroupDetail', { groupId: g.id })}
+                />
+              ))
+            )}
+          </>
+        )}
+      </CollapsingHeaderScreen>
+
+      <FAB onPress={openCreate} icon="+" bottomInset={TAB_BAR_HEIGHT + insets.bottom} accessibilityLabel="Add group" />
 
       <InfoSheet
         visible={infoVisible}
@@ -695,178 +295,83 @@ export default function GroupsScreen({ navigation, route }: { navigation: any; r
         title="About Groups"
         body="Group shared and personal expenses together. Shared-group splits flow into your Lent/Borrowed balances, so a friend across several groups nets to one total you can settle in one place."
         bullets={[
-          { label: 'Shared', value: 'Split expenses; balances appear in Lent/Borrowed.' },
-          { label: 'Personal', value: 'Track a theme (house, trip); optionally exclude from totals. The total resets each month — the card shows this month, older months sit on the list dividers.' },
+          { label: 'Shared', value: 'Split expenses; balances appear in Lent/Borrowed and in the summary above.' },
+          { label: 'Personal', value: 'Track a theme (house, trip); optionally exclude from totals. The total resets each month.' },
           { label: 'Auto-cleanup', value: 'Groups you haven’t touched in 6 months are removed once everyone is settled.' },
         ]}
-      />
-
-      <CenterModal
-        visible={!!confirm}
-        title={confirm?.title}
-        message={confirm?.message}
-        primaryText={confirm?.primaryText || 'OK'}
-        secondaryText={confirm?.secondaryText}
-        destructive={!!confirm?.destructive}
-        onPrimary={confirm?.onPrimary || (() => setConfirm(null))}
-        onSecondary={confirm?.onSecondary || (() => setConfirm(null))}
-        onClose={() => setConfirm(null)}
-      />
-
-      <AccountPickerSheet
-        visible={!!settleTarget}
-        title="Repay from which account?"
-        subtitle={settleTarget
-          ? `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
-          : undefined}
-        accounts={accounts}
-        onSelect={(accountId: string) => {
-          if (selectedGroupId && settleTarget) {
-            settleGroupPersonBalance(selectedGroupId, settleTarget.personKey, { accountId });
-            toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
-          }
-          setSettleTarget(null);
-        }}
-        skipLabel="Just mark repaid (no expense)"
-        onSkip={() => {
-          if (selectedGroupId && settleTarget) {
-            settleGroupPersonBalance(selectedGroupId, settleTarget.personKey);
-            toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
-          }
-          setSettleTarget(null);
-        }}
-        onClose={() => setSettleTarget(null)}
       />
     </View>
   );
 }
 
-const TILE = 84;
-
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: colors.background },
-  infoBtn:    { marginLeft: spacing.xs, padding: 2 },
+  root: { flex: 1, backgroundColor: colors.background },
+  infoBtn: { marginLeft: spacing.xs, padding: 2 },
   subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
-  // flex:1 bounds the list to the viewport below the header so its content
-  // (card detail + transactions) is fully scrollable instead of clipped.
-  flatList:   { flex: 1 },
-  list:       { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
+  list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
 
-  // Tiles. flexGrow:1 fills the viewport when there are few tiles so the row isn't
-  // scrollable — fixes the "items jump right on scroll" glitch with a short list.
-  tileRow: { paddingVertical: spacing.sm, gap: spacing.sm, flexGrow: 1 },
-  // Outer ring; 1px padding creates a transparent gap between the border and the fill.
-  tileWrap: {
-    width: TILE, height: TILE, borderRadius: radius.lg,
-    borderWidth: 1, padding: 1, backgroundColor: 'transparent',
-    ...shadows.card,
-  },
-  tileFill: {
-    flex: 1, borderRadius: radius.lg - 1,
-    alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 6, overflow: 'hidden',
-  },
-  tileFillIdle: { backgroundColor: colors.card },
-  addTile: {
-    width: TILE, height: TILE, borderRadius: radius.lg,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#E6E8EC',   // flat gray, no outline
-  },
-  addTilePlus:  { fontSize: 28, fontWeight: '300', lineHeight: 32, color: colors.textSecondary },
-  addTileLabel: { ...typography.tiny, fontWeight: '700', marginTop: 2, color: colors.textSecondary },
-  tileEmoji:   { fontSize: 26 },
-  tileLabel:   { ...typography.tiny, fontWeight: '700', marginTop: 6, maxWidth: TILE - 12, textAlign: 'center' },
-  tileLabelActive: { color: '#fff' },
+  // Root-screen bar row (no back chevron) — mirrors CollapsingHeaderScreen's
+  // own StandardBar layout, since a custom renderBar/renderCollapsedBar pair
+  // replaced it (needed so the info icon's ink can flip with `onLight`, which
+  // a single static `headerRight` node can't do).
+  barRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
+  barTitle: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, flex: 1 },
 
-  // Expense summary card — accent on the BOTTOM edge
-  expenseCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-    borderBottomWidth: 4,
-    ...shadows.card,
-  },
-  // Gray→white gradient header strip; 1px inset reveals a thin card-coloured edge around it.
-  cardHeaderGrad: {
+  // The aggregate summary now lives IN THE HERO — translucent-white-on-gradient,
+  // same treatment as Home's Income/Refunds card (no shadow: it's part of the
+  // header's own surface, not a card floating on the page).
+  heroSummaryCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    margin: 1,
-    borderTopLeftRadius: radius.lg - 1,
-    borderTopRightRadius: radius.lg - 1,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-  },
-  // Tappable top region (amount + balances summary). Zone area is separate below.
-  cardSummary: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
-  zoneArea:    { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
-  cardEmoji:  { fontSize: 26, marginRight: spacing.sm },
-  cardName:   { ...typography.h3, color: colors.textPrimary },
-  cardMeta:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  cardActions:{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  cardActionBtn: { padding: 4 },
-  // 1px (not hairline) and a mid-gray: the icons sit on the near-white END of the
-  // header gradient, where a 0.5px `divider` tone is effectively invisible.
-  cardActionDivider: {
-    width: 1,
-    height: 20,
-    marginHorizontal: spacing.xs,
-    backgroundColor: colors.textMuted,
-    opacity: 0.5,
-  },
-  amountRow:  { marginTop: spacing.sm },
-  amountBig:  { ...typography.display, color: colors.textPrimary },
-  amountSub:  { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
-  // Compact, tappable balances summary on the card (full breakdown is in the modal).
-  balancesSummary: {
-    flexDirection: 'row', alignItems: 'center',
-    marginTop: spacing.md, paddingTop: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.divider,
-  },
-  balancesSummaryTitle: { ...typography.small, color: colors.textPrimary, fontWeight: '700' },
-  balancesSummarySub:   { ...typography.tiny, fontWeight: '700', marginTop: 1 },
-  balancesSettled: { ...typography.small, color: colors.success, fontWeight: '700', paddingVertical: 2 },
-  balancesChevron:      { ...typography.h2, color: colors.textMuted, marginLeft: spacing.sm },
-  // balanceRow/avatar/settleBtn are shared by the card summary and the balances modal.
-  balanceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.xs },
-  avatar:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
-  avatarTxt:  { fontWeight: '800', fontSize: 12 },
-  balanceName:{ ...typography.body, color: colors.textPrimary },
-  balanceSub: { ...typography.tiny, fontWeight: '700', marginTop: 1 },
-  settleBtn:  { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, marginLeft: spacing.sm },
-  settleBtnTxt:{ ...typography.small, fontWeight: '700' },
-
-  // Balances bottom-sheet modal (opened from the card)
-  sheetBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
-  sheetDismiss:  { flex: 1 },
-  balancesSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
-    padding: spacing.lg, paddingBottom: spacing.xl, maxHeight: '80%',
-  },
-  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md },
-  sheetTitle:  { ...typography.h3, color: colors.textPrimary, fontWeight: '700', marginBottom: spacing.md },
-  balancesSheetList: { maxHeight: 360 },
-  balancesEmpty: { ...typography.body, color: colors.textSecondary, paddingVertical: spacing.lg, textAlign: 'center' },
-  balancesClose: { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
-  balancesCloseTxt: { ...typography.body, color: colors.textSecondary },
-
-  // Group Zone toggle row
-  zoneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
+    backgroundColor: '#FFFFFF1F',
+    borderRadius: radius.md,
+    overflow: 'hidden',
   },
-  zoneTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
-  zoneSub:   { ...typography.tiny, color: colors.textMuted, marginTop: 1 },
+  heroSummaryCell: { flex: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.md, alignItems: 'center' },
+  heroSummaryDivider: { width: StyleSheet.hairlineWidth, backgroundColor: '#FFFFFF3D', marginVertical: spacing.sm },
+  // Plain white, no icon — direction reads from the label text alone
+  // ("YOU ARE OWED"/"YOU OWE"); a coloured green/coral read too loud sitting
+  // on the translucent card over the gradient, and an icon was tried too.
+  // Same colour/weight-family as Home's Income/Refunds hero stat (DashboardScreen's
+  // statValue), sized one step up (h3, not bodyBold) — this figure is the card's
+  // own headline number, not a secondary stat beside a bigger one like Home's.
+  heroSummaryValue: { ...typography.h3, fontWeight: '800', color: '#fff', textAlign: 'center' },
+  heroSummaryLabel: { ...typography.tiny, color: '#FFFFFFCC', fontWeight: '800', letterSpacing: 0.9, textAlign: 'center', marginTop: spacing.xs },
 
-  // Transactions list
-  txnHeader: { marginTop: spacing.md, marginBottom: spacing.md },
-  // Plain (no card) — just centred text + emoji.
-  emptyTxn: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },
+  chipRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  chip: {
+    paddingHorizontal: spacing.sm + 2, paddingVertical: 6, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.divider, backgroundColor: colors.card,
+  },
+  chipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '600' },
 
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
+  sectionHeading: { marginBottom: spacing.sm },
+
+  // Shadow lives on this OPAQUE outer shell; the inner `groupCard` carries the
+  // (possibly translucent) state wash + border. Elevation under a see-through
+  // fill renders as a muddy grey box on Android, so the two must not share a
+  // view (same rule as the summary/stat card shells above).
+  groupCardShadow: {
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    marginBottom: spacing.md,
+    ...shadows.card,
+  },
+  groupCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.card, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: 'transparent',
+    padding: spacing.lg,
+  },
+  groupIconTile: { width: 48, height: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
+  groupIconEmoji: { fontSize: 24 },
+  groupCardName: { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
+  groupCardMeta: { ...typography.small, color: colors.textSecondary, marginTop: 3 },
+  groupCardBalance: { ...typography.h3, fontWeight: '800' },
+  groupCardBalanceLabel: { ...typography.small, color: colors.textMuted, marginTop: 2 },
+
+  // This is now the ScrollView's own `contentContainerStyle` (collapsing mode
+  // owns the scroll view), so it needs `flexGrow`, not `flex`, to centre the
+  // EmptyState within at least the visible height.
+  emptyContainer: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
 });

@@ -143,7 +143,7 @@ const AnalyticsScreen = ({ navigation, headerless = false, monthOffset = 0 }) =>
   const focusKey = focusedGroupId || 'all'; // remount key → morph transition
 
   const openGroupDetails = (gid) => {
-    if (navigation) navigation.navigate('Groups', { focusGroupId: gid });
+    if (navigation) navigation.navigate('GroupDetail', { groupId: gid });
   };
 
   // If the focused group is deleted while viewing, fall back to all-spending.

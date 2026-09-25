@@ -1638,6 +1638,62 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   was only ever set on pick, never reset on close, so it survived into the next open. Now
   resets on `visible → false` (every close path — pick, dismiss, create-new — flips
   `visible`). Local UI-state bug only; the store's `tagTransactionToGroup` was never wrong.
+- **Sep-25-2026: Groups revamp — back to a real 3-level nav.** Undid the Jul-31 merge
+  that had folded the detail screen into the Groups tab. Level 1 (`GroupsScreen.tsx`,
+  rewritten): an aggregate You-Are-Owed/You-Owe/Net summary built from every SHARED
+  group's own LB-ledger rows (a personal group can't produce one, so it's automatically
+  excluded), an All/Owed-to-you/You-owe filter, one balance card per group; the FAB now
+  creates a group instead of adding an expense. Level 2 (`GroupDetailScreen.tsx`, new):
+  icon/name/members hero, a Total-Expense-or-This-Month + Your-Balance stat card, Add
+  Expense + Settle Up actions, and three tabs — Transactions (the existing list, moved
+  here), Members (chips, Add Member, pending settlements with Settle + a WhatsApp
+  "Request" button reusing `LentBorrowedScreen`'s pattern), and Summary (a 6-month
+  spend chart, top 5 categories, and a per-payer contribution breakdown for shared
+  groups). New shared `UnderlineTabBar` component for the tabs; `WhatsAppIcon` extracted
+  out of `LentBorrowedScreen.js` as a shared component. See the `groups` skill for the
+  full file table and behaviour notes.
+- **Sep-25-2026: Groups revamp, follow-up sizing/state pass.** Aggregate summary card
+  is taller with the number leading (bigger, above its label). Level-1 balance cards
+  have bigger text and, for shared groups, a faded lent/borrowed/settled background
+  wash with a thin matching border. Add/Edit Group is now a full screen
+  (`GroupFormScreen.tsx`, route `GroupForm`) instead of a bottom sheet — the old
+  `CreateGroupModal.tsx` is deleted; the create flow lands directly on the new group's
+  detail screen, edit just returns to it.
+- **Sep-26-2026: Groups list header now collapses on scroll.** Removed the trailing
+  arrow from each group's balance card (the whole card is already tappable). The
+  aggregate You Are Owed/You Owe/Net summary moved off the list and into the
+  gradient header itself — it now fades away and the header squares off as you
+  scroll down, same behaviour as Home's collapsing header, and reappears when you
+  scroll back up.
+- **Sep-26-2026: Group detail screen — header cleanup + sticky-tab scrolling.**
+  Removed the screen title text (kept the back chevron). The whole screen is now
+  one continuous scroll — the Transactions/Members/Summary tab bar sticks to the
+  top once you scroll past the top card/actions/zone block, so a long transaction
+  list can use the full screen instead of scrolling in its own cramped box below a
+  fixed header.
+- **Sep-26-2026: Group detail screen — top card restored to its original look.**
+  The hero + stat-card pair (and a brief list-card-styled version) is gone; the top
+  of the screen is back to the same card the Groups tab used before this revamp —
+  a colour-tinted header strip and a bottom accent border in the group's own
+  colour. Group Zone stays its own row, below the Add Expense/Settle Up buttons.
+- **Sep-26-2026: Group detail screen — top card tidy-up.** Dropped the tappable
+  "Balances · N people" footer (Settle Up and the Members tab already cover it) and
+  brought back the classic Total Expense / Your Balance two-figure row in its
+  place. Settings moved out of the card into the screen's own header (top-right).
+  On the card itself, the group's icon/name now sit on the left and Edit/Delete
+  moved to the top-right corner.
+- **Sep-26-2026: Group detail screen — Members/Summary row polish + empty states.**
+  Each member row now shows an avatar, the name, and an Admin/Member tag on the
+  right; the Add Member button lost its outline for a light fill. Pending
+  Settlements rows lead with the amount (bigger) and a "so-and-so owes
+  you"/"you owe so-and-so" line below it. Contribution rows gained an avatar and
+  show the progress bar with its own percentage plus the full amount on the
+  right — matching alignment fixes so the icon, bar and amount line up cleanly,
+  including the very last row in both the Contribution and Top Categories
+  lists. The top card's Edit button was removed (Settings already opens the
+  same edit screen), and its border is a touch thicker. Both the Transactions
+  and Summary tabs now show a proper centred "nothing here yet" message when
+  the group has no spending, instead of a small corner note or a blank chart.
 
 **Open**
 - None currently tracked (spend-exclusion cross-cutting checklist lives in the groups skill

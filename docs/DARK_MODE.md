@@ -107,7 +107,25 @@ the accent orthogonal to it. Carbon would then be the accent that also *defaults
 
 ## 7. Inventory (measured, 2026-09-01; re-counted 2026-09-06, 2026-09-13, 2026-09-14 ×5, 2026-09-17)
 
-**51 files · 931 references.** Sep-23 (5th pass): +2 (929→931) — the LB direction chips' new inactive-icon colour (`colors.textSecondary`, in LbEntryForm.js). Sep-23 (4th pass): -1 (930→929) — moving the entry-count text off the "Transaction History" header (now the Add button's slot) onto the hero hint dropped its own `colors.*` style. Sep-23 (3rd pass): back to 930 — the same row's colour moved off `colors.expense` onto `theme.borrowed` (LB's own coral, not the app's red) per the user's follow-up; that's a theme read, not a static ref, so the +1 from the 2nd pass reverts. Sep-23: +4 (926→930) — LbPersonScreen's
+**54 files · 977 references.** Sep-26 (Groups revamp, 3rd pass — collapsing header): +1
+(976→977), files unchanged (54) — `GroupsScreen.tsx` moved its aggregate summary card into a
+`CollapsingHeaderScreen` hero (matching Home's collapsing-header pattern: the header now shrinks
+and hides the summary on scroll) and swapped its `title`/`headerRight` props for a custom
+`renderBar`/`renderCollapsedBar` pair so the info icon's ink can flip for the pinned (light)
+state — still reading the same static `colors` object as before, net +1 reference from the new
+bar-row/hero styles. Sep-25 (Groups revamp, 2nd pass): +1 (975→976), files unchanged
+(54) — `CreateGroupModal.tsx` (a bottom sheet) was deleted and its form body moved into a new
+full-screen `GroupFormScreen.tsx` (create/edit, both now pushed screens per user request — "add
+and edit group now will be full screen"), same static-`colors` convention as the sheet it
+replaced; one file out, one in, net +1 reference. Sep-25 (Groups revamp, 1st pass): +23
+(952→975), +2 files (52→54) — new `GroupDetailScreen.tsx` (the Groups feature's new level-2
+screen: hero, stat card, actions, Transactions/Members/Summary tabs) and the rewritten level-1
+`GroupsScreen.tsx` (aggregate balance summary + filter chips + group list) both read the static
+`colors` object, matching every other Groups/LB screen's existing (pre-migration) convention;
+the new shared `UnderlineTabBar.tsx` does the same. This pass also found the recorded count
+already stale — 931→952 had accrued from the intervening LB Revamp / Budget Revamp /
+theme-rebrand commits without updating this doc — folded into the same re-count rather than
+tracked as a separate entry. Sep-23 (5th pass): +2 (929→931) — the LB direction chips' new inactive-icon colour (`colors.textSecondary`, in LbEntryForm.js). Sep-23 (4th pass): -1 (930→929) — moving the entry-count text off the "Transaction History" header (now the Add button's slot) onto the hero hint dropped its own `colors.*` style. Sep-23 (3rd pass): back to 930 — the same row's colour moved off `colors.expense` onto `theme.borrowed` (LB's own coral, not the app's red) per the user's follow-up; that's a theme read, not a static ref, so the +1 from the 2nd pass reverts. Sep-23: +4 (926→930) — LbPersonScreen's
 new "Total Dealt" summary card, single-card entry list (divider, icon tiles) and settled-state
 tick all read the static `colors` object, matching this screen's existing (pre-migration)
 convention. Sep-17: -1 (927→926) — Google login. The new `GoogleSignInPanel`/

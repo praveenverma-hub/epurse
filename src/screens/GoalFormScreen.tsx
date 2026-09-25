@@ -551,7 +551,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           <Text style={[styles.label, { color: theme.textSecondary }]}>Icon</Text>
           <View style={styles.wrap}>
             {/* Type any emoji — the DEVICE keyboard is the picker, so there is no
-                emoji-picker dependency (same approach as CreateGroupModal and
+                emoji-picker dependency (same approach as GroupFormScreen and
                 CategoriesScreen). Highlighted whenever the goal's glyph isn't
                 one of the presets, which is the only signal that the field is
                 what's currently in use. */}
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: radius.pill,
     alignItems: 'center', justifyContent: 'center',
   },
-  // The app's selected-swatch treatment (CreateGroupModal): scale up, a WHITE
+  // The app's selected-swatch treatment (GroupFormScreen): scale up, a WHITE
   // inner ring, and a dark drop so the ring stays visible on a pale colour.
   // A theme-coloured border was invisible on half the palette.
   swatchSelected: {

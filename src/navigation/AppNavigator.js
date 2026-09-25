@@ -8,6 +8,8 @@ import OnboardingDeck, { AccountFilterScreen } from '../screens/OnboardingExperi
 import MainTabNavigator    from './MainTabNavigator';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
 import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
+import GroupDetailScreen from '../screens/GroupDetailScreen';
+import GroupFormScreen from '../screens/GroupFormScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
 import SecuritySettingsScreen from '../screens/SecuritySettingsScreen';
@@ -74,6 +76,8 @@ export default function AppNavigator() {
         {/* Full-screen "add" flows pushed on top of the tab bar */}
         <Stack.Screen name="AddTransaction"  component={AddTransactionScreen} />
         <Stack.Screen name="AddGroupExpense" component={AddGroupExpenseScreen} />
+        <Stack.Screen name="GroupDetail"     component={GroupDetailScreen} />
+        <Stack.Screen name="GroupForm"       component={GroupFormScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="Settings"       component={SettingsScreen} />
         <Stack.Screen name="Security"       component={SecuritySettingsScreen} />

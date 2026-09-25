@@ -1,8 +1,15 @@
+// =============================================================================
+// GroupFormScreen — full-screen create/edit for a group (Sep-25-26: replaced
+// the old CreateGroupModal bottom sheet, on user request — "add and edit group
+// now will be full screen"). Same plain-header + scroll-body + pinned-footer
+// shell as AddGroupExpenseScreen/AddTransactionScreen; the form fields
+// themselves are unchanged from the old modal.
+// Route params: { groupId? } — present = edit, absent = create.
+// =============================================================================
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -11,18 +18,21 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+
 import { colors, radius, searchFill, shadows, spacing, typography as typographyBase } from '../constants/theme';
-import { useTheme } from '../hooks/useTheme';
-import GradientButtonBase from './GradientButton';
-import SheetCloseButton from './SheetCloseButton';
-// The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
+import { useTheme } from '../hooks/useTheme';
+import PlainScreenHeader from '../components/PlainScreenHeader';
+import GradientButtonBase from '../components/GradientButton';
+import { useEPurseStore } from '../store/ePurseStore';
 import { fetchContactsForPicker, getContactsPermissionStatus } from '../services/contactsService';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { useToast } from '../components/Toast';
 import type { Group, GroupMember, GroupType } from '../types/group';
 
-// GradientButton.js has no TS declarations — cast to the props we use.
 const GradientButton = GradientButtonBase as React.FC<{
   title: string;
   onPress: () => void;
@@ -47,20 +57,20 @@ export interface CreateGroupData {
   members: GroupMember[];
 }
 
-interface CreateGroupModalProps {
-  visible: boolean;
-  /** Existing group when editing; null/undefined when creating. */
-  group?: Group | null;
-  onClose: () => void;
-  onSave: (data: CreateGroupData) => void;
-}
-
 const EMOJIS = ['🏠', '✈️', '🎉', '🍕', '💼', '🏋️', '🚗', '📚', '🌴', '🎮'];
 const GROUP_COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4'];
 const TYPE_OPTIONS: GroupType[] = ['personal', 'shared'];
 
-export default function CreateGroupModal({ visible, group, onClose, onSave }: CreateGroupModalProps) {
+export default function GroupFormScreen({ navigation, route }: { navigation: any; route: any }) {
+  const groupId = route?.params?.groupId as string | undefined;
   const theme = useTheme();
+  const toast = useToast();
+  const insets = useSafeAreaInsets();
+  const groups = useEPurseStore((s: any) => s.groups) as Group[];
+  const createGroup = useEPurseStore((s: any) => s.createGroup) as (d: CreateGroupData) => string;
+  const updateGroup = useEPurseStore((s: any) => s.updateGroup) as (id: string, patches: Partial<Group>) => void;
+  const group = groupId ? groups.find((g) => g.id === groupId) || null : null;
+  const isEdit = !!groupId;
 
   const [name, setName] = useState('');
   const [type, setType] = useState<GroupType>('personal');
@@ -72,9 +82,9 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
   const [contacts, setContacts] = useState<PickerContact[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Populate from existing group when editing
+  // Seed from the existing group once, on mount — a screen has no `visible`
+  // prop to re-key off like the old modal did.
   useEffect(() => {
-    if (!visible) return;
     if (group) {
       setName(group.name || '');
       setType(group.type || 'personal');
@@ -83,16 +93,9 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
       setExcludeFromTotals(!!group.excludeFromTotals);
       // strip the built-in "me" member before showing
       setMembers((group.members || []).filter((m) => !m.isMe));
-    } else {
-      setName('');
-      setType('personal');
-      setEmoji('🏠');
-      setColor('#6366F1');
-      setExcludeFromTotals(false);
-      setMembers([]);
     }
-    setQuery('');
-  }, [visible, group]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadContacts = useCallback(async () => {
     if (type !== 'shared') return;
@@ -105,7 +108,7 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
     }
   }, [type]);
 
-  useEffect(() => { if (visible && type === 'shared') loadContacts(); }, [visible, type, loadContacts]);
+  useEffect(() => { if (type === 'shared') loadContacts(); }, [type, loadContacts]);
 
   const filtered = contacts.filter((c) => {
     const q = query.trim().toLowerCase();
@@ -130,30 +133,36 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
   const handleSave = () => {
     const cleaned = sanitizeName(name);
     if (!isValidName(cleaned)) return; // needs NAME_MIN..NAME_MAX chars
-    submit(() => onSave({ name: cleaned, type, emoji, color, excludeFromTotals, members }));
+    submit(() => {
+      const data: CreateGroupData = { name: cleaned, type, emoji, color, excludeFromTotals, members };
+      if (isEdit && groupId) {
+        updateGroup(groupId, data);
+        toast.success('Group updated');
+        navigation.goBack();
+      } else {
+        const id = createGroup(data);
+        toast.success('Group created');
+        // Replace, not push — the form shouldn't sit in the back stack between
+        // the list and the new group's own detail screen.
+        navigation.replace('GroupDetail', { groupId: id });
+      }
+    });
   };
 
   const nameValid = isValidName(sanitizeName(name));
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
-        <SheetCloseButton onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-          <ScrollView
-            style={styles.body}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.bodyContent}
-          >
-          <Text style={styles.title}>{group ? 'Edit Group' : 'New Group'}</Text>
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <StatusBar style="dark" />
+      <PlainScreenHeader title={isEdit ? 'Edit Group' : 'New Group'} onBack={() => navigation.goBack()} bordered />
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Name */}
           <TextInput
             style={[styles.nameInput, name.trim().length > 0 && !nameValid && styles.nameInputError]}
@@ -310,51 +319,30 @@ export default function CreateGroupModal({ visible, group, onClose, onSave }: Cr
               </View>
             </TouchableOpacity>
           )}
+        </ScrollView>
 
-          </ScrollView>
-
-          {/* Pinned footer — Cancel + Save side by side. */}
-          <View style={styles.footer}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8} disabled={submitting}>
-              <Text style={styles.cancelTxt}>Cancel</Text>
-            </TouchableOpacity>
-            <GradientButton
-              title={group ? 'Save Changes' : 'Create Group'}
-              onPress={handleSave}
-              disabled={!nameValid}
-              loading={submitting}
-              style={styles.submitBtn}
-            />
-          </View>
+        {/* Pinned footer — single primary action, matching AddGroupExpenseScreen/
+            AddTransactionScreen (the back chevron already covers "Cancel"). */}
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+          <GradientButton
+            title={isEdit ? 'Save Changes' : 'Create Group'}
+            onPress={handleSave}
+            disabled={!nameValid}
+            loading={submitting}
+            style={{ width: '100%' }}
+          />
         </View>
-      </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop:       { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
-  dismiss:        { flex: 1 },
-  // flexShrink lets the body yield height to the pinned footer when content is tall.
-  body:           { flexShrink: 1 },
-  bodyContent:    { paddingBottom: spacing.sm },
-  sheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: spacing.lg,
-    paddingBottom: spacing.xl + 8,
-    maxHeight: '90%',
-  },
-  handle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: colors.divider,
-    alignSelf: 'center', marginBottom: spacing.md,
-  },
-  title:    { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.md },
+  root: { flex: 1, backgroundColor: colors.background },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
+
   nameInput: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.card,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
@@ -376,7 +364,7 @@ const styles = StyleSheet.create({
   typeChip: {
     flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.pill,
     alignItems: 'center', borderWidth: 1.5, borderColor: colors.divider,
-    backgroundColor: colors.background,
+    backgroundColor: colors.card,
   },
   typeChipTxt:  { ...typography.body, color: colors.textSecondary },
   typeHint:     { ...typography.tiny, color: colors.textMuted, marginBottom: spacing.sm },
@@ -386,7 +374,7 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: radius.md,
     alignItems: 'center', justifyContent: 'center',
     marginRight: 8, borderWidth: 1.5, borderColor: 'transparent',
-    backgroundColor: colors.background,
+    backgroundColor: colors.card,
   },
   emojiTxt:     { fontSize: 22 },
   emojiCustom:  { fontSize: 22, textAlign: 'center', color: colors.textPrimary, padding: 0 },
@@ -410,7 +398,7 @@ const styles = StyleSheet.create({
   memberChipTxt: { ...typography.small, fontWeight: '700' },
   memberRemove:  { marginLeft: 6, color: colors.danger, fontWeight: '800', fontSize: 14 },
   search: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.card,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
@@ -451,11 +439,11 @@ const styles = StyleSheet.create({
     ...shadows.pop,
   },
   toggleThumbOn: { transform: [{ translateX: 18 }] },
-  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
-  cancelBtn: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
   },
-  cancelTxt: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
-  submitBtn: { flex: 1 },
 });

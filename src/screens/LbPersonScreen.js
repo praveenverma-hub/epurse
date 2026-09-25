@@ -545,9 +545,8 @@ const LbPersonScreen = ({ route, navigation }) => {
           window, which disables Android's adjustResize. The window then never shrinks
           for the keyboard, and since KeyboardAvoidingView passes `undefined` on Android
           (it RELIES on that resize), a bottom-anchored sheet stays pinned behind the
-          keyboard. Every other input-bearing sheet — CreateGroupModal, LinkContactModal,
-          GroupExpenseSheet — omits it for the same reason. Only add it to sheets with no
-          text input. */}
+          keyboard. Every other input-bearing sheet — LinkContactModal, GroupExpenseSheet —
+          omits it for the same reason. Only add it to sheets with no text input. */}
       <Modal
         visible={addOpen}
         transparent
