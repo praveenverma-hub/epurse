@@ -23,7 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import PlainScreenHeader from '../components/PlainScreenHeader';
-import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H } from '../constants/theme';
+import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H, withAlpha } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
@@ -38,6 +38,7 @@ import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
+import EditIcon from '../components/EditIcon';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import MonthDivider from '../components/MonthDivider';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -517,15 +518,12 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     <SafeAreaView style={styles.root} edges={['top']}>
       <StatusBar style="dark" />
 
+      {/* No `right` any more — the edit action moved into the hero card itself,
+          beside Delete (was a lone settings gear here). */}
       <PlainScreenHeader
         title=""
         onBack={() => navigation.goBack()}
         bordered
-        right={
-          <TouchableOpacity onPress={() => navigation.navigate('GroupForm', { groupId: group.id })} hitSlop={8} style={styles.headerIconBtn}>
-            <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-        }
       />
 
       <View style={styles.body}>
@@ -543,12 +541,13 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
               {/* Top card — the pre-revamp GroupsScreen "expense summary card"
                   shell. Its gradient tint is currently commented out (plain
                   surface + a 1px group-colour border instead — see below).
-                  Emoji/name stay on the LEFT; Delete sits top-RIGHT of the
-                  strip (Edit was removed — Settings, in the screen's own
-                  header bar, covers the same edit route). No tappable
-                  balances footer — Total Expense/Your Balance are the two
-                  plain figures instead. Group Zone stays OUT of this card,
-                  as its own row below the actions. */}
+                  Emoji/name stay on the LEFT; Delete + Edit sit top-RIGHT of
+                  the strip (Edit was on the screen's own header as a settings
+                  gear; now it's the app's canonical pencil, moved in here
+                  beside Delete instead). No tappable balances footer — Total
+                  Expense/Your Balance are the two plain figures instead.
+                  Group Zone stays OUT of this card, as its own row below the
+                  actions. */}
               <View style={[styles.expenseCard, { borderWidth: 1, borderColor: accent }]}>
                 {/* Gradient tint commented out for now — plain surface + a
                     1px group-colour border instead:
@@ -570,8 +569,21 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                     </Text>
                   </View>
                   <View style={styles.cardActions}>
-                    <TouchableOpacity onPress={handleDeleteGroup} hitSlop={8} style={styles.cardActionBtn}>
+                    <TouchableOpacity
+                      onPress={handleDeleteGroup}
+                      hitSlop={8}
+                      style={[styles.cardActionBtn, { backgroundColor: withAlpha(colors.danger, 0.12) }]}
+                    >
                       <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => navigation.navigate('GroupForm', { groupId: group.id })}
+                      hitSlop={8}
+                      style={[styles.cardActionBtn, { backgroundColor: withAlpha(colors.textSecondary, 0.12) }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit group"
+                    >
+                      <EditIcon size={18} color={colors.textSecondary} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -776,9 +788,6 @@ const styles = StyleSheet.create({
   // opaque wrapper to read as a distinct white block above it.
   headerArea: { backgroundColor: colors.card },
 
-  // Settings now lives in the screen's own header bar, not the card.
-  headerIconBtn: { padding: 4 },
-
   // Pre-revamp "expense summary card" shell — the bottom accent border it
   // used to carry was dropped on request, replaced by the `borderWidth`/
   // `borderColor: accent` set inline where this is used. Its gradient tint
@@ -804,8 +813,14 @@ const styles = StyleSheet.create({
   cardEmoji: { fontSize: 26 },
   cardName: { ...typography.h3, color: colors.textPrimary },
   cardMeta: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  cardActionBtn: { padding: 4 },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Icon-in-tinted-circle, same idiom as AccountDetailsScreen's stat tiles —
+  // the background colour itself (danger/neutral) is set per button at the
+  // call site, not here (each icon carries its own tint).
+  cardActionBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+  },
   cardSummary: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   amountRow: {},
   amountBig: { ...typography.display, color: colors.textPrimary },

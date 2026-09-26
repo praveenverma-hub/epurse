@@ -18,15 +18,26 @@ export interface StatSplitCell {
   value: string;
 }
 
-export default function StatSplitRow({ cells, style }: { cells: StatSplitCell[]; style?: any }) {
+export default function StatSplitRow({
+  cells,
+  style,
+  align = 'left',
+}: {
+  cells: StatSplitCell[];
+  style?: any;
+  /** 'left' (default, matches Home/Accounts) or 'center' — a per-caller axis,
+   *  not a redesign of the shared shape, so existing callers are untouched. */
+  align?: 'left' | 'center';
+}) {
+  const centered = align === 'center';
   return (
     <View style={[styles.row, style]}>
       {cells.map((c, i) => (
         <React.Fragment key={c.label}>
           {i > 0 ? <View style={styles.divider} /> : null}
-          <View style={styles.cell}>
-            <Text style={styles.label}>{c.label}</Text>
-            <Text style={styles.value} numberOfLines={1}>{c.value}</Text>
+          <View style={[styles.cell, centered && styles.cellCenter]}>
+            <Text style={[styles.label, centered && styles.textCenter]}>{c.label}</Text>
+            <Text style={[styles.value, centered && styles.textCenter]} numberOfLines={1}>{c.value}</Text>
           </View>
         </React.Fragment>
       ))}
@@ -46,6 +57,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
   },
+  cellCenter: { alignItems: 'center' },
+  textCenter: { textAlign: 'center' },
   // Inset top and bottom so it reads as a divider between cells rather than a
   // seam splitting the surface into two shapes.
   divider: {

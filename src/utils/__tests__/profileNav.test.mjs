@@ -340,7 +340,6 @@ console.log('\n── shared components ──');
     'screens/BudgetPlanScreen.js',
     'screens/BudgetScreen.js',
     'screens/TransactionsScreen.js',
-    'screens/AccountDetailsScreen.tsx',
     'screens/LbPersonScreen.js',
   ];
   const { execSync } = await import('node:child_process');

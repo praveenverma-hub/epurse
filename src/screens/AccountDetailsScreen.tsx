@@ -47,6 +47,7 @@ import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 import EditIcon from '../components/EditIcon';
 import MonthDivider from '../components/MonthDivider';
 import { monthKey, formatDate, ordinalDay as ordinal } from '../utils/format';
@@ -336,21 +337,20 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         barStyle={theme.darkMode ? 'light-content' : 'dark-content'}
         backgroundColor={theme.background}
       />
-      <View style={styles.navBar}>
-      <View style={[styles.navSide, styles.navSideLeft]}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.navBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
-        </TouchableOpacity>
-      </View>
-      <Text style={[styles.navTitle, { color: theme.textPrimary }]}>Account Details</Text>
-      <View style={[styles.navSide, styles.navSideRight]}>
-        {account ? (
+      {/* Same canonical second-level header every other detail screen uses
+          (GoalDetailScreen, GroupDetailScreen, …) — this screen used to
+          hand-roll its own at a smaller size (17/600, an h3) than the
+          shared component's title (h2, 20/700), a drift nobody had caught.
+          No `bordered`, so it stays flat/transparent on `theme.background`
+          exactly as the old hand-rolled bar did — only `tint`/`titleColor`
+          are passed, to keep this screen's own dark-mode-aware ink instead
+          of the component's static (non-theme) default. */}
+      <PlainScreenHeader
+        title="Account Details"
+        onBack={() => navigation.goBack()}
+        tint={theme.textPrimary}
+        titleColor={theme.textPrimary}
+        right={account ? (
           <TouchableOpacity
             onPress={() => setBalanceInfoVisible(true)}
             style={styles.navBtn}
@@ -360,9 +360,8 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           >
             <InfoIcon size={22} color={theme.textSecondary} />
           </TouchableOpacity>
-        ) : null}
-      </View>
-      </View>
+        ) : undefined}
+      />
     </>
   );
 
@@ -922,21 +921,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
 
-  // 1. Nav header
-  navBar: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical:   spacing.sm,
-  },
-  navBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  navTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
-  // Fixed-width side slots (matched) so the centered title stays centered whether
-  // the right side holds one icon or two.
-  navSide:      { width: 80, flexDirection: 'row', alignItems: 'center' },
-  navSideLeft:  { justifyContent: 'flex-start' },
-  navSideRight: { justifyContent: 'flex-end' },
+  // 1. Nav header — PlainScreenHeader now owns the bar/title/back-chevron
+  // layout; this is just the balance-info button filling its `right` slot
+  // (sized to match PlainScreenHeader's own HEADER_SLOT exactly).
+  navBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
   // 2. Card stage
   // marginBottom: -POCKET_OVERLAP is the single structural trick — it shifts the

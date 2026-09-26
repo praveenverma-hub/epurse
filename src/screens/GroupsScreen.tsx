@@ -26,9 +26,22 @@ import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
 import SectionHeader from '../components/SectionHeader';
+import StatSplitRow from '../components/StatSplitRow';
 import type { Group } from '../types/group';
 
 type Filter = 'all' | 'owed' | 'owe';
+
+// The bar's own content: a 24pt title + one small info icon — this screen
+// never overrode `CollapsingHeaderScreen`'s `barHeight` prop, so it was
+// sitting on the component's generic 44pt DEFAULT_BAR_H (sized for a denser
+// row than this one actually has). That left extra blank space between the
+// "Groups" title and the hero's subheading line below it — Home and
+// Accounts both already tune this per their own bar content (54/40); Groups
+// never did. NOT a component-level default to change for everyone — the
+// component itself adds no fixed gap between the bar and the hero
+// (`top: insets.top + barHeight`, no extra constant), so each screen's own
+// content genuinely does need its own value here, same as those two.
+const HEADER_BAR_H = 40;
 
 function GroupListCardRow({
   group, net, personalMonth, onPress,
@@ -191,6 +204,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
       <CollapsingHeaderScreen
         gradientColors={gradient}
         onCollapseChange={setHeaderPinned}
+        barHeight={HEADER_BAR_H}
         renderBar={() => groupsBar(false)}
         renderCollapsedBar={() => groupsBar(true)}
         // The hero is two stacked text/card blocks whose height depends on
@@ -199,28 +213,24 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         estimatedHeroHeight={hasSharedGroups ? 170 : 40}
         renderHero={() => (
           <>
-            <Text style={styles.subheading}>Track shared and personal transactions</Text>
+            <Text style={styles.subheading}>Organise expenses across people, trips and events</Text>
             {/* The overall summary now lives IN the header — it fades and slides
                 away with the rest of the hero as the header collapses, exactly
                 like Home's Income/Refunds card, rather than sitting as the
-                first card in the scrollable body. */}
+                first card in the scrollable body. Same shared `StatSplitRow`
+                Home and AccountsScreen already use for this exact shape (one
+                translucent surface, hairline-divided, label above value) —
+                was its own hand-rolled copy with the order flipped. */}
             {hasSharedGroups && (
-              <View style={styles.heroSummaryCard}>
-                <View style={styles.heroSummaryCell}>
-                  <Text style={styles.heroSummaryValue} numberOfLines={1}>{formatCurrency(totals.owed)}</Text>
-                  <Text style={styles.heroSummaryLabel}>YOU ARE OWED</Text>
-                </View>
-                <View style={styles.heroSummaryDivider} />
-                <View style={styles.heroSummaryCell}>
-                  <Text style={styles.heroSummaryValue} numberOfLines={1}>{formatCurrency(totals.owe)}</Text>
-                  <Text style={styles.heroSummaryLabel}>YOU OWE</Text>
-                </View>
-                <View style={styles.heroSummaryDivider} />
-                <View style={styles.heroSummaryCell}>
-                  <Text style={styles.heroSummaryValue} numberOfLines={1}>{formatCurrency(Math.abs(totals.net))}</Text>
-                  <Text style={styles.heroSummaryLabel}>{totals.net >= 0 ? 'NET TO RECEIVE' : 'NET TO PAY'}</Text>
-                </View>
-              </View>
+              <StatSplitRow
+                style={styles.heroSummaryCard}
+                align="center"
+                cells={[
+                  { label: 'YOU ARE OWED', value: formatCurrency(totals.owed) },
+                  { label: 'YOU OWE', value: formatCurrency(totals.owe) },
+                  { label: totals.net >= 0 ? 'NET TO RECEIVE' : 'NET TO PAY', value: formatCurrency(Math.abs(totals.net)) },
+                ]}
+              />
             )}
           </>
         )}
@@ -307,36 +317,23 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   infoBtn: { marginLeft: spacing.xs, padding: 2 },
-  subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 2 },
+  subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 0, marginBottom: spacing.sm },
   list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
 
   // Root-screen bar row (no back chevron) — mirrors CollapsingHeaderScreen's
   // own StandardBar layout, since a custom renderBar/renderCollapsedBar pair
   // replaced it (needed so the info icon's ink can flip with `onLight`, which
   // a single static `headerRight` node can't do).
-  barRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
+  // minHeight matches HEADER_BAR_H — was a stale 44 (the component's generic
+  // default) that outgrew the bar's own shorter content and fought the
+  // shrunk `barHeight` prop above it.
+  barRow: { flexDirection: 'row', alignItems: 'center', minHeight: HEADER_BAR_H },
   barTitle: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, flex: 1 },
 
-  // The aggregate summary now lives IN THE HERO — translucent-white-on-gradient,
-  // same treatment as Home's Income/Refunds card (no shadow: it's part of the
-  // header's own surface, not a card floating on the page).
-  heroSummaryCard: {
-    flexDirection: 'row',
-    marginTop: spacing.md,
-    backgroundColor: '#FFFFFF1F',
-    borderRadius: radius.md,
-    overflow: 'hidden',
-  },
-  heroSummaryCell: { flex: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.md, alignItems: 'center' },
-  heroSummaryDivider: { width: StyleSheet.hairlineWidth, backgroundColor: '#FFFFFF3D', marginVertical: spacing.sm },
-  // Plain white, no icon — direction reads from the label text alone
-  // ("YOU ARE OWED"/"YOU OWE"); a coloured green/coral read too loud sitting
-  // on the translucent card over the gradient, and an icon was tried too.
-  // Same colour/weight-family as Home's Income/Refunds hero stat (DashboardScreen's
-  // statValue), sized one step up (h3, not bodyBold) — this figure is the card's
-  // own headline number, not a secondary stat beside a bigger one like Home's.
-  heroSummaryValue: { ...typography.h3, fontWeight: '800', color: '#fff', textAlign: 'center' },
-  heroSummaryLabel: { ...typography.tiny, color: '#FFFFFFCC', fontWeight: '800', letterSpacing: 0.9, textAlign: 'center', marginTop: spacing.xs },
+  // The aggregate summary now lives IN THE HERO — `StatSplitRow` itself carries
+  // the translucent surface/divider/label-value styling (same shared component
+  // Home and AccountsScreen use); this is just the gap above it.
+  heroSummaryCard: { marginTop: spacing.md },
 
   chipRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   chip: {

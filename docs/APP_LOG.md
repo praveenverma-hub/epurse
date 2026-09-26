@@ -368,6 +368,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   neither is in either sheet — they're still visible right on screen, just not
   re-explained in a sheet. "All accounts" is also now "All Accounts" (Title
   Case, matching every other heading in the app).
+- **Same day: account detail screen's title now matches every other detail
+  screen's size.** "Account Details" was rendering noticeably smaller than
+  the equivalent heading on Goals, Groups, Budget category and every other
+  detail screen — now the same size as all of them, using the app's one
+  shared header component. Nothing else about the header changed (same
+  colours, same back button, same info button).
 
 ---
 
@@ -1868,6 +1874,26 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   same edit screen), and its border is a touch thicker. Both the Transactions
   and Summary tabs now show a proper centred "nothing here yet" message when
   the group has no spending, instead of a small corner note or a blank chart.
+- **Sep-26-2026: Groups' header summary card now matches Home and Accounts
+  exactly.** The You Are Owed/You Owe/Net card at the top of the Groups tab
+  now uses the identical shared card Home's Income/Refunds and the Accounts
+  tab's Balance/Outstanding use, and each label sits above its amount (was
+  amount above label).
+- **Same day: tightened the gap under the "Groups" title.** The bar at the top
+  of the Groups tab was sized taller than it needed for its own content,
+  leaving extra blank space above the subheading line below it — tuned down
+  to match its actual content, same as Home and Accounts already do for their
+  own header bars.
+- **Same day: refreshed the one-line subheading under "Groups"** — now
+  "Organise expenses across people, trips and events" (was "Track shared and
+  personal transactions"). Accounts and Insights got a matching one-line
+  subheading of their own under their own titles: "Your complete financial
+  position, in one place" and "Understand your money and make better
+  choices" respectively (Insights' was tried and then removed again — that
+  screen doesn't have one).
+- **Same day: Group detail screen's Edit moved back onto its top card.** The
+  settings gear that lived in this screen's own header bar is gone; editing a
+  group is now a pencil icon on the card itself, right beside the trash icon.
 
 **Open**
 - None currently tracked (spend-exclusion cross-cutting checklist lives in the groups skill
@@ -1913,6 +1939,16 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   (city-first, falls back to district/region). City name only for now, no icon. The
   capture itself (manual add + live-SMS-only, never the backfill sweep) already existed —
   this just surfaces it; see the earlier Q&A in this log's history for how capture works.
+- **Sep-26-2026: picking a month on the Insights tab is now a bottom sheet.** The
+  "‹ September ›" row under Analytics/Budget's tab switcher is gone — the month
+  now shows as a chip beside the "Insights" title (top-right, with a small
+  drop-down arrow), and tapping it opens a sheet listing the last 12 months to
+  jump straight to, instead of stepping one at a time.
+- **Same day: tightened the gap above the new subheading on the Accounts tab**
+  ("Your complete financial position, in one place" was sitting further from
+  the "Accounts" title than intended). The Insights tab's own subheading was
+  removed again on request — that screen goes back to just its Analytics/
+  Budget switcher under the title, no subheading line.
 
 **Open**
 - None currently tracked.

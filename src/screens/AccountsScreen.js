@@ -341,7 +341,15 @@ export default function AccountsScreen({ navigation }) {
         renderCollapsedBar={() => accountsBar(true)}
         renderBar={() => accountsBar(false)}
         renderHero={() => (
-          <View style={styles.heroBlock}>
+          <>
+            {/* Own (small) top gap — sits OUTSIDE heroBlock on purpose, so
+                heroBlock's `paddingTop: spacing.lg` still opens the same
+                distance below IT that Home's `balanceBlock` does (a pinned
+                cross-screen invariant, see headerLayout.test.mjs), instead of
+                that same gap now reading as oversized above one line of
+                small prose. */}
+            <Text style={styles.subheading}>Your complete financial position, in one place</Text>
+            <View style={styles.heroBlock}>
             <Text style={styles.headerLabel}>NET WORTH</Text>
             <View style={styles.heroAmountRow}>
               <Text style={styles.headerBalance} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
@@ -373,7 +381,8 @@ export default function AccountsScreen({ navigation }) {
                 { label: 'OUTSTANDING', value: balancesVisible ? formatCurrency(liabilities) : '••••' },
               ]}
             />
-          </View>
+            </View>
+          </>
         )}
       >
         {/* Merge suggestions — "this card & this bank look like the same money" */}
@@ -641,10 +650,16 @@ const styles = StyleSheet.create({
   // Ink is applied at the call site: this row renders on the gradient AND on
   // the light pinned bar (`accountsBar`).
   headerTitle:    { flex: 1, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  /** The ONLY thing between the title row and "Net Worth" — matching Home's own
-   *  `balanceBlock` gap. With a self-measuring hero there is no box slack to add
-   *  to it, so this number is the gap. */
+  /** The ONLY thing between the subheading above it and "Net Worth" —
+   *  matching Home's own `balanceBlock` gap, a pinned cross-screen invariant
+   *  (`headerLayout.test.mjs` greps this exact line). Left untouched when the
+   *  subheading was added: it now moved OUTSIDE this block, one sibling up,
+   *  with its own smaller gap instead — see the comment at that call site. */
   heroBlock:     { paddingTop: spacing.lg },
+  // One-line "what this screen is for", same treatment as Groups' own hero
+  // subheading (small, translucent white). Its own tight top gap (not
+  // `heroBlock`'s pinned `spacing.lg`) is what actually sits below the bar.
+  subheading:    { ...typography.small, color: '#FFFFFFCC' },
   // Same row as the balance figure, chip on the right — flex-end so the
   // (two-line, shorter) chip sits at the BOTTOM of the row, level with where
   // the big amount text ends, rather than centered across its full height.

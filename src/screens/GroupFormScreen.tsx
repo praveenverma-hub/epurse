@@ -20,15 +20,19 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 
-import { colors, radius, searchFill, shadows, spacing, typography as typographyBase } from '../constants/theme';
+import { BUTTON_H, colors, radius, searchFill, shadows, spacing, typography as typographyBase } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import GradientButtonBase from '../components/GradientButton';
+import { FormTextInput } from '../components/FormField';
+import AppSwitch from '../components/AppSwitch';
 import { useEPurseStore } from '../store/ePurseStore';
 import { fetchContactsForPicker, getContactsPermissionStatus } from '../services/contactsService';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
+import { firstName } from '../utils/format';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember, GroupType } from '../types/group';
@@ -152,9 +156,16 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
   const nameValid = isValidName(sanitizeName(name));
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <View style={styles.root}>
       <StatusBar style="dark" />
-      <PlainScreenHeader title={isEdit ? 'Edit Group' : 'New Group'} onBack={() => navigation.goBack()} bordered />
+      {/* The header gets its OWN white SafeAreaView (matching
+          AddGroupExpenseScreen's own headerSafe) — with one shared
+          SafeAreaView for the whole screen, the status bar strip sat on
+          `root`'s gray `colors.background` instead of the header's white,
+          reading as the wrong colour up top. */}
+      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+        <PlainScreenHeader title={isEdit ? 'Edit Group' : 'New Group'} onBack={() => navigation.goBack()} bordered />
+      </SafeAreaView>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
@@ -163,11 +174,13 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Name */}
-          <TextInput
-            style={[styles.nameInput, name.trim().length > 0 && !nameValid && styles.nameInputError]}
-            placeholder="Group name…"
-            placeholderTextColor={colors.textMuted}
+          {/* Name — same outlined FormTextInput + labelled-section shape every
+              other form uses (AccountFormScreen, GoalFormScreen…), not a
+              filled card with oversized bold text. */}
+          <Text style={styles.sectionLabel}>Group Name</Text>
+          <FormTextInput
+            style={[styles.nameInputSpacing, name.trim().length > 0 && !nameValid && styles.nameInputError]}
+            placeholder="e.g. Goa Trip, Flatmates…"
             value={name}
             onChangeText={(t) => setName(sanitizeName(t))}
             maxLength={INPUT_LIMITS.NAME_MAX}
@@ -188,10 +201,13 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
                 {TYPE_OPTIONS.map((t) => (
                   <TouchableOpacity
                     key={t}
-                    style={[styles.typeChip, type === t && { backgroundColor: theme.primary + '20', borderColor: theme.primary }]}
+                    style={[styles.typeChip, type === t && { backgroundColor: theme.primary + '18', borderColor: theme.primary }]}
                     onPress={() => setType(t)}
                   >
-                    <Text style={[styles.typeChipTxt, type === t && { color: theme.primary, fontWeight: '700' }]}>
+                    {/* Weight stays constant — only colour/border change on
+                        selection (same rule FormField's own chips follow;
+                        a weight jump resizes the text and the row shifts). */}
+                    <Text style={[styles.typeChipTxt, type === t && { color: theme.primary }]}>
                       {t === 'personal' ? '👤 Personal' : '👥 Shared'}
                     </Text>
                   </TouchableOpacity>
@@ -206,9 +222,12 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
             </>
           )}
 
-          {/* Emoji row */}
+          {/* Emoji row — wraps across lines, same contained shape the Colour
+              row below already uses, instead of a horizontal scroll that ran
+              past the screen edge with no visual sign there was more to
+              scroll to. */}
           <Text style={styles.sectionLabel}>Icon</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.emojiRow}>
+          <View style={styles.emojiRow}>
             {/* Type any emoji — highlighted when the icon isn't one of the presets. */}
             <TextInput
               style={[
@@ -237,7 +256,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
                 <Text style={styles.emojiTxt}>{e}</Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
 
           {/* Color row */}
           <Text style={styles.sectionLabel}>Colour</Text>
@@ -264,18 +283,38 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
 
               {members.length > 0 && (
                 <View style={styles.membersBox}>
-                  <View style={[styles.memberChip, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '44' }]}>
-                    <Text style={[styles.memberChipTxt, { color: theme.primary }]}>👤 You</Text>
+                  {/* "You" is fixed (not removable) — same round-avatar +
+                      short-name-below shape as every added member, just no
+                      cross badge. */}
+                  <View style={styles.memberAvatarTile}>
+                    <View style={[styles.memberAvatar, { backgroundColor: theme.primary + '22' }]}>
+                      <Text style={[styles.memberAvatarTxt, { color: theme.primary }]}>Y</Text>
+                    </View>
+                    <Text style={styles.memberAvatarName} numberOfLines={1}>You</Text>
                   </View>
                   {members.map((m) => (
-                    <TouchableOpacity
-                      key={m.contactId}
-                      style={[styles.memberChip, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '44' }]}
-                      onPress={() => removeMember(m.contactId)}
-                    >
-                      <Text style={[styles.memberChipTxt, { color: theme.primary }]}>{m.name}</Text>
-                      <Text style={styles.memberRemove}>×</Text>
-                    </TouchableOpacity>
+                    <View key={m.contactId} style={styles.memberAvatarTile}>
+                      {/* Exactly avatar-sized, so the badge's absolute corner
+                          anchors to the CIRCLE, not the wider tile (which also
+                          has the name below it). */}
+                      <View style={styles.memberAvatarWrap}>
+                        <View style={[styles.memberAvatar, { backgroundColor: theme.primary + '22' }]}>
+                          <Text style={[styles.memberAvatarTxt, { color: theme.primary }]}>
+                            {m.name.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => removeMember(m.contactId)}
+                          hitSlop={8}
+                          style={styles.memberRemoveBadge}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${m.name}`}
+                        >
+                          <Ionicons name="close" size={10} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.memberAvatarName} numberOfLines={1}>{firstName(m.name)}</Text>
+                    </View>
                   ))}
                 </View>
               )}
@@ -307,33 +346,55 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
             </>
           )}
 
-          {/* Exclude toggle (personal only) */}
+          {/* Exclude toggle (personal only) — same AppSwitch + bordered row
+              shape AccountFormScreen's own toggles use, not a hand-drawn
+              track/thumb pair. */}
           {type === 'personal' && (
-            <TouchableOpacity style={styles.toggleRow} onPress={() => setExcludeFromTotals(!excludeFromTotals)}>
+            <View style={styles.toggleRow}>
               <View style={styles.toggleLeft}>
                 <Text style={styles.toggleLabel}>Exclude from main totals</Text>
                 <Text style={styles.toggleHint}>Group spend won&apos;t count in monthly reports or budget</Text>
               </View>
-              <View style={[styles.toggle, excludeFromTotals && { backgroundColor: theme.primary }]}>
-                <View style={[styles.toggleThumb, excludeFromTotals && styles.toggleThumbOn]} />
-              </View>
-            </TouchableOpacity>
+              <AppSwitch
+                value={excludeFromTotals}
+                onValueChange={setExcludeFromTotals}
+                trackColor={{ true: theme.primary, false: colors.divider }}
+                thumbColor="#fff"
+                ios_backgroundColor={colors.divider}
+              />
+            </View>
           )}
         </ScrollView>
 
-        {/* Pinned footer — single primary action, matching AddGroupExpenseScreen/
-            AddTransactionScreen (the back chevron already covers "Cancel"). */}
+        {/* Pinned footer. Create mode: single full-width primary action (the
+            back chevron already covers "Cancel"). Edit mode: an explicit
+            Cancel rides beside Save — same secondary/primary pairing
+            CenterModal's own two-button row uses (secondary left, primary
+            right, equal width). */}
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-          <GradientButton
-            title={isEdit ? 'Save Changes' : 'Create Group'}
-            onPress={handleSave}
-            disabled={!nameValid}
-            loading={submitting}
-            style={{ width: '100%' }}
-          />
+          <View style={styles.footerRow}>
+            {isEdit && (
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => navigation.goBack()}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              >
+                <Text style={styles.cancelBtnTxt}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+            <GradientButton
+              title={isEdit ? 'Save Changes' : 'Create Group'}
+              onPress={handleSave}
+              disabled={!nameValid}
+              loading={submitting}
+              style={isEdit ? { flex: 1 } : { width: '100%' }}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -341,39 +402,35 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
 
-  nameInput: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    color: colors.textPrimary,
-    ...typography.h3,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
+  // `FormTextInput` (from components/FormField) carries the base look now —
+  // these are just this screen's own spacing/error overrides.
+  nameInputSpacing: { marginBottom: spacing.md },
   nameInputError: { borderColor: colors.danger },
   nameError: {
     ...typography.tiny,
     color: colors.danger,
-    marginTop: -spacing.sm,
+    marginTop: spacing.xs,
     marginBottom: spacing.sm,
     marginLeft: spacing.xs,
   },
   typeRow:      { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  // Transparent at rest (no `colors.card` fill), 1px border — same shape
+  // AccountFormScreen's own type-picker chips use; selected state's bg/border
+  // are applied inline at the call site.
   typeChip: {
     flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.pill,
-    alignItems: 'center', borderWidth: 1.5, borderColor: colors.divider,
-    backgroundColor: colors.card,
+    alignItems: 'center', borderWidth: 1, borderColor: colors.divider,
   },
   typeChipTxt:  { ...typography.body, color: colors.textSecondary },
   typeHint:     { ...typography.tiny, color: colors.textMuted, marginBottom: spacing.sm },
   sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.sm, marginBottom: spacing.xs },
-  emojiRow:     { flexDirection: 'row', marginBottom: spacing.sm },
+  // flexWrap + gap — same shape `colorRow` below already uses; spacing comes
+  // from `gap`, not per-chip margin (that was the horizontal-scroll layout).
+  emojiRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
   emojiChip: {
     width: 44, height: 44, borderRadius: radius.md,
     alignItems: 'center', justifyContent: 'center',
-    marginRight: 8, borderWidth: 1.5, borderColor: 'transparent',
+    borderWidth: 1.5, borderColor: 'transparent',
     backgroundColor: colors.card,
   },
   emojiTxt:     { fontSize: 22 },
@@ -387,16 +444,29 @@ const styles = StyleSheet.create({
     ...shadows.pop,
   },
   colorCheck:   { color: '#fff', fontWeight: '900', fontSize: 15 },
-  membersBox:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
-  // accent bg/border/text applied inline via theme.primary
-  memberChip: {
-    flexDirection: 'row', alignItems: 'center',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1,
+  membersBox:   { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginBottom: spacing.md },
+  // Round avatar + short name below — same avatar idiom as this screen's own
+  // contact-search rows (`avatar`/`avatarTxt`) and GroupDetailScreen's Members
+  // tab, not a fresh look picked for this one row.
+  memberAvatarTile: { width: 56, alignItems: 'center' },
+  // Exactly the avatar's own footprint — the badge below anchors to THIS
+  // box's corner, not the wider tile (which also carries the name text).
+  memberAvatarWrap: { width: 44, height: 44 },
+  memberAvatar: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
   },
-  memberChipTxt: { ...typography.small, fontWeight: '700' },
-  memberRemove:  { marginLeft: 6, color: colors.danger, fontWeight: '800', fontSize: 14 },
+  memberAvatarTxt: { ...typography.body, fontWeight: '800' },
+  memberAvatarName: { ...typography.tiny, color: colors.textSecondary, marginTop: 4, maxWidth: 56 },
+  // Corner badge on the avatar — same "small circular badge, top-right corner"
+  // idiom as AccountsScreen's primary-account star / AccountCard's delete pill.
+  memberRemoveBadge: {
+    position: 'absolute', top: -4, right: -4,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: colors.danger,
+    alignItems: 'center', justifyContent: 'center',
+    ...shadows.pop,
+  },
   search: {
     backgroundColor: colors.card,
     borderRadius: radius.md,
@@ -421,24 +491,16 @@ const styles = StyleSheet.create({
   avatarTxt:    { fontWeight: '800' },
   contactName:  { flex: 1, ...typography.body, color: colors.textPrimary },
   check:        { fontWeight: '800' },
+  // Bordered settings-row shape — matches AccountFormScreen's own toggle rows
+  // (a hairline above, not a floating unbounded row).
   toggleRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: spacing.sm, marginTop: spacing.xs,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingVertical: spacing.md, marginTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider,
   },
   toggleLeft:   { flex: 1 },
   toggleLabel:  { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
   toggleHint:   { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
-  toggle: {
-    width: 44, height: 26, borderRadius: 13,
-    backgroundColor: colors.divider,
-    padding: 3, justifyContent: 'center',
-  },
-  toggleThumb: {
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: '#fff',
-    ...shadows.pop,
-  },
-  toggleThumbOn: { transform: [{ translateX: 18 }] },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
@@ -446,4 +508,21 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.divider,
   },
+  footerRow: { flexDirection: 'row', gap: spacing.sm },
+  // Same outlined-secondary shape CenterModal's own secondary button uses —
+  // BUTTON_H so it lines up exactly with GradientButton beside it.
+  cancelBtn: {
+    flex: 1,
+    minHeight: BUTTON_H,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnTxt: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '800' },
+  // Header's own SafeAreaView — white, matching AddGroupExpenseScreen's
+  // `headerSafe`, so the status bar strip sits on white, not `root`'s gray.
+  headerSafe: { backgroundColor: colors.card },
 });
