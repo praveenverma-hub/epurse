@@ -93,3 +93,13 @@ export const isValidAmount = (raw) => {
   const n = parseAmount(raw);
   return n > 0 && n <= MAX_ALLOWED_AMOUNT;
 };
+
+// ── Day of month (CC billing/due day) ────────────────────────────────────────
+/** Digits only, clamped to a real day-of-month (1-31). Empty stays empty —
+ *  used by both AccountFormScreen and AccountCreditCardStepScreen. */
+export const sanitizeDay = (raw) => {
+  const digits = String(raw ?? '').replace(/\D/g, '').slice(0, 2);
+  if (!digits) return '';
+  const n = Math.min(31, Math.max(1, parseInt(digits, 10)));
+  return String(n);
+};

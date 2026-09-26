@@ -9,10 +9,10 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Keyboard, Dimensions,
+  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,23 +20,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useEPurseStore,
   selectEPurseNetWorth,
-  selectShouldShowAnchorNudge,
+  selectAssetsAndLiabilities,
   selectAccountLinkSuggestions,
 } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, pinnedHeaderChrome, withAlpha } from '../constants/theme';
 import { useTheme, useGradient } from '../hooks/useTheme';
-import { formatCurrency, formatCompact } from '../utils/format';
+import { formatCurrency, formatCompact, timeAgo } from '../utils/format';
+import { netWorthTrend } from '../utils/accountFlow';
+import { resolveAccountGradient } from '../utils/accountGradient';
+import { resolveTxnAccount } from '../utils/accountMatch';
+import { ccPaymentStatus, PAYMENT_STATUS_LABEL, dueRelativeText, ccStatusColor } from '../utils/ccStatement';
+import { currentPaymentWindow } from '../utils/dueDate';
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL } from '../constants/categories';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
 
 import AccountCard    from '../components/AccountCard';
+import StatSplitRow   from '../components/StatSplitRow';
 import EmptyState     from '../components/EmptyState';
 import InfoIcon       from '../components/InfoIcon';
-import AddAccountModal from '../components/AddAccountModal';
 import CenterModal    from '../components/CenterModal';
 import InfoSheet      from '../components/InfoSheet';
 import LinkCardToBankSheet from '../components/LinkCardToBankSheet';
-import ManageAccountModal from '../components/ManageAccountModal';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
@@ -108,7 +112,6 @@ export default function AccountsScreen({ navigation }) {
   const isFocused    = useIsFocused();
   const accounts     = useEPurseStore((s) => s.accounts);
   const userName     = useEPurseStore((s) => s.userName);
-  const addAccount   = useEPurseStore((s) => s.addAccount);
   const deleteAccount = useEPurseStore((s) => s.deleteAccount);
 
   // Debit-card↔bank unification: auto-detected merge suggestions + the actions.
@@ -133,16 +136,8 @@ export default function AccountsScreen({ navigation }) {
   const [linkTarget, setLinkTarget] = useState(null);
   const [linkInfoVisible, setLinkInfoVisible] = useState(false);
 
-  const userPhones     = useEPurseStore((s) => s.userPhones);
-  const addUserPhone   = useEPurseStore((s) => s.addUserPhone);
-  const removeUserPhone = useEPurseStore((s) => s.removeUserPhone);
-
   const [balancesVisible,    setBalancesVisible]    = useState(false);
-  const [addAccountVisible,  setAddAccountVisible]  = useState(false);
   const [confirm,            setConfirm]            = useState(null);
-  const [phoneInput,         setPhoneInput]         = useState('');
-  // Manage Account modal — opened from the flat list row's left icon.
-  const [manageAccountId,    setManageAccountId]    = useState(null);
 
   // StatusBar: light glyphs over the gradient header, dark once the LIGHT bar has
   // pinned over it (it covers the status-bar inset). The imperative, focus-gated
@@ -151,14 +146,6 @@ export default function AccountsScreen({ navigation }) {
   // next tab. Dashboard goes through the same one.
   const [headerPinned, setHeaderPinned] = useState(false);
   useHeaderStatusBar(headerPinned);
-
-  const handleAddPhone = () => {
-    const digits = phoneInput.replace(/\D/g, '');
-    if (digits.length < 4) return;
-    addUserPhone(digits);
-    setPhoneInput('');
-    Keyboard.dismiss();
-  };
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -177,6 +164,21 @@ export default function AccountsScreen({ navigation }) {
     () => accounts.filter((a) => a.type === ACCOUNT_TYPES.BANK),
     [accounts],
   );
+
+  // Most recent activity per account, for the plain list's "Last activity"
+  // line — ONE pass over every transaction via `resolveTxnAccount` (the
+  // store's own matcher, see utils/accountMatch), not a per-row re-scan.
+  const lastActivityByAccount = useMemo(() => {
+    const map = {};
+    for (const t of txnsForLinks) {
+      if (t.isIgnored) continue;
+      const acc = resolveTxnAccount(t, accounts);
+      if (!acc) continue;
+      const at = new Date(t.createdAt).getTime();
+      if (!map[acc.id] || at > map[acc.id]) map[acc.id] = at;
+    }
+    return map;
+  }, [txnsForLinks, accounts]);
 
   // ── Looping card carousel ──────────────────────────────────────────────────
   // With 2+ cards we clone the last card before the first and the first after the
@@ -216,9 +218,30 @@ export default function AccountsScreen({ navigation }) {
   // transactions (they reflect actual money movement). See selectEPurseNetWorth
   // in the store for the exclusion rules.
   const totalBalance = useEPurseStore(selectEPurseNetWorth);
-
-  const showAnchorNudge   = useEPurseStore(selectShouldShowAnchorNudge);
-  const dismissAnchorNudge = useEPurseStore((s) => s.dismissAnchorNudge);
+  // Same accounts, split into what you own vs what you owe — always sums back
+  // to totalBalance above (see selectAssetsAndLiabilities's own doc comment).
+  // Computed in a useMemo, NOT called as a store selector directly — it
+  // returns a fresh object every call, and zustand v5 compares selector
+  // results by reference (see the project's own "no zustand selector
+  // allocates" lint / project_zustand_v5_selector_loop_sep2026 memory).
+  const { assets, liabilities } = useMemo(
+    () => selectAssetsAndLiabilities({ accounts }),
+    [accounts],
+  );
+  // "vs last month" — reconstructed from each account's own ledger, not stored
+  // history (there isn't any). `accounts`/`txnsForLinks` are already subscribed
+  // above for the link-suggestion memo; reused here rather than a second
+  // subscription to the same state.
+  const netWorthCompare = useMemo(
+    () => netWorthTrend(accounts, txnsForLinks),
+    [accounts, txnsForLinks],
+  );
+  // A tiny epsilon keeps float noise (fractions of a rupee) from flickering
+  // between up/down — real "no change" reads as flat, not ±0.01%.
+  const nwTrend = Math.abs(netWorthCompare.deltaPct) < 0.05 ? 'flat'
+    : netWorthCompare.deltaPct > 0 ? 'up' : 'down';
+  const nwTrendColor = nwTrend === 'up' ? theme.success : nwTrend === 'down' ? theme.danger : '#FFFFFFB3';
+  const nwTrendIcon = nwTrend === 'up' ? 'trending-up' : nwTrend === 'down' ? 'trending-down' : 'remove';
 
   const handleToggleBalances = async () => {
     if (balancesVisible) { setBalancesVisible(false); return; }
@@ -287,7 +310,7 @@ export default function AccountsScreen({ navigation }) {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.iconBtn, { backgroundColor: fill(ICON_BTN_ALPHA) }]}
-            onPress={() => setAddAccountVisible(true)}
+            onPress={() => navigation.navigate('AccountForm')}
             activeOpacity={0.7}
           >
             <Ionicons name="add" size={22} color={ink} />
@@ -319,40 +342,40 @@ export default function AccountsScreen({ navigation }) {
         renderBar={() => accountsBar(false)}
         renderHero={() => (
           <View style={styles.heroBlock}>
-            <Text style={styles.headerLabel}>Net Worth</Text>
-            <Text style={styles.headerBalance}>
-              {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
-            </Text>
+            <Text style={styles.headerLabel}>NET WORTH</Text>
+            <View style={styles.heroAmountRow}>
+              <Text style={styles.headerBalance} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                {balancesVisible ? formatCurrency(totalBalance) : '₹ ••••••'}
+              </Text>
+              {/* Masked with the balance — a ratio still leaks how much things
+                  moved, so it's gated the same as the figure it's about. */}
+              {balancesVisible && netWorthCompare.hasComparison ? (
+                <View style={styles.nwTrendWrap}>
+                  {/* Only the icon+percentage gets the chip background — "vs
+                      last month" renders plain, same treatment as the
+                      "Net Worth" label itself, not as part of the chip. The
+                      trend colour now lives in the chip's OWN tinted
+                      background; the icon/value stay plain white on it. */}
+                  <View style={[styles.nwTrendChip, { backgroundColor: withAlpha(nwTrendColor, 0.3) }]}>
+                    <Ionicons name={nwTrendIcon} size={12} color="#fff" />
+                    <Text style={styles.nwTrendPct} numberOfLines={1}>
+                      {Math.round(Math.abs(netWorthCompare.deltaPct))}%
+                    </Text>
+                  </View>
+                  <Text style={[styles.headerLabel, styles.nwTrendSub]} numberOfLines={1}>vs last month</Text>
+                </View>
+              ) : null}
+            </View>
+            <StatSplitRow
+              style={styles.assetsRow}
+              cells={[
+                { label: 'BALANCE',     value: balancesVisible ? formatCurrency(assets) : '••••' },
+                { label: 'OUTSTANDING', value: balancesVisible ? formatCurrency(liabilities) : '••••' },
+              ]}
+            />
           </View>
         )}
       >
-        {/* First-time anchor nudge — auto-hides once any account is anchored
-            or once the user dismisses it. */}
-        {showAnchorNudge ? (
-          <View style={[styles.nudgeCard, { backgroundColor: theme.card, borderColor: theme.primary + '33' }]}>
-            <View style={[styles.nudgeIcon, { backgroundColor: theme.primary + '1A' }]}>
-              <Ionicons name="wallet-outline" size={20} color={theme.primary} />
-            </View>
-            <View style={styles.nudgeBody}>
-              <Text style={[styles.nudgeTitle, { color: colors.textPrimary }]}>
-                Set your real balances
-              </Text>
-              <Text style={[styles.nudgeBody2, { color: colors.textSecondary }]}>
-                Tap any card below, flip it, and enter the actual balance from your
-                bank. Net Worth becomes accurate from that moment on.
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={dismissAnchorNudge}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss"
-            >
-              <Ionicons name="close" size={18} color={colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
         {/* Merge suggestions — "this card & this bank look like the same money" */}
         {linkSuggestions.map((sug) => (
           <View key={`${sug.cardMask}:${sug.bankMask}`} style={styles.linkSuggest}>
@@ -446,7 +469,7 @@ export default function AccountsScreen({ navigation }) {
 
         {/* Flat account list */}
         <View style={styles.listHeaderRow}>
-          <Text style={styles.listTitle}>All accounts</Text>
+          <Text style={styles.listTitle}>All Accounts</Text>
           <TouchableOpacity
             onPress={() => setLinkInfoVisible(true)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -465,7 +488,28 @@ export default function AccountsScreen({ navigation }) {
             style={styles.accountsEmpty}
           />
         ) : (
-          sortedAccounts.map((a) => (
+          sortedAccounts.map((a) => {
+            // Row subtitle — a Credit Card gets its payment status (the same
+            // status/wording the detail screen's own Payment Details card
+            // uses), everything else gets when it last moved. Only ONE shows
+            // per row: a CC has no plain "last activity" line of its own here,
+            // status already implies recency and the row has no space for both.
+            const isCC = a.type === ACCOUNT_TYPES.CREDIT_CARD;
+            let rowSubtitle = null;
+            let rowSubtitleColor = null;
+            if (isCC) {
+              const status = ccPaymentStatus(a);
+              if (status !== 'no_statement') {
+                rowSubtitle = (status === 'upcoming' || status === 'due_soon' || status === 'due_today')
+                  ? `Due ${dueRelativeText(currentPaymentWindow(a))}`
+                  : PAYMENT_STATUS_LABEL[status];
+                rowSubtitleColor = ccStatusColor(status, theme);
+              }
+            } else if (lastActivityByAccount[a.id]) {
+              rowSubtitle = `Last activity ${timeAgo(lastActivityByAccount[a.id])}`;
+            }
+
+            return (
             <TouchableOpacity
               key={a.id}
               style={styles.listRow}
@@ -473,13 +517,29 @@ export default function AccountsScreen({ navigation }) {
               activeOpacity={0.7}
             >
               <TouchableOpacity
-                style={styles.listIcon}
-                onPress={() => setManageAccountId(a.id)}
+                style={styles.listIconWrap}
+                onPress={() => navigation.navigate('AccountForm', { accountId: a.id })}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityRole="button"
                 accessibilityLabel={`Manage ${a.name}`}
               >
-                <Text style={{ fontSize: 20 }}>{ACCOUNT_TYPE_EMOJI[a.type] ?? '💳'}</Text>
+                {/* Same gradient the account's own detail-screen hero card
+                    resolves to (bank-name match / manual Card Color pick /
+                    hash fallback) — one shared source, not a flat neutral
+                    circle unrelated to what the card itself looks like. */}
+                <LinearGradient
+                  colors={resolveAccountGradient(a, theme)}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.listIcon}
+                >
+                  <Text style={{ fontSize: 20 }}>{ACCOUNT_TYPE_EMOJI[a.type] ?? '💳'}</Text>
+                </LinearGradient>
+                {a.primary ? (
+                  <View style={[styles.listPrimeBadge, { backgroundColor: theme.card }]}>
+                    <Ionicons name="star" size={10} color="#F2A93B" />
+                  </View>
+                ) : null}
               </TouchableOpacity>
               <View style={{ flex: 1, marginRight: spacing.sm }}>
                 <Text style={styles.listName} numberOfLines={1} ellipsizeMode="tail">{a.name}</Text>
@@ -487,6 +547,14 @@ export default function AccountsScreen({ navigation }) {
                   {ACCOUNT_TYPE_LABEL[a.type] ?? a.type}
                   {(a.aliasMasks?.length ?? 0) > 0 ? ` · card ··${a.aliasMasks[0]}` : ''}
                 </Text>
+                {rowSubtitle ? (
+                  <Text
+                    style={[styles.listSubtitle, rowSubtitleColor ? { color: rowSubtitleColor } : null]}
+                    numberOfLines={1}
+                  >
+                    {rowSubtitle}
+                  </Text>
+                ) : null}
               </View>
               {/* Debit cards can be folded into a bank (same money) */}
               {a.type === ACCOUNT_TYPES.DEBIT_CARD && bankAccounts.length > 0 ? (
@@ -510,67 +578,12 @@ export default function AccountsScreen({ navigation }) {
                   : '••••'}
               </Text>
             </TouchableOpacity>
-          ))
+            );
+          })
         )}
-
-        {/* Linked mobile numbers — powers self-transfer detection */}
-        <Text style={[styles.listTitle, styles.listTitleStandalone]}>Your mobile numbers</Text>
-        <View style={styles.phoneCard}>
-          <Text style={styles.phoneHelp}>
-            Add the mobile number(s) linked to your bank accounts. When money moves
-            to your own account or number, we'll tag it as a self transfer and keep
-            it out of your spending and income totals.
-          </Text>
-
-          {userPhones?.length > 0 ? (
-            <View style={styles.phoneChips}>
-              {userPhones.map((p) => (
-                <View key={p} style={styles.phoneChip}>
-                  <Text style={styles.phoneChipText}>{p}</Text>
-                  <TouchableOpacity
-                    onPress={() => removeUserPhone(p)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${p}`}
-                  >
-                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          <View style={styles.phoneInputRow}>
-            <TextInput
-              style={styles.phoneInput}
-              value={phoneInput}
-              onChangeText={setPhoneInput}
-              placeholder="e.g. 9876543210"
-              placeholderTextColor={colors.textMuted}
-              keyboardType="phone-pad"
-              returnKeyType="done"
-              onSubmitEditing={handleAddPhone}
-              maxLength={15}
-            />
-            <TouchableOpacity
-              style={[styles.phoneAddBtn, phoneInput.replace(/\D/g, '').length < 4 && styles.phoneAddBtnDisabled]}
-              onPress={handleAddPhone}
-              disabled={phoneInput.replace(/\D/g, '').length < 4}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.phoneAddText}>Add</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
 
         <View style={{ height: tabBarClearance(insets.bottom) }} />
       </CollapsingHeaderScreen>
-
-      <AddAccountModal
-        visible={addAccountVisible}
-        onClose={() => setAddAccountVisible(false)}
-        onAdd={(acct) => addAccount(acct)}
-      />
 
       <CenterModal
         visible={!!confirm}
@@ -584,7 +597,9 @@ export default function AccountsScreen({ navigation }) {
         onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
       />
 
-      {/* What "linking" a card to a bank means */}
+      {/* What "linking" a card to a bank means — the one thing on this screen
+          a user might not already understand on sight (unlike "last activity"
+          or a plain-English payment-status label, which need no explaining). */}
       <InfoSheet
         visible={linkInfoVisible}
         onClose={() => setLinkInfoVisible(false)}
@@ -614,13 +629,6 @@ export default function AccountsScreen({ navigation }) {
         }}
       />
 
-      {/* Manage Account — rename / change type / link / delete (left icon on a row) */}
-      <ManageAccountModal
-        accountId={manageAccountId}
-        visible={!!manageAccountId}
-        onClose={() => setManageAccountId(null)}
-        onDeleted={() => setManageAccountId(null)}
-      />
     </View>
   );
 }
@@ -637,8 +645,27 @@ const styles = StyleSheet.create({
    *  `balanceBlock` gap. With a self-measuring hero there is no box slack to add
    *  to it, so this number is the gap. */
   heroBlock:     { paddingTop: spacing.lg },
-  headerLabel:   { color: '#FFFFFFCC', ...typography.small },
-  headerBalance: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
+  // Same row as the balance figure, chip on the right — flex-end so the
+  // (two-line, shorter) chip sits at the BOTTOM of the row, level with where
+  // the big amount text ends, rather than centered across its full height.
+  heroAmountRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.sm },
+  // Matches Dashboard's own eyebrow-label + hero-figure treatment
+  // (`balanceLabel`/`balanceValue`) — same tiny-bold-tracked eyebrow above a
+  // large, tight-tracked figure, so the two hero screens read as one family.
+  headerLabel:   { color: '#FFFFFFCC', ...typography.tiny, fontWeight: '800', letterSpacing: 0.9 },
+  headerBalance: { color: '#fff', fontSize: 38, fontWeight: '800', letterSpacing: -0.8 },
+  // Column: the chip (icon+%, its own background) on top, plain caption below.
+  nwTrendWrap: { alignItems: 'center' },
+  nwTrendChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  nwTrendPct: { color: '#fff', ...typography.tiny, fontWeight: '800' },
+  // Same treatment as the "Net Worth" label (styles.headerLabel) — plain
+  // context text, not part of the coloured chip above it.
+  nwTrendSub: { marginTop: 3, fontSize: 10 },
+  assetsRow: { marginTop: spacing.md },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
@@ -684,36 +711,6 @@ const styles = StyleSheet.create({
   addCardPlus:  { fontSize: 32, color: colors.textSecondary, fontWeight: '300', lineHeight: 36 },
   addCardLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
 
-  nudgeCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    marginHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    ...shadows.card,
-  },
-  nudgeIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nudgeBody: { flex: 1 },
-  nudgeTitle: {
-    ...typography.bodyBold,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  nudgeBody2: {
-    ...typography.small,
-    lineHeight: 18,
-  },
-
   flipHintText: {
     ...typography.tiny,
     color: colors.textSecondary,
@@ -734,11 +731,6 @@ const styles = StyleSheet.create({
     ...typography.h3,
     color: colors.textPrimary,
   },
-  // Standalone section titles (not inside listHeaderRow) keep their own spacing.
-  listTitleStandalone: {
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
-  },
   listRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -749,72 +741,26 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     ...shadows.card,
   },
+  listIconWrap: { width: 40, height: 40 },
   listIcon: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: colors.background,
     alignItems: 'center', justifyContent: 'center',
+  },
+  // Corner badge for a primary account — same idiom as AccountDetailsScreen's
+  // own "PRIME" mark, sized down to sit on this 40px icon.
+  listPrimeBadge: {
+    position: 'absolute', top: -3, right: -3,
+    width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+    ...shadows.pop,
   },
   listName:    { ...typography.bodyBold, color: colors.textPrimary },
   listType:    { ...typography.small, color: colors.textSecondary, marginTop: 2 },
+  // A Credit Card's payment status (tinted per status, see the row's own
+  // colour switch) or, for every other type, "Last activity …" in the same
+  // muted tone as listType.
+  listSubtitle: { ...typography.tiny, color: colors.textSecondary, marginTop: 2, fontWeight: '600' },
   listBalance: { ...typography.bodyBold, color: colors.textPrimary },
-
-  phoneCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    ...shadows.card,
-  },
-  phoneHelp: {
-    ...typography.small,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
-  phoneChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  phoneChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
-  phoneChipText: { ...typography.small, color: colors.textPrimary, fontWeight: '600' },
-  phoneInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  phoneInput: {
-    flex: 1,
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    ...typography.body,
-    color: colors.textPrimary,
-  },
-  phoneAddBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 4,
-    borderRadius: radius.md,
-    backgroundColor: colors.textPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  phoneAddBtnDisabled: { opacity: 0.4 },
-  phoneAddText: { color: colors.card, ...typography.bodyBold, fontWeight: '700' },
-
 
   // Debit-card↔bank merge suggestion card
   linkSuggest: {

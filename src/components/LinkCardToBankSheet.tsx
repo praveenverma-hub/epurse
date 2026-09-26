@@ -1,8 +1,8 @@
 // =============================================================================
 // LinkCardToBankSheet — pick which Bank account a Debit Card draws from, to fold
 // it in via linkDebitCardToBank (same money, one balance). Extracted from
-// AccountsScreen's inline bank-picker Modal — pure refactor, no behavior change,
-// so ManageAccountModal can reuse the same sheet.
+// AccountsScreen's inline bank-picker Modal — pure refactor, no behavior change.
+// AccountsScreen's own row-level "Link" pill is still the one caller.
 //
 // This component only picks a bank — it does NOT call linkDebitCardToBank or show
 // the "can't be auto-undone" confirmation itself. The caller's `onLink(bankId)`

@@ -48,10 +48,10 @@ const LoginGate: React.FC = () => {
   // just confirmed would be actively wrong, not just imprecise.
   const title = justDeletedAccount ? 'Account Deleted' : sessionExpired ? 'Sign Back In' : 'Sign In To Continue';
   const subtitle = justDeletedAccount
-    ? 'Your data has been deleted from this device. Sign in to start fresh.'
+    ? 'Your data has been deleted from this device\nSign in to start fresh.'
     : sessionExpired
-      ? 'Your Google session expired. Sign in again to keep using ePurse.'
-      : 'ePurse now requires a Google sign-in. Your data on this device is untouched.';
+      ? 'Your Google session expired. Sign in again\nto keep using ePurse.'
+      : 'ePurse now requires a Google sign-in. Your data\non this device is untouched.';
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: theme.card }]}>

@@ -132,9 +132,9 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   everything else lingered as dead references. `LinkCardToBankSheet.tsx` extracted from
   `AccountsScreen`'s inline bank-picker so both surfaces share it. Unlink/unmerge still
   deliberately not built — `linkDebitCardToBank` stays one-way.
-- CC card limit schema is still note-only (`TODO(cc-limits)` in `ePurseStore.js`); net
-  worth still treats a CC purely as its outstanding balance. `statementDay`/`dueDay`
-  themselves ARE real, populated fields now (see the cycle-date entry below).
+- ~~CC card limit schema is still note-only~~ — built Sep-26-2026, see below.
+  `statementDay`/`dueDay` themselves ARE real, populated fields (see the cycle-date entry
+  below).
 - **Sep-9-2026: fixed manually-added transactions showing no account on their card at all**
   (reported: "after submission, the transaction card does not show any account"). Cause:
   `TransactionItem.js` reads `txn.accountType`/`txn.accountMask` directly (never a live
@@ -194,6 +194,180 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   than mixing in `theme.*`) holding a smaller 13px icon in `#64748B` (matching the label's
   own muted grey). Purely visual — `onPress`/`openAnchor` still lives on the outer
   `TouchableOpacity`, the icon has never itself been a separate tap target.
+- **Sep-26-2026: Account Revamp phase 1 — schema + store actions + Add/Edit as ONE full
+  screen.** User supplied a target field list (Bank/Cash: name/type/balance/last4/
+  institution/primary/include-in-net-worth/appearance/transactions; Credit Card adds
+  outstanding/credit limit/statement balance/billing day/due day/minimum due/payment
+  history/utilization/available credit) and asked what the store wasn't maintaining yet.
+  Manual transfers and account-level analytics were explicitly scoped OUT for this pass.
+  Store v36 migration adds `primary`/`includeInNetWorth`/`archived`/`archivedAt` to every
+  account, and `creditLimit`/`statementBalance`/`minimumDue`/`paymentHistory` (capped at 24
+  entries) to Credit Card accounts — `statementBalance` is backfilled from any existing
+  `ccBills` entry so it's populated immediately, not just going forward. New actions:
+  `setPrimaryAccount` (exclusive — `null` clears it entirely), `setIncludeInNetWorth`,
+  `archiveAccount`/`unarchiveAccount` (soft-hide, keeps transactions/`ccBills`/history unlike
+  `deleteAccount`; cancels the card's due reminders same as delete does), `setCreditLimit`,
+  `setMinimumDue`, `setAccountCycleDates` (manual counterpart to the SMS-driven
+  `applyCcCycleInfoToAccount` — either source freely overwrites the other). `paymentHistory`
+  is pushed by every balance-settling reconcile path (`confirmCCTrueUp`, `settleCCPayment`,
+  `markAsCCBillPayment` when its mode isn't `'none'`) and `statementBalance`/`minimumDue`
+  clear back to null at the same moment. `selectEPurseNetWorth` now skips an account that's
+  `archived` or has `includeInNetWorth: false`. `utilization`/`availableCredit` deliberately
+  NOT stored — derive them from `creditLimit` + outstanding when a screen needs them, so
+  there's no second number that can drift from the real one.
+
+  **AddAccountModal + ManageAccountModal → one `AccountFormScreen.tsx`.** Merged the create
+  sheet and the rename/type/link/delete sheet into a single pushed screen (optional
+  `route.params?.accountId` picks add vs edit), the same convention `AddTransactionScreen`/
+  `GoalFormScreen` already use — a pushed screen rather than a Modal, so its own `CenterModal`
+  confirms (type-change / archive / delete) are never a second stacked native Modal. Bank
+  name / last-4 mask stay creation-only (shown read-only in edit mode, matching the old
+  modal — no store action to edit them post-creation was ever built, and none was asked for
+  here). New in edit mode: Primary and Include-in-net-worth switches, and for a Credit Card,
+  Credit Limit / Billing Day / Payment Due Day / Minimum Due fields. `addAccount` now
+  returns the new account's id so the screen can call `setPrimaryAccount` right after
+  creating a row marked primary. `ACCOUNT_NEEDS_MASK`/`ACCOUNT_NEEDS_BANK` promoted from a
+  private copy inside `AddAccountModal` into `constants/categories.js` (single source).
+  `AccountsScreen`'s own separate debit-card "Link" pill (independent of the old modal's own
+  "Link Now") is untouched. `AccountDetailsScreen`'s hero-card pencil and `AccountsScreen`'s
+  row-icon/FAB now `navigation.navigate('AccountForm', ...)` instead of opening a modal.
+  6 new `storeIntegration.test.mjs` blocks (migration backfill, primary exclusivity, net
+  worth exclusion, archive/unarchive, the three CC setters, payment-history push+cap).
+  UI polish (styling of the new toggles/fields, account-level analytics, manual transfers)
+  explicitly deferred to a later pass.
+- **Same day, follow-up: CC section styling + two-step Add flow.** The "Credit Card"
+  section became a `SectionHeader` (icon+subtitle, "optional" said once) instead of a
+  plain field label — stacked against a same-weight field label right below it
+  ("Credit Limit"), it read as a duplicate heading. All its fields now live in ONE
+  bordered card (border = `theme.inputBorder`, matching the individual inputs) whose own
+  edge opens/closes the section — no separate hairline needed. **Adding a NEW Credit
+  Card is now two screens; editing one stays one**, per explicit request: step 1
+  (`AccountFormScreen`) collects type/bank/mask/name/primary/net-worth and, for a new CC,
+  hands off via "Next" instead of creating the account; step 2 (new
+  `AccountCreditCardStepScreen.tsx`) asks for the same all-optional limit/billing
+  day/due day/minimum due fields with a single **Add Account** button — a blank field
+  already resolves to null, so there's no separate "skip" action to offer (a first cut
+  had a "Skip" button beside it too; removed same day once flagged as doing the
+  identical thing). Step 2 is the one that actually calls `addAccount`, then pops back
+  2 screens to `AccountsScreen`. `sanitizeDay` promoted to `utils/validation.js` so both
+  screens share it.
+- **Same day: removed the redundant "Set your real balances" nudge card.** It duplicated
+  the existing hint text already below the account carousel — the selector's own doc
+  comment even said so. Removed top to bottom (not just the JSX) since it had no other
+  caller: `anchorNudgeDismissed` field/action/selector out of the store, out of the
+  backup allow-list, out of the reset-defaults tests. No migration needed for removing a
+  field.
+- **Same day: credit-card billing & payment spec (store v37).** Partial payments are real now:
+  a card keeps its statement amount and a `remainingDue` that drops with each Settle (True-up
+  marks it paid); a repeat bill reminder can't wipe a partial payment, a new statement resets
+  it. The existing payment modals stay the only UX — Settle now says how much is left on the
+  statement, and an overpayment shows a warning before "Settle Anyway". The Home bill card
+  shows what's still owed and says "Due date passed" rather than "Overdue". Over-limit is no
+  longer hidden (available goes negative, utilization past 100%, "Over Limit By" tile). Actual
+  statement/due dates from the bill SMS now outrank the recurring days; the bill's minimum due
+  is parsed too. Account Details: payment status pill, real due date, remaining/last payment,
+  unusual statement→due gap warning, and a true statement-to-statement bill cycle with this
+  cycle's spend. Forms validate limit > 0 and minimum due ≤ statement. Also fixed
+  `backupService` `STORE_VERSION` (stale since v36 — a restore-version guard).
+- **Same day, correction: actual dates now need confirmation, not auto-save.** A bill SMS's
+  real statement/due date used to save straight onto the account; now it only STAGES
+  (`pendingCycleDate`) until the user confirms it — surfaced as an inline "Update?" note the
+  next time they settle a payment on that card (the existing payment sheets, no new modal).
+  A manually-set billing/due day (Edit Account) now wins over SMS PERMANENTLY, not just
+  until the next bill. Fixed a real bug this uncovered: repeat-bill detection was comparing
+  against the now-unconfirmed date and would have reset a partial payment on every resend.
+- **Same day: AccountDetailsScreen now shows Credit Card insights.** Three new CC-only
+  sections (non-CC accounts unchanged): a 4-tile "Credit Snapshot" grid (Outstanding —
+  always shown — plus Credit Limit/Available Credit/Utilization% once a limit is set, else
+  one "Add credit limit" prompt tile instead of 3 dashed ones); a "Payment Details" card
+  (Statement Balance/Minimum Due/Billing Day/Payment Due Day, hidden only if all four are
+  unset); a "Current Bill Cycle" card (date range, days-left, a progress bar, and a
+  spent/remaining money line once a limit is set) — shown only once both the billing and
+  due day are known. New `currentBillCycle`/`nextOccurrenceOfDay`/`daysUntilDayOfMonth`
+  helpers in `utils/dueDate.js` (correctly rolls a due day numerically smaller than the
+  statement day into the next month), covered by a new `test:dueDate` suite. Also renamed
+  the Add-flow's Credit Card step-2 screen from "Credit Card Details" to "Card Details",
+  dropped its now-redundant card border, and rewrote its subtitle to state the benefit
+  ("helps us track your available credit and remind you before payments are due") instead
+  of just restating that the fields are optional.
+- **Same day: AccountDetailsScreen now shows insights for Bank/Cash/Debit/Wallet accounts
+  too.** A "This Month" card (faded/tinted header strip, Money In / Money Out / Net Flow
+  below — hidden if there's no activity yet this month) and a "Balance Trend" bar chart
+  (last up-to-6 months' end-of-month balance, reconstructed backwards from the account's
+  current balance and its own transaction ledger — so it shows FEWER months rather than a
+  flat invented history for a newer or recently-corrected account, and never for a single
+  month, since one bar isn't a trend). New pure `utils/accountFlow.js`
+  (`monthMoneyFlow`/`accountBalanceTrend`), a new `test:accountFlow` suite, and the month-bar
+  chart itself promoted from a private copy inside `GroupDetailScreen.tsx` into a shared
+  `components/MonthlyBarChart.tsx` (now used by both screens).
+- **Same day: Balance Trend now a line chart, not bars** — same visual language as the
+  "Spending Pace" insight chart (gradient area fill, faint grid with value labels, a
+  highlighted endpoint with its value called out), via a new shared
+  `components/MonthlyLineChart.tsx`. A month that dips negative extends the scale below
+  zero with a dashed zero-line and renders its endpoint in the danger color.
+- **Same day: guaranteed ONE primary account, and used it as the real default (store v38).**
+  Previously nothing ensured any account was ever marked primary — most accounts are
+  auto-created from SMS, which never touched that field. Now the app always picks one
+  (the first account, automatically) whenever at least one account exists, and re-picks
+  one if the primary account is archived or deleted. That account is now the actual
+  default: Add Transaction's account field starts on it, and adding an already-repaid
+  entry from the main Lent/Borrowed screen's own form books it against that account
+  directly, with no extra step. Also added a small gold "PRIME" badge next to the
+  network chip on the account's detail card.
+- **Same day, correction: a person's own ledger screen still asks which account you
+  repaid from.** The default above was too broad at first — settling a debt from a
+  specific person's page is a deliberate action on real money, so it keeps confirming
+  which account before booking it, same as before. Only the quick add-a-settled-entry
+  form on the main Lent/Borrowed screen skips that question.
+- **Same day: Credit Card detail-screen polish.** "Credit Snapshot" heading → "Overview".
+  When no credit limit is set yet, the "Add credit limit" card used to take up a whole
+  row by itself (mostly empty space) while Outstanding sat alone above it, half-empty.
+  They now share one row, half-width each.
+- **Same day: removed the duplicate mobile-number card from the Accounts screen.**
+  Mobile number is managed from Profile now; the "Your mobile numbers" card at the
+  bottom of Accounts (add/remove multiple numbers) was a leftover duplicate. Note:
+  Profile only ever keeps ONE number, so this also means self-transfer detection can
+  no longer be told about a second linked number — a deliberate trade-off, not an
+  oversight.
+- **Same day: Accounts screen gets a Balance/Outstanding card + a Net Worth trend.**
+  Same "one surface, split by a divider" card Home already uses for Income/Refunds,
+  now showing what you own vs what you owe, right under the Net Worth figure. Also
+  added a small up/down chip next to the amount — the percentage change versus the
+  end of last month, reconstructed from each account's own transaction history
+  (there's no stored history to read back). Both hide along with the balance when
+  it's masked.
+- **Same day: pick a color for an account's detail-screen card.** Add/Edit Account
+  now has a "Card Color" swatch row — the same bank-tone gradients the detail
+  screen already uses automatically for recognized banks, now pickable by hand for
+  any account. Only that one card (the detail screen's) uses the pick — the
+  Accounts-tab carousel card keeps choosing its own color independently, so the
+  two can still look different for the same account (found while answering how
+  each of the app's three account-card looks decides its color — turns out all
+  three do it differently, and only one of them just got a manual override).
+- **Same day: the plain account list now uses that same color too, plus a
+  primary marker.** The small icon circle on each row (Accounts tab, below the
+  cards) used to be a flat gray for every account — it now shows the exact
+  same color/gradient as that account's own detail-screen card. A primary
+  account also gets a small gold star badge on its icon.
+- **Same day: both the account list and the account detail screen show more
+  at a glance.** On the Accounts tab, each row in "All accounts" now has a
+  small status line under its type — a Credit Card shows its bill status
+  ("Due in 5 days" / "Paid" / "Partially paid" / "Due date passed", tinted to
+  match), every other account shows "Last activity 3h ago" (or the date, once
+  it's older than a day). On the account detail screen, a new line above the
+  balance reads "Last activity {when} · N transactions" — the same "Last
+  activity · N entries" phrasing the Lent/Borrowed person screen already uses
+  — and a bank account with a debit card folded into it now says so ("Also
+  includes card ··1234"), which previously wasn't shown anywhere on that
+  screen.
+- **Same day: the two ⓘ info sheets got a proper trim.** They now explain only
+  what a user genuinely couldn't tell from looking at the screen — how linking
+  a card to its bank works, and how balance anchoring and linked-card folding
+  work — as short one-line points, not paragraphs. "Last activity" (and, on
+  the account list, the credit-card status wording) needed no explaining, so
+  neither is in either sheet — they're still visible right on screen, just not
+  re-explained in a sheet. "All accounts" is also now "All Accounts" (Title
+  Case, matching every other heading in the app).
 
 ---
 

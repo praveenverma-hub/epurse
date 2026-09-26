@@ -36,10 +36,11 @@ import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { spacing, radius, shadows, typography as typographyBase } from '../constants/theme';
+import { spacing, radius, shadows, withAlpha, typography as typographyBase } from '../constants/theme';
 // The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { ACCOUNT_TYPES } from '../constants/categories';
+import { resolveAccountGradient } from '../utils/accountGradient';
 import TransactionItemRaw from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
@@ -47,14 +48,22 @@ import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
 import EditIcon from '../components/EditIcon';
-import ManageAccountModal from '../components/ManageAccountModal';
 import MonthDivider from '../components/MonthDivider';
-import { monthKey } from '../utils/format';
+import { monthKey, formatDate, ordinalDay as ordinal } from '../utils/format';
 import { txnBelongsToAccount } from '../utils/accountMatch';
 import { useAnchorToast, BalanceAnchorModal } from './OnboardingExperience';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import SectionHeader from '../components/SectionHeader';
+import ProgressBar from '../components/ProgressBar';
 import { EMPTY_ARRAY } from '../constants/empty';
+import { currentPaymentWindow, currentBillingCycle } from '../utils/dueDate';
+import {
+  statementRemaining, ccPaymentStatus, PAYMENT_STATUS_LABEL, creditAvailability,
+  cycleSpend, lastPayment, dueRelativeText, ccStatusColor,
+} from '../utils/ccStatement';
+import { monthMoneyFlow, accountBalanceTrend } from '../utils/accountFlow';
+import { timeAgo } from '../utils/format';
+import MonthlyLineChart from '../components/MonthlyLineChart';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -72,9 +81,30 @@ type Account = {
   network?: string;
   balance: number;
   color?: string;
+  primary?: boolean;
+  /** Manual "Card Color" pick from AccountFormScreen — a BANK_GRADIENTS key,
+   *  never a free-form hex. Wins over every automatic guess in heroGradient. */
+  colorKey?: string | null;
   ccPaymentsTracked?: boolean;
   /** Linked debit-card masks folded into this (bank) account — see matchAccount. */
   aliasMasks?: string[];
+  /** Stamped when the user corrects a balance — the point before which
+   *  reconstructing PAST balances (Balance Trend) can't be trusted. */
+  anchoredAt?: number | null;
+  // Credit Card insights (account revamp, Sep-2026) — see the store's own
+  // doc comments on `setCreditLimit`/`setMinimumDue`/`setAccountCycleDates`
+  // and `applyCcCycleInfoToAccount` for how these get populated.
+  creditLimit?: number | null;
+  statementBalance?: number | null;
+  minimumDue?: number | null;
+  statementDay?: number | null;
+  dueDay?: number | null;
+  remainingDue?: number | null;
+  lastStatementDate?: string | null;
+  lastDueDate?: string | null;
+  cycleDaysManual?: boolean;
+  pendingCycleDate?: { statementDate: string | null; dueDate: string | null } | null;
+  paymentHistory?: { date: number; amount: number }[];
 };
 
 type Txn = {
@@ -88,7 +118,11 @@ type Txn = {
 };
 
 interface Props {
-  navigation: { goBack: () => void; addListener: (e: string, cb: () => void) => () => void };
+  navigation: {
+    goBack: () => void;
+    navigate: (screen: string, params?: Record<string, unknown>) => void;
+    addListener: (e: string, cb: () => void) => () => void;
+  };
   route: { params?: { accountId?: string } };
 }
 
@@ -103,27 +137,6 @@ const SENSITIVE_TYPES = new Set<string>([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT
 // Pixels of the card's bottom that tuck behind the pocket sheet.
 const POCKET_OVERLAP = 64;
 
-const BANK_GRADIENTS: Record<string, [string, string]> = {
-  ICICI: ['#9E2A1B', '#D4502E'],
-  HDFC:  ['#0B4DA2', '#1E66C7'],
-  SBI:   ['#15489B', '#2E73D1'],
-  AXIS:  ['#7A1F2B', '#A8324A'],
-  KOTAK: ['#9A1B2F', '#C8324A'],
-  IDFC:  ['#7A1B5C', '#A83289'],
-  PNB:   ['#0E5B4A', '#138A6E'],
-  YES:   ['#0C3C8C', '#1E5FD0'],
-  RBL:   ['#5B2A86', '#8047C2'],
-};
-
-const FALLBACK_PALETTES: [string, string][] = [
-  ['#1F1147', '#5B247A'],
-  ['#0F2027', '#2C5364'],
-  ['#061236', '#0D2E6E'],
-  ['#0A1F11', '#153A28'],
-  ['#130F08', '#2D2010'],
-  ['#0E1020', '#1A2040'],
-];
-
 const TYPE_SUBTITLE: Record<string, string> = {
   [ACCOUNT_TYPES.BANK]:        'Savings Account',
   [ACCOUNT_TYPES.CREDIT_CARD]: 'Credit Card',
@@ -133,22 +146,6 @@ const TYPE_SUBTITLE: Record<string, string> = {
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const hashIndex = (seed: string, mod: number): number => {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return h % mod;
-};
-
-const heroGradient = (account: Account, theme: any): [string, string] => {
-  const key = (account.bankName || account.name || '').toUpperCase();
-  // Indian Bank → exact emerald token from the active theme palette.
-  if (key.includes('INDIAN')) return [theme.gradientGreenStart, theme.gradientGreenEnd];
-  const matched = Object.keys(BANK_GRADIENTS).find((b) => key.includes(b));
-  if (matched) return BANK_GRADIENTS[matched];
-  if (account.color) return [account.color, account.color];
-  return FALLBACK_PALETTES[hashIndex(account.id || key, FALLBACK_PALETTES.length)];
-};
 
 const deriveBankName = (account: Account): string => {
   if (account.bankName) return account.bankName.toUpperCase();
@@ -211,7 +208,6 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // ── Balance anchoring — tap the balance to set/correct it; header ⓘ explains it.
   // (Replaces the old first-visit anchor chip with an on-demand affordance.)
   const [balanceInfoVisible, setBalanceInfoVisible] = useState(false);
-  const [manageVisible, setManageVisible] = useState(false);
   const {
     modalVisible: anchorVisible,
     openModal: openAnchor,
@@ -419,31 +415,331 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const rawBalance     = account.balance ?? 0;
   const summaryLabel   = isCreditCard ? 'Total Outstanding' : 'Available Balance';
   const summaryValue   = isCreditCard ? Math.abs(rawBalance) : rawBalance;
-  const [gradStart, gradEnd] = heroGradient(account, theme);
+  const [gradStart, gradEnd] = resolveAccountGradient(account, theme);
   const networkLabel   = account.network || TYPE_SUBTITLE[account.type] || '';
+
+  // ── Credit Card insights (billing spec) ─────────────────────────────────────
+  // All statement / status / limit maths comes from `utils/ccStatement` +
+  // `utils/dueDate` — the SAME functions the store and both payment sheets use,
+  // so this screen can't disagree with them. `outstanding` reuses the summary's
+  // own figure rather than deriving the same number twice.
+  const outstanding      = summaryValue;
+  const creditLimit      = isCreditCard ? account.creditLimit ?? null : null;
+  const avail            = isCreditCard ? creditAvailability(outstanding, creditLimit) : null;
+  const hasLimit         = !!avail;
+  // UNCLAMPED — over the limit, available goes negative and utilization past
+  // 100%; shown as an "Over limit" warning instead of hidden behind ₹0 / 100%.
+  const availableCredit  = avail ? avail.availableCredit : null;
+  const utilization      = avail ? avail.utilization : null;
+  const utilPct          = utilization != null ? Math.round(utilization * 100) : null;
+  const overLimit        = !!avail?.overLimit;
+  // Same tiers Budget already uses for spend-vs-cap — not new thresholds.
+  const utilColor = utilPct == null
+    ? theme.primary
+    : utilPct >= 100 ? theme.budgetOver
+    : utilPct >= 85 ? theme.budgetNearLimit
+    : theme.budgetNormal;
+
+  const statementBalance = isCreditCard ? account.statementBalance ?? null : null;
+  const minimumDue        = isCreditCard ? account.minimumDue ?? null : null;
+  const statementDay       = isCreditCard ? account.statementDay ?? null : null;
+  const dueDay             = isCreditCard ? account.dueDay ?? null : null;
+  const remainingDue       = isCreditCard ? statementRemaining(account) : null;
+  const payStatus          = isCreditCard ? ccPaymentStatus(account) : 'no_statement';
+  const payWindow          = isCreditCard ? currentPaymentWindow(account) : null;
+  const lastPay            = isCreditCard ? lastPayment(account) : null;
+  const partlyPaid = remainingDue != null && statementBalance != null
+    && remainingDue > 0 && remainingDue < statementBalance;
+  // A card that's 100% dashes has no reason to render — but these fill in on
+  // their own from a later parsed bill SMS, so the section grows in over time.
+  const hasPaymentDetails = isCreditCard && (statementBalance != null || minimumDue != null
+    || statementDay != null || dueDay != null || !!lastPay);
+  const dueText = dueRelativeText(payWindow);
+  // Status → accent. The label always renders in textPrimary beside a coloured
+  // dot, so an amber tier never has to carry text contrast on its own.
+  const statusColor = ccStatusColor(payStatus, theme);
+
+  // The BILLING cycle — statement to next statement, the spend period (distinct
+  // from the statement→due payment window above).
+  const billing    = isCreditCard ? currentBillingCycle(account) : null;
+  const cycleSpent = billing ? cycleSpend(ledger, billing.start, billing.end) : 0;
+  const cycleLeftText = !billing ? ''
+    : billing.daysLeft === 0 ? 'Closes today'
+    : `${billing.daysLeft} ${billing.daysLeft === 1 ? 'day' : 'days'} left`;
+
+  // ── Bank/Cash/Debit/Wallet insights ─────────────────────────────────────────
+  // Same ledger the transaction list below already builds from `belongsToAccount`
+  // — every row that ever moved this account's real balance (self-transfers and
+  // LB entries included), not a "spend"-filtered subset (see utils/accountFlow).
+  const { moneyIn, moneyOut, netFlow } = !isCreditCard ? monthMoneyFlow(ledger) : { moneyIn: 0, moneyOut: 0, netFlow: 0 };
+  const hasFlowThisMonth = !isCreditCard && (moneyIn > 0 || moneyOut > 0);
+  // Reconstructing months before an anchor (or before the account's first-ever
+  // transaction) has nothing real to show — trimmed rather than padded with a
+  // flat, invented history.
+  const trendSince = !isCreditCard
+    ? (account.anchoredAt ?? (ledger.length ? new Date(ledger[ledger.length - 1].createdAt).getTime() : Date.now()))
+    : null;
+  const balanceTrend = !isCreditCard
+    ? accountBalanceTrend(ledger, rawBalance, { since: trendSince }).filter((b) => b.known)
+    : [];
+  // A single bar isn't a trend — needs at least 2 known months to be worth a chart.
+  const hasBalanceTrend = balanceTrend.length > 1;
+
+  // ── At-a-glance meta — same "Last activity {date} · N entries" idiom
+  // LbPersonScreen already uses for its own summary card. `ledger` is already
+  // sorted newest-first, so its head is the latest activity with no extra pass.
+  const txnCountLabel = ledger.length === 1 ? '1 transaction' : `${ledger.length} transactions`;
+  const linkedMasks = account.aliasMasks ?? [];
 
   // FlatList header: lives entirely inside the pocket sheet — no z-index tricks.
   const listHeaderComponent = (
     <View style={styles.pocketContent}>
-      {/* Tap the balance to set/correct it (anchor). The header ⓘ explains how. */}
-      <TouchableOpacity
-        style={styles.summaryBox}
-        onPress={openAnchor}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel={`Adjust ${summaryLabel.toLowerCase()}`}
-      >
-        <Text style={styles.summaryLabel}>{summaryLabel}</Text>
-        <View style={styles.summaryRight}>
-          <Text style={styles.summaryValue}>{formatMoney(summaryValue)}</Text>
-          {/* Same 26×26 chip as the card's own edit button (`cardEditBtn`) and
-              GoalCard/GoalDetailScreen's pencil — was a bare 20px glyph
-              floating beside the value with no chrome of its own. */}
-          <View style={styles.summaryEditBtn}>
-            <EditIcon size={13} color="#64748B" />
+      {/* Quick context above the balance — when this account last moved, how
+          much history it has, and (bank accounts only) which linked debit
+          card(s) are folded into this same balance. The list screen's own
+          row shows a shorter version of the first line; nothing here duplicates
+          the ledger below, which already carries every date individually. */}
+      {ledger.length > 0 ? (
+        <Text style={[styles.metaCaption, { color: theme.textMuted }]} numberOfLines={1}>
+          Last activity {timeAgo(new Date(ledger[0].createdAt).getTime())} · {txnCountLabel}
+        </Text>
+      ) : null}
+      {linkedMasks.length > 0 ? (
+        <View style={styles.linkedRow}>
+          <Ionicons name="git-merge-outline" size={13} color={theme.textMuted} />
+          <Text style={[styles.linkedText, { color: theme.textMuted }]} numberOfLines={1}>
+            Also includes card{linkedMasks.length > 1 ? 's' : ''} ··{linkedMasks.join(', ··')}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Tap the balance to set/correct it (anchor). The header ⓘ explains how.
+          Credit Card accounts skip this — the new "Outstanding" stat tile below
+          takes over as the one tap-to-anchor entry point, so the same figure
+          isn't shown twice in two different treatments. */}
+      {!isCreditCard ? (
+        <TouchableOpacity
+          style={styles.summaryBox}
+          onPress={openAnchor}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Adjust ${summaryLabel.toLowerCase()}`}
+        >
+          <Text style={styles.summaryLabel}>{summaryLabel}</Text>
+          <View style={styles.summaryRight}>
+            <Text style={styles.summaryValue}>{formatMoney(summaryValue)}</Text>
+            {/* Same 26×26 chip as the card's own edit button (`cardEditBtn`) and
+                GoalCard/GoalDetailScreen's pencil — was a bare 20px glyph
+                floating beside the value with no chrome of its own. */}
+            <View style={styles.summaryEditBtn}>
+              <EditIcon size={13} color="#64748B" />
+            </View>
+          </View>
+        </TouchableOpacity>
+      ) : null}
+
+      {/* ── Credit Card insights (Sep-2026) — Outstanding is always shown;
+          Credit Limit/Available/Utilization only once a limit is set, else one
+          wide "add a limit" tile in their place rather than 3 tiles of dashes. */}
+      {isCreditCard ? (
+        <>
+          <SectionHeader icon="stats-chart-outline" title="Overview" accentColor={theme.primary} style={styles.sectionHead} />
+          <View style={styles.statGrid}>
+            <TouchableOpacity
+              style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}
+              onPress={openAnchor}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={`Adjust ${summaryLabel.toLowerCase()}`}
+            >
+              {/* Same corner-badge idiom as the hero card's own `cardEditBtn` /
+                  the old `summaryEditBtn` — a circular chip in the tile's
+                  top-right corner, the tap affordance for the one interactive
+                  tile in this grid. */}
+              <View style={[styles.statEditBadge, { backgroundColor: withAlpha(theme.textMuted, 0.14) }]}>
+                <EditIcon size={10} color={theme.textMuted} />
+              </View>
+              <View style={[styles.statIconWrap, { backgroundColor: withAlpha(theme.borrowed, 0.12) }]}>
+                <Ionicons name="cash-outline" size={16} color={theme.borrowed} />
+              </View>
+              <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatMoney(outstanding)}</Text>
+              <Text style={[styles.statK, { color: theme.textMuted }]}>Outstanding</Text>
+            </TouchableOpacity>
+
+            {hasLimit ? (
+              <>
+                <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+                  <View style={[styles.statIconWrap, { backgroundColor: withAlpha(theme.primary, 0.12) }]}>
+                    <Ionicons name="card-outline" size={16} color={theme.primary} />
+                  </View>
+                  <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatMoney(creditLimit as number)}</Text>
+                  <Text style={[styles.statK, { color: theme.textMuted }]}>Credit Limit</Text>
+                </View>
+                {/* Over the limit, this tile flips to the warning itself: how far
+                    over, in the danger tone — never a silent ₹0. */}
+                <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: overLimit ? withAlpha(theme.danger, 0.4) : theme.divider }]}>
+                  <View style={[styles.statIconWrap, { backgroundColor: withAlpha(overLimit ? theme.danger : theme.primary, 0.12) }]}>
+                    <Ionicons name={overLimit ? 'alert-circle-outline' : 'wallet-outline'} size={16} color={overLimit ? theme.danger : theme.primary} />
+                  </View>
+                  <Text style={[styles.statV, { color: overLimit ? theme.danger : theme.textPrimary }]}>
+                    {formatMoney(Math.abs(availableCredit as number))}
+                  </Text>
+                  <Text style={[styles.statK, { color: overLimit ? theme.danger : theme.textMuted }]}>
+                    {overLimit ? 'Over Limit By' : 'Available Credit'}
+                  </Text>
+                </View>
+                <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+                  <View style={[styles.statIconWrap, { backgroundColor: withAlpha(utilColor, 0.12) }]}>
+                    <Ionicons name="speedometer-outline" size={16} color={utilColor} />
+                  </View>
+                  <Text style={[styles.statV, { color: theme.textPrimary }]}>{utilPct}%</Text>
+                  <Text style={[styles.statK, { color: theme.textMuted }]}>Utilization</Text>
+                  {/* The bar fills to 100% at most (ProgressBar clamps); the % above
+                      is the real, possibly >100 figure. */}
+                  <ProgressBar progress={utilization as number} color={utilColor} height={5} style={styles.statBar} />
+                </View>
+              </>
+            ) : (
+              // Same half-width tile as Outstanding, not a full-width one — a
+              // lone wide card here was mostly empty space either way (an
+              // icon and two lines in the space of three tiles), and it left
+              // Outstanding stranded alone on its own row above it.
+              <TouchableOpacity
+                style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}
+                onPress={() => navigation.navigate('AccountForm', { accountId: account.id })}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Add credit limit"
+              >
+                <View style={[styles.statIconWrap, { backgroundColor: withAlpha(theme.primary, 0.12) }]}>
+                  <Ionicons name="add-circle-outline" size={16} color={theme.primary} />
+                </View>
+                <Text style={[styles.statV, { color: theme.primary, fontSize: 13 }]}>Add Limit</Text>
+                <Text style={[styles.statK, { color: theme.textMuted }]}>See utilization</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </>
+      ) : null}
+
+      {/* ── Payment details — the statement, its due date and status. Any ONE
+          missing field shows "—"; the card hides only when NOTHING is known. */}
+      {hasPaymentDetails ? (
+        <>
+          <SectionHeader icon="receipt-outline" title="Payment Details" accentColor={theme.primary} style={styles.sectionHead} />
+          <View style={[styles.infoCard, { borderColor: theme.inputBorder }]}>
+            {payStatus !== 'no_statement' ? (
+              <View style={styles.statusRow}>
+                <View style={[styles.statusPill, { backgroundColor: withAlpha(statusColor, 0.12) }]}>
+                  <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+                  <Text style={[styles.statusText, { color: theme.textPrimary }]}>{PAYMENT_STATUS_LABEL[payStatus]}</Text>
+                </View>
+                {payWindow && payStatus !== 'paid' ? (
+                  <Text style={[styles.statusSub, { color: theme.textSecondary }]}>
+                    Due {formatDate(payWindow.dueDate)} · {dueText}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+            {[
+              ['Statement Balance', statementBalance != null ? formatMoney(statementBalance) : '—'],
+              ...(partlyPaid ? [['Remaining Due', formatMoney(remainingDue as number)]] : []),
+              ['Minimum Due', minimumDue != null ? formatMoney(minimumDue) : '—'],
+              ['Billing Day', statementDay != null ? `the ${ordinal(statementDay)}` : '—'],
+              ['Payment Due Day', dueDay != null ? `the ${ordinal(dueDay)}` : '—'],
+              ...(lastPay ? [['Last Payment', `${formatMoney(lastPay.amount)} · ${formatDate(lastPay.date)}`]] : []),
+            ].map(([label, value], i) => (
+              <View
+                key={label}
+                style={[styles.infoRow, (i > 0 || payStatus !== 'no_statement') && styles.infoRowDivider, { borderTopColor: theme.divider }]}
+              >
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>{label}</Text>
+                <Text style={[styles.infoValue, { color: theme.textPrimary }]}>{value}</Text>
+              </View>
+            ))}
+            {/* Warn, never block — some issuers genuinely run short/long gaps. */}
+            {payWindow?.gapUnusual ? (
+              <Text style={[styles.gapWarn, { color: theme.textSecondary }]}>
+                {payWindow.gapDays} days from statement to due date is unusual — check the billing and due days.
+              </Text>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
+      {/* ── Current bill cycle — statement to next statement (the spend period).
+          Needs only the billing day or a real statement date. */}
+      {billing ? (
+        <>
+          <SectionHeader icon="calendar-outline" title="Current Bill Cycle" accentColor={theme.primary} style={styles.sectionHead} />
+          <View style={[styles.infoCard, { borderColor: theme.inputBorder }]}>
+            <View style={styles.cycleHeadRow}>
+              <Text style={[styles.cycleDates, { color: theme.textPrimary }]} numberOfLines={1}>
+                {formatDate(billing.start)} – {formatDate(billing.end)}
+              </Text>
+              <Text style={[styles.cycleDaysLeft, { color: theme.primary }]}>{cycleLeftText}</Text>
+            </View>
+            <ProgressBar progress={billing.progress} color={theme.primary} height={6} style={styles.cycleBar} />
+            <View style={styles.cycleMoneyRow}>
+              <Text style={[styles.cycleMoneyText, { color: theme.textSecondary }]}>
+                Spent {formatMoney(cycleSpent)}
+              </Text>
+              {hasLimit ? (
+                <Text style={[styles.cycleMoneyText, { color: overLimit ? theme.danger : theme.textSecondary }]}>
+                  {overLimit
+                    ? `Over limit by ${formatMoney(Math.abs(availableCredit as number))}`
+                    : `Remaining ${formatMoney(availableCredit as number)}`}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        </>
+      ) : null}
+
+      {/* ── Bank/Cash/Debit/Wallet insights — a faded-header "This Month" card
+          (Money In / Money Out / Net Flow) and a Balance Trend bar chart.
+          Credit Card accounts skip both: their own Payment Details / Bill
+          Cycle cards above already cover "where the money's going". */}
+      {hasFlowThisMonth ? (
+        <View style={[styles.flowCard, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          <View style={[styles.flowHeader, { backgroundColor: withAlpha(theme.primary, 0.08) }]}>
+            <Ionicons name="calendar-outline" size={14} color={theme.primary} />
+            <Text style={[styles.flowHeaderText, { color: theme.textPrimary }]}>This Month</Text>
+          </View>
+          <View style={styles.flowBody}>
+            <View style={styles.flowStat}>
+              <Text style={[styles.flowLabel, { color: theme.textMuted }]}>Money In</Text>
+              <Text style={[styles.flowValue, { color: theme.income }]} numberOfLines={1}>
+                {formatMoney(moneyIn)}
+              </Text>
+            </View>
+            <View style={[styles.flowDivider, { backgroundColor: theme.divider }]} />
+            <View style={styles.flowStat}>
+              <Text style={[styles.flowLabel, { color: theme.textMuted }]}>Money Out</Text>
+              <Text style={[styles.flowValue, { color: theme.expense }]} numberOfLines={1}>
+                {formatMoney(moneyOut)}
+              </Text>
+            </View>
+            <View style={[styles.flowDivider, { backgroundColor: theme.divider }]} />
+            <View style={styles.flowStat}>
+              <Text style={[styles.flowLabel, { color: theme.textMuted }]}>Net Flow</Text>
+              <Text style={[styles.flowValue, { color: netFlow >= 0 ? theme.income : theme.expense }]} numberOfLines={1}>
+                {netFlow >= 0 ? '+' : '-'}{formatMoney(Math.abs(netFlow))}
+              </Text>
+            </View>
           </View>
         </View>
-      </TouchableOpacity>
+      ) : null}
+
+      {hasBalanceTrend ? (
+        <>
+          <SectionHeader icon="trending-up-outline" title="Balance Trend" accentColor={theme.primary} style={styles.sectionHead} />
+          <View style={[styles.infoCard, styles.trendCard, { borderColor: theme.inputBorder }]}>
+            <MonthlyLineChart data={balanceTrend} color={theme.primary} allowNegative />
+          </View>
+        </>
+      ) : null}
+
       <SectionHeader icon="receipt-outline" title="Transactions" accentColor={theme.primary} />
     </View>
   );
@@ -467,11 +763,23 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.cardBank} numberOfLines={1}>
               {deriveBankName(account)}
             </Text>
-            {networkLabel ? (
-              <View style={styles.networkBadge}>
-                <Text style={styles.networkText}>{networkLabel}</Text>
-              </View>
-            ) : null}
+            <View style={styles.cardTopRight}>
+              {/* The one account marked primary (see `ensurePrimary` in
+                  ePurseStore.js) — sits BEFORE the network chip, both on the
+                  right of the row. Gold matches the EMV chip's own tone
+                  (`#F2D38A`) rather than a new arbitrary accent. */}
+              {account.primary ? (
+                <View style={styles.primeBadge}>
+                  <Ionicons name="star" size={10} color="#F2D38A" />
+                  <Text style={styles.primeText}>PRIMARY</Text>
+                </View>
+              ) : null}
+              {networkLabel ? (
+                <View style={styles.networkBadge}>
+                  <Text style={styles.networkText}>{networkLabel}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           {/* EMV chip — pure native styling */}
@@ -499,7 +807,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
                 (networkBadge), not theme.card/textSecondary — the gradient
                 card is a bespoke surface, not a themed one. */}
             <TouchableOpacity
-              onPress={() => setManageVisible(true)}
+              onPress={() => navigation.navigate('AccountForm', { accountId: account.id })}
               hitSlop={10}
               style={styles.cardEditBtn}
               accessibilityRole="button"
@@ -580,25 +888,29 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         onSave={commitAnchor}
       />
 
-      {/* Header ⓘ → what "anchoring" means. */}
+      {/* Header ⓘ → the internal mechanics this screen manages that aren't
+          obvious on sight — same bar Groups/Goals hold their own "how it
+          works" sheets to. "Last activity" needs no bullet (self-evident);
+          anchoring and linked-card folding both quietly change what a number
+          on screen means, so both stay, worded as short scannable points
+          rather than a paragraph. */}
       <InfoSheet
         visible={balanceInfoVisible}
         onClose={() => setBalanceInfoVisible(false)}
-        title="Balance & anchoring"
-        body={
-          'ePurse keeps this balance in sync from your bank SMS. If it ever drifts from your ' +
-          'real balance, tap the balance to set the correct amount — that "anchors" it, and new ' +
-          'transactions adjust from there. Transactions dated before the anchor stay for reference ' +
-          "and don't change it."
-        }
-      />
-
-      {/* Card pencil → rename / change type / link / delete this account. */}
-      <ManageAccountModal
-        accountId={accountId ?? null}
-        visible={manageVisible}
-        onClose={() => setManageVisible(false)}
-        onDeleted={() => { setManageVisible(false); navigation.goBack(); }}
+        icon={<Ionicons name="information-circle-outline" size={28} color={theme.primary} />}
+        title="About this account"
+        bullets={[
+          {
+            icon: 'create-outline',
+            label: 'Balance & anchoring',
+            value: 'Synced from your bank SMS. If it ever drifts, tap the balance to set the right amount — new transactions adjust from there.',
+          },
+          {
+            icon: 'git-merge-outline',
+            label: 'Linked cards',
+            value: 'A linked debit card’s money is folded into this balance and ledger, not tracked separately.',
+          },
+        ]}
       />
 
     </SafeAreaView>
@@ -659,6 +971,22 @@ const styles = StyleSheet.create({
     fontSize:    16,
     fontWeight:  '700',
     letterSpacing: 1,
+  },
+  cardTopRight: { flexDirection: 'row', alignItems: 'center' },
+  primeBadge: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    gap:             3,
+    backgroundColor: '#FFFFFF26',
+    borderRadius:    6,
+    paddingHorizontal: 8,
+    paddingVertical:   3,
+  },
+  primeText: {
+    color:        '#F2D38A',
+    fontSize:     10,
+    fontWeight:   '800',
+    letterSpacing: 0.6,
   },
   networkBadge: {
     backgroundColor: '#FFFFFF26',
@@ -736,6 +1064,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom:     4,
   },
+  metaCaption: { ...typography.tiny, fontWeight: '600', marginBottom: spacing.xs },
+  linkedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginBottom: spacing.md,
+  },
+  linkedText: { ...typography.tiny, fontWeight: '600', flexShrink: 1 },
   summaryBox: {
     paddingHorizontal: 16,
     paddingVertical:   14,
@@ -769,6 +1103,103 @@ const styles = StyleSheet.create({
     justifyContent:  'center',
     marginLeft:      10,
   },
+
+  // ── Credit Card insights (Sep-2026) ─────────────────────────────────────
+  sectionHead: { marginTop: spacing.md, marginBottom: spacing.sm },
+
+  // Stat grid — GoalDetailScreen's own 2-column wrap tile, composed here with
+  // an icon-in-tinted-circle each tile didn't have there.
+  statGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg,
+  },
+  statTile: {
+    flexBasis: '48%', flexGrow: 1,
+    borderWidth: 1, borderRadius: radius.md,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.md,
+    alignItems: 'center',
+  },
+  statIconWrap: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  statV: { ...typography.bodyBold, fontWeight: '800' },
+  statK: { ...typography.tiny, marginTop: 2, textAlign: 'center' },
+  // Outstanding is the one tappable tile (tap-to-anchor) — this corner badge
+  // is its affordance, same idiom as `cardEditBtn`/`summaryEditBtn` elsewhere
+  // on this screen, just smaller to fit a compact stat tile.
+  statEditBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statBar: { width: '100%', marginTop: spacing.xs },
+
+  // Payment details / bill cycle — same bordered-card language AccountFormScreen
+  // uses for its own inline Credit Card section (`ccCard`).
+  infoCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  infoRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: spacing.sm + 2,
+  },
+  infoRowDivider: { borderTopWidth: StyleSheet.hairlineWidth },
+  infoLabel: { ...typography.small, fontWeight: '500' },
+  infoValue: { ...typography.small, fontWeight: '700' },
+
+  statusRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: spacing.sm, paddingVertical: spacing.sm + 2,
+  },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: radius.pill, paddingHorizontal: spacing.sm + 2, paddingVertical: 4,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { ...typography.tiny, fontWeight: '700' },
+  statusSub: { ...typography.tiny, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  gapWarn: { ...typography.tiny, paddingBottom: spacing.sm + 2, lineHeight: 16 },
+
+  cycleHeadRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: spacing.sm, paddingTop: spacing.md,
+  },
+  cycleDates: { ...typography.small, fontWeight: '600', flex: 1 },
+  cycleDaysLeft: { ...typography.tiny, fontWeight: '800' },
+  cycleBar: { marginTop: spacing.sm, marginBottom: spacing.sm },
+  cycleMoneyRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingBottom: spacing.md,
+  },
+  cycleMoneyText: { ...typography.tiny, fontWeight: '600' },
+
+  // ── Bank/Cash/Debit/Wallet insights ─────────────────────────────────────
+  flowCard: {
+    borderRadius: radius.md, borderWidth: 1, overflow: 'hidden', marginBottom: spacing.lg,
+  },
+  flowHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  flowHeaderText: { ...typography.small, fontWeight: '700' },
+  flowBody: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+  },
+  flowStat: { flex: 1, alignItems: 'center' },
+  flowLabel: { ...typography.tiny, fontWeight: '600', marginBottom: 4 },
+  flowValue: { ...typography.small, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  flowDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: 2 },
+  trendCard: { paddingTop: spacing.md, paddingBottom: spacing.sm },
 
   listContent: { paddingBottom: spacing.xxl * 2, flexGrow: 1 },
   txnRow: { paddingHorizontal: 16 },

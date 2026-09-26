@@ -18,6 +18,8 @@ import MonthlyRecapSettingsScreen from '../screens/MonthlyRecapSettingsScreen';
 import SpendRulesScreen    from '../screens/SpendRulesScreen';
 import BackupScreen        from '../screens/BackupScreen';
 import AccountDetailsScreen from '../screens/AccountDetailsScreen';
+import AccountFormScreen   from '../screens/AccountFormScreen';
+import AccountCreditCardStepScreen from '../screens/AccountCreditCardStepScreen';
 import LentBorrowedScreen  from '../screens/LentBorrowedScreen';
 import BudgetPlanScreen    from '../screens/BudgetPlanScreen';
 import BudgetCategoryDetailScreen from '../screens/BudgetCategoryDetailScreen';
@@ -86,6 +88,8 @@ export default function AppNavigator() {
         <Stack.Screen name="SpendRules"     component={SpendRulesScreen} />
         <Stack.Screen name="Backup"         component={BackupScreen} />
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />
+        <Stack.Screen name="AccountForm"    component={AccountFormScreen} />
+        <Stack.Screen name="AccountCreditCardStep" component={AccountCreditCardStepScreen} />
         <Stack.Screen name="LentBorrowed"   component={LentBorrowedScreen} />
         <Stack.Screen name="BudgetPlan"     component={BudgetPlanScreen} />
         <Stack.Screen name="BudgetCategoryDetail" component={BudgetCategoryDetailScreen} />

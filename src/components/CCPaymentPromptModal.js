@@ -6,7 +6,9 @@
 // responds, each one is shown in turn after the previous is dismissed/confirmed.
 // Lets the user choose how to reconcile the payment against the tracked balance:
 //   • True-up to Zero    → clear the whole outstanding (paid the full bill)
-//   • Settle this payment → reduce outstanding by exactly the payment amount
+//   • Settle this payment → reduce outstanding by exactly the payment amount —
+//                           and the statement with it: a smaller payment leaves
+//                           the bill PART-paid (see utils/ccStatement)
 //   • Skip                → leave the balance untouched
 //
 // Theme-aware: surfaces/text follow the active (light/dark) palette; green = the
@@ -28,6 +30,8 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { EMPTY_ARRAY } from '../constants/empty';
+import { statementRemaining } from '../utils/ccStatement';
+import { ordinalDay } from '../utils/format';
 
 // Short label for an account chip, e.g. "HDFC ••4521".
 const acctLabel = (a) =>
@@ -42,6 +46,7 @@ const CCPaymentPromptModal = () => {
   const confirmCCTrueUp        = useEPurseStore((s) => s.confirmCCTrueUp);
   const settleCCPayment        = useEPurseStore((s) => s.settleCCPayment);
   const dismissCCPaymentPrompt = useEPurseStore((s) => s.dismissCCPaymentPrompt);
+  const confirmPendingCycleDate = useEPurseStore((s) => s.confirmPendingCycleDate);
 
   // Which reconciliation the user has picked. Defaults to the full true-up.
   const topModal = useAutoModalQueue();
@@ -96,13 +101,39 @@ const CCPaymentPromptModal = () => {
   const outstanding    = account ? Math.abs(Math.min(account.balance ?? 0, 0)) : 0;
   const hasOutstanding = outstanding > 0;
 
+  // A statement/due date learned from a bill SMS, staged for confirmation — this
+  // settle moment is exactly the checkpoint that surfaces it (never auto-saved).
+  const pendingDate = account?.pendingCycleDate ?? null;
+  const pendingDateText = (() => {
+    if (!pendingDate) return '';
+    const parts = [];
+    if (pendingDate.statementDate) parts.push(`statement date is now the ${ordinalDay(new Date(pendingDate.statementDate).getDate())}`);
+    if (pendingDate.dueDate) parts.push(`due date is now the ${ordinalDay(new Date(pendingDate.dueDate).getDate())}`);
+    return parts.join(' and ');
+  })();
+
   // Resulting balance for each choice (what the outstanding becomes).
   const afterSettle = Math.max(0, outstanding - amount);
 
+  // What's left on the latest STATEMENT (null = none on file). Settle applies
+  // exactly this payment to it — a smaller one leaves the bill part-paid (the
+  // store's `applyStatementPayment`); True-up marks it paid outright.
+  const stmtLeft = statementRemaining(account);
+  const settleSub = stmtLeft == null || stmtLeft <= 0
+    ? `Apply ${formatCurrency(amount)}`
+    : amount >= stmtLeft
+      ? 'Pays this statement in full'
+      : `${formatCurrency(stmtLeft - amount)} left on the statement`;
+  // Paying more than the card owes is allowed, but never silently — the extra
+  // isn't kept as a credit balance (settle floors the card at ₹0).
+  const overpaid = choice === 'settle' && hasOutstanding && amount > outstanding
+    ? amount - outstanding
+    : 0;
+
   const OPTIONS = [
-    { key: 'trueup', title: 'True-up to Zero',    sub: 'Cleared the full bill',      result: 0 },
-    { key: 'settle', title: 'Settle this payment', sub: `Apply ${formatCurrency(amount)}`, result: afterSettle },
-    { key: 'skip',   title: 'Skip for now',        sub: 'Leave balance unchanged',    result: outstanding },
+    { key: 'trueup', title: 'True-up to Zero',    sub: 'Cleared the full bill',   result: 0 },
+    { key: 'settle', title: 'Settle this payment', sub: settleSub,                 result: afterSettle },
+    { key: 'skip',   title: 'Skip for now',        sub: 'Leave balance unchanged', result: outstanding },
   ];
 
   const queueCount = queue.length;
@@ -116,7 +147,7 @@ const CCPaymentPromptModal = () => {
 
   const confirmLabel =
     choice === 'trueup' ? 'True-up to Zero'
-    : choice === 'settle' ? `Settle ${formatCurrency(amount)}`
+    : choice === 'settle' ? (overpaid > 0 ? 'Settle Anyway' : `Settle ${formatCurrency(amount)}`)
     : 'Skip';
   const confirmIsMuted = choice === 'skip';
 
@@ -149,6 +180,22 @@ const CCPaymentPromptModal = () => {
           )}
         </View>
 
+        {pendingDate ? (
+          <View style={styles.pendingDateBox}>
+            <Text style={styles.pendingDateText}>
+              We noticed your {pendingDateText} — update it on file?
+            </Text>
+            <View style={styles.pendingDateActions}>
+              <TouchableOpacity onPress={() => confirmPendingCycleDate(account.id, false)} activeOpacity={0.8}>
+                <Text style={styles.pendingDateSkip}>Not now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => confirmPendingCycleDate(account.id, true)} activeOpacity={0.8}>
+                <Text style={styles.pendingDateYes}>Update</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
         {/* Success badge — card glyph with a tick */}
         <View style={styles.iconWrap}>
           <Text style={styles.icon}>💳</Text>
@@ -169,6 +216,12 @@ const CCPaymentPromptModal = () => {
             <View style={styles.outstandingChip}>
               <Text style={styles.outstandingLabel}>Tracked outstanding</Text>
               <Text style={styles.outstandingValue}>{formatCurrency(outstanding)}</Text>
+              {stmtLeft != null && stmtLeft > 0 ? (
+                <>
+                  <Text style={styles.outstandingLabel}>·  Statement due</Text>
+                  <Text style={styles.outstandingValue}>{formatCurrency(stmtLeft)}</Text>
+                </>
+              ) : null}
             </View>
 
             <Text style={styles.question}>How should we reconcile it?</Text>
@@ -239,6 +292,12 @@ const CCPaymentPromptModal = () => {
                 </ScrollView>
               </View>
             )}
+
+            {overpaid > 0 ? (
+              <Text style={styles.overpayWarn}>
+                This is {formatCurrency(overpaid)} more than the tracked outstanding — the extra won't be kept as credit.
+              </Text>
+            ) : null}
 
             {/* Confirm */}
             <TouchableOpacity
@@ -388,6 +447,20 @@ const makeStyles = (t) => {
       marginBottom: spacing.md,
     },
 
+    pendingDateBox: {
+      width: '100%',
+      backgroundColor: t.cardAlt,
+      borderWidth: 1,
+      borderColor: t.divider,
+      borderRadius: radius.md,
+      padding: spacing.sm + 2,
+      marginBottom: spacing.md,
+    },
+    pendingDateText: { color: t.textSecondary, fontSize: 12.5, lineHeight: 17, marginBottom: 6 },
+    pendingDateActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.md },
+    pendingDateSkip: { color: t.textMuted, fontSize: 12.5, fontWeight: '700' },
+    pendingDateYes: { color: ACCENT, fontSize: 12.5, fontWeight: '700' },
+
     // Outstanding context chip
     outstandingChip: {
       flexDirection: 'row',
@@ -515,6 +588,15 @@ const makeStyles = (t) => {
     },
     chipText: { color: t.textSecondary, fontSize: 12.5, fontWeight: '600' },
     chipTextActive: { color: ACCENT },
+
+    overpayWarn: {
+      alignSelf: 'stretch',
+      color: DANGER, // amber text fails contrast on the light card
+      fontSize: 12.5,
+      fontWeight: '600',
+      lineHeight: 18,
+      marginBottom: spacing.sm,
+    },
 
     // Body (no-outstanding branch)
     body: {

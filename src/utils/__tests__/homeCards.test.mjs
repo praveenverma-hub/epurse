@@ -186,8 +186,10 @@ console.log('\n── CC bill due window ──');
   check('8 days out → not yet worth interrupting for', billCard(bill('18-Aug-26')) === null);
 
   check('1 day overdue → still warns', !!billCard(bill('09-Aug-26')));
-  check('overdue copy says overdue', billCard(bill('09-Aug-26')).eyebrow === 'Overdue');
-  check('overdue reads "1 day overdue"', billCard(bill('09-Aug-26')).title.includes('1 day overdue'));
+  // Billing spec: "Due date passed", never "Overdue" — a local-only app can't
+  // know the bill wasn't paid some way it never saw an SMS for.
+  check('a passed due date says "Due date passed", not "Overdue"', billCard(bill('09-Aug-26')).eyebrow === 'Due date passed');
+  check('…and reads "due 1 day ago"', billCard(bill('09-Aug-26')).title.includes('due 1 day ago'), billCard(bill('09-Aug-26')).title);
   check('3 days overdue → still warns (edge of grace)', !!billCard(bill('07-Aug-26')));
   check('4 days overdue → gone; assume paid rather than nag',
     billCard(bill('06-Aug-26')) === null);
@@ -196,6 +198,11 @@ console.log('\n── CC bill due window ──');
     billCard(bill('sometime soon')) === null);
   check('a missing due date → no card', billCard(bill(null)) === null);
   check('a zero amount → no card', billCard(bill('12-Aug-26', { amount: 0 })) === null);
+  // Partial payment — the card shows what's LEFT, not the full bill.
+  const part = billCard(bill('12-Aug-26', { amount: 10000, remaining: 6000 }));
+  check('a part-paid bill shows what is left', !!part && part.title.includes('6') && part.title.includes('left'), part?.title);
+  check('…and says so', part?.eyebrow === 'Partly paid', part?.eyebrow);
+  check('a bill paid down to 0 → no card', billCard(bill('12-Aug-26', { amount: 10000, remaining: 0 })) === null);
   check('an empty bill map → no card', billCard({}) === null);
 
   // Numeric Indian form, since that's the other shape banks send.

@@ -1,8 +1,9 @@
 // =============================================================================
 // reminderSchedule — when does a reminder fire next?
 // -----------------------------------------------------------------------------
-// PURE. Zero imports, so the headless `.mjs` runner and the store can both use
-// it (`utils/notifications.js` pulls in expo-notifications and loads in neither).
+// PURE. Only imports `utils/format` (itself dependency-free), so the headless
+// `.mjs` runner and the store can both use it (`utils/notifications.js` pulls
+// in expo-notifications and loads in neither).
 //
 // WHY WE COMPUTE DATES OURSELVES instead of using a native repeating trigger:
 // expo-notifications on SDK 50 offers DAILY / WEEKLY / YEARLY / CALENDAR triggers
@@ -23,6 +24,8 @@
 // WRONG time — the failure mode is a missed reminder after months of never
 // opening a finance app, not a wrong one.
 // =============================================================================
+
+import { ordinalDay as ordinal } from './format';
 
 /** Repeat rules a reminder can carry. `once` is the default. */
 export const REPEAT = {
@@ -136,17 +139,6 @@ export const isReminderExpired = (reminder, from = Date.now()) => {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/** Ordinal day-of-month: 5 → "5th". Matches ManageAccountModal's bill-cycle copy. */
-const ordinal = (n) => {
-  const rem100 = n % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1: return `${n}st`;
-    case 2: return `${n}nd`;
-    case 3: return `${n}rd`;
-    default: return `${n}th`;
-  }
-};
 
 /**
  * How the repeat rule reads in the UI — "Every Monday", "Monthly on the 5th".

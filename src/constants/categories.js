@@ -216,6 +216,20 @@ export const ACCOUNT_TYPE_LABEL = {
   [ACCOUNT_TYPES.CASH]: 'Cash',
 };
 
+// Which account types collect a mask (last 4) / bank name on the add/edit form —
+// single source (was a private copy inside AddAccountModal) so every caller agrees.
+export const ACCOUNT_NEEDS_MASK = new Set([
+  ACCOUNT_TYPES.BANK,
+  ACCOUNT_TYPES.CREDIT_CARD,
+  ACCOUNT_TYPES.DEBIT_CARD,
+]);
+export const ACCOUNT_NEEDS_BANK = new Set([
+  ACCOUNT_TYPES.BANK,
+  ACCOUNT_TYPES.CREDIT_CARD,
+  ACCOUNT_TYPES.DEBIT_CARD,
+  ACCOUNT_TYPES.WALLET,
+]);
+
 export const TRANSACTION_TYPES = {
   DEBIT: 'debit',
   CREDIT: 'credit',

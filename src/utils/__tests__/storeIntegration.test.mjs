@@ -4014,7 +4014,6 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     googleAccount: { email: 'dirty@example.com', name: 'Dirty', picture: null },
     sessionExpired: true,
     justDeletedAccount: false,
-    anchorNudgeDismissed: true,
     themeId: 'carbon',
     darkMode: true,
     appLockEnabled: true,
@@ -4063,7 +4062,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     ccCycleHeadsUpNotified: {}, pendingCCPayment: null, pendingCCPaymentQueue: [],
     manualTxnSeq: 0, smsPermissionGranted: false, contactsPermissionGranted: false,
     isLoggedIn: false, googleAccount: null, sessionExpired: false, justDeletedAccount: true,
-    anchorNudgeDismissed: false, darkMode: false, appLockEnabled: false,
+    darkMode: false, appLockEnabled: false,
     showWeeklySummary: true, weeklyRecapHandled: null, pendingWeeklyRecap: null,
     showMonthlyRecap: true, recapMonthHandled: null, monthlyRecapCardDismissed: null,
     pendingMonthlyRecap: null, reminders: [], reminderNotifIds: {},
@@ -4092,6 +4091,445 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 
   check('hasOnboarded is left UNTOUCHED (still true) — LoginGate depends on this, not reset to false',
     s.hasOnboarded === true);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACCOUNT REVAMP (Sep-26-26) — primary / includeInNetWorth / archived, and
+// Credit Card creditLimit / statementBalance / minimumDue / paymentHistory.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── v36 migration: backfill defaults, recover statementBalance from ccBills ──
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const legacy = {
+    accounts: [
+      { id: 'a1', type: 'Bank', name: 'HDFC', mask: '1111', balance: 5000 },
+      {
+        id: 'a2', type: 'Credit Card', name: 'SBI Card', mask: '2222',
+        bankName: 'SBI', balance: -1500,
+      },
+    ],
+    ccBills: {
+      2222: { amount: 1500, cardLast4: '2222', bankName: 'SBI' },
+    },
+  };
+  const migrated = migrate(legacy, 35);
+  const bank = migrated.accounts.find((a) => a.id === 'a1');
+  const card = migrated.accounts.find((a) => a.id === 'a2');
+
+  // v36 itself backfills `primary: false` for a plain account with no opinion
+  // either way — but this migrate() call also runs every LATER version block up
+  // to current, including v38's `ensurePrimary` invariant (never zero primary
+  // while an active account exists), which promotes the first active account
+  // (`a1`, the bank) since neither of these two had one set. That's the correct
+  // end-to-end result, not a conflict between the two migrations.
+  check('a plain account gets primary/includeInNetWorth/archived defaults (then v38 picks it as THE primary)',
+    bank.primary === true && bank.includeInNetWorth === true && bank.archived === false && bank.archivedAt === null,
+    JSON.stringify(bank));
+  check('a Credit Card additionally gets creditLimit/minimumDue/paymentHistory defaults',
+    card.creditLimit === null && card.minimumDue === null && Array.isArray(card.paymentHistory) && card.paymentHistory.length === 0,
+    JSON.stringify(card));
+  check('a Credit Card\'s statementBalance is backfilled from its existing ccBills entry',
+    card.statementBalance === 1500, JSON.stringify(card));
+
+  // A field already present (e.g. re-running the migration, or a value some
+  // other path already wrote) must survive untouched, not get clobbered back.
+  const already = migrate({
+    accounts: [{ id: 'a3', type: 'Bank', name: 'ICICI', primary: true, includeInNetWorth: false, archived: true, archivedAt: 123 }],
+  }, 35).accounts[0];
+  check('an already-set field is left alone, not reset to the default',
+    already.primary === true && already.includeInNetWorth === false && already.archived === true && already.archivedAt === 123,
+    JSON.stringify(already));
+}
+
+// ── setPrimaryAccount — exclusive, null clears it entirely ──────────────────
+{
+  reset();
+  const idA = useStore.getState().addAccount({ type: 'Bank', name: 'A', mask: '0001' });
+  const idB = useStore.getState().addAccount({ type: 'Bank', name: 'B', mask: '0002' });
+
+  useStore.getState().setPrimaryAccount(idA);
+  let acc = useStore.getState().accounts;
+  check('setPrimaryAccount marks the chosen account primary',
+    acc.find((a) => a.id === idA).primary === true, JSON.stringify(acc));
+
+  useStore.getState().setPrimaryAccount(idB);
+  acc = useStore.getState().accounts;
+  check('setting a new primary unsets the old one — only ONE is ever primary',
+    acc.find((a) => a.id === idA).primary === false && acc.find((a) => a.id === idB).primary === true,
+    JSON.stringify(acc));
+
+  // `ensurePrimary` (the "never zero primary while an active account exists"
+  // invariant) immediately re-picks a default here — the FIRST active account
+  // (idA) — rather than leaving the app with none.
+  useStore.getState().setPrimaryAccount(null);
+  acc = useStore.getState().accounts;
+  check('passing null reassigns primary to the first active account, never leaves none',
+    acc.find((a) => a.id === idA).primary === true && acc.find((a) => a.id === idB).primary === false,
+    JSON.stringify(acc));
+}
+
+// ── ensurePrimary invariant — never zero primary while an active account exists ──
+{
+  reset();
+  const idA = useStore.getState().addAccount({ type: 'Bank', name: 'A', mask: '0001' });
+  check('the FIRST account ever added is auto-promoted to primary',
+    useStore.getState().accounts.find((a) => a.id === idA).primary === true,
+    JSON.stringify(useStore.getState().accounts));
+
+  const idB = useStore.getState().addAccount({ type: 'Bank', name: 'B', mask: '0002' });
+  check('a SECOND account added does not steal primary from the first',
+    useStore.getState().accounts.find((a) => a.id === idA).primary === true
+      && useStore.getState().accounts.find((a) => a.id === idB).primary === false,
+    JSON.stringify(useStore.getState().accounts));
+
+  useStore.getState().archiveAccount(idA);
+  let acc2 = useStore.getState().accounts;
+  check('archiving the primary account promotes another active one automatically',
+    acc2.find((a) => a.id === idA).primary === false && acc2.find((a) => a.id === idB).primary === true,
+    JSON.stringify(acc2));
+
+  useStore.getState().unarchiveAccount(idA);
+  useStore.getState().setPrimaryAccount(idA);
+  useStore.getState().deleteAccount(idA);
+  acc2 = useStore.getState().accounts;
+  check('deleting the primary account promotes another active one automatically',
+    acc2.length === 1 && acc2[0].id === idB && acc2[0].primary === true,
+    JSON.stringify(acc2));
+}
+
+// ── setAccountColorKey — manual "Card Color" pick ────────────────────────────
+{
+  reset();
+  const id = useStore.getState().addAccount({ type: 'Bank', name: 'A', mask: '0001' });
+  check('a new account starts with no colorKey', useStore.getState().accounts[0].colorKey === null);
+
+  useStore.getState().setAccountColorKey(id, 'HDFC');
+  check('setAccountColorKey stores the picked key',
+    useStore.getState().accounts.find((a) => a.id === id).colorKey === 'HDFC');
+
+  useStore.getState().setAccountColorKey(id, null);
+  check('passing null clears it back to automatic',
+    useStore.getState().accounts.find((a) => a.id === id).colorKey === null);
+}
+
+// ── v39 migration: colorKey backfilled to null ───────────────────────────────
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const legacy = { accounts: [{ id: 'a1', type: 'Bank', name: 'HDFC', mask: '1111', balance: 5000 }] };
+  const migrated = migrate(legacy, 38);
+  check('v39: an existing account without colorKey gets null, not undefined',
+    migrated.accounts[0].colorKey === null, JSON.stringify(migrated.accounts[0]));
+
+  const already = migrate({ accounts: [{ id: 'a2', type: 'Bank', name: 'X', colorKey: 'SBI' }] }, 38).accounts[0];
+  check('v39: an already-set colorKey survives untouched', already.colorKey === 'SBI');
+}
+
+// ── setIncludeInNetWorth + selectEPurseNetWorth skips archived/excluded ──────
+{
+  reset();
+  const bankId = useStore.getState().addAccount({ type: 'Bank', name: 'Bank', mask: '1234', balance: 10000 });
+  const cashId = useStore.getState().addAccount({ type: 'Cash', name: 'Cash', balance: 500 });
+
+  check('both accounts count toward net worth by default',
+    useStore.getState().getTotalBalance() === 10500, `${useStore.getState().getTotalBalance()}`);
+
+  useStore.getState().setIncludeInNetWorth(cashId, false);
+  check('excluding an account drops it from net worth',
+    useStore.getState().getTotalBalance() === 10000, `${useStore.getState().getTotalBalance()}`);
+
+  useStore.getState().setIncludeInNetWorth(cashId, true);
+  useStore.getState().archiveAccount(bankId);
+  check('archiving an account ALSO drops it from net worth',
+    useStore.getState().getTotalBalance() === 500, `${useStore.getState().getTotalBalance()}`);
+}
+
+// ── selectAssetsAndLiabilities — always sums back to selectEPurseNetWorth ───
+{
+  reset();
+  useStore.getState().addAccount({ type: 'Bank', name: 'Bank', mask: '1234', balance: 10000 });
+  useStore.getState().addAccount({ type: 'Cash', name: 'Cash', balance: 500 });
+  const cardId = useStore.getState().addAccount({ type: 'Credit Card', name: 'Card', mask: '9999', bankName: 'HDFC', balance: -3000 });
+
+  let { assets, liabilities } = mod.selectAssetsAndLiabilities(useStore.getState());
+  check('assets sum every non-CC balance', assets === 10500, `${assets}`);
+  check('liabilities sum the CC\'s outstanding (owed) balance', liabilities === 3000, `${liabilities}`);
+  check('assets − liabilities equals selectEPurseNetWorth\'s own total',
+    assets - liabilities === mod.selectEPurseNetWorth(useStore.getState()),
+    `${assets - liabilities} vs ${mod.selectEPurseNetWorth(useStore.getState())}`);
+
+  // A Credit Card IN CREDIT (overpaid) must not read as an asset — net worth
+  // itself already zeroes it out via Math.min(bal, 0); showing it as an
+  // asset here would disagree with the headline Net Worth figure.
+  useStore.setState({
+    accounts: useStore.getState().accounts.map((a) => (a.id === cardId ? { ...a, balance: 500 } : a)),
+  });
+  ({ assets, liabilities } = mod.selectAssetsAndLiabilities(useStore.getState()));
+  check('a Credit Card in credit contributes to NEITHER bucket',
+    assets === 10500 && liabilities === 0, JSON.stringify({ assets, liabilities }));
+  check('…still agrees with selectEPurseNetWorth',
+    assets - liabilities === mod.selectEPurseNetWorth(useStore.getState()));
+}
+
+// ── archiveAccount / unarchiveAccount ────────────────────────────────────────
+{
+  reset();
+  const cardId = useStore.getState().addAccount({
+    type: 'Credit Card', name: 'Card', mask: '3333', bankName: 'SBI', balance: -2000,
+  });
+  useStore.getState().setPrimaryAccount(cardId);
+  useStore.setState({
+    ccDueReminderIds: { '3333:2026-09-07': 'notif-1' },
+    ccBills: { 3333: { amount: 2000, cardLast4: '3333', bankName: 'SBI' } },
+  });
+
+  useStore.getState().archiveAccount(cardId);
+  const archived = useStore.getState().accounts.find((a) => a.id === cardId);
+  check('archiveAccount sets archived + archivedAt', archived.archived === true && !!archived.archivedAt, JSON.stringify(archived));
+  check('archiving unsets primary — a hidden account can\'t be the headline balance',
+    archived.primary === false, JSON.stringify(archived));
+  check('archiving cancels this card\'s scheduled due reminders',
+    Object.keys(useStore.getState().ccDueReminderIds).length === 0, JSON.stringify(useStore.getState().ccDueReminderIds));
+  check('archiving does NOT touch ccBills — history survives',
+    Object.keys(useStore.getState().ccBills).length === 1, JSON.stringify(useStore.getState().ccBills));
+
+  useStore.getState().unarchiveAccount(cardId);
+  const restored = useStore.getState().accounts.find((a) => a.id === cardId);
+  check('unarchiveAccount clears archived/archivedAt',
+    restored.archived === false && restored.archivedAt === null, JSON.stringify(restored));
+}
+
+// ── setCreditLimit / setMinimumDue / setAccountCycleDates ───────────────────
+{
+  reset();
+  const cardId = useStore.getState().addAccount({ type: 'Credit Card', name: 'Card', mask: '4444', bankName: 'HDFC' });
+
+  useStore.getState().setCreditLimit(cardId, 100000);
+  useStore.getState().setMinimumDue(cardId, 2500);
+  useStore.getState().setAccountCycleDates(cardId, { statementDay: 12, dueDay: 28 });
+
+  const card = useStore.getState().accounts.find((a) => a.id === cardId);
+  check('setCreditLimit sets creditLimit', card.creditLimit === 100000, JSON.stringify(card));
+  check('setMinimumDue sets minimumDue', card.minimumDue === 2500, JSON.stringify(card));
+  check('setAccountCycleDates sets both cycle days',
+    card.statementDay === 12 && card.dueDay === 28, JSON.stringify(card));
+}
+
+// ── Statement payments: partial vs full (billing spec §4/§8) ───────────────
+// Covers all three balance-adjusting reconcile paths: confirmCCTrueUp,
+// settleCCPayment (both via the pending-payment queue), and
+// markAsCCBillPayment (the manual "I paid this from my bank" flow). A payment
+// smaller than what's left leaves the statement PARTIALLY paid — never "paid"
+// on the first payment — and True-up always means the whole bill is cleared.
+{
+  reset();
+  const cardId = useStore.getState().addAccount({
+    type: 'Credit Card', name: 'Card', mask: '5555', bankName: 'ICICI',
+    balance: -3000, statementBalance: 3000, minimumDue: 150, dueDay: 15,
+  });
+  const cardNow = () => useStore.getState().accounts.find((a) => a.id === cardId);
+  // A real NEW bill resets remainingDue with it — arm both, like ingest does.
+  const arm = (bal, min) => useStore.setState({
+    accounts: useStore.getState().accounts.map((a) => (a.id === cardId
+      ? { ...a, statementBalance: bal, remainingDue: bal, minimumDue: min } : a)),
+  });
+  const queuePay = (amount, smsId) => useStore.setState({
+    pendingCCPaymentQueue: [{ amount, accountId: cardId, accountMask: '5555', bankName: 'ICICI', smsId }],
+  });
+
+  check('addAccount starts remainingDue at the statement balance', cardNow().remainingDue === 3000, JSON.stringify(cardNow()));
+
+  queuePay(3000, 'pay-x');
+  useStore.getState().confirmCCTrueUp();
+  let card = cardNow();
+  check('confirmCCTrueUp logs a paymentHistory entry',
+    card.paymentHistory.length === 1 && card.paymentHistory[0].mode === 'trueup' && card.paymentHistory[0].amount === 3000,
+    JSON.stringify(card.paymentHistory));
+  check('confirmCCTrueUp marks the statement PAID (remainingDue 0), keeping the billed amount on file',
+    card.remainingDue === 0 && card.statementBalance === 3000, JSON.stringify(card));
+
+  // Partial: ₹400 against a ₹1,000 statement.
+  arm(1000, 50);
+  queuePay(400, 'pay-y');
+  useStore.getState().settleCCPayment();
+  card = cardNow();
+  check('settleCCPayment logs a paymentHistory entry with what is left',
+    card.paymentHistory.length === 2 && card.paymentHistory[1].mode === 'settle'
+      && card.paymentHistory[1].amount === 400 && card.paymentHistory[1].remainingAfter === 600,
+    JSON.stringify(card.paymentHistory));
+  check('a smaller Settle leaves the statement PARTIALLY paid, not paid',
+    card.remainingDue === 600 && card.statementBalance === 1000 && card.minimumDue === 50, JSON.stringify(card));
+
+  queuePay(600, 'pay-z');
+  useStore.getState().settleCCPayment();
+  check('a second Settle covering the rest pays the statement off', cardNow().remainingDue === 0, `${cardNow().remainingDue}`);
+
+  // Overpayment is allowed — recorded, remaining floors at 0.
+  arm(200, null);
+  queuePay(500, 'pay-o');
+  useStore.getState().settleCCPayment();
+  card = cardNow();
+  check('an overpayment floors remaining at 0 and records the excess',
+    card.remainingDue === 0 && card.paymentHistory[card.paymentHistory.length - 1].overpaid === 300,
+    JSON.stringify(card.paymentHistory[card.paymentHistory.length - 1]));
+
+  // markAsCCBillPayment — 'none' must NOT log or touch the statement (the
+  // automatic path already did); 'settle'/'trueup' follow the same rule.
+  arm(800, 40);
+  useStore.getState().addTransaction({
+    id: 'bill-txn-1', amount: 500, type: 'debit', categoryId: 'other',
+    merchant: 'ICICI Bill Pay', createdAt: new Date().toISOString(), source: 'manual',
+  });
+  const before = cardNow().paymentHistory.length;
+  useStore.getState().markAsCCBillPayment('bill-txn-1', cardId, 'none');
+  check('markAsCCBillPayment mode "none" logs nothing and leaves the statement alone',
+    cardNow().paymentHistory.length === before && cardNow().remainingDue === 800, JSON.stringify(cardNow()));
+
+  useStore.getState().addTransaction({
+    id: 'bill-txn-2', amount: 300, type: 'debit', categoryId: 'other',
+    merchant: 'ICICI Bill Pay', createdAt: new Date().toISOString(), source: 'manual',
+  });
+  useStore.getState().markAsCCBillPayment('bill-txn-2', cardId, 'settle');
+  check('markAsCCBillPayment "settle" applies a partial payment', cardNow().remainingDue === 500, `${cardNow().remainingDue}`);
+
+  useStore.getState().addTransaction({
+    id: 'bill-txn-3', amount: 100, type: 'debit', categoryId: 'other',
+    merchant: 'ICICI Bill Pay', createdAt: new Date().toISOString(), source: 'manual',
+  });
+  useStore.getState().markAsCCBillPayment('bill-txn-3', cardId, 'trueup');
+  card = cardNow();
+  check('markAsCCBillPayment "trueup" pays the statement off regardless of amount',
+    card.remainingDue === 0 && card.paymentHistory[card.paymentHistory.length - 1].mode === 'trueup', JSON.stringify(card));
+}
+
+// ── Bill SMS → partial payment → repeat reminder → new statement ───────────
+// The end-to-end path: what the bill SMS stamps, that a partial payment keeps
+// the Home "bill due" entry (money is still owed), that a REPEAT reminder for
+// the same statement can't wipe a partial payment, and that a NEW statement
+// resets the cycle.
+{
+  reset();
+  useStore.setState({ ccBills: {}, ccDueReminderIds: {} });
+  const cardId = useStore.getState().addAccount({ type: 'Credit Card', name: 'HDFC Card', mask: '7777', bankName: 'HDFC', balance: -10000 });
+  const cardNow = () => useStore.getState().accounts.find((a) => a.id === cardId);
+  const billFor = () => Object.values(useStore.getState().ccBills || {}).find((b) => b.cardLast4 === '7777');
+
+  ingest('HDFCBK', 'Total Amount Due on your HDFC Credit Card ending 7777 for statement dt 18-Sep-26 is Rs.10,000.00. Min Amount Due: Rs.500.00. Payment due date: 08-Oct-26.',
+    { smsId: 'h-bill-1' });
+  let card = cardNow();
+  check('a bill SMS stamps statementBalance + remainingDue', card.statementBalance === 10000 && card.remainingDue === 10000, JSON.stringify(card));
+  check('…and the parsed Min Amount Due', card.minimumDue === 500, `${card.minimumDue}`);
+  // The actual dates STAGE, pending confirmation — never auto-saved to
+  // lastStatementDate/lastDueDate (billing spec correction: confirm at settle time).
+  check('the actual dates are NOT auto-saved', card.lastStatementDate === null && card.lastDueDate === null, JSON.stringify(card));
+  const pend = card.pendingCycleDate;
+  const stmt = new Date(pend?.statementDate);
+  const due = new Date(pend?.dueDate);
+  check('…they stage as a pending confirmation instead', !!pend, JSON.stringify(pend));
+  check('…with the ACTUAL statement date', stmt.getDate() === 18 && stmt.getMonth() === 8, pend?.statementDate);
+  check('…and the ACTUAL due date', due.getDate() === 8 && due.getMonth() === 9, pend?.dueDate);
+
+  useStore.getState().confirmPendingCycleDate(cardId, false);
+  check('dismissing the pending date clears it without applying', cardNow().pendingCycleDate === null && cardNow().lastStatementDate === null, JSON.stringify(cardNow()));
+
+  // Re-arrive at the same reminder and this time confirm it.
+  ingest('HDFCBK', 'Total Amount Due on your HDFC Credit Card ending 7777 for statement dt 18-Sep-26 is Rs.10,000.00. Min Amount Due: Rs.500.00. Payment due date: 08-Oct-26.',
+    { smsId: 'h-bill-1-again' });
+  useStore.getState().confirmPendingCycleDate(cardId, true);
+  card = cardNow();
+  check('confirming applies the actual dates', !!card.lastStatementDate && !!card.lastDueDate, JSON.stringify(card));
+  check('…and syncs statementDay/dueDay to match', card.statementDay === 18 && card.dueDay === 8, JSON.stringify(card));
+  check('…and clears the pending slot', card.pendingCycleDate === null);
+
+  ingest('HDFCBK', 'Payment of Rs.4,000.00 received towards your HDFC Credit Card ending 7777. Thank you.',
+    { smsId: 'h-pay-1', receivedAt: Date.now() });
+  check('a PARTIAL payment SMS keeps the bill standing (still owed)', !!billFor(), JSON.stringify(useStore.getState().ccBills));
+  useStore.getState().settleCCPayment();
+  card = cardNow();
+  check('Settle on the prompt leaves ₹6,000 remaining', card.remainingDue === 6000, `${card.remainingDue}`);
+  check('…and stamps that on the bill for the Home card', billFor()?.remaining === 6000, JSON.stringify(billFor()));
+
+  ingest('HDFCBK', 'Total Amount Due on your HDFC Credit Card ending 7777 for statement dt 18-Sep-26 is Rs.10,000.00. Min Amount Due: Rs.500.00. Payment due date: 08-Oct-26.',
+    { smsId: 'h-bill-1-repeat' });
+  check('a REPEAT reminder for the same statement does NOT wipe the partial payment',
+    cardNow().remainingDue === 6000 && cardNow().statementBalance === 10000, JSON.stringify(cardNow()));
+
+  ingest('HDFCBK', 'Total Amount Due on your HDFC Credit Card ending 7777 for statement dt 18-Sep-26 is Rs.5,000.00. Payment due date: 08-Oct-26.',
+    { smsId: 'h-bill-1-lower' });
+  check('…but a LOWER amount for the same statement lowers remaining (a payment we never saw)',
+    cardNow().remainingDue === 5000 && cardNow().statementBalance === 10000, JSON.stringify(cardNow()));
+
+  ingest('HDFCBK', 'Total Amount Due on your HDFC Credit Card ending 7777 for statement dt 18-Oct-26 is Rs.7,000.00. Payment due date: 07-Nov-26.',
+    { smsId: 'h-bill-2' });
+  card = cardNow();
+  check('a NEW statement resets the cycle to its full amount',
+    card.statementBalance === 7000 && card.remainingDue === 7000, JSON.stringify(card));
+  check('…and drops the old statement\'s minimum due rather than carrying it', card.minimumDue === null, `${card.minimumDue}`);
+
+  ingest('HDFCBK', 'Payment of Rs.7,000.00 received towards your HDFC Credit Card ending 7777. Thank you.',
+    { smsId: 'h-pay-2', receivedAt: Date.now() });
+  check('a payment covering the whole statement clears the bill at once', !billFor(), JSON.stringify(useStore.getState().ccBills));
+}
+
+// ── v37 migration: remainingDue + actual dates ──────────────────────────────
+{
+  const migrate = useStore.persist.getOptions().migrate;
+  const out = migrate({
+    accounts: [
+      { id: 'c1', type: 'Credit Card', name: 'C', statementBalance: 2500 },
+      { id: 'c2', type: 'Credit Card', name: 'D', statementBalance: null },
+      { id: 'b1', type: 'Bank', name: 'B' },
+    ],
+  }, 36);
+  const c1 = out.accounts.find((a) => a.id === 'c1');
+  const c2 = out.accounts.find((a) => a.id === 'c2');
+  const b1 = out.accounts.find((a) => a.id === 'b1');
+  check('v37: a statement on file starts fully unpaid (remainingDue = the bill)', c1.remainingDue === 2500, JSON.stringify(c1));
+  check('v37: no statement → remainingDue null', c2.remainingDue === null, JSON.stringify(c2));
+  check('v37: actual dates start unknown', c1.lastStatementDate === null && c1.lastDueDate === null, JSON.stringify(c1));
+  check('v37: non-card accounts are untouched', !('remainingDue' in b1), JSON.stringify(b1));
+  check('v37: cycleDaysManual defaults false, pendingCycleDate null', c1.cycleDaysManual === false && c1.pendingCycleDate === null, JSON.stringify(c1));
+}
+
+// ── Manual billing/due day edit takes priority over SMS, forever ───────────
+{
+  reset();
+  useStore.setState({ ccBills: {}, ccDueReminderIds: {} });
+  const cardId = useStore.getState().addAccount({ type: 'Credit Card', name: 'SBI Card', mask: '2468', bankName: 'SBI' });
+  const cardNow = () => useStore.getState().accounts.find((a) => a.id === cardId);
+
+  useStore.getState().setAccountCycleDates(cardId, { statementDay: 10, dueDay: 25 });
+  check('a manual edit sets cycleDaysManual', cardNow().cycleDaysManual === true, JSON.stringify(cardNow()));
+
+  ingest('SBICRD', 'Total Amount Due on your SBI Credit Card ending 2468 for statement dt 18-Sep-26 is Rs.7,500.00. Payment due date: 08-Oct-26.',
+    { smsId: 's-manual-1' });
+  let card = cardNow();
+  check('SMS no longer overwrites the manually-set days', card.statementDay === 10 && card.dueDay === 25, JSON.stringify(card));
+  check('…and never stages a pending actual-date confirmation either', card.pendingCycleDate === null, JSON.stringify(card));
+  check('…but the BILL AMOUNT still applies — money keeps tracking', card.statementBalance === 7500 && card.remainingDue === 7500, JSON.stringify(card));
+
+  // A pending date from BEFORE the manual edit is discarded by the edit itself.
+  useStore.setState({ accounts: useStore.getState().accounts.map((a) => (a.id === cardId ? { ...a, cycleDaysManual: false, pendingCycleDate: { statementDate: new Date().toISOString(), dueDate: null } } : a)) });
+  useStore.getState().setAccountCycleDates(cardId, { statementDay: 11 });
+  check('a fresh manual edit drops any pending confirmation', cardNow().pendingCycleDate === null, JSON.stringify(cardNow()));
+}
+
+// ── paymentHistory caps at 24 entries, dropping the oldest ──────────────────
+{
+  reset();
+  const cardId = useStore.getState().addAccount({ type: 'Credit Card', name: 'Card', mask: '6666', bankName: 'Axis' });
+  for (let i = 0; i < 26; i++) {
+    useStore.setState({
+      accounts: useStore.getState().accounts.map((a) => (a.id === cardId ? { ...a, statementBalance: 100 } : a)),
+      pendingCCPaymentQueue: [{ amount: 100 + i, accountId: cardId, accountMask: '6666', bankName: 'Axis', smsId: `pay-${i}` }],
+    });
+    useStore.getState().settleCCPayment();
+  }
+  const card = useStore.getState().accounts.find((a) => a.id === cardId);
+  check('paymentHistory caps at 24 entries', card.paymentHistory.length === 24, `${card.paymentHistory.length}`);
+  check('the cap drops the OLDEST entries, keeping the newest',
+    card.paymentHistory[0].amount === 102 && card.paymentHistory[23].amount === 125,
+    JSON.stringify(card.paymentHistory.map((h) => h.amount)));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

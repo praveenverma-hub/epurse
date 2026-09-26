@@ -144,10 +144,12 @@ const ccBillCard = (ccBills, nowMs) => {
   if (bills.length === 0) return null;
 
   const dated = bills
-    .map((b) => ({ ...b, days: daysUntilDue(b.dueDate, nowMs) }))
+    // `remaining` = what's still owed after a PARTIAL payment (the store stamps
+    // it); a bill nobody has paid against owes its full amount.
+    .map((b) => ({ ...b, owed: b.remaining ?? b.amount, days: daysUntilDue(b.dueDate, nowMs) }))
     // A bill with an unparseable date can't say "due in N days", and a vague
     // "you have a bill" isn't worth a slot.
-    .filter((b) => b.days != null && b.amount > 0)
+    .filter((b) => b.days != null && b.owed > 0)
     .filter((b) => b.days <= DUE_SOON_DAYS && b.days >= -OVERDUE_GRACE_DAYS)
     .sort((a, b) => a.days - b.days);
 
@@ -158,21 +160,24 @@ const ccBillCard = (ccBills, nowMs) => {
     ? `${bill.bankName || 'Credit card'} •• ${bill.cardLast4}`
     : (bill.bankName || 'Credit card');
 
+  // "Due date passed", never "overdue": the app only reads SMS, so a bill paid
+  // some other way can still look open here — state the date, not a verdict.
   const when = bill.days < 0
-    ? `${Math.abs(bill.days)} ${Math.abs(bill.days) === 1 ? 'day' : 'days'} overdue`
+    ? `due ${Math.abs(bill.days)} ${Math.abs(bill.days) === 1 ? 'day' : 'days'} ago`
     : bill.days === 0 ? 'due today'
     : bill.days === 1 ? 'due tomorrow'
     : `due in ${bill.days} days`;
+  const partlyPaid = bill.remaining != null && bill.remaining < bill.amount;
 
   return {
     id: 'cc_bill_due',
     tier: TIER.URGENT,
     tone: TONE.DANGER,
     icon: 'card-outline',
-    eyebrow: bill.days < 0 ? 'Overdue' : 'Card bill',
-    title: `${formatCompact(bill.amount)} ${when}`,
+    eyebrow: bill.days < 0 ? 'Due date passed' : partlyPaid ? 'Partly paid' : 'Card bill',
+    title: `${formatCompact(bill.owed)} ${partlyPaid ? 'left, ' : ''}${when}`,
     body: bill.days < 0
-      ? `${card} — late fees may already apply.`
+      ? `${card} — late fees apply if unpaid.`
       : `${card} — pay in full to avoid interest.`,
     cta: 'Open accounts',
     target: ['Accounts'],

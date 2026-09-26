@@ -29,6 +29,19 @@ export const formatDate = (date) => {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 
+/** Ordinal day-of-month: 5 → "5th". Single source — was a private copy in
+ *  both `reminderSchedule.js` and `AccountDetailsScreen.tsx`. */
+export const ordinalDay = (n) => {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+};
+
 export const formatDateTime = (date) => {
   const d = new Date(date);
   return d.toLocaleString('en-IN', {
@@ -62,6 +75,27 @@ export const formatDateLabel = (date) => {
     month: 'short',
     year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
   });
+};
+
+/**
+ * "Just now" / "5m ago" / "3h ago" for anything under a day old; the actual
+ * date beyond that (clearer than "3d"/"2w" once it's not "this session").
+ * Promoted from a private copy in `NotificationsSheet.tsx` — now also used by
+ * the Accounts list's "Last activity" line.
+ */
+export const timeAgo = (ms) => {
+  const diff = Math.max(0, Date.now() - ms);
+  const m = Math.floor(diff / 60_000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const dt = new Date(ms);
+  const now = new Date();
+  const opts = dt.getFullYear() === now.getFullYear()
+    ? { day: 'numeric', month: 'short' }
+    : { day: 'numeric', month: 'short', year: 'numeric' };
+  return dt.toLocaleDateString('en-IN', opts);
 };
 
 /**

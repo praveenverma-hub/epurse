@@ -26,7 +26,7 @@ import PlainScreenHeader from '../components/PlainScreenHeader';
 import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, formatCompact, monthKey, titleCaseName } from '../utils/format';
+import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
 import { countsForSpend, spendContribution } from '../utils/split';
 import { buildCategoryBreakdown } from '../analytics/behavioralSelectors';
 import EmptyState from '../components/EmptyState';
@@ -41,6 +41,7 @@ import CenterModal from '../components/CenterModal';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import MonthDivider from '../components/MonthDivider';
 import WhatsAppIcon from '../components/WhatsAppIcon';
+import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
 import type { Group } from '../types/group';
 
@@ -70,29 +71,6 @@ function lightenHex(hex: string, amt = 0.4): string {
   const mix = (c: number) => Math.round(c + (255 - c) * amt);
   const to2 = (n: number) => n.toString(16).padStart(2, '0');
   return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
-}
-
-function MonthlyBarChart({ data, color }: { data: { key: string; label: string; total: number }[]; color: string }) {
-  const max = Math.max(1, ...data.map((d) => d.total));
-  const H = 96;
-  return (
-    <View style={styles.chartRow}>
-      {data.map((d) => {
-        const h = Math.max(3, (d.total / max) * H);
-        return (
-          <View key={d.key} style={styles.chartCol}>
-            <Text style={styles.chartValue} numberOfLines={1}>
-              {d.total > 0 ? formatCompact(d.total) : ''}
-            </Text>
-            <View style={styles.chartBarTrack}>
-              <View style={[styles.chartBar, { height: h, backgroundColor: d.total > 0 ? color : colors.divider }]} />
-            </View>
-            <Text style={styles.chartLabel}>{d.label}</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
 }
 
 export default function GroupDetailScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -918,12 +896,6 @@ const styles = StyleSheet.create({
 
   summaryScroll: { padding: spacing.md, paddingBottom: spacing.xl },
   chartCard: { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.lg, ...shadows.card },
-  chartRow: { flexDirection: 'row', alignItems: 'flex-end', height: 96 + 36 },
-  chartCol: { flex: 1, alignItems: 'center' },
-  chartValue: { ...typography.tiny, color: colors.textSecondary, marginBottom: 4 },
-  chartBarTrack: { flex: 1, justifyContent: 'flex-end' },
-  chartBar: { width: 18, borderRadius: 4 },
-  chartLabel: { ...typography.tiny, color: colors.textMuted, marginTop: 6 },
 
   listCard: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden' },
   categoryRow: { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },

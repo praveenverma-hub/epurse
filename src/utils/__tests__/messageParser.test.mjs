@@ -1560,11 +1560,11 @@ const CC_DUE_DATE_AUG26 = [
   { name: 'SBI: "Payment due date: 07-Jun-26" (colon — the regression)',
     sender: 'SBICRD',
     sms: 'Total Amount Due on your SBI Credit Card ending 1234 for statement dt 20-May-26 is ₹16,748.65. Min Amount Due: ₹837.00. Payment due date: 07-Jun-26.',
-    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65, ccStatementDate: '20-May-26', ccDueCardLast4: '1234' } },
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '07-Jun-26', ccDueAmount: 16748.65, ccStatementDate: '20-May-26', ccDueCardLast4: '1234', ccMinDue: 837 } },
   { name: 'Statement cycle date — "statement dated <date>" phrasing',
     sender: 'HDFCBK',
     sms: 'Your HDFC Bank Credit Card ending 9876 statement dated 05-Sep-26 is ready. Total Amount Due Rs.12,400.00. Due date: 25-Sep-26.',
-    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '25-Sep-26', ccStatementDate: '05-Sep-26', ccDueCardLast4: '9876' } },
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '25-Sep-26', ccStatementDate: '05-Sep-26', ccDueCardLast4: '9876', ccMinDue: null } },
   { name: 'Statement cycle date — "statement generated on <date>" phrasing',
     sender: 'ICICIB',
     sms: 'Your ICICI Bank Credit Card XX5004 statement generated on 06-Sep-26. Total Amount Due Rs.8,120.00. Payment due date : 26-Sep-26.',
@@ -1572,7 +1572,7 @@ const CC_DUE_DATE_AUG26 = [
   { name: 'Statement mentions only a month, no day — statement date stays null',
     sender: 'ICICIB',
     sms: 'Your ICICI Bank Credit Card XX5004 statement for Jul-26 is generated. Total due Rs.24,190.00, min due Rs.1,210.00, due by 18-Aug-26.',
-    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '18-Aug-26', ccStatementDate: null } },
+    expect: { accept: false, code: 'cc_bill_reminder', ccDueDate: '18-Aug-26', ccStatementDate: null, ccMinDue: 1210 } },
   { name: 'No colon still works (the shape that always passed)',
     sender: 'SBICRD',
     sms: 'Total Amount Due on your SBI Credit Card ending 1234 is ₹9,100.00. Payment due date 07-Jul-26.',
@@ -1757,6 +1757,8 @@ function checkCase({ sender, sms, expect }) {
       cmp('ccDue.amount', r.ccDue?.amount ?? null, expect.ccDueAmount);
     if (expect.ccStatementDate !== undefined)
       cmp('ccDue.statementDate', r.ccDue?.statementDate ?? null, expect.ccStatementDate);
+    if (expect.ccMinDue !== undefined)
+      cmp('ccDue.minDue', r.ccDue?.minDue ?? null, expect.ccMinDue);
     // "Which card" — was silently NEVER asserted despite the fields existing since
     // whenever these interceptions were built. Real gap: the payment-notification
     // path used a stricter mask regex than the reminder path and returned null on

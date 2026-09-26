@@ -21,7 +21,6 @@ import { useTheme, useLbGradients } from '../hooks/useTheme';
 import { formatCurrency, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
-import AccountPickerSheet from '../components/AccountPickerSheet';
 import LbEntryForm from '../components/LbEntryForm';
 import InfoIcon from '../components/InfoIcon';
 import InfoSheet from '../components/InfoSheet';
@@ -48,7 +47,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const [index, setIndex] = useState(() => keyToIndex(initialKind));
   const kind = LB_ROUTES[index].key;
   const setKind = useCallback((k) => setIndex(keyToIndex(k)), []);
-  const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
   const [confirm, setConfirm] = useState(null);
   const [infoVisible, setInfoVisible] = useState(false);
 
@@ -57,6 +55,13 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const accounts = useEPurseStore((s) => s.accounts);
   const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
   const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
+  // The LB form has no account field of its own — a borrow-repaid entry that
+  // books a real Repayment expense uses the store's own PRIMARY account
+  // rather than interrupting with a picker (see ensurePrimary in ePurseStore.js).
+  const primaryAccountId = useMemo(
+    () => accounts.find((a) => a.primary && !a.archived)?.id ?? accounts[0]?.id ?? null,
+    [accounts],
+  );
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   // "Does this person already have a reminder?" now comes from the reminder
   // REGISTRY (keyed by personKey in `sourceKey`), which is also what the
@@ -95,11 +100,16 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     const n = baseEntry.amount;
 
     if (settled) {
-      // A borrow's counterpart (borrow_repaid) is a real expense — pick which
-      // account it left before committing (same as the Settle flow). No toast on
-      // this branch: the account picker below is the actual commit point.
+      // A borrow's counterpart (borrow_repaid) is a real expense — the LB form
+      // has no account field of its own, so it books against the PRIMARY
+      // account directly instead of interrupting with a picker.
       if (addKind === 'borrowed') {
-        setPendingSettledAdd({ ...baseEntry, kind: 'borrowed' });
+        addAlreadySettledLentBorrowed({ ...baseEntry, kind: 'borrowed' }, primaryAccountId ? { accountId: primaryAccountId } : undefined);
+        const repaidWho = firstName(baseEntry.person);
+        toast.success(
+          `Repaid ${formatCurrency(n)} to ${repaidWho}`,
+          formatOutstanding(netWithPerson(baseEntry), repaidWho),
+        );
         return;
       }
       addAlreadySettledLentBorrowed({ ...baseEntry, kind: 'lent' });
@@ -124,24 +134,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         ? formatOutstanding(net, who)
         : undefined,
     );
-  }, [addLentBorrowed, addAlreadySettledLentBorrowed, toast, netWithPerson]);
-
-  /**
-   * Commit an "already repaid" BORROW. All three exits of the account picker land
-   * here — pick an account (books the Repayment expense), skip, or dismiss — since
-   * the entry itself is committed either way; only the account question differs.
-   */
-  const commitSettledBorrow = useCallback((accountId) => {
-    const entry = pendingSettledAdd;
-    if (!entry) return;
-    addAlreadySettledLentBorrowed(entry, accountId ? { accountId } : undefined);
-    const who = firstName(entry.person);
-    toast.success(
-      `Repaid ${formatCurrency(entry.amount)} to ${who}`,
-      formatOutstanding(netWithPerson(entry), who),
-    );
-    setPendingSettledAdd(null);
-  }, [pendingSettledAdd, addAlreadySettledLentBorrowed, toast, netWithPerson]);
+  }, [addLentBorrowed, addAlreadySettledLentBorrowed, toast, netWithPerson, primaryAccountId]);
 
   // Per-person balances for BOTH panels (both scenes are mounted by the pager).
   // lent panel shows net > 0, borrowed panel shows net < 0. Also include
@@ -454,25 +447,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
           onSecondary={confirm?.onSecondary}
           onClose={() => setConfirm(null)}
           onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
-        />
-
-        {/* The net-settle account picker moved to LbPersonScreen along with the
-            Settle button. The one below is a different flow — the add form's
-            "already settled" toggle, which still lives on this screen. */}
-        <AccountPickerSheet
-          visible={!!pendingSettledAdd}
-          title="Repaid from which account?"
-          subtitle={pendingSettledAdd
-            ? `${pendingSettledAdd.person} · ${formatCurrency(pendingSettledAdd.amount)} — records a Repayment expense`
-            : undefined}
-          accounts={accounts}
-          onSelect={(accountId) => commitSettledBorrow(accountId)}
-          skipLabel="Just mark repaid (no expense)"
-          onSkip={() => commitSettledBorrow(null)}
-          // Dismissing the backdrop still logs the entry (ledger-only) — the user
-          // already committed to adding it by tapping "Add"; only the account
-          // question was left open, so declining it shouldn't discard the entry.
-          onClose={() => commitSettledBorrow(null)}
         />
 
     </KeyboardAvoidingView>

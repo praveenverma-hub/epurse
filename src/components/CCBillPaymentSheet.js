@@ -5,7 +5,8 @@
 // payment (category → 'cc_bill', which drops it out of spend totals). Lets them
 // pick WHICH card it paid and how to reconcile that card's outstanding:
 //   • True-up to Zero      → clear the card
-//   • Settle this payment  → reduce the card by exactly this txn's amount
+//   • Settle this payment  → reduce the card by exactly this txn's amount — and
+//                            its statement: a smaller payment leaves it PART-paid
 //   • Don't change balance → leave the card (use when the card's own "payment
 //                            received" SMS already reduced it → no double count)
 //
@@ -27,6 +28,8 @@ import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { EMPTY_ARRAY } from '../constants/empty';
+import { statementRemaining } from '../utils/ccStatement';
+import { ordinalDay } from '../utils/format';
 
 const outstandingOf = (acc) => Math.abs(Math.min(acc?.balance ?? 0, 0));
 
@@ -36,6 +39,7 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
 
   const accounts            = useEPurseStore((s) => s.accounts) ?? EMPTY_ARRAY;
   const markAsCCBillPayment = useEPurseStore((s) => s.markAsCCBillPayment);
+  const confirmPendingCycleDate = useEPurseStore((s) => s.confirmPendingCycleDate);
 
   const ccAccounts = useMemo(
     () => accounts.filter((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD),
@@ -74,15 +78,39 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
   const selectedCard = ccAccounts.find((a) => a.id === cardId) || null;
   const cardOutstanding = selectedCard ? outstandingOf(selectedCard) : 0;
 
+  // Same checkpoint as the SMS payment prompt: a learned statement/due date
+  // waits here, at the moment the user is already settling this card.
+  const pendingDate = selectedCard?.pendingCycleDate ?? null;
+  const pendingDateText = (() => {
+    if (!pendingDate) return '';
+    const parts = [];
+    if (pendingDate.statementDate) parts.push(`statement date is now the ${ordinalDay(new Date(pendingDate.statementDate).getDate())}`);
+    if (pendingDate.dueDate) parts.push(`due date is now the ${ordinalDay(new Date(pendingDate.dueDate).getDate())}`);
+    return parts.join(' and ');
+  })();
+
   const pickCard = (id) => {
     setCardId(id);
     const acc = ccAccounts.find((a) => a.id === id);
     setMode(acc && outstandingOf(acc) > 0 ? 'settle' : 'none');
   };
 
+  // Same statement rule as the SMS payment prompt (utils/ccStatement): Settle
+  // applies exactly this amount — a smaller one leaves the bill part-paid.
+  const stmtLeft = statementRemaining(selectedCard);
+  const settleSub = stmtLeft == null || stmtLeft <= 0
+    ? `Apply ${formatCurrency(amount)}`
+    : amount >= stmtLeft
+      ? 'Pays this statement in full'
+      : `${formatCurrency(stmtLeft - amount)} left on the statement`;
+  // More than the card owes is allowed, but only with the warning below.
+  const overpaid = mode === 'settle' && cardOutstanding > 0 && amount > cardOutstanding
+    ? amount - cardOutstanding
+    : 0;
+
   const MODES = [
     { key: 'trueup', title: 'True-up to Zero',      sub: 'Cleared the full bill',   result: 0 },
-    { key: 'settle', title: 'Settle this payment',   sub: `Apply ${formatCurrency(amount)}`, result: Math.max(0, cardOutstanding - amount) },
+    { key: 'settle', title: 'Settle this payment',   sub: settleSub, result: Math.max(0, cardOutstanding - amount) },
     { key: 'none',   title: "Don't change balance",  sub: 'Card SMS already recorded it', result: cardOutstanding },
   ];
 
@@ -155,6 +183,22 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
                 );
               })}
 
+              {pendingDate ? (
+                <View style={styles.pendingDateBox}>
+                  <Text style={styles.pendingDateText}>
+                    We noticed this card's {pendingDateText} — update it on file?
+                  </Text>
+                  <View style={styles.pendingDateActions}>
+                    <TouchableOpacity onPress={() => confirmPendingCycleDate(selectedCard.id, false)} activeOpacity={0.8}>
+                      <Text style={styles.pendingDateSkip}>Not now</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => confirmPendingCycleDate(selectedCard.id, true)} activeOpacity={0.8}>
+                      <Text style={styles.pendingDateYes}>Update</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+
               {/* How to reconcile */}
               <Text style={[styles.section, { marginTop: spacing.md }]}>Adjust the card?</Text>
               {MODES.map((m) => {
@@ -184,6 +228,12 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
               })}
             </ScrollView>
 
+            {overpaid > 0 ? (
+              <Text style={styles.overpayWarn}>
+                This is {formatCurrency(overpaid)} more than the card owes — the extra won't be kept as credit.
+              </Text>
+            ) : null}
+
             <TouchableOpacity
               style={[styles.primaryBtn, submitting && styles.primaryBtnBusy]}
               onPress={confirm}
@@ -192,7 +242,7 @@ const CCBillPaymentSheet = ({ txn, onClose, onConfirm = () => {} }) => {
             >
               {submitting
                 ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.primaryBtnText}>Mark as CC bill payment</Text>}
+                : <Text style={styles.primaryBtnText}>{overpaid > 0 ? 'Mark Anyway' : 'Mark as CC bill payment'}</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -294,6 +344,25 @@ const makeStyles = (t) => {
     rowResultLabel: { color: t.textMuted, fontSize: 10, fontWeight: '600' },
     rowResult: { color: t.textPrimary, fontSize: 14, fontWeight: '800', marginTop: 1 },
     rowResultZero: { color: SUCCESS },
+    pendingDateBox: {
+      backgroundColor: t.cardAlt,
+      borderWidth: 1,
+      borderColor: t.divider,
+      borderRadius: radius.md,
+      padding: spacing.sm + 2,
+      marginBottom: spacing.md,
+    },
+    pendingDateText: { color: t.textSecondary, fontSize: 12.5, lineHeight: 17, marginBottom: 6 },
+    pendingDateActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.md },
+    pendingDateSkip: { color: t.textMuted, fontSize: 12.5, fontWeight: '700' },
+    pendingDateYes: { color: ACCENT, fontSize: 12.5, fontWeight: '700' },
+    overpayWarn: {
+      color: t.danger, // amber text fails contrast on the light card
+      fontSize: 12.5,
+      fontWeight: '600',
+      lineHeight: 18,
+      marginTop: spacing.sm,
+    },
     primaryBtn: {
       backgroundColor: ACCENT,
       borderRadius: radius.lg,

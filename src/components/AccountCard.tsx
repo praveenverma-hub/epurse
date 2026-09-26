@@ -308,7 +308,10 @@ const AccountCard: React.FC<Props> = ({
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           activeOpacity={0.75}
         >
-          <Text style={styles.deleteBtnText}>✕</Text>
+          {/* A plain drawn bar, not an Ionicons glyph — "remove"'s stroke
+              weight is fixed to the font and read as too thin at this size;
+              a View gives control over its own thickness directly. */}
+          <View style={styles.deleteBtnBar} />
         </TouchableOpacity>
       ) : null}
     </View>
@@ -764,6 +767,10 @@ const styles = StyleSheet.create({
   },
 
   // ── Delete pill ──
+  // The minus is a plain drawn bar (deleteBtnBar), not a font glyph —
+  // Ionicons "remove"'s stroke weight is fixed and read as too thin at this
+  // size; "remove-circle" draws circle+glyph as ONE fill, so neither can be a
+  // red circle with a bold white minus, only one flat colour or a thin line.
   deleteBtn: {
     position: 'absolute',
     top: -6,
@@ -771,16 +778,13 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#FF3B30EE',
+    // Faded from a near-opaque '#FF3B30EE' (93%) — read as too vibrant sitting on
+    // top of the card's own colour. Same hue, lower alpha; still reads as delete.
+    backgroundColor: '#FF3B30CC',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,
     ...shadows.pop,
   },
-  deleteBtnText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '900',
-    lineHeight: 12,
-  },
+  deleteBtnBar: { width: 10, height: 2.5, borderRadius: 1.25, backgroundColor: '#fff' },
 });

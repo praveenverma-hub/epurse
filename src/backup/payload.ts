@@ -123,7 +123,7 @@ export const STORE_KEYS = [
   // nothing will ever deliver.
   'reminders', 'notificationPrefs',
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
-  'welcomeReviewSeen', 'planBannerDismissed', 'anchorNudgeDismissed',
+  'welcomeReviewSeen', 'planBannerDismissed',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',
   'declinedAccountLinks', 'activeGroupZoneId', 'userCustomRules',
 ] as const;

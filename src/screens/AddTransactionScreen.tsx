@@ -27,7 +27,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { ACCOUNT_TYPES, TRANSACTION_TYPES } from '../constants/categories';
+import { TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation';
 import { colors, radius, spacing, typography } from '../constants/theme';
@@ -310,9 +310,12 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   }, [editTxn?.id]);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
+  // The store guarantees exactly one active account is `primary` whenever any
+  // account exists (see `ensurePrimary` in ePurseStore.js) — that's the one
+  // real default for a manual entry, not an arbitrary "first Cash account".
   const defaultAccountId = useMemo(() => {
-    const cash = accounts.find((a: any) => a.type === ACCOUNT_TYPES.CASH);
-    return cash?.id || accounts[0]?.id || null;
+    const primary = accounts.find((a: any) => a.primary && !a.archived);
+    return primary?.id || accounts[0]?.id || null;
   }, [accounts]);
 
   const resolvedAccountId = accountId ?? defaultAccountId;

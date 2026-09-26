@@ -12,8 +12,12 @@
 //
 // The form owns ALL its state, its validation, and the contact-picker sheet. It
 // reports one shape upward via onSubmit and holds no store dependency, so both
-// shells stay free to commit it differently (the LB tab routes an already-repaid
-// borrow through an account picker first).
+// shells stay free to commit it differently — an already-repaid borrow books a
+// real Repayment expense, and this form has no account field of its own, so
+// each shell decides how that account gets picked: LentBorrowedScreen (the
+// main LB screen) defaults straight to the PRIMARY account (see ensurePrimary
+// in ePurseStore.js), while LbPersonScreen still confirms via AccountPickerSheet
+// — money leaving a real account is worth a confirmation there.
 // =============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';

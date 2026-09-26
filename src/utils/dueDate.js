@@ -1,5 +1,7 @@
 // =============================================================================
-// dueDate — parse the due-date string a CC-bill SMS carries.
+// dueDate — parse the due-date string a CC-bill SMS carries, plus billing-CYCLE
+// math from the two day-of-month fields learned onto the account
+// (`statementDay`/`dueDay` — see `applyCcCycleInfoToAccount` in the store).
 // -----------------------------------------------------------------------------
 // Extracted from `utils/notifications.js` (Aug-26) so it can be used off the
 // notification path. That module imports expo-notifications, which cannot load
@@ -8,6 +10,8 @@
 // `notifications.js` re-exports `parseDueDate` from here, so existing callers are
 // unaffected and there is exactly one implementation.
 // =============================================================================
+
+import { daysInMonth } from './reminderSchedule';
 
 const MONTHS = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
@@ -94,4 +98,176 @@ export function ccReminderFireAt(dueStr, nowMs = Date.now()) {
   if (dayBefore.getTime() > floor) return dayBefore.getTime();
   if (onDue.getTime() > floor) return onDue.getTime();
   return null; // due date already here/passed — the in-app chip covers it
+}
+
+const DAY_MS = 86400000;
+
+/** Midnight local time for `d` — every function below compares whole days. */
+const atMidnight = (d) => {
+  const n = new Date(d);
+  n.setHours(0, 0, 0, 0);
+  return n;
+};
+
+/**
+ * The next calendar date landing on `day` (1-31), `from` inclusive. Clamped to
+ * the month's real length via `daysInMonth` (imported from `reminderSchedule`,
+ * the same clamping `monthlyOccurrence` uses there) — day 31 in February lands
+ * on the 28th/29th rather than overflowing into March.
+ */
+export function nextOccurrenceOfDay(day, from = new Date()) {
+  const today = atMidnight(from);
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const thisMonth = new Date(y, m, Math.min(day, daysInMonth(y, m)));
+  if (thisMonth.getTime() >= today.getTime()) return thisMonth;
+  const nextM = m + 1;
+  const year = y + Math.floor(nextM / 12);
+  const month = ((nextM % 12) + 12) % 12;
+  return new Date(year, month, Math.min(day, daysInMonth(year, month)));
+}
+
+/** Mirror of `nextOccurrenceOfDay`, looking backward — most recent occurrence
+ *  of `day` on/before `from`, clamped the same way. */
+export function previousOccurrenceOfDay(day, from = new Date()) {
+  const today = atMidnight(from);
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const thisMonth = new Date(y, m, Math.min(day, daysInMonth(y, m)));
+  if (thisMonth.getTime() <= today.getTime()) return thisMonth;
+  const prevM = m - 1;
+  const year = y + Math.floor(prevM / 12);
+  const month = ((prevM % 12) + 12) % 12;
+  return new Date(year, month, Math.min(day, daysInMonth(year, month)));
+}
+
+/** Whole days from `from` to the next occurrence of `day` (1-31). 0 = today. */
+export function daysUntilDayOfMonth(day, from = new Date()) {
+  return Math.round((nextOccurrenceOfDay(day, from).getTime() - atMidnight(from).getTime()) / DAY_MS);
+}
+
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const daysBetween = (a, b) => Math.round((b.getTime() - a.getTime()) / DAY_MS);
+
+/** A stored date (ISO string / epoch ms / Date) as local midnight, or null. */
+export const toDay = (v) => {
+  if (v == null || v === '') return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : atMidnight(d);
+};
+
+// An actual statement date within this many days of the one the recurring
+// billing day predicts is the SAME statement — the real date wins (issuers
+// shift a day or two for weekends/holidays).
+const SAME_STATEMENT_WINDOW = 10;
+// An actual date older than this with no recurring day to fall back on is a
+// past cycle, not the current one.
+const ACTUAL_STALE_DAYS = 45;
+// A real due date more than this after its statement can't belong to it.
+const DUE_MAX_AFTER_STATEMENT = 60;
+
+/** Statement→due spans outside this read as a typo'd day, not a real issuer. */
+export const PAYMENT_GAP_MIN_DAYS = 5;
+export const PAYMENT_GAP_MAX_DAYS = 45;
+export const isUnusualPaymentGap = (days) =>
+  days != null && (days < PAYMENT_GAP_MIN_DAYS || days > PAYMENT_GAP_MAX_DAYS);
+
+/**
+ * The most recent statement date on/before `from`. Priority (the billing
+ * spec): the ACTUAL date a bill SMS reported → the recurring billing day →
+ * nothing. The actual date only wins while it's plausibly the current
+ * statement; once a newer one is due by the recurring day, that takes over.
+ */
+export function resolveStatementDate({ statementDay, lastStatementDate } = {}, from = new Date()) {
+  const today = atMidnight(from);
+  const actual = toDay(lastStatementDate);
+  const derived = statementDay ? previousOccurrenceOfDay(statementDay, today) : null;
+  if (actual && actual.getTime() <= today.getTime()) {
+    if (!derived) {
+      return daysBetween(actual, today) <= ACTUAL_STALE_DAYS ? { date: actual, source: 'actual' } : null;
+    }
+    // Same statement (a day or two off), or a NEWER one than the recurring day
+    // predicts (the issuer moved the cycle) — either way the real date wins.
+    if (Math.abs(daysBetween(derived, actual)) <= SAME_STATEMENT_WINDOW || actual > derived) {
+      return { date: actual, source: 'actual' };
+    }
+  }
+  return derived ? { date: derived, source: 'derived' } : null;
+}
+
+/**
+ * The due date belonging to `statementDate`: the real one from the bill SMS if
+ * it fits after that statement, else the FIRST occurrence of `dueDay` after the
+ * statement date (short months clamp to their last day).
+ */
+export function resolveDueDate({ dueDay, lastDueDate } = {}, statementDate) {
+  if (!statementDate) return null;
+  const actual = toDay(lastDueDate);
+  if (actual && actual > statementDate && daysBetween(statementDate, actual) <= DUE_MAX_AFTER_STATEMENT) {
+    return { date: actual, source: 'actual' };
+  }
+  if (!dueDay) return null;
+  return { date: nextOccurrenceOfDay(dueDay, addDays(statementDate, 1)), source: 'derived' };
+}
+
+/** Days from a statement on `statementDay` to its due on `dueDay` — for the
+ *  "unusual gap" warning on the add/edit forms, before any bill has arrived. */
+export function paymentGapDays(statementDay, dueDay, from = new Date()) {
+  if (!statementDay || !dueDay) return null;
+  const stmt = previousOccurrenceOfDay(statementDay, from);
+  return daysBetween(stmt, nextOccurrenceOfDay(dueDay, addDays(stmt, 1)));
+}
+
+/**
+ * The window between the latest statement and ITS due date — "how long do I
+ * have to pay this bill". `daysToDue` is signed (negative = the due date has
+ * passed); `progress` is 0-1 across the window. Null without a statement date
+ * or a due date to anchor it.
+ */
+export function currentPaymentWindow(account = {}, from = new Date()) {
+  const today = atMidnight(from);
+  const stmt = resolveStatementDate(account, today);
+  if (!stmt) return null;
+  const due = resolveDueDate(account, stmt.date);
+  if (!due) return null;
+  const total = daysBetween(stmt.date, due.date);
+  const elapsed = Math.min(total, Math.max(0, daysBetween(stmt.date, today)));
+  return {
+    statementDate: stmt.date,
+    dueDate: due.date,
+    statementSource: stmt.source,
+    dueSource: due.source,
+    daysToDue: daysBetween(today, due.date),
+    progress: total > 0 ? elapsed / total : 1,
+    gapDays: total,
+    gapUnusual: isUnusualPaymentGap(total),
+  };
+}
+
+/**
+ * The BILLING cycle today falls in — statement to next statement, the spend
+ * period (billing day 18, today 26 Sep → 19 Sep – 18 Oct). A statement day is
+ * the LAST day of the cycle it closes. The previous statement comes from the
+ * actual date when known (same priority as `resolveStatementDate`).
+ */
+export function currentBillingCycle({ statementDay, lastStatementDate } = {}, from = new Date()) {
+  const today = atMidnight(from);
+  const actual = toDay(lastStatementDate);
+  const day = statementDay || (actual ? actual.getDate() : null);
+  if (!day) return null;
+  const end = nextOccurrenceOfDay(day, today);
+  let prev = previousOccurrenceOfDay(day, addDays(end, -1));
+  if (actual && actual < end && (Math.abs(daysBetween(prev, actual)) <= SAME_STATEMENT_WINDOW || actual > prev)) {
+    prev = actual;
+  }
+  const start = addDays(prev, 1);
+  const total = daysBetween(start, end) + 1;
+  const elapsed = daysBetween(start, today) + 1;
+  return {
+    start,
+    end,
+    progress: Math.min(1, Math.max(0, elapsed / total)),
+    daysLeft: daysBetween(today, end),
+    totalDays: total,
+  };
 }

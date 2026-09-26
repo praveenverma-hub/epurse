@@ -396,6 +396,12 @@ const CC_DUE_DATE_REGEX =
 const CC_STATEMENT_DATE_REGEX =
   /\bstatement\s+(?:dt|dated|date|generated\s+on|as\s+of)\s*:?\s*-?\s*(\d{1,2}[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/i;
 
+// The MINIMUM amount due on a CC bill reminder ("Min Amount Due: Rs.837.00", "Minimum
+// Due Rs 500", "Min. Amt Due of INR 1,200"). Separate from AMOUNT_REGEX's first match,
+// which is the total — a reminder normally states both, total first.
+const CC_MIN_DUE_REGEX =
+  /\bmin(?:imum)?\.?\s*(?:amount|amt)?\.?\s*due\b\s*(?:is|of|:|-)?\s*(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)/i;
+
 // Outgoing CC bill payment from source bank account (not an expense — it's a
 // liability settlement). Patterns: "towards [bank] credit card", "credit card
 // bill payment successful", "paid to [bank] credit card".
@@ -955,6 +961,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
     const dueDate   = dateMatch?.[1] || null;
     const stmtMatch = text.match(CC_STATEMENT_DATE_REGEX);
     const statementDate = stmtMatch?.[1] || null;
+    const minDue    = toNumber(text.match(CC_MIN_DUE_REGEX)?.[1]);
     return {
       ok: false,
       error: {
@@ -963,7 +970,11 @@ export const parseMessageDetailed = (message, opts = {}) => {
           'Credit-card bill reminder detected (amount due / pay by …), so it was not added as a spend.',
       },
       ccDue: dueAmt > 0
-        ? { amount: dueAmt, cardLast4, dueDate, statementDate, bankName: getBankName(opts.sender) }
+        ? {
+          amount: dueAmt, cardLast4, dueDate, statementDate,
+          minDue: minDue > 0 && minDue <= dueAmt ? minDue : null,
+          bankName: getBankName(opts.sender),
+        }
         : null,
     };
   }

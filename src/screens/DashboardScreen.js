@@ -59,6 +59,7 @@ import BellIcon from '../components/BellIcon';
 import NotificationsSheet from '../components/NotificationsSheet';
 import AppBrandFooter from '../components/AppBrandFooter';
 import EmptyState from '../components/EmptyState';
+import StatSplitRow from '../components/StatSplitRow';
 import {
   useNotificationStore,
   selectHasUnreadNotifications,
@@ -740,22 +741,16 @@ const DashboardScreen = ({ navigation }) => {
           </View>
 
           {/* ── Income / refunds — ONE surface, split by a divider ──
-              Two separate pills read as two objects competing with the hero
-              figure; a single segmented block is one object with two facts in it.
               The labels dropped their period suffix too: the hero already says
               "this month" right above, so "Income this month" / "Refunds this
               month" printed the same phrase three times in one glance. */}
-          <View style={styles.statsRow}>
-            <View style={styles.statCell}>
-              <Text style={styles.statLabel}>INCOME</Text>
-              <Text style={styles.statValue} numberOfLines={1}>{formatCurrency(periodStats.received)}</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statCell}>
-              <Text style={styles.statLabel}>REFUNDS</Text>
-              <Text style={styles.statValue} numberOfLines={1}>{formatCurrency(periodStats.refunds)}</Text>
-            </View>
-          </View>
+          <StatSplitRow
+            style={styles.statsRow}
+            cells={[
+              { label: 'INCOME',  value: formatCurrency(periodStats.received) },
+              { label: 'REFUNDS', value: formatCurrency(periodStats.refunds) },
+            ]}
+          />
           </>
         )}
         // ── Collapsing mode ──────────────────────────────────────────────────
@@ -1460,34 +1455,9 @@ const styles = StyleSheet.create({
   // possible without settling that decision. Don't reintroduce an alpha.
   dataInfo: { color: '#FFFFFF', ...typography.tiny },
 
-  // ── Income / refunds: ONE segmented surface ───────────────────────────────
-  // Was two separate pills with a gap between them. One surface split by a
-  // hairline is a single object carrying two facts, which competes far less with
-  // the figure above it — and it can't drift out of alignment the way two
-  // independently-padded pills can.
-  statsRow: {
-    flexDirection: 'row',
-    marginTop: spacing.md,
-    backgroundColor: '#FFFFFF1F',
-    borderRadius: radius.md,
-    overflow: 'hidden',
-  },
-  statCell: {
-    flex: 1,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-  },
-  // Inset top and bottom so it reads as a divider between cells rather than a
-  // seam splitting the surface into two shapes.
-  statDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: '#FFFFFF3D',
-    marginVertical: spacing.sm,
-  },
-  // Same eyebrow tier as balanceLabel — the metric labels and the hero label are
-  // the same KIND of thing, so they get the same treatment.
-  statLabel: { color: '#FFFFFFCC', ...typography.tiny, fontWeight: '800', letterSpacing: 0.9 },
-  statValue: { color: '#fff', ...typography.bodyBold, fontWeight: '700', marginTop: 3 },
+  // Income/Refunds now render via the shared `StatSplitRow` component — this
+  // is just its outer spacing on this screen.
+  statsRow: { marginTop: spacing.md },
 
   // Body
   // ── Vertical rhythm: TWO levels, not one ──────────────────────────────────

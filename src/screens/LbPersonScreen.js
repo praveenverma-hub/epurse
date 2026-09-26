@@ -36,10 +36,10 @@ import GradientButton from '../components/GradientButton';
 import SectionHeader from '../components/SectionHeader';
 import SheetCloseButton from '../components/SheetCloseButton';
 import CenterModal from '../components/CenterModal';
-import AccountPickerSheet from '../components/AccountPickerSheet';
 import EmptyState from '../components/EmptyState';
 import EditIcon from '../components/EditIcon';
 import LbEntryForm from '../components/LbEntryForm';
+import AccountPickerSheet from '../components/AccountPickerSheet';
 import { useToast } from '../components/Toast';
 
 // Why a row can't be edited here — shown inline so the restriction explains itself

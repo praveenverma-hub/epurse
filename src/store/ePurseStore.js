@@ -79,7 +79,8 @@ import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSch
 // is stubbed wholesale in the headless test runner (it pulls in expo-notifications),
 // and its stub for parseDueDate always returns null. dueDate.js has zero
 // dependencies, so the store can use the REAL implementation in tests too.
-import { parseDueDate, ccReminderFireAt } from '../utils/dueDate';
+import { parseDueDate, ccReminderFireAt, toDay } from '../utils/dueDate';
+import { applyStatementPayment, statementRemaining } from '../utils/ccStatement';
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { locationKey } from '../utils/location';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
@@ -176,19 +177,54 @@ const nudgeAllowed = (state, prefKey) => (state?.notificationPrefs?.[prefKey] ??
  * is the whole reason that helper exists for account matching. Bank name is a
  * fallback for bills that carried no mask at all.
  */
-const clearCcBill = (bills, { cardLast4, bankName }) => {
+const billMatchesCard = (b, { cardLast4, bankName }) => {
+  const bank = (bankName || '').trim().toLowerCase();
+  if (cardLast4 && b.cardLast4 && maskMatch(b.cardLast4, cardLast4)) return true;
+  // Only fall back to the bank name when the bill has no mask of its own —
+  // otherwise one bank's payment would clear a DIFFERENT card's bill.
+  return !!bank && !b.cardLast4 && (b.bankName || '').trim().toLowerCase() === bank;
+};
+
+const clearCcBill = (bills, who) => {
   const entries = Object.entries(bills || {});
   if (entries.length === 0) return bills || {};
-  const bank = (bankName || '').trim().toLowerCase();
-  const kept = entries.filter(([, b]) => {
-    if (cardLast4 && b.cardLast4 && maskMatch(b.cardLast4, cardLast4)) return false;
-    // Only fall back to the bank name when the bill has no mask of its own —
-    // otherwise one bank's payment would clear a DIFFERENT card's bill.
-    if (bank && !b.cardLast4 && (b.bankName || '').trim().toLowerCase() === bank) return false;
-    return true;
-  });
+  const kept = entries.filter(([, b]) => !billMatchesCard(b, who));
   return kept.length === entries.length ? bills : Object.fromEntries(kept);
 };
+
+/**
+ * `ccBills` + OS due-reminders after a payment on `card`. Cleared only once its
+ * statement is FULLY paid (`remainingAfter` 0), or when no statement is tracked
+ * at all (nothing to measure against — the old always-clear behaviour). A
+ * PARTIAL payment leaves the bill and its reminder standing — money is still
+ * due — and just stamps what's left, so the Home "bill due" card shows that.
+ */
+const settleCcBillMaps = (state, card, remainingAfter) => {
+  const who = { cardLast4: card.mask || null, bankName: card.bankName || null };
+  if (remainingAfter != null && remainingAfter > 0) {
+    const bills = { ...(state.ccBills || {}) };
+    for (const [k, b] of Object.entries(bills)) {
+      if (billMatchesCard(b, who)) bills[k] = { ...b, remaining: remainingAfter };
+    }
+    return { ccBills: bills, ccDueReminderIds: state.ccDueReminderIds };
+  }
+  return {
+    ccBills: clearCcBill(state.ccBills, who),
+    ccDueReminderIds: cancelCcDueRemindersForCard(state.ccDueReminderIds, ccBillKey(who)),
+  };
+};
+
+/** One `paymentHistory` entry. `dueDate` is the real due date of the statement
+ *  paid (ISO) when known — not the bare day-of-month it used to store. */
+const paymentEntry = (a, amount, mode, applied) => ({
+  date: Date.now(),
+  amount,
+  mode,
+  statementBalance: a.statementBalance ?? null,
+  remainingAfter: applied.remainingAfter,
+  overpaid: applied.overpaid,
+  dueDate: a.lastDueDate ?? null,
+});
 
 /**
  * Cancel every scheduled CC-due-reminder OS notification for a card (any due date)
@@ -226,9 +262,40 @@ const cancelCcDueRemindersForCard = (ccDueReminderIds, cardKey) => {
  * account did this MONEY move on") than "which card does this FYI concern".
  * A reminder alone never creates an account; if none matches, the info is
  * dropped rather than guessed at.
+ *
+ * Also the ONE writer of the statement fields — `statementBalance`/`remainingDue`/
+ * `minimumDue` — alongside `ccBills`, so the two can never drift apart. A NEW
+ * statement (different statement/due date, or a different amount when the SMS
+ * carries no dates) resets the cycle: remaining = the full bill. A REPEAT
+ * reminder for the SAME statement must not — it would wipe partial payments
+ * already applied — except to LOWER remaining when the bank reports less still
+ * due (a payment the app never saw an SMS for).
+ *
+ * `lastStatementDate`/`lastDueDate` (the ACTUAL dates, which outrank the
+ * recurring day fields — see `resolveStatementDate`) are NOT written here
+ * directly. A freshly-read date only STAGES as `pendingCycleDate` — the user
+ * confirms it (inline, when they next settle a payment on this card) before it
+ * becomes authoritative. Money fields above still apply immediately; only the
+ * date-priority questions wait for a human.
+ *
+ * `cycleDaysManual` (set once by `setAccountCycleDates`, the Edit Account
+ * form) means the user has taken over the billing/due days by hand — SMS stops
+ * touching `dueDay`/`statementDay`/`lastStatementDate`/`lastDueDate`/
+ * `pendingCycleDate` for that card entirely, forever, per the user's own rule:
+ * a manual edit stays priority. Money fields keep updating either way.
  */
-const applyCcCycleInfoToAccount = (accounts, { cardLast4, bankName, dueDay, statementDay }) => {
-  if (!dueDay && !statementDay) return accounts;
+/** True/false — source date differs from what's already confirmed on the account. */
+const sameDay = (a, b) => {
+  const x = toDay(a);
+  const y = toDay(b);
+  return !!x && !!y && x.getTime() === y.getTime();
+};
+
+const applyCcCycleInfoToAccount = (accounts, {
+  cardLast4, bankName, dueDay, statementDay, statementBalance,
+  statementDate = null, dueDate = null, minDue = null,
+}) => {
+  if (!dueDay && !statementDay && statementBalance == null) return accounts;
   const bank = (bankName || '').trim().toLowerCase();
   let matched = false;
   const next = (accounts || []).map((a) => {
@@ -239,13 +306,64 @@ const applyCcCycleInfoToAccount = (accounts, { cardLast4, bankName, dueDay, stat
     const byBank = !cardLast4 && !!bank && (a.bankName || '').trim().toLowerCase() === bank;
     if (!byMask && !byBank) return a;
     matched = true;
-    return {
-      ...a,
+
+    const days = a.cycleDaysManual ? {} : {
       ...(dueDay ? { dueDay } : {}),
       ...(statementDay ? { statementDay } : {}),
     };
+    // A date pending confirmation, or already confirmed and unchanged, or the
+    // user has taken the days over by hand — nothing new to stage.
+    const pending = a.cycleDaysManual ? undefined : (() => {
+      const changed =
+        (statementDate && !sameDay(statementDate, a.lastStatementDate)) ||
+        (dueDate && !sameDay(dueDate, a.lastDueDate));
+      if (!changed) return undefined;
+      return { statementDate: statementDate ? toDay(statementDate).toISOString() : (a.pendingCycleDate?.statementDate ?? null),
+               dueDate: dueDate ? toDay(dueDate).toISOString() : (a.pendingCycleDate?.dueDate ?? null) };
+    })();
+
+    if (statementBalance == null) {
+      return { ...a, ...days, ...(pending !== undefined ? { pendingCycleDate: pending } : {}) };
+    }
+
+    // Compare against whichever we have — CONFIRMED (`lastStatementDate`) or
+    // still-pending-confirmation (`pendingCycleDate`) — so a repeat reminder is
+    // recognised as the same bill even before the user has confirmed the date.
+    const sameStatement = a.statementBalance != null && (
+      statementDate ? (sameDay(statementDate, a.lastStatementDate) || sameDay(statementDate, a.pendingCycleDate?.statementDate))
+      : dueDate ? (sameDay(dueDate, a.lastDueDate) || sameDay(dueDate, a.pendingCycleDate?.dueDate))
+      : statementBalance === a.statementBalance
+    );
+    if (sameStatement) {
+      const remaining = statementRemaining(a);
+      return {
+        ...a,
+        ...days,
+        ...(pending !== undefined ? { pendingCycleDate: pending } : {}),
+        remainingDue: Math.min(remaining, statementBalance),
+        ...(minDue != null ? { minimumDue: minDue } : {}),
+      };
+    }
+    return {
+      ...a,
+      ...days,
+      ...(pending !== undefined ? { pendingCycleDate: pending } : {}),
+      statementBalance,
+      remainingDue: statementBalance,
+      // A new statement's minimum replaces the last one's — never carry a stale one.
+      minimumDue: minDue,
+    };
   });
   return matched ? next : accounts;
+};
+
+
+/** Push a settled-payment entry onto a card's history, newest last, capped so
+ *  the array can't grow unbounded across years of statements. */
+const PAYMENT_HISTORY_CAP = 24;
+const appendPaymentHistory = (history, entry) => {
+  const next = [...(history || []), entry];
+  return next.length > PAYMENT_HISTORY_CAP ? next.slice(-PAYMENT_HISTORY_CAP) : next;
 };
 
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
@@ -277,6 +395,30 @@ const maxManualIdSuffixFromTransactions = (transactions = []) => {
 // =============================================================================
 // Helpers
 // =============================================================================
+
+/**
+ * Invariant: exactly one ACTIVE (non-archived) account is `primary` whenever
+ * at least one active account exists — never zero. (Never implicitly more
+ * than one either, but that half is already enforced by `setPrimaryAccount`
+ * itself, which unsets everyone else in the same write.)
+ *
+ * A no-op when the invariant already holds — safe to call after any mutation
+ * that could otherwise leave it violated (a fresh account added with no
+ * primary picked yet, the primary account archived/deleted, an explicit
+ * clear-to-null). Picks the first active account (array/creation order,
+ * i.e. the oldest) — deterministic, no type preference.
+ *
+ * This is the one default AddTransactionScreen's account picker and the LB
+ * form (which has no account field of its own) both fall back to, so a real
+ * account being marked "the" primary can't be left to chance.
+ */
+const ensurePrimary = (accounts) => {
+  const list = accounts || [];
+  const active = list.filter((a) => !a.archived);
+  if (active.length === 0 || active.some((a) => a.primary)) return list;
+  const firstId = active[0].id;
+  return list.map((a) => (a.id === firstId ? { ...a, primary: true } : a));
+};
 
 /** Two bank labels are compatible if either is missing or one contains the other. */
 /** Auto-create an account when an SMS references a mask we haven't seen. */
@@ -317,7 +459,7 @@ const ensureAccountForParsed = (accounts, parsed) => {
         balance: 0,
         color: parsed.accountType === ACCOUNT_TYPES.WALLET ? '#10B981' : '#F59E0B',
       };
-      return { accounts: [...accounts, auto], account: auto };
+      return { accounts: ensurePrimary([...accounts, auto]), account: auto };
     }
     return { accounts, account: null };
   }
@@ -341,15 +483,15 @@ const ensureAccountForParsed = (accounts, parsed) => {
     // `aliasMasks` = linked debit-card masks folded into a bank account (a card is
     // just an access point to the bank — same money). See linkDebitCardToBank.
     aliasMasks: [],
-    // TODO(cc-limits): `creditLimit` (number) and `limitGroupId` (string: cards that
-    // SHARE one limit are grouped by this id, e.g. an add-on card on the primary's
-    // limit) are still NOT built. `statementDay`/`dueDay` (1–31) ARE now populated —
-    // see `applyCcCycleInfoToAccount`, set from real CC-bill-reminder SMS dates, NOT
-    // here at account creation (a reminder never creates an account, only updates one
-    // that already exists). Until creditLimit lands, net worth treats a CC purely as
-    // a liability (outstanding balance) — see selectEPurseNetWorth.
+    // TODO(cc-limits): `creditLimit` was built (Sep-26 account revamp — user-set via
+    // AccountFormScreen, read by AccountDetailsScreen's Overview/Available-Credit/
+    // Utilization tiles). Still NOT built: `limitGroupId` (string — cards that SHARE
+    // one limit are grouped by this id, e.g. an add-on card on the primary's limit).
+    // `statementDay`/`dueDay` (1–31) ARE populated — see `applyCcCycleInfoToAccount`,
+    // set from real CC-bill-reminder SMS dates, NOT here at account creation (a
+    // reminder never creates an account, only updates one that already exists).
   };
-  return { accounts: [...accounts, auto], account: auto };
+  return { accounts: ensurePrimary([...accounts, auto]), account: auto };
 };
 
 const applyDelta = (accounts, accountId, parsed) => {
@@ -1057,11 +1199,6 @@ export const useEPurseStore = create(
       // own clear points in useGoogleSession's signIn/devBypass).
       justDeletedAccount: false,
 
-      // One-time onboarding nudge: ask the user to anchor their real bank balances
-      // on the Accounts screen. Auto-suppressed once any account has been anchored,
-      // or when the user explicitly dismisses the card.
-      anchorNudgeDismissed: false,
-
       // Theme preferences
       themeId: DEFAULT_THEME_ID,   // THEMES keys: 'orange'|'blue'|'carbon'|'indigo'|'platinum'
       darkMode: false,             // reserved for future dark-theme rollout
@@ -1244,24 +1381,16 @@ export const useEPurseStore = create(
       setUserName: (name) => set({ userName: (name || '').trim() }),
 
       // ─── User mobile numbers (for self-transfer detection) ───────────────────
+      // Managed from ProfileScreen only (one number) — the Accounts screen's own
+      // multi-number add/remove UI was removed as a duplicate; nothing else calls
+      // this with more than one entry today, but it stays a full replace so a
+      // second number is still just a matter of building UI for it, not schema.
       /** Replace the full list. Each entry is normalised to digits only. */
       setUserPhones: (phones) =>
         set({
           userPhones: Array.from(
             new Set((phones || []).map((p) => String(p).replace(/\D/g, '')).filter((p) => p.length >= 4))
           ),
-        }),
-      addUserPhone: (phone) =>
-        set((s) => {
-          const digits = String(phone || '').replace(/\D/g, '');
-          if (digits.length < 4) return s;
-          if ((s.userPhones || []).includes(digits)) return s;
-          return { userPhones: [...(s.userPhones || []), digits] };
-        }),
-      removeUserPhone: (phone) =>
-        set((s) => {
-          const digits = String(phone || '').replace(/\D/g, '');
-          return { userPhones: (s.userPhones || []).filter((p) => p !== digits) };
         }),
 
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
@@ -2769,17 +2898,171 @@ export const useEPurseStore = create(
         }),
 
       // ----- accounts ----------------------------------------------------
-      addAccount: (account) =>
+      // Returns the new account's id — the AccountForm screen needs it to
+      // immediately call setPrimaryAccount when "primary" was checked at
+      // creation (exclusivity has to be enforced against the FULL list,
+      // including this brand-new row, not just the fields on it).
+      addAccount: (account) => {
+        // Random suffix, matching every other account-id generator in this file —
+        // `Date.now()` alone collides when two accounts are added in the same
+        // millisecond (e.g. onboarding creating several in a tight loop), and a
+        // shared id means a later single-account update (balance, anchor, CC
+        // reconcile...) silently mutates BOTH accounts.
+        const id = `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        set((s) => {
+          const base = {
+            id,
+            balance: 0,
+            color: '#6B7280',
+            colorKey: null,
+            primary: false,
+            includeInNetWorth: true,
+            archived: false,
+            archivedAt: null,
+            ...account,
+          };
+          if (base.type === ACCOUNT_TYPES.CREDIT_CARD) {
+            base.creditLimit = base.creditLimit ?? null;
+            base.statementBalance = base.statementBalance ?? null;
+            base.minimumDue = base.minimumDue ?? null;
+            base.paymentHistory = base.paymentHistory ?? [];
+            base.remainingDue = base.remainingDue ?? base.statementBalance ?? null;
+            base.lastStatementDate = base.lastStatementDate ?? null;
+            base.lastDueDate = base.lastDueDate ?? null;
+            base.cycleDaysManual = base.cycleDaysManual ?? false;
+            base.pendingCycleDate = base.pendingCycleDate ?? null;
+          }
+          return { accounts: ensurePrimary([...s.accounts, base]) };
+        });
+        return id;
+      },
+
+      /** Exclusive: only one account app-wide is ever `primary` at a time.
+       *  Pass `null` to clear it — but `ensurePrimary` immediately re-picks a
+       *  default from whatever active accounts remain (the FIRST one, same as
+       *  everywhere else this invariant is enforced), so this can reassign
+       *  primary status but can never leave the app with none while at least
+       *  one active account exists. */
+      setPrimaryAccount: (accountId) =>
         set((s) => ({
-          accounts: [
-            ...s.accounts,
-            // Random suffix, matching every other account-id generator in this file —
-            // `Date.now()` alone collides when two accounts are added in the same
-            // millisecond (e.g. onboarding creating several in a tight loop), and a
-            // shared id means a later single-account update (balance, anchor, CC
-            // reconcile…) silently mutates BOTH accounts.
-            { id: `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, balance: 0, color: '#6B7280', ...account },
-          ],
+          accounts: ensurePrimary(s.accounts.map((a) => ({ ...a, primary: a.id === accountId }))),
+        })),
+
+      setIncludeInNetWorth: (accountId, include) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) =>
+            a.id === accountId ? { ...a, includeInNetWorth: !!include } : a
+          ),
+        })),
+
+      /**
+       * Manual "Card Color" pick (AccountFormScreen) — a key into the closed
+       * `BANK_GRADIENTS` set (`constants/accountCardColors.js`), never a
+       * free-form hex. Only `AccountDetailsScreen`'s hero card reads it (it wins over
+       * that screen's own bank-name/hash guess); the Accounts-tab carousel
+       * card keeps its own independent hash-based color, unaffected by this.
+       * Pass `null` to clear back to the automatic guess.
+       */
+      setAccountColorKey: (accountId, colorKey) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) =>
+            a.id === accountId ? { ...a, colorKey: colorKey || null } : a
+          ),
+        })),
+
+      /**
+       * Soft-hide an account without losing its history — unlike `deleteAccount`,
+       * which unlinks transactions and wipes CC bill/reminder bookkeeping outright.
+       * Cancels this card's scheduled due-date reminders (an archived card shouldn't
+       * keep nagging) but leaves `ccBills`/`paymentHistory` untouched, and drops it
+       * as primary if it was one — a hidden account can't be the app's headline
+       * balance. `ensurePrimary` immediately promotes another active account in
+       * that case, so archiving the primary account can never leave the app
+       * with none.
+       */
+      archiveAccount: (accountId) =>
+        set((s) => {
+          const acct = s.accounts.find((a) => a.id === accountId);
+          if (!acct) return s;
+          const cardKey = acct.type === ACCOUNT_TYPES.CREDIT_CARD
+            ? ccBillKey({ cardLast4: acct.mask || null, bankName: acct.bankName || null })
+            : null;
+          return {
+            accounts: ensurePrimary(s.accounts.map((a) =>
+              a.id === accountId
+                ? { ...a, archived: true, archivedAt: Date.now(), primary: false }
+                : a
+            )),
+            ccDueReminderIds: cardKey
+              ? cancelCcDueRemindersForCard(s.ccDueReminderIds, cardKey)
+              : s.ccDueReminderIds,
+          };
+        }),
+
+      unarchiveAccount: (accountId) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) =>
+            a.id === accountId ? { ...a, archived: false, archivedAt: null } : a
+          ),
+        })),
+
+      setCreditLimit: (accountId, limit) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) =>
+            a.id === accountId ? { ...a, creditLimit: limit } : a
+          ),
+        })),
+
+      setMinimumDue: (accountId, amount) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) =>
+            a.id === accountId ? { ...a, minimumDue: amount } : a
+          ),
+        })),
+
+      /** Manual counterpart to the SMS-driven `applyCcCycleInfoToAccount` — either
+       *  source freely overwrites the other, same "last write wins, stays updatable"
+       *  precedent the CC cycle heads-up feature already established. */
+      // The user's own edit ALWAYS wins from here on — sets `cycleDaysManual`,
+      // which tells `applyCcCycleInfoToAccount` to stop touching these days (and
+      // the actual-date priority fields) from SMS entirely, and drops whatever
+      // was mid-confirmation since the user just overrode it directly.
+      setAccountCycleDates: (accountId, { statementDay, dueDay } = {}) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) => {
+            if (a.id !== accountId) return a;
+            return {
+              ...a,
+              ...(statementDay !== undefined ? { statementDay } : {}),
+              ...(dueDay !== undefined ? { dueDay } : {}),
+              cycleDaysManual: true,
+              pendingCycleDate: null,
+            };
+          }),
+        })),
+
+      /**
+       * The user confirmed (or dismissed) a pending actual statement/due date —
+       * surfaced inline the next time they settle a payment on this card (see
+       * CCPaymentPromptModal / CCBillPaymentSheet), never applied silently.
+       * Accepting also updates `statementDay`/`dueDay` to match, since a real
+       * date is more precise than whatever those were derived from.
+       */
+      confirmPendingCycleDate: (accountId, accept) =>
+        set((s) => ({
+          accounts: s.accounts.map((a) => {
+            if (a.id !== accountId || !a.pendingCycleDate) return a;
+            const { statementDate, dueDate } = a.pendingCycleDate;
+            if (!accept) return { ...a, pendingCycleDate: null };
+            return {
+              ...a,
+              pendingCycleDate: null,
+              lastStatementDate: statementDate ?? a.lastStatementDate ?? null,
+              lastDueDate: dueDate ?? a.lastDueDate ?? null,
+              ...(statementDate ? { statementDay: toDay(statementDate).getDate() } : {}),
+              ...(dueDate ? { dueDay: toDay(dueDate).getDate() } : {}),
+            };
+          }),
         })),
 
       updateAccountBalance: (accountId, delta) =>
@@ -2831,10 +3114,6 @@ export const useEPurseStore = create(
           }),
         })),
 
-      // User explicitly dismissed the "set your real balances" onboarding card
-      // on the Accounts screen. Survives reloads via partialize.
-      dismissAnchorNudge: () => set({ anchorNudgeDismissed: true }),
-
       /**
        * Deletes the account AND prunes every stale reference it leaves behind —
        * not just the live transactions. Without this, a re-created account with
@@ -2860,7 +3139,7 @@ export const useEPurseStore = create(
           delete ccCycleHeadsUpNotified[accountId];
 
           return {
-            accounts: s.accounts.filter((a) => a.id !== accountId),
+            accounts: ensurePrimary(s.accounts.filter((a) => a.id !== accountId)),
             transactions: unlink(s.transactions),
             archivedTransactions: unlink(s.archivedTransactions),
             declinedAccountLinks: (s.declinedAccountLinks || []).filter((key) => {
@@ -3583,20 +3862,24 @@ export const useEPurseStore = create(
         set({
           accounts: accountsWithMatch,
           pendingCCPaymentQueue: [...queue, newEntry],
-          // A payment landed for this card, so its outstanding bill is settled —
-          // drop it rather than keep nagging from the Dashboard. Matched on mask
-          // OR bank name because the bill and the payment SMS don't always carry
-          // the same identifier. If a match is missed the bill isn't stranded: it
-          // stops showing once its due date passes, and the next cycle's bill
-          // replaces it outright.
-          ccBills: clearCcBill(state.ccBills, {
-            cardLast4: account.mask || accountMask || null,
-            bankName:  account.bankName || bankName || null,
-          }),
-          ccDueReminderIds: cancelCcDueRemindersForCard(
-            state.ccDueReminderIds,
-            ccBillKey({ cardLast4: account.mask || accountMask || null, bankName: account.bankName || bankName || null }),
-          ),
+          // A payment landed for this card. If it covers what's left on the
+          // statement (or no statement is tracked), the bill is settled — drop it
+          // rather than keep nagging from the Dashboard. A SMALLER payment leaves
+          // the bill standing (money is still due); the user's Settle / True-up
+          // choice in the prompt then applies it via `settleCcBillMaps`. Matched on
+          // mask OR bank name because the bill and the payment SMS don't always
+          // carry the same identifier. If a match is missed the bill isn't
+          // stranded: it stops showing once its due date passes, and the next
+          // cycle's bill replaces it outright.
+          ...(() => {
+            const left = statementRemaining(account);
+            if (left != null && amount < left) return {}; // partial — the prompt decides
+            return settleCcBillMaps(
+              state,
+              { mask: account.mask || accountMask || null, bankName: account.bankName || bankName || null },
+              0,
+            );
+          })(),
         });
         if (nudgeAllowed(state, 'ccPayment')) {
           fireCCPaymentNotification({
@@ -3619,12 +3902,23 @@ export const useEPurseStore = create(
         // Book the paying side onto the chosen account (if any), then zero the card.
         const booked = bookCcPaymentSource(state, sourceAccountId, current.amount, new Date().toISOString());
         const baseAccounts = booked?.accounts || state.accounts;
+        const card = baseAccounts.find((a) => a.id === current.accountId);
+        // True-up = "I cleared the full bill" → the statement is paid, whatever the amount.
+        const applied = card ? applyStatementPayment(card, current.amount, 'trueup') : null;
         set({
           accounts: baseAccounts.map((a) =>
             a.id === current.accountId
-              ? { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() }
+              ? {
+                  ...a,
+                  balance: 0,
+                  ccPaymentsTracked: true,
+                  anchoredAt: Date.now(),
+                  ...applied.patch,
+                  paymentHistory: appendPaymentHistory(a.paymentHistory, paymentEntry(a, current.amount, 'trueup', applied)),
+                }
               : a
           ),
+          ...(card ? settleCcBillMaps(state, card, applied.remainingAfter) : {}),
           ...(booked ? { transactions: booked.transactions } : {}),
           ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
           pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
@@ -3643,12 +3937,23 @@ export const useEPurseStore = create(
         if (!current) return;
         const booked = bookCcPaymentSource(state, sourceAccountId, current.amount, new Date().toISOString());
         const baseAccounts = booked?.accounts || state.accounts;
+        const card = baseAccounts.find((a) => a.id === current.accountId);
+        // Settle = exactly this amount → a smaller payment leaves the statement
+        // PARTIALLY paid (remainingDue drops), never marked paid on the first one.
+        const applied = card ? applyStatementPayment(card, current.amount, 'settle') : null;
         set({
           accounts: baseAccounts.map((a) =>
             a.id === current.accountId
-              ? { ...a, balance: Math.min(0, (a.balance ?? 0) + current.amount), ccPaymentsTracked: true }
+              ? {
+                  ...a,
+                  balance: Math.min(0, (a.balance ?? 0) + current.amount),
+                  ccPaymentsTracked: true,
+                  ...applied.patch,
+                  paymentHistory: appendPaymentHistory(a.paymentHistory, paymentEntry(a, current.amount, 'settle', applied)),
+                }
               : a
           ),
+          ...(card ? settleCcBillMaps(state, card, applied.remainingAfter) : {}),
           ...(booked ? { transactions: booked.transactions } : {}),
           ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
           pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
@@ -3664,13 +3969,10 @@ export const useEPurseStore = create(
       //       mode 'none'   → leave the card alone (use when the card's own
       //                       "payment received" SMS already reduced it → no
       //                       double reduction).
-      //   • clear the card's `ccBills` due-entry (if any) — the user just told us
-      //     THIS transaction paid it, so the Home carousel's "bill due" card must
-      //     stop nagging for it. Without this, a bill whose "payment received" SMS
-      //     never arrived (the whole reason this manual flow exists) kept showing
-      //     as due forever, even though the user had just marked it paid.
-      //   • cancel any scheduled OS due-date reminder for that card too — same
-      //     reasoning, otherwise a paid-off bill's push notification still fires.
+      //   • clear the card's `ccBills` due-entry + OS due reminder once its
+      //     statement is FULLY paid — the user just told us THIS transaction paid
+      //     it, so the Home "bill due" card must stop nagging. A PARTIAL payment
+      //     keeps both (money is still due) and just lowers what the card shows.
       markAsCCBillPayment: (txnId, cardAccountId = null, mode = 'none') =>
         set((s) => {
           const txn = (s.transactions || []).find((t) => t.id === txnId);
@@ -3694,28 +3996,47 @@ export const useEPurseStore = create(
           );
           const lentBorrowed = (s.lentBorrowed || []).filter((l) => l.sourceTxnId !== txnId);
 
-          // Optionally knock down the paid card's outstanding.
+          // Optionally knock down the paid card's outstanding — and the statement
+          // with it (same partial-vs-full rule as the SMS prompt's Settle/True-up).
           let accounts = s.accounts;
           const card = cardAccountId ? s.accounts.find((a) => a.id === cardAccountId) : null;
-          if (card && mode !== 'none') {
+          // 'none' = the card's own payment SMS already applied this — the
+          // statement is left exactly as that path left it.
+          const applied = card && mode !== 'none'
+            ? applyStatementPayment(card, txn.amount || 0, mode)
+            : null;
+          if (applied) {
             accounts = s.accounts.map((a) => {
               if (a.id !== cardAccountId) return a;
+              const paymentHistory = appendPaymentHistory(a.paymentHistory, paymentEntry(a, txn.amount || 0, mode, applied));
               if (mode === 'trueup') {
-                return { ...a, balance: 0, ccPaymentsTracked: true, anchoredAt: Date.now() };
+                return {
+                  ...a,
+                  balance: 0,
+                  ccPaymentsTracked: true,
+                  anchoredAt: Date.now(),
+                  ...applied.patch,
+                  paymentHistory,
+                };
               }
               // 'settle' — reduce by exactly the payment, never past zero.
-              return { ...a, balance: Math.min(0, (a.balance ?? 0) + (txn.amount || 0)), ccPaymentsTracked: true };
+              return {
+                ...a,
+                balance: Math.min(0, (a.balance ?? 0) + (txn.amount || 0)),
+                ccPaymentsTracked: true,
+                ...applied.patch,
+                paymentHistory,
+              };
             });
           }
 
-          const ccBills = card
-            ? clearCcBill(s.ccBills, { cardLast4: card.mask || null, bankName: card.bankName || null })
-            : s.ccBills;
-          const ccDueReminderIds = card
-            ? cancelCcDueRemindersForCard(s.ccDueReminderIds, ccBillKey({ cardLast4: card.mask || null, bankName: card.bankName || null }))
-            : s.ccDueReminderIds;
+          // The user told us this txn paid the card: the bill clears once its
+          // statement is fully paid (or none is tracked); a partial payment keeps it.
+          const bills = card
+            ? settleCcBillMaps(s, card, applied ? applied.remainingAfter : statementRemaining(card))
+            : { ccBills: s.ccBills, ccDueReminderIds: s.ccDueReminderIds };
 
-          return { transactions, lentBorrowed, accounts, ccBills, ccDueReminderIds };
+          return { transactions, lentBorrowed, accounts, ...bills };
         }),
 
       // User tapped "Skip" — leave the balance untouched, but file this payment's
@@ -3755,7 +4076,7 @@ export const useEPurseStore = create(
             parsedResult?.error?.code === 'cc_bill_reminder' &&
             parsedResult.ccDue
           ) {
-            const { amount, cardLast4, dueDate, statementDate, bankName } = parsedResult.ccDue;
+            const { amount, cardLast4, dueDate, statementDate, bankName, minDue = null } = parsedResult.ccDue;
             const cardLabel = cardLast4
               ? `${bankName || 'Credit Card'} •• ${cardLast4}`
               : (bankName || 'Credit Card');
@@ -3777,17 +4098,30 @@ export const useEPurseStore = create(
             // applyCcCycleInfoToAccount's doc comment.
             const dueDay       = dueDate ? parseDueDate(dueDate)?.getDate() ?? null : null;
             const statementDay = statementDate ? parseDueDate(statementDate)?.getDate() ?? null : null;
-            set((s) => ({
-              ccBills: {
-                ...(s.ccBills || {}),
-                [ccBillKey({ cardLast4, bankName })]: {
-                  amount, cardLast4: cardLast4 || null, bankName: bankName || null,
-                  dueDate: dueDate || null, statementDate: statementDate || null,
-                  seenAt: opts.receivedAt || new Date().toISOString(),
+            set((s) => {
+              const accounts = applyCcCycleInfoToAccount(s.accounts, {
+                cardLast4, bankName, dueDay, statementDay, statementBalance: amount ?? null,
+                statementDate: statementDate ? parseDueDate(statementDate) : null,
+                dueDate: dueDate ? parseDueDate(dueDate) : null,
+                minDue,
+              });
+              // The card this reminder landed on (the one entry the map replaced) —
+              // its `remainingDue` rides on the bill so the Home "bill due" card
+              // shows what's still owed after a partial payment, not the full bill.
+              const card = accounts.find((a, i) => a !== s.accounts[i]);
+              return {
+                ccBills: {
+                  ...(s.ccBills || {}),
+                  [ccBillKey({ cardLast4, bankName })]: {
+                    amount, cardLast4: cardLast4 || null, bankName: bankName || null,
+                    dueDate: dueDate || null, statementDate: statementDate || null,
+                    remaining: card ? statementRemaining(card) : null,
+                    seenAt: opts.receivedAt || new Date().toISOString(),
+                  },
                 },
-              },
-              accounts: applyCcCycleInfoToAccount(s.accounts, { cardLast4, bankName, dueDay, statementDay }),
-            }));
+                accounts,
+              };
+            });
             useNotificationStore.getState().add({
               kind:      'cc_due',
               title:     `₹${Math.round(amount).toLocaleString('en-IN')} due on ${cardLabel}`,
@@ -5703,7 +6037,6 @@ export const useEPurseStore = create(
           googleAccount: null,
           sessionExpired: false,
           justDeletedAccount: true,
-          anchorNudgeDismissed: false,
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
           appLockEnabled: false,
@@ -5741,7 +6074,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 35,
+      version: 39,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -6417,6 +6750,80 @@ export const useEPurseStore = create(
           state = { ...state, themeId: DEFAULT_THEME_ID };
         }
 
+        // v36: account revamp fields — primary/includeInNetWorth/archived on every
+        // account, plus creditLimit/statementBalance/minimumDue/paymentHistory on
+        // Credit Card accounts. `statementBalance` is backfilled from any existing
+        // `ccBills` entry for that card so it's populated immediately, not just from
+        // the next parsed statement (see `applyCcCycleInfoToAccount`'s doc comment
+        // for why cardLast4/bankName is the matching key, not account id).
+        if (version < 36) {
+          const ccBills = state.ccBills || {};
+          state = {
+            ...state,
+            accounts: (state.accounts || []).map((a) => {
+              const next = {
+                ...a,
+                primary: a.primary ?? false,
+                includeInNetWorth: a.includeInNetWorth ?? true,
+                archived: a.archived ?? false,
+                archivedAt: a.archivedAt ?? null,
+              };
+              if (a.type === ACCOUNT_TYPES.CREDIT_CARD) {
+                const bill = ccBills[ccBillKey({ cardLast4: a.mask || null, bankName: a.bankName || null })];
+                next.creditLimit = a.creditLimit ?? null;
+                next.statementBalance = a.statementBalance ?? bill?.amount ?? null;
+                next.minimumDue = a.minimumDue ?? null;
+                next.paymentHistory = a.paymentHistory ?? [];
+              }
+              return next;
+            }),
+          };
+        }
+
+        // v37: partial CC payments + actual statement dates (billing spec). A
+        // statement already on file is treated as fully unpaid (remaining = the
+        // bill) — before v37 any payment nulled `statementBalance`, so one still
+        // present has seen no payment against it. Actual dates weren't kept
+        // before, so they start unknown and fill in from the next bill SMS.
+        if (version < 37) {
+          state = {
+            ...state,
+            accounts: (state.accounts || []).map((a) => (
+              a.type === ACCOUNT_TYPES.CREDIT_CARD
+                ? {
+                    ...a,
+                    remainingDue: a.remainingDue ?? a.statementBalance ?? null,
+                    lastStatementDate: a.lastStatementDate ?? null,
+                    lastDueDate: a.lastDueDate ?? null,
+                    cycleDaysManual: a.cycleDaysManual ?? false,
+                    pendingCycleDate: a.pendingCycleDate ?? null,
+                  }
+                : a
+            )),
+          };
+        }
+
+        // v38: guarantee exactly one PRIMARY account whenever at least one
+        // active account exists. Most real accounts are auto-created from SMS
+        // via `ensureAccountForParsed`, which never set this field at all — so
+        // an existing user could genuinely have zero accounts marked primary.
+        // Needed as a real default now: AddTransactionScreen's account picker
+        // and the LB form (which has no account field of its own) both fall
+        // back to the primary account.
+        if (version < 38) {
+          state = { ...state, accounts: ensurePrimary(state.accounts || []) };
+        }
+
+        // v39: `colorKey` — a manual "Card Color" pick (AccountFormScreen),
+        // a key into `constants/accountCardColors.js`'s BANK_GRADIENTS. Only
+        // AccountDetailsScreen's hero card reads it.
+        if (version < 39) {
+          state = {
+            ...state,
+            accounts: (state.accounts || []).map((a) => ({ ...a, colorKey: a.colorKey ?? null })),
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -6486,7 +6893,6 @@ export const useEPurseStore = create(
         xp: state.xp,
         reviewStreak: state.reviewStreak,
         userCustomRules: state.userCustomRules,
-        anchorNudgeDismissed: state.anchorNudgeDismissed,
         welcomeReviewSeen: state.welcomeReviewSeen ?? false,
         planBannerDismissed: state.planBannerDismissed ?? false,
         groups: state.groups ?? [],
@@ -7102,10 +7508,38 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
  */
 export const selectEPurseNetWorth = (s) =>
   (s.accounts || []).reduce((sum, a) => {
+    if (a.archived || a.includeInNetWorth === false) return sum;
     const bal = a.balance ?? 0;
     if (a.type === ACCOUNT_TYPES.CREDIT_CARD) return sum + Math.min(bal, 0);
     return sum + bal;
   }, 0);
+
+/**
+ * The SAME accounts `selectEPurseNetWorth` sums, split into what you own vs
+ * what you owe — `assets − liabilities` always equals that selector's own
+ * total, by construction (every account's net-worth contribution above is
+ * reproduced here as a signed split, not re-derived a second way).
+ *
+ * A Credit Card in credit (balance ≥ 0) contributes to NEITHER bucket —
+ * `selectEPurseNetWorth` already doesn't count it as an asset (its own
+ * `Math.min(bal, 0)`), so showing it as an asset here would make this
+ * card's two numbers disagree with the headline Net Worth figure.
+ */
+export const selectAssetsAndLiabilities = (s) => {
+  let assets = 0;
+  let liabilities = 0;
+  (s.accounts || []).forEach((a) => {
+    if (a.archived || a.includeInNetWorth === false) return;
+    const bal = a.balance ?? 0;
+    if (a.type === ACCOUNT_TYPES.CREDIT_CARD) {
+      if (bal < 0) liabilities += -bal;
+      return;
+    }
+    if (bal < 0) liabilities += -bal;
+    else assets += bal;
+  });
+  return { assets, liabilities };
+};
 
 /**
  * Debit-card↔bank merge SUGGESTIONS — pairs we think are the same money.
@@ -7158,19 +7592,3 @@ export const selectAccountLinkSuggestions = (s) => {
   return out;
 };
 
-/**
- * Show the "set your real balances" onboarding card on the Accounts screen
- * when ALL of the following hold:
- *   • The user has at least one account (otherwise the empty state takes over).
- *   • No account has been anchored yet (no `anchoredAt` timestamp).
- *   • The user hasn't explicitly dismissed the card.
- *
- * Setting an anchor on any single account auto-hides the nudge — anchoring
- * the rest is then discoverable via the existing hint text below the cards.
- */
-export const selectShouldShowAnchorNudge = (s) => {
-  if (s.anchorNudgeDismissed) return false;
-  const accounts = s.accounts || [];
-  if (accounts.length === 0) return false;
-  return !accounts.some((a) => a.anchoredAt);
-};
