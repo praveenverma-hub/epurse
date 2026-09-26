@@ -452,6 +452,7 @@ const LbPersonScreen = ({ route, navigation }) => {
 
         {/* Same segmented-surface treatment as Home's Income/Refunds card, on a
             white surface here (this screen has no gradient header to sit on). */}
+        <View style={styles.summaryCardShadow}>
         <View style={styles.summaryCard}>
           <View style={styles.summaryCell}>
             <Text style={styles.summaryLabel}>TOTAL INVOLVED</Text>
@@ -466,6 +467,7 @@ const LbPersonScreen = ({ route, navigation }) => {
               {formatCurrency(netAbs)}
             </Text>
           </View>
+        </View>
         </View>
 
         <SectionHeader
@@ -491,6 +493,7 @@ const LbPersonScreen = ({ route, navigation }) => {
           }
         />
 
+        <View style={styles.entriesCardShadow}>
         <View style={styles.entriesCard}>
           {displayEntries.length === 0 ? (
             <Text style={styles.noEntriesText}>No transactions with this person yet.</Text>
@@ -502,6 +505,7 @@ const LbPersonScreen = ({ route, navigation }) => {
               </React.Fragment>
             ))
           )}
+        </View>
         </View>
       </ScrollView>
 
@@ -814,13 +818,21 @@ const styles = StyleSheet.create({
   // ── Total dealt / current side — same segmented-surface idea as Home's
   // Income/Refunds card, rebuilt on a white surface (this screen has no
   // gradient header for it to sit on).
+  //
+  // Shadow lives on this OPAQUE outer shell; the inner `summaryCard` clips the
+  // divider's square corners to match — a shadow can't share a view with
+  // `overflow:'hidden'`, which erases it (ui-consistency §6b).
+  summaryCardShadow: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    marginBottom: spacing.lg,
+    ...shadows.card,
+  },
   summaryCard: {
     flexDirection: 'row',
     backgroundColor: colors.card,
     borderRadius: radius.lg,
-    marginBottom: spacing.lg,
     overflow: 'hidden',
-    ...shadows.card,
   },
   summaryCell: { flex: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   summaryDivider: {
@@ -850,11 +862,17 @@ const styles = StyleSheet.create({
   // ── ONE card holding every entry, rows separated by a hairline instead of
   // each row being its own shadowed card — a ledger reads as one list, not as
   // a stack of separate objects.
+  //
+  // Same shadow/overflow split as `summaryCardShadow` above.
+  entriesCardShadow: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    ...shadows.card,
+  },
   entriesCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     overflow: 'hidden',
-    ...shadows.card,
   },
   noEntriesText: {
     ...typography.small, color: colors.textMuted, padding: spacing.lg, textAlign: 'center',

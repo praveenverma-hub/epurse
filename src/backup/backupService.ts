@@ -30,7 +30,7 @@ const APP_VERSION = '1.5.0';
  *
  * Nothing enforced that by hand, so `backupDrive.test.mjs` now asserts this
  * constant equals the store's `version:` — the same source-of-truth check that
- * suite already does for the OAuth scheme in app.json.
+ * suite already does for the OAuth scheme in app.base.json.
  */
 const STORE_VERSION = 35;
 

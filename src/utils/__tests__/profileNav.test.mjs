@@ -320,16 +320,26 @@ console.log('\n── shared components ──');
       'a leftover copy is how the look drifts back apart');
   }
 
-  // KNOWN, un-swept: five screens still hand-roll a plain pushed header
-  // (AddTransaction, AddGroupExpense, BudgetPlan, Budget, AccountDetails — the
-  // last one theme-tinted with a trailing action). This list is asserted EXACTLY
-  // so a NEW screen cannot quietly join it: converting one of them means
-  // deleting it from here.
+  // KNOWN, un-swept: seven screens still hand-roll a plain pushed header
+  // (AddTransaction, AddGroupExpense, BudgetPlan, Budget, AccountDetails,
+  // LbPerson, Transactions). AccountDetails and Transactions are both
+  // theme-tinted-or-conditional headers with a WIDER trailing action (a
+  // themed icon / an Export pill) — PlainScreenHeader's `right` slot is a
+  // fixed 40px box and its title is centred via `flex:1` between the two
+  // side slots, so a wider `right` shifts the title off true centre; both
+  // screens' hand-rolled absolute-centring trick is there specifically to
+  // avoid that, not left over from before the shared header existed.
+  // Transactions ALSO only shows this header at all when pushed with a
+  // `routeCategoryId` — its Activity-tab (root) mode has no back button and
+  // isn't a candidate for this header in the first place.
+  // This list is asserted EXACTLY so a NEW screen cannot quietly join it:
+  // converting one of them means deleting it from here.
   const UNSWEPT = [
     'screens/AddTransactionScreen.tsx',
     'screens/AddGroupExpenseScreen.tsx',
     'screens/BudgetPlanScreen.js',
     'screens/BudgetScreen.js',
+    'screens/TransactionsScreen.js',
     'screens/AccountDetailsScreen.tsx',
     'screens/LbPersonScreen.js',
   ];

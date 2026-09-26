@@ -62,7 +62,7 @@ export const isBackupConfigured = (): boolean =>
  * Derived rather than configured, because writing it out by hand is the classic
  * source of `redirect_uri_mismatch` — and it's a pure function of the client id.
  * An arbitrary scheme like `epurse://` is REJECTED by Android client types; only
- * this form works. The same string must also be registered in app.json's
+ * this form works. The same string must also be registered in app.base.json's
  * `scheme` array or the browser has nothing to hand control back to.
  */
 export function googleRedirectScheme(clientId = GOOGLE_ANDROID_CLIENT_ID): string {

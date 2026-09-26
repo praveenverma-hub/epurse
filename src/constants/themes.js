@@ -281,6 +281,13 @@ export const STATUS_COLORS = {
 const FINANCE_KEYS = ['income', 'incomeSoft', 'expense', 'expenseSoft', 'lent', 'lentSoft', 'borrowed', 'borrowedSoft'];
 export const FINANCE_COLORS = Object.fromEntries(FINANCE_KEYS.map((k) => [k, STATIC_COLORS[k]]));
 
+// ----- Budget progress states (theme-agnostic) ------------------------------
+// Same reasoning as FINANCE_COLORS: a budget's normal/near-limit/over states
+// must read the same whatever accent is picked, so they're sourced from the
+// static `colors` block rather than varying per theme.
+const BUDGET_KEYS = ['budgetNormal', 'budgetNearLimit', 'budgetOver', 'budgetRemaining'];
+export const BUDGET_COLORS = Object.fromEntries(BUDGET_KEYS.map((k) => [k, STATIC_COLORS[k]]));
+
 // ----- Build a full palette from themeId + darkMode -------------------------
 export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
   const theme = THEMES[themeId] || THEMES[DEFAULT_THEME_ID];
@@ -309,6 +316,7 @@ export const buildPalette = (themeId = DEFAULT_THEME_ID, darkMode = false) => {
     ...neutrals,
     ...STATUS_COLORS,
     ...FINANCE_COLORS,
+    ...BUDGET_COLORS,
     // Every gradient consumer reads `gradientStops`, so a theme can be a simple
     // pair OR a multi-stop ramp without any call site knowing the difference.
     gradientStops: theme.gradientStops || [theme.gradientStart, theme.gradientEnd],

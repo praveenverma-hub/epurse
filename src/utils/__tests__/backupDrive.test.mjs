@@ -32,13 +32,16 @@ const expectCode = async (fn, code) => {
 
 // ── configuration coherence ─────────────────────────────────────────────────
 // A Google Android OAuth client only accepts the reversed-client-id redirect,
-// and Android only hands control back if that scheme is registered in app.json.
+// and Android only hands control back if that scheme is registered in
+// app.base.json (the real PROD identity — app.config.js wraps it dynamically
+// per build variant, but no variant overrides `scheme`, so this stays the
+// single source of truth; see app.config.js's own header comment).
 // Get either wrong and sign-in dies with an opaque error AFTER the user has
 // already approved consent — so assert them against each other here.
 {
   const { readFileSync } = await import('node:fs');
   const cfg = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/config.ts');
-  const appJson = JSON.parse(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/app.json', 'utf8'));
+  const appJson = JSON.parse(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/app.base.json', 'utf8'));
   const schemes = [].concat(appJson.expo.scheme || []);
 
   // backupService mirrors the store's persist version by hand so a restore can
@@ -62,9 +65,9 @@ const expectCode = async (fn, code) => {
     cfg.googleRedirectUri().startsWith('com.googleusercontent.apps.') &&
     cfg.googleRedirectUri().endsWith(':/oauthredirect'),
     cfg.googleRedirectUri());
-  check('config: app.json registers that redirect scheme (else the browser cannot return)',
+  check('config: app.base.json registers that redirect scheme (else the browser cannot return)',
     schemes.includes(cfg.googleRedirectScheme()),
-    `app.json schemes = ${JSON.stringify(schemes)}`);
+    `app.base.json schemes = ${JSON.stringify(schemes)}`);
   check("config: the app's own 'epurse' scheme is still registered", schemes.includes('epurse'));
   check('config: only drive.file is requested (broader scopes need Google review)',
     cfg.DRIVE_SCOPE === 'https://www.googleapis.com/auth/drive.file', cfg.DRIVE_SCOPE);

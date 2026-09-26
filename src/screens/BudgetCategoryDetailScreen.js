@@ -34,6 +34,7 @@ import {
 import ProgressBar from '../components/ProgressBar';
 import SectionHeader from '../components/SectionHeader';
 import NavListRow from '../components/NavListRow';
+import PlainScreenHeader from '../components/PlainScreenHeader';
 
 // How many sub-categories are DEFINED under each parent (from the taxonomy,
 // not from spending) — a parent is drillable when it has >1, regardless of
@@ -87,13 +88,7 @@ const BudgetCategoryDetailScreen = ({ navigation, route }) => {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <StatusBar style="dark" />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Category</Text>
-          <View style={styles.backBtn} />
-        </View>
+        <PlainScreenHeader title="Category" onBack={() => navigation.goBack()} bordered />
       </SafeAreaView>
     );
   }
@@ -116,13 +111,7 @@ const BudgetCategoryDetailScreen = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <StatusBar style="dark" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{cat.name}</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <PlainScreenHeader title={cat.name} onBack={() => navigation.goBack()} bordered />
 
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -255,19 +244,6 @@ export default BudgetCategoryDetailScreen;
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.card },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-    backgroundColor: colors.card,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title:   { ...typography.h3, color: colors.textPrimary, flex: 1, textAlign: 'center' },
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: colors.background, flexGrow: 1 },
 

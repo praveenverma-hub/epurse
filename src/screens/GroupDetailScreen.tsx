@@ -1,10 +1,11 @@
 // =============================================================================
 // GroupDetailScreen — level 2 of the Groups feature (pushed from GroupsScreen's
 // list). Top card is the pre-revamp GroupsScreen's own "expense summary card"
-// (gradient header strip, bottom accent border, big amount, tappable balances
-// row), Add Expense + Settle Up actions, a Group Zone toggle, then three text
-// tabs (Transactions / Members / Summary — Members is skipped for a personal
-// group, which has no split).
+// shell — icon/name strip + a 1px group-colour border (the card's own gradient
+// tint is currently commented out, see `expenseCard` below) — a Total
+// Expense/Your Balance stat row, Add Expense + Settle Up actions, a Group Zone
+// toggle, then three text tabs (Transactions / Members / Summary — Members is
+// skipped for a personal group, which has no split).
 // =============================================================================
 import React, { useMemo, useState } from 'react';
 import {
@@ -562,13 +563,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           ListHeaderComponent={
             <View style={styles.headerArea}>
               {/* Top card — the pre-revamp GroupsScreen "expense summary card"
-                  look (tinted-to-white header strip, bottom accent border in
-                  the group's own colour). Emoji/name stay on the LEFT;
-                  Edit/Delete moved to the top-RIGHT of the strip; Settings
-                  moved out entirely, into the screen's own header bar. No
-                  tappable balances footer — Total Expense/Your Balance are
-                  back as the two plain figures instead. Group Zone stays OUT
-                  of this card, as its own row below the actions. */}
+                  shell. Its gradient tint is currently commented out (plain
+                  surface + a 1px group-colour border instead — see below).
+                  Emoji/name stay on the LEFT; Delete sits top-RIGHT of the
+                  strip (Edit was removed — Settings, in the screen's own
+                  header bar, covers the same edit route). No tappable
+                  balances footer — Total Expense/Your Balance are the two
+                  plain figures instead. Group Zone stays OUT of this card,
+                  as its own row below the actions. */}
               <View style={[styles.expenseCard, { borderWidth: 1, borderColor: accent }]}>
                 {/* Gradient tint commented out for now — plain surface + a
                     1px group-colour border instead:
@@ -800,16 +802,20 @@ const styles = StyleSheet.create({
   headerIconBtn: { padding: 4 },
 
   // Pre-revamp "expense summary card" shell — the bottom accent border it
-  // used to carry was dropped on request; the header strip's own tint is the
-  // only colour cue now.
+  // used to carry was dropped on request, replaced by the `borderWidth`/
+  // `borderColor: accent` set inline where this is used. Its gradient tint
+  // is currently commented out (see the JSX below) — right now the 1px
+  // border is the card's only colour cue.
   expenseCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     marginHorizontal: spacing.md,
     ...shadows.card,
   },
-  // Icon/name/actions row — plain layout now; the colour comes from the
-  // outer `expenseCard` gradient, not a separate inset strip.
+  // Icon/name/actions row layout. Named `cardHeaderGrad` from when this WAS
+  // the LinearGradient itself (now commented out above the outer
+  // `expenseCard`) — kept the name since the commented block still refers
+  // to it, so a revert doesn't need a rename too.
   cardHeaderGrad: {
     flexDirection: 'row',
     alignItems: 'center',

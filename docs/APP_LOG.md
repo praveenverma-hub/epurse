@@ -2402,6 +2402,26 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - `npm test` chain: parser/self-transfer/store suites, `e2eJourney` (narrative MVP
   acceptance, 55/55), `bulkReconciliation` (35-txn volume cross-check, 37/37), SMS sync,
   backup/payload/drive suites, crypto/envelope suites. 330+ individual checks, all green.
+- **Sep-26-2026: a full "is everything prod ready" sweep found and fixed 4 real,
+  pre-existing bugs** unrelated to whatever feature was being worked on at the time:
+  `test:drive` crashed outright (not just failed) because it still read a hardcoded
+  `app.json`, a file the build-variant migration removed weeks ago — fixed to read
+  `app.base.json`. `LbPersonScreen.js`'s summary/entries cards silently lost their
+  Android shadow (a shadow + `overflow:'hidden'` on the same view cancels the shadow) —
+  split into shadow-shell + clipped-inner-view, the same fix pattern used throughout the
+  Groups revamp. The theme palette was missing 4 keys the app actually uses
+  (`budgetNormal`/`budgetNearLimit`/`budgetOver`/`budgetRemaining`) — added as a
+  `BUDGET_COLORS` set, same pattern as the existing `FINANCE_COLORS`. And
+  `BudgetCategoryDetailScreen.js` was hand-rolling its own back button instead of using
+  the shared `PlainScreenHeader` — converted. `TransactionsScreen.js`'s hand-rolled
+  header was reviewed too and kept as-is: it's a genuinely different case (a wider Export
+  pill needs the same absolute-centring trick `AccountDetailsScreen` already uses, which
+  `PlainScreenHeader`'s fixed 40px `right` slot can't reproduce), so it joined the
+  documented UNSWEPT list instead of being forced into a header that would recentre its
+  title incorrectly. Two known contrast gaps were confirmed as deliberate, DOCUMENTED
+  trade-offs (not bugs) and left alone — the Lent/Borrowed colour pair's contrast on
+  white, and `danger`'s contrast on the not-yet-shipped dark-mode canvas — both accepted
+  in `themeContrast.test.mjs`'s own comments, tied to explicit prior colour choices.
 
 **Open**
 - No automated coverage for the Rewards or Groups UI screens (documented as accepted
