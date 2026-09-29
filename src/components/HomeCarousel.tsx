@@ -276,7 +276,7 @@ const HomeCarousel: React.FC<Props> = ({ cards, onNavigate, loading = false, ble
   // A timestamp, not a boolean: a boolean needs a second timer to clear it, and
   // two timers racing is how a carousel ends up advancing mid-swipe.
   const pausedUntil = useRef(0);
-  const resetTimer = useRef<ReturnType<typeof setTimeout>>();
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const count = cards.length;
   // Below two cards there is nothing to advance to, so the timer, the clone and

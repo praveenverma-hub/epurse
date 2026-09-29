@@ -64,8 +64,8 @@ export default function AppNavigator() {
           options={{ animation: 'fade', gestureEnabled: false }}
         />
 
-        {/* "Is this yours?" account filter — shown once, right after the SMS
-            permission handshake and before the dashboard mounts. */}
+        {/* "Is this yours?" account filter — reached only when the onboarding
+            SMS sweep actually discovers cards or bank accounts to confirm. */}
         <Stack.Screen
           name="AccountFilter"
           component={AccountFilterScreen}

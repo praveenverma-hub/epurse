@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // ACTIVITY LIST ARRANGEMENT — ordering and sectioning
 // -----------------------------------------------------------------------------
@@ -12,9 +13,9 @@
 //      on, which is why both go through `resolveTxnAccount`.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
-const mod = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/txnArrange.js');
+const mod = await import(`${PROJECT_ROOT}/src/utils/txnArrange.js`);
 const {
   SORTS, GROUPS, DEFAULT_SORT, DEFAULT_GROUP, normalizeSort, normalizeGroup,
   isChronological, sortTransactions, monthKeyOf, buildListRows, makeGrouper,
@@ -277,7 +278,7 @@ console.log('\n── the two filter rows must not contradict each other ──'
 // showed a selection, and so did "This Month" + Date Range "Last month".
 {
   const { readFileSync } = await import('node:fs');
-  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC = `${PROJECT_ROOT}/src`;
   // Comments are prose — a scan that reads them can pass while the code says
   // nothing of the kind (this has bitten the header suite three times).
   const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

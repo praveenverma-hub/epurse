@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useShallow } from 'zustand/react/shallow';
 import { useEPurseStore, selectUnreviewedQueue } from '../store/ePurseStore';
+import { EPurseInlineWordmark } from './EPurseBrandLockup';
 import {
   useRewardStore,
   selectTotalRP,
@@ -227,7 +228,10 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
           {txn.__welcome ? (
             <View style={styles.welcomeInner}>
               <Text style={styles.welcomeEmoji}>👋</Text>
-              <Text style={styles.welcomeTitle}>Welcome to ePurse</Text>
+              <View style={styles.welcomeTitleRow} accessibilityLabel="Welcome to ePurse">
+                <Text style={styles.welcomeTitle}>Welcome to </Text>
+                <EPurseInlineWordmark size={20} color={colors.textPrimary} />
+              </View>
               <Text style={styles.welcomeBody} numberOfLines={2}>
                 New transactions land here to review. Swipe right to approve, left to fix the category.
               </Text>
@@ -885,6 +889,7 @@ const styles = StyleSheet.create({
   // ── Welcome tutorial card ──
   welcomeInner: { flex: 1, justifyContent: 'center', gap: 4 },
   welcomeEmoji: { fontSize: 26 },
+  welcomeTitleRow: { flexDirection: 'row', alignItems: 'center' },
   welcomeTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   welcomeBody:  { ...typography.small, color: colors.textSecondary, lineHeight: 18 },
 

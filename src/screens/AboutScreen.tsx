@@ -10,6 +10,7 @@ import { radius, spacing, typography as typographyBase } from '../constants/them
 import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, APP_VERSION } from '../constants/appMeta';
 import PlainScreenHeader from '../components/PlainScreenHeader';
+import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -40,7 +41,11 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
       >
         <View style={styles.identity}>
           <Image source={require('../../assets/icon.png')} style={styles.icon} />
-          <Text style={[styles.appName, { color: theme.textPrimary }]}>{APP_NAME}</Text>
+          {APP_NAME === 'ePurse' ? (
+            <EPurseInlineWordmark size={28} color={theme.textPrimary} />
+          ) : (
+            <Text style={[styles.appName, { color: theme.textPrimary }]}>{APP_NAME}</Text>
+          )}
           <Text style={[styles.version, { color: theme.textSecondary }]}>Version {APP_VERSION}</Text>
         </View>
       </ScrollView>

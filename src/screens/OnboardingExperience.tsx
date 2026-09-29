@@ -4,7 +4,7 @@
 // A single, self-contained module that finalizes the frictionless entry flow:
 //
 //   1. OnboardingDeck          — 4-page slide deck (3 info slides + registration)
-//   2. AccountFilterScreen     — "Is this yours?" pre-home account gate
+//   2. AccountFilterScreen     — "Is this yours?" gate after SMS account discovery
 //   3. TopVendorFixCard +      — Myntra-style inline feed widget with a strict
 //      buildFeedWithWidgets()    24-hour-from-onboarding injection window
 //   4. AnchorBalanceToast +    — first-visit "anchor your live balance" toast
@@ -42,10 +42,13 @@
 // (`AccountFilter`, `Main`) are overridable via props.
 // =============================================================================
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
+  Animated,
   Dimensions,
+  Easing,
   Keyboard,
   KeyboardAvoidingView,
   LayoutChangeEvent,
@@ -69,13 +72,15 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, BUTTON_H } from '../constants/theme';
 import { useEPurseStore, selectAccountLinkSuggestions } from '../store/ePurseStore';
 import GoogleSignInPanel from '../components/GoogleSignInPanel';
+import EPurseBrandLockup, { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import CenterModal from '../components/CenterModal';
-import { ACCOUNT_TYPES } from '../constants/categories';
+import { ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL } from '../constants/categories';
 import { requestSmsPermission, smsSupported } from '../services/smsService';
 import { requestLocationPermission } from '../services/locationService';
 import { requestContactsPermission } from '../services/contactsService';
 import { requestNotificationPermissions } from '../utils/notifications';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
+import { shouldShowAccountConfirmation } from '../utils/onboardingRouting';
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount } from '../utils/validation';
 
 // =============================================================================
@@ -111,6 +116,8 @@ export interface Account {
   color?: string;
   anchoredAt?: number | null;
   isAnchored?: boolean;
+  dueDay?: number | null;
+  statementDay?: number | null;
 }
 
 export interface VendorFix {
@@ -133,11 +140,29 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const WINDOW_W = Dimensions.get('window').width;
 const WINDOW_H = Dimensions.get('window').height;
 
-type IconKind = 'smartphone' | 'folder' | 'trophy';
+const CONFIRM_ACCOUNT_TYPES = [
+  ACCOUNT_TYPES.BANK,
+  ACCOUNT_TYPES.DEBIT_CARD,
+  ACCOUNT_TYPES.CREDIT_CARD,
+  ACCOUNT_TYPES.WALLET,
+];
+
+const ordinalDay = (day?: number | null) => {
+  if (!day) return null;
+  const rem100 = day % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${day}th`;
+  if (day % 10 === 1) return `${day}st`;
+  if (day % 10 === 2) return `${day}nd`;
+  if (day % 10 === 3) return `${day}rd`;
+  return `${day}th`;
+};
+
+type IconKind = 'smartphone' | 'folder' | 'group';
 
 interface Slide {
   key: string;
   icon: IconKind;
+  eyebrow: string;
   title: string;
   body: string;
 }
@@ -146,22 +171,28 @@ const SLIDES: Slide[] = [
   {
     key: 'tracking',
     icon: 'smartphone',
-    title: 'The truth of your wallet, automated.',
-    body: 'Securely tracking your credit cards and bank balances in real-time through intelligent device logs.',
+    eyebrow: 'CAPTURE → REVIEW',
+    title: 'Know where it goes.',
+    body: 'Turn supported bank messages into a clear ledger\non your device, then review every detail\nbefore relying on it.',
   },
   {
     key: 'strategy',
     icon: 'folder',
-    title: 'Strategy over chaos.',
-    body: 'Enforce custom budget limits and group related expenses into cross-cutting project folders like trips or renovations.',
+    eyebrow: 'UNDERSTAND → PLAN',
+    title: 'Plan with perspective.',
+    body: 'See spending patterns, build category budgets and\ngive every savings goal a place in your\nmonthly plan.',
   },
   {
-    key: 'gamified',
-    icon: 'trophy',
-    title: 'Every step counts. Literally.',
-    body: 'Build lasting wealth habits with Aware Run and earn Reality Points for staying on budget. Accumulate ePurse Coins to unlock custom themes.',
+    key: 'shared',
+    icon: 'group',
+    eyebrow: 'SHARE → SETTLE',
+    title: 'Shared costs. Private records.',
+    body: 'Organize groups, splits, lending and borrowing without turning your financial history into a shared\ncloud ledger.',
   },
 ];
+
+const AUTO_SWIPE_MS = 3100;
+const AUTO_TRANSITION_MS = 1250;
 
 /**
  * Play's "prominent disclosure" requirement, in one place: WHAT is accessed
@@ -203,12 +234,12 @@ const FolderGridIcon = ({ color, size = 40 }: { color: string; size?: number }) 
   </Svg>
 );
 
-const TrophyIcon = ({ color, size = 40 }: { color: string; size?: number }) => (
+const GroupIcon = ({ color, size = 40 }: { color: string; size?: number }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M7 4h10v4a5 5 0 0 1-10 0V4Z" stroke={color} strokeWidth={1.6} strokeLinejoin="round" />
-    <Path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
-    <Line x1={12} y1={13} x2={12} y2={17} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
-    <Path d="M8.5 20h7M9.5 20l.5-3h4l.5 3" stroke={color} strokeWidth={1.6} strokeLinejoin="round" />
+    <Circle cx={9} cy={8} r={3} stroke={color} strokeWidth={1.6} />
+    <Circle cx={17} cy={9} r={2.3} stroke={color} strokeWidth={1.6} />
+    <Path d="M3.5 19c.4-3.3 2.4-5 5.5-5s5.1 1.7 5.5 5" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+    <Path d="M14 14.5c3.5-.7 5.7.8 6.3 3.8" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
   </Svg>
 );
 
@@ -226,11 +257,171 @@ const CardChipIcon = ({ color, size = 22 }: { color: string; size?: number }) =>
   </Svg>
 );
 
-const renderSlideIcon = (kind: IconKind, color: string) => {
-  if (kind === 'smartphone') return <SmartphoneIcon color={color} size={48} />;
-  if (kind === 'folder') return <FolderGridIcon color={color} size={48} />;
-  return <TrophyIcon color={color} size={48} />;
+const renderSlideIcon = (kind: IconKind, color: string, size = 48) => {
+  if (kind === 'smartphone') return <SmartphoneIcon color={color} size={size} />;
+  if (kind === 'folder') return <FolderGridIcon color={color} size={size} />;
+  return <GroupIcon color={color} size={size} />;
 };
+
+const PreviewBar = ({ width, color, track }: { width: `${number}%`; color: string; track: string }) => (
+  <View style={[previewStyles.barTrack, { backgroundColor: track }]}>
+    <View style={[previewStyles.barFill, { width, backgroundColor: color }]} />
+  </View>
+);
+
+const OnboardingPreview = ({ kind, theme }: { kind: IconKind; theme: Theme }) => {
+  if (kind === 'smartphone') {
+    return (
+      <View style={[previewStyles.shell, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+        <View style={previewStyles.previewTopRow}>
+          <View>
+            <Text style={[previewStyles.kicker, { color: theme.textSecondary }]}>SEPTEMBER</Text>
+            <Text style={[previewStyles.amount, { color: theme.textPrimary }]}>₹15,717</Text>
+          </View>
+          <View style={[previewStyles.statusPill, { backgroundColor: theme.success + '18' }]}>
+            <Text style={[previewStyles.statusText, { color: theme.success }]}>On track</Text>
+          </View>
+        </View>
+        <View style={[previewStyles.insightCard, { backgroundColor: theme.primary + '0D' }]}>
+          <Text style={[previewStyles.insightTitle, { color: theme.textPrimary }]}>Category breakdown</Text>
+          <View style={previewStyles.metricRow}>
+            <Text style={[previewStyles.metricLabel, { color: theme.textSecondary }]}>Travel &amp; Cabs</Text>
+            <Text style={[previewStyles.metricValue, { color: theme.textPrimary }]}>₹6,440</Text>
+          </View>
+          <PreviewBar width="78%" color={theme.info} track={theme.info + '18'} />
+          <View style={previewStyles.metricRow}>
+            <Text style={[previewStyles.metricLabel, { color: theme.textSecondary }]}>Bills &amp; Utility</Text>
+            <Text style={[previewStyles.metricValue, { color: theme.textPrimary }]}>₹4,769</Text>
+          </View>
+          <PreviewBar width="58%" color={theme.primary} track={theme.primary + '18'} />
+        </View>
+        <View style={[previewStyles.reviewChip, { backgroundColor: theme.background, borderColor: theme.divider }]}>
+          <View style={[previewStyles.reviewDot, { backgroundColor: theme.warning }]} />
+          <Text style={[previewStyles.reviewText, { color: theme.textPrimary }]}>1 transaction ready to review</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (kind === 'folder') {
+    return (
+      <View style={[previewStyles.shell, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+        <View style={previewStyles.previewTopRow}>
+          <View>
+            <Text style={[previewStyles.kicker, { color: theme.textSecondary }]}>MONTHLY PLAN</Text>
+            <Text style={[previewStyles.amount, { color: theme.textPrimary }]}>₹15.54k</Text>
+          </View>
+          <View style={[previewStyles.ring, { borderColor: theme.success }]}>
+            <Text style={[previewStyles.ringValue, { color: theme.success }]}>89%</Text>
+            <Text style={[previewStyles.ringLabel, { color: theme.textSecondary }]}>used</Text>
+          </View>
+        </View>
+        <View style={[previewStyles.planSummary, { backgroundColor: theme.success + '12' }]}>
+          <Text style={[previewStyles.planSummaryTitle, { color: theme.success }]}>₹1.96k remaining</Text>
+          <Text style={[previewStyles.planSummaryBody, { color: theme.textSecondary }]}>₹980 available per day</Text>
+        </View>
+        {[
+          ['Travel & Cabs', '99%', '96%'],
+          ['Bills & Utility', '95%', '88%'],
+          ['Food & Dining', '78%', '72%'],
+        ].map(([label, value, width]) => (
+          <View key={label} style={previewStyles.planRow}>
+            <View style={previewStyles.metricRow}>
+              <Text style={[previewStyles.metricLabel, { color: theme.textPrimary }]}>{label}</Text>
+              <Text style={[previewStyles.metricValue, { color: theme.textSecondary }]}>{value}</Text>
+            </View>
+            <PreviewBar width={width as `${number}%`} color={theme.primary} track={theme.primary + '15'} />
+          </View>
+        ))}
+      </View>
+    );
+  }
+
+  return (
+    <View style={[previewStyles.shell, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+      <View style={previewStyles.previewTopRow}>
+        <View>
+          <Text style={[previewStyles.kicker, { color: theme.textSecondary }]}>WEEKEND TRIP</Text>
+          <Text style={[previewStyles.amount, { color: theme.textPrimary }]}>₹21,480</Text>
+        </View>
+        <View style={previewStyles.avatarStack}>
+          {['P', 'A', 'R'].map((initial, index) => (
+            <View
+              key={initial}
+              style={[
+                previewStyles.avatar,
+                { backgroundColor: index === 1 ? theme.info : index === 2 ? theme.success : theme.primary, marginLeft: index ? -8 : 0 },
+              ]}
+            >
+              <Text style={previewStyles.avatarText}>{initial}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+      <View style={previewStyles.balanceRow}>
+        <View style={[previewStyles.balanceCard, { backgroundColor: theme.success + '12' }]}>
+          <Text style={[previewStyles.balanceLabel, { color: theme.textSecondary }]}>YOU LENT</Text>
+          <Text style={[previewStyles.balanceValue, { color: theme.success }]}>₹1,770</Text>
+        </View>
+        <View style={[previewStyles.balanceCard, { backgroundColor: theme.danger + '10' }]}>
+          <Text style={[previewStyles.balanceLabel, { color: theme.textSecondary }]}>YOU BORROWED</Text>
+          <Text style={[previewStyles.balanceValue, { color: theme.danger }]}>₹0</Text>
+        </View>
+      </View>
+      <View style={[previewStyles.groupZone, { borderColor: theme.divider }]}>
+        <View>
+          <Text style={[previewStyles.groupZoneTitle, { color: theme.textPrimary }]}>Group Zone</Text>
+          <Text style={[previewStyles.groupZoneBody, { color: theme.textSecondary }]}>Add the next transaction automatically</Text>
+        </View>
+        <View style={[previewStyles.switchTrack, { backgroundColor: theme.primary + '38' }]}>
+          <View style={[previewStyles.switchThumb, { backgroundColor: theme.primary }]} />
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const previewStyles = StyleSheet.create({
+  shell: {
+    width: '100%', maxWidth: 350, minHeight: 276, borderRadius: 28, borderWidth: 1,
+    padding: 20, shadowColor: '#170D32', shadowOpacity: 0.13, shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 }, elevation: 5,
+  },
+  previewTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  kicker: { fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
+  amount: { fontSize: 29, fontWeight: '900', letterSpacing: -0.8, marginTop: 3 },
+  statusPill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  statusText: { fontSize: 11, fontWeight: '800' },
+  insightCard: { marginTop: 18, borderRadius: 18, padding: 14 },
+  insightTitle: { fontSize: 14, fontWeight: '800', marginBottom: 7 },
+  metricRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
+  metricLabel: { fontSize: 11, fontWeight: '600' },
+  metricValue: { fontSize: 11, fontWeight: '800' },
+  barTrack: { height: 6, borderRadius: 999, overflow: 'hidden', marginTop: 5 },
+  barFill: { height: '100%', borderRadius: 999 },
+  reviewChip: { marginTop: 14, minHeight: 42, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center' },
+  reviewDot: { width: 8, height: 8, borderRadius: 4, marginRight: 9 },
+  reviewText: { fontSize: 11, fontWeight: '700' },
+  ring: { width: 66, height: 66, borderRadius: 33, borderWidth: 7, alignItems: 'center', justifyContent: 'center' },
+  ringValue: { fontSize: 16, fontWeight: '900', lineHeight: 18 },
+  ringLabel: { fontSize: 9, fontWeight: '700' },
+  planSummary: { borderRadius: 15, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14 },
+  planSummaryTitle: { fontSize: 13, fontWeight: '800' },
+  planSummaryBody: { fontSize: 10, marginTop: 2 },
+  planRow: { marginTop: 6 },
+  avatarStack: { flexDirection: 'row', paddingLeft: 16 },
+  avatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
+  balanceRow: { flexDirection: 'row', marginTop: 20, gap: 10 },
+  balanceCard: { flex: 1, borderRadius: 17, paddingHorizontal: 14, paddingVertical: 16 },
+  balanceLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  balanceValue: { fontSize: 20, fontWeight: '900', marginTop: 5 },
+  groupZone: { marginTop: 14, borderWidth: 1, borderRadius: 17, padding: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  groupZoneTitle: { fontSize: 13, fontWeight: '800' },
+  groupZoneBody: { fontSize: 9, marginTop: 2 },
+  switchTrack: { width: 38, height: 22, borderRadius: 11, padding: 3, alignItems: 'flex-end' },
+  switchThumb: { width: 16, height: 16, borderRadius: 8 },
+});
 
 // =============================================================================
 // 3. Inline feed injection helpers (pure, testable)
@@ -286,9 +477,11 @@ export function buildFeedWithWidgets<T extends { id?: string }>(
 export default function OnboardingDeck({
   navigation,
   accountFilterRoute = 'AccountFilter',
+  homeRoute = 'Main',
 }: {
   navigation?: Nav;
   accountFilterRoute?: string;
+  homeRoute?: string;
 }) {
   const theme = useTheme() as Theme;
   const insets = useSafeAreaInsets();
@@ -307,12 +500,19 @@ export default function OnboardingDeck({
   const capOnboardingQueue = useEPurseStore((s: any) => s.capOnboardingQueue);
 
   const scrollRef = useRef<ScrollView>(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const scrollOffsetRef = useRef(0);
+  const autoScrollValue = useRef(new Animated.Value(0)).current;
+  const autoScrollAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const autoScrollListenerRef = useRef<string | null>(null);
   const [width, setWidth] = useState(WINDOW_W);
   const [page, setPage] = useState(0);
 
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sweepLabel, setSweepLabel] = useState<string | null>(null);
+  const [autoSwipePaused, setAutoSwipePaused] = useState(false);
+  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
   // Play policy requires this disclosure to appear BEFORE the runtime SMS/
   // contacts/location prompts, not just somewhere in the app — see docs/
   // ANDROID_RELEASE.md §3.5. Gates the SAME permission block that used to
@@ -335,23 +535,95 @@ export default function OnboardingDeck({
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const next = Math.round(e.nativeEvent.contentOffset.x / Math.max(width, 1));
+      const offset = e.nativeEvent.contentOffset.x;
+      scrollOffsetRef.current = offset;
+      const next = Math.round(offset / Math.max(width, 1));
       if (next !== page) setPage(next);
     },
     [page, width],
   );
 
+  const stopAutoScroll = useCallback(() => {
+    autoScrollAnimationRef.current?.stop();
+    autoScrollAnimationRef.current = null;
+    if (autoScrollListenerRef.current) {
+      autoScrollValue.removeListener(autoScrollListenerRef.current);
+      autoScrollListenerRef.current = null;
+    }
+  }, [autoScrollValue]);
+
   const goToPage = useCallback(
     (idx: number) => {
+      stopAutoScroll();
       scrollRef.current?.scrollTo({ x: idx * width, animated: true });
       setPage(idx);
     },
-    [width],
+    [stopAutoScroll, width],
   );
+
+  const autoGlideToPage = useCallback((idx: number) => {
+    stopAutoScroll();
+    autoScrollValue.setValue(scrollOffsetRef.current);
+    autoScrollListenerRef.current = autoScrollValue.addListener(({ value }) => {
+      scrollRef.current?.scrollTo({ x: value, animated: false });
+    });
+
+    const animation = Animated.timing(autoScrollValue, {
+      toValue: idx * width,
+      duration: AUTO_TRANSITION_MS,
+      easing: Easing.inOut(Easing.cubic),
+      useNativeDriver: false,
+    });
+    autoScrollAnimationRef.current = animation;
+    animation.start(({ finished }) => {
+      if (autoScrollListenerRef.current) {
+        autoScrollValue.removeListener(autoScrollListenerRef.current);
+        autoScrollListenerRef.current = null;
+      }
+      autoScrollAnimationRef.current = null;
+      if (finished) scrollRef.current?.scrollTo({ x: idx * width, animated: false });
+    });
+  }, [autoScrollValue, stopAutoScroll, width]);
 
   const goNext = useCallback(() => {
     if (page < registrationIndex) goToPage(page + 1);
   }, [page, registrationIndex, goToPage]);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (mounted) setReduceMotionEnabled(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setReduceMotionEnabled,
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  // Auto-advance the product story, then stop at registration. Each page change
+  // starts a fresh interval, while touch interaction and reduced-motion settings
+  // suppress the timer entirely.
+  useEffect(() => {
+    if (
+      page >= registrationIndex
+      || autoSwipePaused
+      || reduceMotionEnabled
+      || submitting
+      || showDisclosure
+    ) return undefined;
+
+    const timer = setTimeout(() => autoGlideToPage(page + 1), AUTO_SWIPE_MS);
+    return () => clearTimeout(timer);
+  }, [
+    page, registrationIndex, autoSwipePaused, reduceMotionEnabled,
+    submitting, showDisclosure, autoGlideToPage,
+  ]);
+
+  useEffect(() => stopAutoScroll, [stopAutoScroll]);
 
   const navAfter = useCallback(
     (route: string) => {
@@ -381,6 +653,7 @@ export default function OnboardingDeck({
   const proceedFromDisclosure = useCallback(async (withPermissions: boolean) => {
     setShowDisclosure(false);
     setSubmitting(true);
+    let showAccountConfirmation = false;
     try {
       setUserName?.(name.trim());
       // Capture the absolute onboarding timestamp — drives the 24h widget rule.
@@ -396,10 +669,15 @@ export default function OnboardingDeck({
               setSmsPermissionGranted?.(true);
               // Back-fill 3 months of accounts/transactions so the next screen
               // ("Is this yours?") has the discovered cards to confirm.
-              await runInitialInboxSweep(
+              const sweep = await runInitialInboxSweep(
                 { ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions, capOnboardingQueue },
                 (p) => setSweepLabel(p.label),
               );
+              showAccountConfirmation = shouldShowAccountConfirmation({
+                smsPermissionGranted: true,
+                messagesRead: sweep.total,
+                discoveredAccountCount: useEPurseStore.getState().accounts?.length || 0,
+              });
             }
           } catch {
             /* permission denied / dismissed — continue; user can grant later */
@@ -422,7 +700,10 @@ export default function OnboardingDeck({
       }
 
       setHasOnboarded?.(true);
-      navAfter(accountFilterRoute);
+      // A denied/skipped permission or an empty/unrecognised inbox has no cards
+      // or banks to confirm. Go straight home instead of showing an empty
+      // "Is this yours?" configuration screen.
+      navAfter(showAccountConfirmation ? accountFilterRoute : homeRoute);
     } finally {
       setSweepLabel(null);
       setSubmitting(false);
@@ -430,7 +711,7 @@ export default function OnboardingDeck({
   }, [
     name, setUserName, setUserOnboardedAt, setSmsPermissionGranted, setHasOnboarded,
     ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions,
-    capOnboardingQueue, navAfter, accountFilterRoute,
+    capOnboardingQueue, navAfter, accountFilterRoute, homeRoute,
   ]);
 
   return (
@@ -454,86 +735,156 @@ export default function OnboardingDeck({
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
+        <Animated.ScrollView
           ref={scrollRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          onScroll={onScroll}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+            { useNativeDriver: true, listener: onScroll },
+          )}
           scrollEventThrottle={16}
           onLayout={onLayout}
+          onTouchStart={() => {
+            stopAutoScroll();
+            setAutoSwipePaused(true);
+          }}
+          onTouchEnd={() => setAutoSwipePaused(false)}
+          onTouchCancel={() => setAutoSwipePaused(false)}
           style={styles.flex}
         >
           {/* Info slides */}
-          {SLIDES.map((slide) => (
-            <View key={slide.key} style={[styles.page, { width }]}>
-              <View style={styles.slideInner}>
-                <View style={[styles.iconHalo, { backgroundColor: theme.primary + '14' }]}>
-                  <View style={[styles.iconRing, { borderColor: theme.primary + '26' }]}>
-                    {renderSlideIcon(slide.icon, theme.primary)}
+          {SLIDES.map((slide, index) => {
+            const inputRange = [
+              (index - 1) * width,
+              index * width,
+              (index + 1) * width,
+            ];
+            const translateY = scrollX.interpolate({
+              inputRange,
+              outputRange: [-34, 0, -34],
+              extrapolate: 'clamp',
+            });
+            const translateX = scrollX.interpolate({
+              inputRange,
+              outputRange: [22, 0, -22],
+              extrapolate: 'clamp',
+            });
+            const scale = scrollX.interpolate({
+              inputRange,
+              outputRange: [0.965, 1, 0.965],
+              extrapolate: 'clamp',
+            });
+            const opacity = scrollX.interpolate({
+              inputRange,
+              outputRange: [0.62, 1, 0.62],
+              extrapolate: 'clamp',
+            });
+
+            return (
+              <View key={slide.key} style={[styles.page, { width }]}>
+                <Animated.View
+                  style={[
+                    styles.slideInner,
+                    { opacity, transform: [{ translateX }, { translateY }, { scale }] },
+                  ]}
+                >
+                <View style={styles.visualStage}>
+                  <View style={[styles.visualAura, { backgroundColor: theme.primary + '10' }]} />
+                  <OnboardingPreview kind={slide.icon} theme={theme} />
+                  <View style={[styles.floatingIcon, { backgroundColor: theme.primary }]}>
+                    {renderSlideIcon(slide.icon, '#FFFFFF', 26)}
                   </View>
                 </View>
+                <Text style={[styles.slideEyebrow, { color: theme.primary }]}>{slide.eyebrow}</Text>
                 <Text style={styles.slideTitle}>{slide.title}</Text>
                 <Text style={styles.slideBody}>{slide.body}</Text>
+                </Animated.View>
               </View>
-            </View>
-          ))}
+            );
+          })}
 
           {/* Registration / secure handshake */}
           <View style={[styles.page, { width }]}>
+            <View pointerEvents="none" style={[styles.regBubble, styles.regBubbleTop, { backgroundColor: theme.primary + '12' }]} />
+            <View pointerEvents="none" style={[styles.regBubble, styles.regBubbleBottom, { backgroundColor: theme.info + '0D' }]} />
             <ScrollView
-              contentContainerStyle={[styles.regScroll, { paddingTop: WINDOW_H * 0.20 }]}
+              contentContainerStyle={styles.regScroll}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              <View style={[styles.iconHalo, styles.regIcon, { backgroundColor: theme.primary + '14' }]}>
-                <ShieldCheckIcon color={theme.primary} size={48} />
+              <View style={styles.regBrandBlock}>
+                <EPurseBrandLockup
+                  iconSize={58}
+                  wordmarkSize={34}
+                  tagline="Financial clarity pays off."
+                  taglineColor={theme.textSecondary}
+                />
               </View>
-              <Text style={styles.regTitle}>Let&apos;s get you set up.</Text>
 
-              <Text style={styles.label}>Full name</Text>
-              <TextInput
-                style={[styles.input, name.length > 0 && !nameValid && styles.inputError]}
-                placeholder="Your full name"
-                placeholderTextColor={theme.textSecondary}
-                value={name}
-                onChangeText={(t) => setName(sanitizeName(t))}
-                autoCapitalize="words"
-                returnKeyType="done"
-                maxLength={INPUT_LIMITS.NAME_MAX}
-              />
+              <View style={[styles.regCard, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+                <View style={styles.regTitleRow} accessibilityLabel="Make ePurse yours.">
+                  <Text style={styles.regTitle}>Make </Text>
+                  <EPurseInlineWordmark size={24} />
+                  <Text style={styles.regTitle}> yours.</Text>
+                </View>
+                <Text style={[styles.regSubtitle, { color: theme.textSecondary }]}>Add your name and connect Google to protect access and optional backups.</Text>
 
-              <GoogleSignInPanel
-                compact
-                disabled={!nameValid}
-                onSuccess={(account) => {
-                  if (account.name && !name) setName(sanitizeName(account.name));
-                }}
-              />
+                <Text style={styles.label}>Your name</Text>
+                <TextInput
+                  style={[styles.input, name.length > 0 && !nameValid && styles.inputError]}
+                  placeholder="Enter your full name"
+                  placeholderTextColor={theme.textSecondary}
+                  value={name}
+                  onChangeText={(t) => setName(sanitizeName(t))}
+                  autoCapitalize="words"
+                  returnKeyType="done"
+                  maxLength={INPUT_LIMITS.NAME_MAX}
+                />
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.primaryBtn,
-                  { backgroundColor: formValid && isLoggedIn ? theme.primary : theme.divider },
-                  pressed && formValid && isLoggedIn && styles.primaryBtnPressed,
-                ]}
-                disabled={!formValid || submitting || !isLoggedIn}
-                onPress={handleGetStarted}
-                accessibilityRole="button"
-                accessibilityLabel="Get started"
-              >
-                {submitting ? (
-                  <View style={styles.btnLoadingRow}>
-                    <ActivityIndicator color="#FFFFFF" />
-                    {sweepLabel ? <Text style={styles.btnLoadingText}>{sweepLabel}</Text> : null}
-                  </View>
-                ) : (
-                  <Text style={[styles.primaryBtnText, !(formValid && isLoggedIn) && { color: theme.textSecondary }]}>
-                    Get Started
-                  </Text>
-                )}
-              </Pressable>
+                <GoogleSignInPanel
+                  compact
+                  disabled={!nameValid}
+                  onSuccess={(account) => {
+                    if (account.name && !name) setName(sanitizeName(account.name));
+                  }}
+                />
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    { backgroundColor: formValid && isLoggedIn ? theme.primary : theme.divider },
+                    pressed && formValid && isLoggedIn && styles.primaryBtnPressed,
+                  ]}
+                  disabled={!formValid || submitting || !isLoggedIn}
+                  onPress={handleGetStarted}
+                  accessibilityRole="button"
+                  accessibilityLabel="Get started"
+                >
+                  {submitting ? (
+                    <View style={styles.btnLoadingRow}>
+                      <ActivityIndicator color="#FFFFFF" />
+                      {sweepLabel ? <Text style={styles.btnLoadingText}>{sweepLabel}</Text> : null}
+                    </View>
+                  ) : (
+                    <Text style={[styles.primaryBtnText, !(formValid && isLoggedIn) && { color: theme.textSecondary }]}>
+                      Continue
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+
+              <View style={styles.regTrustRow}>
+                <View style={[styles.regTrustIcon, { backgroundColor: theme.primary + '12' }]}>
+                  <ShieldCheckIcon color={theme.primary} size={18} />
+                </View>
+                <View style={styles.regTrustCopy}>
+                  <Text style={[styles.regTrustLabel, { color: theme.primary }]}>PRIVATE BY DESIGN</Text>
+                  <Text style={[styles.regTrustText, { color: theme.textSecondary }]}>Your financial ledger stays on this device by default.</Text>
+                </View>
+              </View>
 
               {/* Restore path for a NEW phone. Placed under Get Started, not beside
                   it: setting up fresh is the common case, and a returning user is
@@ -545,14 +896,16 @@ export default function OnboardingDeck({
                 accessibilityRole="button"
                 accessibilityLabel="Restore from a Google Drive backup"
               >
-                <Text style={[styles.restoreLinkText, { color: theme.textSecondary }]}>
-                  Already use ePurse?{' '}
-                  <Text style={{ color: theme.primary }}>Restore a backup</Text>
-                </Text>
+                <View style={styles.restoreCopy} accessibilityLabel="Already use ePurse? Restore a backup">
+                  <Text style={[styles.restoreLinkText, { color: theme.textSecondary }]}>Already use </Text>
+                  <EPurseInlineWordmark size={14} color={theme.textSecondary} />
+                  <Text style={[styles.restoreLinkText, { color: theme.textSecondary }]}>? </Text>
+                  <Text style={[styles.restoreLinkText, { color: theme.primary }]}>Restore a backup</Text>
+                </View>
               </Pressable>
             </ScrollView>
           </View>
-        </ScrollView>
+        </Animated.ScrollView>
 
         {/* Bottom dot pagination + Next on info slides */}
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
@@ -653,18 +1006,24 @@ export function AccountFilterScreen({
   );
 
   const finalize = useCallback(() => {
-    // Drop any account the user toggled off — it isn't theirs.
+    // Drop any account the user toggled off — it isn't theirs. During this
+    // first-run confirmation its imported history must go too; leaving those
+    // rows merely unlinked can make a rejected account reappear if a matching
+    // account is added later.
     accounts.forEach((a) => {
-      if (!isOn(a.id)) deleteAccount?.(a.id);
+      if (!isOn(a.id)) deleteAccount?.(a.id, { purgeTransactions: true });
     });
     navAfter(homeRoute);
   }, [accounts, isOn, deleteAccount, navAfter, homeRoute]);
 
   const maskLabel = useCallback((a: Account) => {
-    const head = a.bankName || a.name || a.type || 'Account';
-    const tail = a.mask ? `•••• ${a.mask}` : '';
-    return tail ? `${head}  ${tail}` : head;
+    return a.bankName || a.name || ACCOUNT_TYPE_LABEL[a.type] || 'Account';
   }, []);
+
+  const visibleLinkSuggestions = useMemo(
+    () => linkSuggestions.filter((sug) => isOn(sug.cardId) && isOn(sug.bankId)),
+    [linkSuggestions, isOn],
+  );
 
   const empty = accounts.length === 0;
 
@@ -677,8 +1036,7 @@ export function AccountFilterScreen({
         </View>
         <Text style={styles.title}>Is this yours?</Text>
         <Text style={styles.subtitle}>
-          We detected these cards on your device. Toggle off any that do not belong to you to
-          finalize your workspace.
+          We found these from your bank messages. Keep what belongs to you and correct anything we classified incorrectly.
         </Text>
       </View>
 
@@ -696,25 +1054,29 @@ export function AccountFilterScreen({
         ) : (
           accounts.map((a) => {
             const on = isOn(a.id);
-            const isCard =
-              a.type === ACCOUNT_TYPES.DEBIT_CARD || a.type === ACCOUNT_TYPES.CREDIT_CARD;
+            const cycleParts = a.type === ACCOUNT_TYPES.CREDIT_CARD
+              ? [
+                  a.statementDay ? `Statement around the ${ordinalDay(a.statementDay)}` : null,
+                  a.dueDay ? `Payment due around the ${ordinalDay(a.dueDay)}` : null,
+                ].filter(Boolean)
+              : [];
             return (
               <View
                 key={a.id}
                 style={[styles.row, !on && styles.rowOff]}
               >
                 <View style={styles.rowTop}>
-                  <View
-                    style={[
-                      styles.rowDot,
-                      { backgroundColor: on ? (a.color || theme.primary) : theme.divider },
-                    ]}
-                  />
+                  <View style={[styles.rowIcon, { backgroundColor: on ? theme.primary + '14' : theme.divider }]}>
+                    <Text style={styles.rowEmoji}>{ACCOUNT_TYPE_EMOJI[a.type] || '💳'}</Text>
+                  </View>
                   <View style={styles.rowText}>
                     <Text style={[styles.rowTitle, !on && styles.rowTitleOff]} numberOfLines={1}>
                       {maskLabel(a)}
                     </Text>
-                    <Text style={styles.rowType}>{a.type}</Text>
+                    <Text style={styles.rowType}>
+                      {ACCOUNT_TYPE_LABEL[a.type] || a.type}
+                      {a.mask ? `  ··${a.mask}` : ''}
+                    </Text>
                   </View>
                   <Switch
                     value={on}
@@ -722,35 +1084,43 @@ export function AccountFilterScreen({
                     trackColor={{ false: theme.divider, true: theme.primary }}
                     thumbColor="#FFFFFF"
                     ios_backgroundColor={theme.divider}
+                    accessibilityLabel={`${on ? 'Keep' : 'Exclude'} ${maskLabel(a)}`}
                   />
                 </View>
 
-                {/* Card type can be misread from the SMS (a credit card that omits the
-                    word "credit" reads as a debit card). Let the user correct it here. */}
-                {isCard && on ? (
+                {on ? (
                   <View style={styles.typeToggleRow}>
-                    <Text style={styles.typeToggleLabel}>Card type</Text>
+                    <Text style={styles.typeToggleLabel}>Account type</Text>
                     <View style={styles.segment}>
-                      {[
-                        { key: ACCOUNT_TYPES.DEBIT_CARD, label: 'Debit' },
-                        { key: ACCOUNT_TYPES.CREDIT_CARD, label: 'Credit' },
-                      ].map((opt) => {
-                        const active = a.type === opt.key;
+                      {CONFIRM_ACCOUNT_TYPES.map((type) => {
+                        const active = a.type === type;
                         return (
                           <Pressable
-                            key={opt.key}
-                            onPress={() => { if (!active) setAccountType?.(a.id, opt.key); }}
+                            key={type}
+                            onPress={() => { if (!active) setAccountType?.(a.id, type); }}
                             style={[styles.segmentBtn, active && styles.segmentBtnActive]}
                             accessibilityRole="button"
                             accessibilityState={{ selected: active }}
+                            accessibilityLabel={`Set account type to ${ACCOUNT_TYPE_LABEL[type]}`}
                           >
                             <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                              {opt.label}
+                              {type === ACCOUNT_TYPES.DEBIT_CARD
+                                ? 'Debit'
+                                : type === ACCOUNT_TYPES.CREDIT_CARD
+                                  ? 'Credit'
+                                  : ACCOUNT_TYPE_LABEL[type]}
                             </Text>
                           </Pressable>
                         );
                       })}
                     </View>
+                  </View>
+                ) : null}
+
+                {on && cycleParts.length > 0 ? (
+                  <View style={styles.cycleRow}>
+                    <Text style={styles.cycleLabel}>Detected bill cycle</Text>
+                    <Text style={styles.cycleValue}>{cycleParts.join(' · ')}</Text>
                   </View>
                 ) : null}
               </View>
@@ -759,10 +1129,10 @@ export function AccountFilterScreen({
         )}
 
         {/* Same-account merge suggestions — a debit card + the bank it draws from */}
-        {linkSuggestions.length > 0 ? (
+        {visibleLinkSuggestions.length > 0 ? (
           <View style={styles.mergeBlock}>
             <Text style={styles.mergeHeading}>Looks like the same account</Text>
-            {linkSuggestions.map((sug) => (
+            {visibleLinkSuggestions.map((sug) => (
               <View key={`${sug.cardMask}:${sug.bankMask}`} style={styles.mergeCard}>
                 <Text style={styles.mergeBody}>
                   Your debit card{' '}
@@ -802,7 +1172,7 @@ export function AccountFilterScreen({
           accessibilityLabel="Finalize workspace"
         >
           <Text style={styles.primaryBtnText}>
-            {empty ? 'Continue' : 'Finalize Workspace'}
+            {empty ? 'Continue' : 'Confirm Accounts'}
           </Text>
         </Pressable>
       </View>
@@ -1147,6 +1517,9 @@ const deckStyles = (t: Theme) =>
     skipBtn: { position: 'absolute', top: spacing.md, right: spacing.xl, zIndex: 10, padding: spacing.sm },
     skipText: { fontSize: 14, fontWeight: '600', color: t.textSecondary },
     page: { flex: 1 },
+    regBubble: { position: 'absolute', borderRadius: 999 },
+    regBubbleTop: { width: 320, height: 320, top: -155, right: -125 },
+    regBubbleBottom: { width: 270, height: 270, bottom: -135, left: -125 },
     restoreLink: {
       alignSelf: 'center',
       paddingVertical: 14,
@@ -1157,47 +1530,94 @@ const deckStyles = (t: Theme) =>
       fontWeight: '700',
       textAlign: 'center',
     },
+    restoreCopy: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
     slideInner: {
       flex: 1,
       paddingHorizontal: 24,
       alignItems: 'center',
       justifyContent: 'center',
+      paddingTop: 46,
+      paddingBottom: 8,
     },
-    iconHalo: {
-      width: 132,
-      height: 132,
-      borderRadius: radius.pill,
+    visualStage: {
+      width: '100%',
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: spacing.xxl,
+      marginBottom: 28,
+      transform: [{ translateY: -18 }],
     },
-    iconRing: {
-      width: 92,
-      height: 92,
+    visualAura: {
+      position: 'absolute',
+      width: '112%',
+      height: '88%',
       borderRadius: radius.pill,
-      borderWidth: 1.5,
+      transform: [{ rotate: '-5deg' }],
+    },
+    floatingIcon: {
+      position: 'absolute',
+      right: 5,
+      bottom: -16,
+      width: 54,
+      height: 54,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 4,
+      borderColor: t.background,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.20,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 6,
+    },
+    slideEyebrow: {
+      fontSize: 11,
+      fontWeight: '900',
+      letterSpacing: 1.8,
+      textAlign: 'center',
+      marginBottom: 9,
     },
     slideTitle: {
-      fontSize: 26,
-      fontWeight: '800',
-      letterSpacing: -0.4,
+      fontSize: 29,
+      fontWeight: '900',
+      letterSpacing: -0.7,
       color: t.textPrimary,
       textAlign: 'center',
-      marginBottom: spacing.md,
+      marginBottom: spacing.sm,
     },
     slideBody: {
       fontSize: 15,
-      lineHeight: 22,
+      lineHeight: 21,
       color: t.textSecondary,
       textAlign: 'center',
-      paddingHorizontal: spacing.sm,
+      paddingHorizontal: spacing.md,
+      maxWidth: 390,
     },
-    regScroll: { paddingHorizontal: 24, paddingBottom: spacing.xl, alignItems: 'stretch' },
-    regIcon: { alignSelf: 'center' },
-    regTitle: { fontSize: 26, fontWeight: '800', letterSpacing: -0.4, color: t.textPrimary, textAlign: 'center', marginBottom: spacing.xl },
-    label: { fontSize: 13, fontWeight: '600', color: t.textSecondary, marginBottom: spacing.sm, marginTop: spacing.md },
+    regScroll: {
+      flexGrow: 1,
+      paddingHorizontal: 24,
+      paddingVertical: spacing.xl,
+      alignItems: 'stretch',
+      justifyContent: 'center',
+    },
+    regBrandBlock: { alignItems: 'center', marginBottom: 70 },
+    regCard: {
+      width: '100%',
+      maxWidth: 420,
+      alignSelf: 'center',
+      borderWidth: 1,
+      borderRadius: 26,
+      padding: 20,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.10,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
+    },
+    regTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+    regTitle: { fontSize: 24, lineHeight: 27, fontWeight: '900', letterSpacing: -0.5, color: t.textPrimary },
+    regSubtitle: { fontSize: 13, lineHeight: 19, marginTop: 5, marginBottom: 10 },
+    label: { fontSize: 12, fontWeight: '800', color: t.textSecondary, marginBottom: spacing.sm, marginTop: spacing.md },
     input: {
       borderWidth: 1,
       borderColor: t.divider,
@@ -1221,6 +1641,16 @@ const deckStyles = (t: Theme) =>
     primaryBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
     btnLoadingRow: { flexDirection: 'row', alignItems: 'center' },
     btnLoadingText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', marginLeft: spacing.md },
+    regTrustRow: {
+      flexDirection: 'row', alignItems: 'center', alignSelf: 'center',
+      maxWidth: 350, marginTop: 16, paddingHorizontal: 8,
+    },
+    regTrustIcon: {
+      width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 10,
+    },
+    regTrustCopy: { flex: 1 },
+    regTrustLabel: { fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 1.2 },
+    regTrustText: { fontSize: 11, lineHeight: 16, fontWeight: '600', marginTop: 1 },
     footer: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1262,37 +1692,48 @@ const filterStyles = (t: Theme) =>
     },
     rowTop: { flexDirection: 'row', alignItems: 'center' },
     rowOff: { opacity: 0.55 },
-    rowDot: { width: 10, height: 10, borderRadius: radius.pill, marginRight: spacing.md },
+    rowIcon: {
+      width: 38, height: 38, borderRadius: radius.md, marginRight: spacing.md,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    rowEmoji: { fontSize: 18 },
     rowText: { flex: 1, marginRight: spacing.md },
     rowTitle: { fontSize: 15, fontWeight: '600', color: t.textPrimary },
     rowTitleOff: { textDecorationLine: 'line-through' },
     rowType: { fontSize: 12, color: t.textSecondary, marginTop: 2 },
     typeToggleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
       marginTop: spacing.md,
       paddingTop: spacing.md,
       borderTopWidth: 1,
       borderTopColor: t.divider,
     },
-    typeToggleLabel: { fontSize: 13, color: t.textSecondary },
+    typeToggleLabel: { fontSize: 12, fontWeight: '700', color: t.textSecondary, marginBottom: spacing.sm },
     segment: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
       backgroundColor: t.background,
-      borderRadius: radius.pill,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: t.divider,
-      padding: 2,
+      padding: 4,
     },
     segmentBtn: {
       paddingVertical: 6,
-      paddingHorizontal: spacing.md,
+      paddingHorizontal: spacing.sm + 2,
       borderRadius: radius.pill,
     },
     segmentBtnActive: { backgroundColor: t.primary },
     segmentText: { fontSize: 13, fontWeight: '600', color: t.textSecondary },
     segmentTextActive: { color: '#FFFFFF' },
+    cycleRow: {
+      marginTop: spacing.sm,
+      paddingTop: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: t.divider,
+    },
+    cycleLabel: { fontSize: 11, fontWeight: '700', color: t.textSecondary },
+    cycleValue: { fontSize: 12, lineHeight: 18, color: t.textPrimary, marginTop: 2 },
     footer: { paddingHorizontal: 24, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: t.divider },
     primaryBtn: { borderRadius: radius.lg, paddingVertical: spacing.xs, alignItems: 'center', justifyContent: 'center', minHeight: BUTTON_H },
     primaryBtnPressed: { opacity: 0.9 },

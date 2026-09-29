@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // Theme contrast — text stays readable on every accent
 // -----------------------------------------------------------------------------
@@ -16,16 +17,16 @@
 // proves it does so for every theme, including any theme added later.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
 const { mix, luminance, contrastRatio, readableOn, colors, LB_BASE, gradientTextPlan, badgeOnGradient,
         pinnedHeaderChrome, chromeHairline, PINNED_FILL_SCALE, withAlpha } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/theme.js');
+  await import(`${PROJECT_ROOT}/src/constants/theme.js`);
 const { THEMES, DEFAULT_THEME_ID, buildPalette } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+  await import(`${PROJECT_ROOT}/src/constants/themes.js`);
 const { readFileSync } = await import('node:fs');
 const { BANNER_STYLES } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/bannerStyles.js');
+  await import(`${PROJECT_ROOT}/src/constants/bannerStyles.js`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;
@@ -282,7 +283,7 @@ check("removed themes are gone ('sky')", !THEMES.sky);
   // constant directly. A mutation reverting the hook to `() => LB_BASE` would
   // leave every check above green while silently undoing the themability.
   const hookSrc = readFileSync(
-    '/Users/praveenverma/Desktop/pvn/ePurse/src/hooks/useTheme.js', 'utf8');
+    `${PROJECT_ROOT}/src/hooks/useTheme.js`, 'utf8');
   check('useLbGradients reads through useTheme(), not the LB_BASE constant directly',
     /useLbGradients = \(\) => useTheme\(\)\.lb;/.test(hookSrc)
     && !/useLbGradients = \(\) => LB_BASE;/.test(hookSrc));
@@ -452,7 +453,7 @@ check("removed themes are gone ('sky')", !THEMES.sky);
 // swaps affordances rather than dropping one: no label → the floating ✕.
 console.log('\n── recap modal dismiss ──');
 {
-  const SRC4 = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC4 = `${PROJECT_ROOT}/src`;
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const shell   = strip(readFileSync(`${SRC4}/components/RecapModalShell.tsx`, 'utf8'));
   const monthly = strip(readFileSync(`${SRC4}/components/MonthlyRecapModal.tsx`, 'utf8'));
@@ -506,9 +507,9 @@ console.log('\n── recap modal dismiss ──');
 console.log('\n── Carbon canvas (deep slate) ──');
 {
   const { CARBON_NEUTRALS, LIGHT_NEUTRALS } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+    await import(`${PROJECT_ROOT}/src/constants/themes.js`);
   const { STATIC_CONFIG } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/config/staticConfig.ts');
+    await import(`${PROJECT_ROOT}/src/config/staticConfig.ts`);
   const ON = STATIC_CONFIG.theme.canvasThemes;
   console.log(`     canvasThemes = ${ON}`);
 
@@ -596,7 +597,7 @@ console.log('\n── Carbon canvas (deep slate) ──');
 console.log('\n── palette ⊇ static colors ──');
 {
   const { execSync } = await import('node:child_process');
-  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC = `${PROJECT_ROOT}/src`;
   const used = new Set(
     execSync(`grep -rho "\\bcolors\\.[a-zA-Z]*" ${SRC}/screens ${SRC}/components || true`)
       .toString().trim().split('\n').filter(Boolean).map((m) => m.split('.')[1]),
@@ -611,7 +612,7 @@ console.log('\n── palette ⊇ static colors ──');
   // Every one of these is a style `StyleSheet.create` freezes at module load,
   // which no theme change can reach. The budget is the number recorded in
   // docs/DARK_MODE.md, read from the doc so there is ONE source of truth.
-  const plan = readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/docs/DARK_MODE.md', 'utf8');
+  const plan = readFileSync(`${PROJECT_ROOT}/docs/DARK_MODE.md`, 'utf8');
   const budget = Number(plan.match(/\*\*(\d+) files · (\d+) references\.\*\*/)?.[2]);
   check('docs/DARK_MODE.md records the backlog size', Number.isFinite(budget), `${budget}`);
   const actual = Number(
@@ -706,7 +707,7 @@ console.log('\n── gradients stay dark enough for white ──');
 // unless you happen to open it with that theme active. Five screens did exactly
 // this before the ramp existed.
 {
-  const ROOT = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const ROOT = `${PROJECT_ROOT}/src`;
   const walk = (dir) => readFileSync && [];
   const { readdirSync, statSync } = await import('node:fs');
   const files = [];
@@ -1014,7 +1015,7 @@ console.log('\n── gradients stay dark enough for white ──');
 // ═════════════════════════════════════════════════════════════════════════════
 console.log(`\n${C.bold}══════ Pinned header chrome ══════${C.reset}\n`);
 {
-  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC = `${PROJECT_ROOT}/src`;
   const { LIGHT_NEUTRALS, DARK_NEUTRALS } = await import(`${SRC}/constants/themes.js`);
 
   // Both neutral sets: the whole point of deriving rather than hardcoding a dark
@@ -1168,7 +1169,7 @@ console.log(`\n${C.bold}══════ Pinned header chrome ═════�
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n── reward surfaces (Profile / Shop) ──');
 {
-  const SRC2 = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC2 = `${PROJECT_ROOT}/src`;
   const paletteSrc = readFileSync(`${SRC2}/hooks/useRewardPalette.ts`, 'utf8');
   const goldMatch  = paletteSrc.match(/export const REWARD_GOLD = '(#[0-9A-Fa-f]{6})';/);
   const alphaMatch = paletteSrc.match(/export const REWARD_TINT_ALPHA = ([0-9.]+);/);
@@ -1224,7 +1225,7 @@ console.log('\n── reward surfaces (Profile / Shop) ──');
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n── NavListRow tile ──');
 {
-  const SRC3 = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC3 = `${PROJECT_ROOT}/src`;
   const rowSrc = readFileSync(`${SRC3}/components/NavListRow.tsx`, 'utf8');
   const tileAlpha = Number(rowSrc.match(/export const TILE_FILL_ALPHA = ([0-9.]+);/)?.[1] ?? 0.12);
   check('the tile fill alpha is a named constant', tileAlpha > 0 && tileAlpha < 1);

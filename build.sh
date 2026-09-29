@@ -121,6 +121,39 @@ else
   echo -e "${DIM}SENTRY_AUTH_TOKEN loaded — source maps will upload${RESET}"
 fi
 
+# Native Android modules in this Expo/RN version require an LTS JDK. Android
+# Studio currently bundles JDK 25, which makes CMake configuration fail with a
+# misleading "restricted method in java.lang.System" error. Prefer Homebrew's
+# JDK 17 when available, while still allowing a caller-provided JDK 17 or 21.
+if [ "$PLATFORM" = "android" ] && { $LOCAL || $EAS_LOCAL; }; then
+  JAVA_MAJOR=""
+  if [ -x "${JAVA_HOME:-}/bin/java" ]; then
+    JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -nE 's/.*version "([0-9]+).*/\1/p' | head -1)"
+  fi
+  if [ -z "$JAVA_MAJOR" ] || [ "$JAVA_MAJOR" -lt 17 ] || [ "$JAVA_MAJOR" -gt 21 ]; then
+    BREW_JDK17="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+    if [ -x "$BREW_JDK17/bin/java" ]; then
+      export JAVA_HOME="$BREW_JDK17"
+      JAVA_MAJOR=17
+    else
+      echo -e "${RED}Android builds require JDK 17 or 21.${RESET}"
+      echo "Install JDK 17 with: brew install openjdk@17"
+      exit 1
+    fi
+  fi
+  export PATH="$JAVA_HOME/bin:$PATH"
+  echo -e "${DIM}JAVA_HOME=${JAVA_HOME} (JDK ${JAVA_MAJOR})${RESET}"
+
+  if [ -z "${ANDROID_HOME:-}" ] && [ -d "$HOME/Library/Android/sdk" ]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
+  fi
+  if [ ! -d "${ANDROID_HOME:-}/platform-tools" ]; then
+    echo -e "${RED}Android SDK not found. Set ANDROID_HOME to your SDK directory.${RESET}"
+    exit 1
+  fi
+  export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+fi
+
 # ── EAS ──────────────────────────────────────────────────────────────────────
 # eas.json owns the env vars and the signing credentials; never duplicate them.
 if ! $LOCAL; then

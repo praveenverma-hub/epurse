@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // STORE INTEGRATION TESTS — the layer parseMessageDetailed batches can't reach.
 // -----------------------------------------------------------------------------
@@ -11,13 +12,13 @@
 // last-6), cross-bank non-merge, and self-transfer categorisation.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_store-hook.mjs`, import.meta.url);
 
-const mod = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+const mod = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 const useStore = mod.useEPurseStore || mod.default;
-const beh = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/analytics/behavioralSelectors.js');
+const beh = await import(`${PROJECT_ROOT}/src/analytics/behavioralSelectors.js`);
 const { isGroupExcluded, isMemoTxn, splitLbChipKind } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
+  await import(`${PROJECT_ROOT}/src/utils/split.js`);
 
 const reset = () =>
   useStore.setState({
@@ -745,7 +746,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // data outlives RAW_RETENTION_MS (raw txns are dropped at 90 days).
 // ---------------------------------------------------------------------------
 {
-  const loc = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/location.js');
+  const loc = await import(`${PROJECT_ROOT}/src/utils/location.js`);
   const pune = { city: 'Pune', district: 'Shivajinagar', region: 'Maharashtra', country: 'India' };
   const mum  = { city: 'Mumbai', district: null, region: 'Maharashtra', country: 'India' };
 
@@ -1288,8 +1289,8 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // ═════════════════════════════════════════════════════════════════════════════
 {
   reset();
-  const { computeLedgerTotals } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/ledgerTotals.js');
-  const { spendExcluded } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+  const { computeLedgerTotals } = await import(`${PROJECT_ROOT}/src/utils/ledgerTotals.js`);
+  const { spendExcluded } = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 
   useStore.getState().addAccount({ name: 'HDFC', type: 'Bank', mask: '1111', balance: 100000 });
   const acc = useStore.getState().accounts[0].id;
@@ -1337,7 +1338,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   // The export path was worse than the footer — it applied NO exclusions at all
   // while the PDF labelled the result "Total Spent" / "Total Income".
   {
-    const { buildPDFHTML } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/services/exportService.ts');
+    const { buildPDFHTML } = await import(`${PROJECT_ROOT}/src/services/exportService.ts`);
 
     // A split you paid (your share is a fraction of the bill) and a group expense
     // someone ELSE paid (a memo — never your money).
@@ -1412,7 +1413,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // budget, and the celebration claimed the whole cap was saved.
 // ═════════════════════════════════════════════════════════════════════════════
 {
-  const { selectMonthlyReport } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+  const { selectMonthlyReport } = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
   const MK = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const lastMonth = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 15, 12, 0, 0);
   const PREV = MK(lastMonth);
@@ -1635,7 +1636,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // is used throughout so "today >= statementDay" is trivially true on whatever
 // real date this suite happens to run — no date-mocking needed.
 {
-  const { monthKey } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+  const { monthKey } = await import(`${PROJECT_ROOT}/src/utils/format.js`);
   const thisMonth = monthKey(new Date());
   // `reset()` doesn't touch ccBills/ccCycleHeadsUpNotified (by design — see the CC
   // BILL DUE block above, which relies on them surviving a reset within ITS own
@@ -1696,11 +1697,11 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // stranded in "Unknown" while a real account claims it.
 {
   const { resolveTxnAccount, txnBelongsToAccount } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountMatch.js');
+    await import(`${PROJECT_ROOT}/src/utils/accountMatch.js`);
   const { countsForSpend, spendContribution } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
+    await import(`${PROJECT_ROOT}/src/utils/split.js`);
   const { NON_SPEND_CATEGORY_IDS } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+    await import(`${PROJECT_ROOT}/src/constants/categories.js`);
   const { spendExcluded } = mod;
 
   reset();
@@ -1833,12 +1834,12 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 //     outstanding  ==  Σ spend on the card (all months)  −  Σ payments applied
 {
   const { resolveTxnAccount } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountMatch.js');
+    await import(`${PROJECT_ROOT}/src/utils/accountMatch.js`);
   const { countsForSpend, spendContribution } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
+    await import(`${PROJECT_ROOT}/src/utils/split.js`);
   const { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
-  const { isSameMonth } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+    await import(`${PROJECT_ROOT}/src/constants/categories.js`);
+  const { isSameMonth } = await import(`${PROJECT_ROOT}/src/utils/format.js`);
   const { spendExcluded } = mod;
 
   const st = () => useStore.getState();
@@ -1909,7 +1910,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // card's spend is just as wrong as a balance that does.
 {
   const { resolveTxnAccount, accountCandidates, isAmbiguousMatch, matchAccount } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountMatch.js');
+    await import(`${PROJECT_ROOT}/src/utils/accountMatch.js`);
 
   reset();
   ingest('HDFCBK', 'Rs.1,000 spent on your HDFC Credit Card XX1234 at AMAZON on 01-08-26.', { smsId: 'dup-h1' });
@@ -2032,7 +2033,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // spent, "under", the entire cap saved, and a streak the user had actually broken.
 // Migration v25 recomputes them. This drives the REAL migrate function.
 {
-  const { monthKey } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+  const { monthKey } = await import(`${PROJECT_ROOT}/src/utils/format.js`);
   const migrate = useStore.persist.getOptions().migrate;
   const version = useStore.persist.getOptions().version;
   // `>=`, not `===`. Pinning the exact number means every future migration has
@@ -2170,7 +2171,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 {
   const migrate = useStore.persist.getOptions().migrate;
   const { THEMES, DEFAULT_THEME_ID } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+    await import(`${PROJECT_ROOT}/src/constants/themes.js`);
 
   check('the Gold accent is really gone', !THEMES.amber);
   check('…and Carbon took its slot', !!THEMES.carbon && THEMES.carbon.label === 'Carbon');
@@ -2189,7 +2190,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 {
   const migrate = useStore.persist.getOptions().migrate;
   const { THEMES, DEFAULT_THEME_ID } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/themes.js');
+    await import(`${PROJECT_ROOT}/src/constants/themes.js`);
   check('violet is the default theme', DEFAULT_THEME_ID === 'violet');
   for (const id of Object.keys(THEMES)) {
     const moved = migrate({ themeId: id }, 34);
@@ -2213,7 +2214,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 {
   const migrate = useStore.persist.getOptions().migrate;
   const { NON_SPEND_CATEGORY_IDS } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+    await import(`${PROJECT_ROOT}/src/constants/categories.js`);
 
   check('borrow_repaid is no longer blanket non-spend',
     !NON_SPEND_CATEGORY_IDS.has('borrow_repaid'));
@@ -2369,7 +2370,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 {
   const st = () => useStore.getState();
   const { monthKey: monthKeyOf } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+    await import(`${PROJECT_ROOT}/src/utils/format.js`);
   reset();
   useStore.setState({ goals: [], goalPlan: null, lastGoalPlan: null, goalContributions: [], goalHistory: {} });
 
@@ -2863,10 +2864,10 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // states where the honest answer is "I don't know yet" but the code answers "no".
 {
   const { selectYesterdayTransactionCount, selectGapTransactionCount } = mod;
-  const rw = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/useRewardStore.ts');
+  const rw = await import(`${PROJECT_ROOT}/src/store/useRewardStore.ts`);
   const useReward = rw.useRewardStore || rw.default;
   const { readFileSync } = await import('node:fs');
-  const SRC = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+  const SRC = `${PROJECT_ROOT}/src`;
 
   const DAY = 86_400_000;
   const cal = (ms) => {
@@ -2968,7 +2969,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // and a deleted CC's unpaid bill/reminder/heads-up bookkeeping never cleared.
 {
   const { ACCOUNT_TYPES } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/categories.js');
+    await import(`${PROJECT_ROOT}/src/constants/categories.js`);
   reset();
   const acctId = 'acct_test_delete_cleanup';
   const mask = '9911';
@@ -3015,7 +3016,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // reconcile that both drops spent one-offs and re-arms exhausted repeats.
 {
   const { REPEAT, QUEUE_DEPTH } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/reminderSchedule.js');
+    await import(`${PROJECT_ROOT}/src/utils/reminderSchedule.js`);
 
   const st = () => useStore.getState();
   const HOUR = 60 * 60 * 1000;

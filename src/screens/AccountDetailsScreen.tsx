@@ -285,7 +285,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!account) return [];
     return transactions
       .filter(belongsToAccount)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort((a: Txn, b: Txn) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [transactions, account, belongsToAccount]);
 
   // Historical (pre-onboarding) rows for this account — reference only.
@@ -293,7 +293,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!account) return [];
     return archivedTransactions
       .filter(belongsToAccount)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort((a: Txn, b: Txn) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [archivedTransactions, account, belongsToAccount]);
 
   // Interleave month dividers into a date-desc row list — only at a month

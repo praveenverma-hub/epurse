@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // ENCRYPTED BACKUP — crypto core tests (Phase 1)
 // -----------------------------------------------------------------------------
@@ -11,13 +12,13 @@
 // decrypts the WRONG thing is far worse than one that refuses to open.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_store-hook.mjs`, import.meta.url);
 
 const {
   sealBackup, openBackup, deriveKey, BackupError,
   bytesToBase64, base64ToBytes, utf8ToBytes, bytesToUtf8,
   BACKUP_FORMAT, ENVELOPE_VERSION, DEFAULT_KDF,
-} = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/envelope.ts');
+} = await import(`${PROJECT_ROOT}/src/backup/envelope.ts`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;
@@ -240,7 +241,7 @@ console.log(`\n${C.bold}══════ Encrypted Backup — crypto core ═�
 {
   // From envelope.ts (pure) — random.ts imports expo-crypto and can't load headlessly.
   const { toKeyMaterial, normaliseRecoveryKey, isValidRecoveryKey } =
-    await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/envelope.ts');
+    await import(`${PROJECT_ROOT}/src/backup/envelope.ts`);
 
   const KEY = 'A1B2 C3D4 E5F6 0718 293A 4B5C 6D7E 8F90 A1B2 C3D4 E5F6 0718 293A 4B5C 6D7E 8F90';
   check('recovery key: the displayed format validates', isValidRecoveryKey(KEY));

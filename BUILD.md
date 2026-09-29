@@ -2,6 +2,11 @@
 
 You have three options, fastest first.
 
+Local Android builds require JDK 17 or 21. On Apple Silicon Macs, install the
+recommended version with `brew install openjdk@17`; `build.sh` detects it at
+`/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`. Android
+Studio's bundled JDK 25 is currently too new for the native CMake modules.
+
 ---
 
 ## Option 1 — Expo Go (no build, ~30 seconds) ⚡ recommended for testing

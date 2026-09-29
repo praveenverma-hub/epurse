@@ -3119,18 +3119,22 @@ export const useEPurseStore = create(
        * not just the live transactions. Without this, a re-created account with
        * the same mask could inherit a dead `declinedAccountLinks` entry, or a
        * deleted card's unpaid bill/reminder/heads-up bookkeeping would linger
-       * forever with nothing left to reconcile it.
+       * forever with nothing left to reconcile it. Normal deletion keeps ledger
+       * rows and unlinks them; the first-run ownership check passes
+       * `{ purgeTransactions: true }` because "not mine" must remove imported
+       * history belonging to that rejected account as well.
        */
-      deleteAccount: (accountId) =>
+      deleteAccount: (accountId, options = {}) =>
         set((s) => {
           const acct = s.accounts.find((a) => a.id === accountId);
           const masks = new Set(
             [acct?.mask, ...(acct?.aliasMasks || [])].filter(Boolean),
           );
-          const unlink = (list) =>
-            (list || []).map((t) =>
-              t.accountId === accountId ? { ...t, accountId: null } : t,
-            );
+          const clearAccountRows = (list) => options.purgeTransactions
+            ? (list || []).filter((t) => t.accountId !== accountId)
+            : (list || []).map((t) =>
+                t.accountId === accountId ? { ...t, accountId: null } : t,
+              );
 
           const cardKey = acct
             ? ccBillKey({ cardLast4: acct.mask || null, bankName: acct.bankName || null })
@@ -3140,8 +3144,8 @@ export const useEPurseStore = create(
 
           return {
             accounts: ensurePrimary(s.accounts.filter((a) => a.id !== accountId)),
-            transactions: unlink(s.transactions),
-            archivedTransactions: unlink(s.archivedTransactions),
+            transactions: clearAccountRows(s.transactions),
+            archivedTransactions: clearAccountRows(s.archivedTransactions),
             declinedAccountLinks: (s.declinedAccountLinks || []).filter((key) => {
               const [cardMask, bankMask] = String(key).split(':');
               return !masks.has(cardMask) && !masks.has(bankMask);
@@ -7591,4 +7595,3 @@ export const selectAccountLinkSuggestions = (s) => {
   }
   return out;
 };
-

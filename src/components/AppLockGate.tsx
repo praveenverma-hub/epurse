@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { NativeModules } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
+import { EPurseInlineWordmark } from './EPurseBrandLockup';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase } from '../constants/theme';
@@ -118,7 +119,10 @@ const AppLockGate: React.FC = () => {
       <View style={[styles.iconCircle, { backgroundColor: theme.primary + '1A' }]}>
         <Ionicons name="lock-closed" size={28} color={theme.primary} />
       </View>
-      <Text style={[styles.title, { color: theme.textPrimary }]}>ePurse is locked</Text>
+      <View style={styles.titleRow} accessibilityLabel="ePurse is locked">
+        <EPurseInlineWordmark size={24} color={theme.textPrimary} />
+        <Text style={[styles.title, { color: theme.textPrimary }]}> is locked</Text>
+      </View>
       <Text style={[styles.hint, { color: theme.textSecondary }]}>
         {failed ? "That didn't work — try again." : 'Verify your identity to continue.'}
       </Text>
@@ -140,7 +144,8 @@ export default AppLockGate;
 const styles = StyleSheet.create({
   overlay: { alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: spacing.xl },
   iconCircle: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
-  title: { ...typography.h2, marginBottom: spacing.xs },
+  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
+  title: { ...typography.h2 },
   hint: { ...typography.small, marginBottom: spacing.xl, textAlign: 'center' },
   btn: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.lg },
   btnText: { color: '#fff', ...typography.body, fontWeight: '700' },

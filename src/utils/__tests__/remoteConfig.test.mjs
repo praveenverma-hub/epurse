@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // remoteConfig — sanitising, version gating, and fail-open behaviour.
 // -----------------------------------------------------------------------------
@@ -10,14 +11,14 @@
 // malformed file. See the FAIL OPEN note in config/remoteConfig.ts.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
 const {
   parseVersion, compareVersions, isVersionBelow,
   sanitiseRemoteConfig, fetchRemoteConfig,
   REMOTE_FLAG_KEYS, EMPTY_FLAGS,
   REMOTE_CONFIG_URLS, resolveRemoteConfigEnv, resolveRemoteConfigUrl, resolveRemoteConfigCacheKey,
-} = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/config/remoteConfig.ts');
+} = await import(`${PROJECT_ROOT}/src/config/remoteConfig.ts`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;

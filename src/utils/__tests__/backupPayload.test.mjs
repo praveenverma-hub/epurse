@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // ENCRYPTED BACKUP — payload / restore fidelity (Phase 2)
 // -----------------------------------------------------------------------------
@@ -15,16 +16,16 @@
 // the app needs, a selector moves and this fails.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_store-hook.mjs`, import.meta.url);
 
-const mod = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+const mod = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 const useStore = mod.useEPurseStore || mod.default;
 const S = () => useStore.getState();
 
 const { buildBackupPayload, readBackupPayload, unknownTxnFields, TXN_FIELDS, STORE_KEYS } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/payload.ts');
+  await import(`${PROJECT_ROOT}/src/backup/payload.ts`);
 const { sealBackup, openBackup, DEFAULT_KDF } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/envelope.ts');
+  await import(`${PROJECT_ROOT}/src/backup/envelope.ts`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;

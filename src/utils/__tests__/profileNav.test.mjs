@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // Profile hub — navigation coherence & shared chrome
 // -----------------------------------------------------------------------------
@@ -29,7 +30,7 @@ const check = (name, cond, detail = '') => {
   else { fail++; console.log(`  ${C.red}✗ ${name}${C.reset}  ${detail}`); }
 };
 
-const ROOT = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+const ROOT = `${PROJECT_ROOT}/src`;
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const readDoc = (rel) => readFileSync(`${ROOT}/${rel}`, 'utf8');
 const read = (rel) => code(readDoc(rel));
@@ -217,7 +218,7 @@ console.log('\n── reminders ──');
 
   // Repeats only keep repeating because a boot pass tops the OS queue back up.
   check('the reconcile pass runs at launch/foreground',
-    /reconcileReminders\(\)/.test(code(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/App.js', 'utf8'))));
+    /reconcileReminders\(\)/.test(code(readFileSync(`${PROJECT_ROOT}/App.js`, 'utf8'))));
 }
 
 // ── 5a. Notifications — the automatic-nudge switches, on their OWN screen ──

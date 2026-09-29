@@ -21,12 +21,17 @@
 // for why hasOnboarded is left untouched and this is the overlay it relies on).
 // =============================================================================
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useTheme } from '../hooks/useTheme';
+import { radius, spacing } from '../constants/theme';
 import GoogleSignInPanel from './GoogleSignInPanel';
+import EPurseBrandLockup from './EPurseBrandLockup';
 
 const LoginGate: React.FC = () => {
   const theme = useTheme();
@@ -54,8 +59,42 @@ const LoginGate: React.FC = () => {
       : 'ePurse now requires a Google sign-in. Your data\non this device is untouched.';
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: theme.card }]}>
-      <GoogleSignInPanel title={title} subtitle={subtitle} />
+    <View style={[StyleSheet.absoluteFill, styles.overlay, { backgroundColor: theme.background }]}>
+      <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
+      <View pointerEvents="none" style={[styles.orb, styles.orbTop, { backgroundColor: theme.primary + '12' }]} />
+      <View pointerEvents="none" style={[styles.orb, styles.orbBottom, { backgroundColor: theme.info + '0D' }]} />
+
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.brandHeader}>
+            <EPurseBrandLockup
+              iconSize={58}
+              wordmarkSize={34}
+              tagline="Financial clarity pays off."
+              taglineColor={theme.textSecondary}
+            />
+          </View>
+
+          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+            <GoogleSignInPanel title={title} subtitle={subtitle} />
+            <View style={[styles.trustLine, { borderTopColor: theme.divider }]}>
+              <View style={[styles.trustIcon, { backgroundColor: theme.primary + '12' }]}>
+                <Ionicons name="shield-checkmark-outline" size={17} color={theme.primary} />
+              </View>
+              <View style={styles.trustCopy}>
+                <Text style={[styles.trustLabel, { color: theme.primary }]}>PRIVATE BY DESIGN</Text>
+                <Text style={[styles.trustText, { color: theme.textSecondary }]}>Google sign-in protects access. Your financial ledger stays on this device by default.</Text>
+              </View>
+            </View>
+          </View>
+
+          <Text style={[styles.footer, { color: theme.textSecondary }]}>Secure access · Optional encrypted backup</Text>
+        </ScrollView>
+      </SafeAreaView>
     </View>
   );
 };
@@ -63,5 +102,35 @@ const LoginGate: React.FC = () => {
 export default LoginGate;
 
 const styles = StyleSheet.create({
-  overlay: { zIndex: 1000, alignItems: 'center', justifyContent: 'center' },
+  overlay: { zIndex: 1000, overflow: 'hidden' },
+  safe: { flex: 1 },
+  brandHeader: { alignItems: 'center', marginBottom: 70 },
+  content: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
+  },
+  orb: { position: 'absolute', borderRadius: 999 },
+  orbTop: { width: 320, height: 320, top: -155, right: -125 },
+  orbBottom: { width: 270, height: 270, bottom: -135, left: -125 },
+  card: {
+    width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 28,
+    paddingHorizontal: spacing.md, paddingTop: spacing.xl, paddingBottom: spacing.lg,
+    shadowColor: '#170D32', shadowOpacity: 0.11,
+    shadowRadius: 22, shadowOffset: { width: 0, height: 10 }, elevation: 5,
+  },
+  trustLine: {
+    flexDirection: 'row', alignItems: 'center', borderTopWidth: 1,
+    marginTop: spacing.lg, paddingTop: spacing.md, paddingHorizontal: spacing.xs,
+  },
+  trustIcon: {
+    width: 32, height: 32, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm,
+  },
+  trustCopy: { flex: 1 },
+  trustLabel: { fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 1.2 },
+  trustText: { fontSize: 10, lineHeight: 15, fontWeight: '600', marginTop: 2 },
+  footer: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 18 },
 });

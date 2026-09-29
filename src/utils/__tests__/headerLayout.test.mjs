@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // COLLAPSING HEADER GEOMETRY — the arithmetic, not the pixels.
 // -----------------------------------------------------------------------------
@@ -27,7 +28,7 @@ const check = (name, cond, detail = '') => {
   else { fail++; console.log(`  ${C.red}✗ ${name}${C.reset}  ${detail}`); }
 };
 
-const ROOT = '/Users/praveenverma/Desktop/pvn/ePurse/src';
+const ROOT = `${PROJECT_ROOT}/src`;
 
 /**
  * Strip comments. EVERY source scan in this suite runs on stripped source, and

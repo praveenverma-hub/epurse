@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // ENCRYPTED BACKUP — Drive client (Phase 4)
 // -----------------------------------------------------------------------------
@@ -9,10 +10,10 @@
 // upload. Those are exactly the paths that decide whether a user loses data.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_store-hook.mjs`, import.meta.url);
 
 const { uploadBackup, listBackups, downloadBackup, deleteBackup, pruneBackups, DriveError } =
-  await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/driveClient.ts');
+  await import(`${PROJECT_ROOT}/src/backup/driveClient.ts`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;
@@ -40,8 +41,8 @@ const expectCode = async (fn, code) => {
 // already approved consent — so assert them against each other here.
 {
   const { readFileSync } = await import('node:fs');
-  const cfg = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/config.ts');
-  const appJson = JSON.parse(readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/app.base.json', 'utf8'));
+  const cfg = await import(`${PROJECT_ROOT}/src/backup/config.ts`);
+  const appJson = JSON.parse(readFileSync(`${PROJECT_ROOT}/app.base.json`, 'utf8'));
   const schemes = [].concat(appJson.expo.scheme || []);
 
   // backupService mirrors the store's persist version by hand so a restore can
@@ -49,8 +50,8 @@ const expectCode = async (fn, code) => {
   // silently drifted the first time the store version was bumped — a stale
   // constant here means a future backup restores instead of being refused.
   {
-    const svc   = readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/src/backup/backupService.ts', 'utf8');
-    const store = readFileSync('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js', 'utf8');
+    const svc   = readFileSync(`${PROJECT_ROOT}/src/backup/backupService.ts`, 'utf8');
+    const store = readFileSync(`${PROJECT_ROOT}/src/store/ePurseStore.js`, 'utf8');
     const svcV   = Number((svc.match(/const STORE_VERSION = (\d+)/) || [])[1]);
     const storeV = Number((store.match(/\n\s*version:\s*(\d+),/) || [])[1]);
     check('config: backupService STORE_VERSION matches the store persist version',

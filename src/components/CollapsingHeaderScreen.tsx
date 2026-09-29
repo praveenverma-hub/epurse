@@ -210,7 +210,7 @@ export interface CollapsingHeaderScreenProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   /** Forwarded to the underlying Animated.ScrollView. (Collapsing mode only.) */
   scrollRef?: React.Ref<Animated.LegacyRef<any>> | any;
-  refreshControl?: React.ReactElement;
+  refreshControl?: React.ReactElement<any>;
   /** Optional passthrough scroll listener (runs alongside the native driver). */
   onScroll?: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
   /**
@@ -370,7 +370,7 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
           ]}
         >
           <LinearGradient
-            colors={gradientColors}
+            colors={gradientColors as [string, string, ...string[]]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
@@ -567,7 +567,7 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
         ]}
       >
         <LinearGradient
-          colors={gradientColors}
+          colors={gradientColors as [string, string, ...string[]]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}

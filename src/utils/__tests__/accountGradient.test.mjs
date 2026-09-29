@@ -1,13 +1,14 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // accountGradient — the account color-resolution chain shared by
 // AccountDetailsScreen's hero card and AccountsScreen's list-row icon.
 //   npm run test:accountGradient
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
-const { resolveAccountGradient, FALLBACK_PALETTES } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountGradient.js');
-const { BANK_GRADIENTS } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/constants/accountCardColors.js');
+const { resolveAccountGradient, FALLBACK_PALETTES } = await import(`${PROJECT_ROOT}/src/utils/accountGradient.js`);
+const { BANK_GRADIENTS } = await import(`${PROJECT_ROOT}/src/constants/accountCardColors.js`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;

@@ -266,7 +266,7 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins, D
     >
       <View style={styles.cardClip}>
       <LinearGradient
-        colors={D.cardGradient}
+        colors={D.cardGradient as [string, string, ...string[]]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}

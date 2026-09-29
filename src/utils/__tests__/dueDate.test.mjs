@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // dueDate — day-of-month cycle math: occurrences, the statement→due PAYMENT
 // window, the statement→statement BILLING cycle, actual-date priority, and the
@@ -9,12 +10,12 @@
 // own header note on why that discipline matters here).
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
 const {
   nextOccurrenceOfDay, daysUntilDayOfMonth, currentPaymentWindow, currentBillingCycle,
   resolveStatementDate, resolveDueDate, paymentGapDays, isUnusualPaymentGap,
-} = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/dueDate.js');
+} = await import(`${PROJECT_ROOT}/src/utils/dueDate.js`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;

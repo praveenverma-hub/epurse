@@ -35,6 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded } from '../store/ePurseStore';
+import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import {
   useRewardStore,
   selectLevel,
@@ -561,9 +562,13 @@ const DashboardScreen = ({ navigation }) => {
         USE_ORIGINAL_HEADER ? styles.headerGreetLeading : styles.headerGreetBesideAvatar,
       ]}>
         <Text style={[styles.greeting, { color: inkMuted }]} numberOfLines={1}>{greeting}</Text>
-        <Text style={[styles.userName, { color: ink }]} numberOfLines={1} ellipsizeMode="tail">
-          {userName ? `Hi, ${userName}` : 'ePurse'}
-        </Text>
+        {userName ? (
+          <Text style={[styles.userName, { color: ink }]} numberOfLines={1} ellipsizeMode="tail">
+            {`Hi, ${userName}`}
+          </Text>
+        ) : (
+          <EPurseInlineWordmark size={22} color={ink} />
+        )}
       </View>
     );
 

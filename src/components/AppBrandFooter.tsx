@@ -26,6 +26,7 @@ import { View, Text, StyleSheet } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
 import { colors, mix, readableOn, spacing } from '../constants/theme';
+import { EPurseInlineWordmark } from './EPurseBrandLockup';
 
 // Host content padding this footer breaks out of (Dashboard bodyContent = spacing.lg).
 const GUTTER = spacing.lg;
@@ -99,7 +100,11 @@ const AppBrandFooter: React.FC<AppBrandFooterProps> = ({
         { backgroundColor: ink.band, borderTopColor: ink.edge, paddingBottom: bottomClearance },
       ]}
     >
-      <Text style={[styles.name, { color: ink.name }]}>{name}</Text>
+      {name === 'ePurse' ? (
+        <EPurseInlineWordmark size={42} color={ink.name} />
+      ) : (
+        <Text style={[styles.name, { color: ink.name }]}>{name}</Text>
+      )}
       {tagline ? <Text style={[styles.tagline, { color: ink.tagline }]}>{tagline}</Text> : null}
     </View>
   );

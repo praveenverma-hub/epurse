@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // END-TO-END USER JOURNEY — MVP acceptance pass
 // -----------------------------------------------------------------------------
@@ -20,11 +21,11 @@
 // contract was wrong — both are useful, which is why this exists.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_store-hook.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_store-hook.mjs`, import.meta.url);
 
-const mod = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/store/ePurseStore.js');
+const mod = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 const useStore = mod.useEPurseStore || mod.default;
-const { isGroupExcluded } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/split.js');
+const { isGroupExcluded } = await import(`${PROJECT_ROOT}/src/utils/split.js`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m', yellow: '\x1b[33m' };
 let pass = 0, fail = 0;

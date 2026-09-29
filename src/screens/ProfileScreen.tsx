@@ -132,7 +132,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.heroCard}>
           <View style={styles.heroCardInner}>
             <LinearGradient
-              colors={D.heroGradient}
+              colors={D.heroGradient as [string, string, ...string[]]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFill}

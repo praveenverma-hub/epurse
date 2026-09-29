@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // ccStatement — statement payments, due status, credit availability, cycle spend.
 //   npm run test:ccStatement
@@ -6,12 +7,12 @@
 // can't drift with the day the suite runs.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
 const {
   statementRemaining, applyStatementPayment, ccPaymentStatus, creditAvailability,
   cycleSpend, lastPayment, validateCardDetails,
-} = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/ccStatement.js');
+} = await import(`${PROJECT_ROOT}/src/utils/ccStatement.js`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;

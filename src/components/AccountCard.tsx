@@ -490,7 +490,7 @@ type BackFaceProps = {
   isCreditCard: boolean;
   draft: string;
   setDraft: (v: string) => void;
-  inputRef: React.RefObject<TextInput>;
+  inputRef: React.RefObject<TextInput | null>;
   onConfirm: () => void;
   onCancel: () => void;
   width: number;

@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // accountFlow — "This Month" money in/out/net + month-wise Balance Trend
 // reconstruction for a Bank/Cash/Debit/Wallet account (AccountDetailsScreen).
@@ -7,10 +8,10 @@
 // on the day the suite happens to run.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
-const { monthMoneyFlow, accountBalanceTrend, netWorthTrend } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/accountFlow.js');
-const { monthKey } = await import('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/format.js');
+const { monthMoneyFlow, accountBalanceTrend, netWorthTrend } = await import(`${PROJECT_ROOT}/src/utils/accountFlow.js`);
+const { monthKey } = await import(`${PROJECT_ROOT}/src/utils/format.js`);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;

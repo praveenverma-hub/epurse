@@ -9,7 +9,7 @@
 // They are required lazily inside compileAndShare() so that a missing native
 // binary (app not yet rebuilt after `npm install`) never crashes the screen load.
 // Type-only imports are erased at compile time — zero runtime effect.
-import type * as TFileSystem from 'expo-file-system';
+import type * as TFileSystem from 'expo-file-system/legacy';
 import type * as TSharing    from 'expo-sharing';
 import type * as TPrint       from 'expo-print';
 
@@ -441,7 +441,7 @@ export async function compileAndExport(
   // during bundle init (which crashes the screen if the binary hasn't been
   // rebuilt yet after `npm install`).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const FS      = require('expo-file-system') as typeof TFileSystem;
+  const FS      = require('expo-file-system/legacy') as typeof TFileSystem;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Sharing = require('expo-sharing')     as typeof TSharing;
   // eslint-disable-next-line @typescript-eslint/no-require-imports

@@ -1,3 +1,4 @@
+import { PROJECT_ROOT } from './paths.mjs';
 // =============================================================================
 // buildVariant — every one of build.sh's FIVE named targets resolves to the
 // right IS_STAGE_BUILD/IS_DEV_BUILD flags.
@@ -14,7 +15,7 @@
 // build is a stage build, checked directly below rather than assumed.
 // =============================================================================
 import { register } from 'node:module';
-register('/Users/praveenverma/Desktop/pvn/ePurse/src/utils/__tests__/_register.mjs', import.meta.url);
+register(`${PROJECT_ROOT}/src/utils/__tests__/_register.mjs`, import.meta.url);
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m', bold: '\x1b[1m' };
 let pass = 0, fail = 0;
@@ -23,7 +24,7 @@ const check = (name, cond, detail = '') => {
   else { fail++; console.log(`  ${C.red}✗ ${name}${C.reset}  ${detail}`); }
 };
 
-const MODULE_URL = '/Users/praveenverma/Desktop/pvn/ePurse/src/constants/buildVariant.ts';
+const MODULE_URL = `${PROJECT_ROOT}/src/constants/buildVariant.ts`;
 
 /**
  * Fresh module evaluation per call: buildVariant.ts reads `process.env` and
