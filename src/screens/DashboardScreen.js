@@ -26,12 +26,13 @@
 // It's the map the next change navigates by, so keep it honest.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
 import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded } from '../store/ePurseStore';
@@ -85,6 +86,7 @@ import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { canSplitTransaction, countsForSpend, debitDisplayAmount } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
+
 import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
@@ -190,6 +192,30 @@ const DashboardScreen = ({ navigation }) => {
   // One auto-opening modal at a time, in a fixed order — see the hook. The claim
   // sheet is LAST: nothing about it expires, so it can always wait.
   const topAutoModal = useAutoModalQueue();
+  const [activeAutoModal, setActiveAutoModal] = useState(null);
+  const [homeFocused, setHomeFocused] = useState(false);
+  const autoModalShownThisVisit = useRef(false);
+
+  // A Home visit gets at most one automatic modal. Closing it never causes the
+  // next pending surface to jump in immediately; the queue advances when the
+  // user leaves Home and returns. This keeps several valid launch-time prompts
+  // from becoming a wall of consecutive dialogs.
+  useFocusEffect(useCallback(() => {
+    autoModalShownThisVisit.current = false;
+    setActiveAutoModal(null);
+    setHomeFocused(true);
+    return () => {
+      setHomeFocused(false);
+      setActiveAutoModal(null);
+    };
+  }, []));
+
+  useEffect(() => {
+    if (!homeFocused || !hydrated || !rewardsHydrated) return;
+    if (!topAutoModal || autoModalShownThisVisit.current) return;
+    autoModalShownThisVisit.current = true;
+    setActiveAutoModal(topAutoModal);
+  }, [homeFocused, hydrated, rewardsHydrated, topAutoModal]);
   const vaultTier        = vaultTierForStreak(awareStreak);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const budget              = useEPurseStore((s) => s.budget);
@@ -821,6 +847,7 @@ const DashboardScreen = ({ navigation }) => {
             <MonthlyRecapCard
               monthKey={latestRecapMonth}
               onDismiss={() => dismissMonthlyRecapCard(latestRecapMonth)}
+              onViewFull={() => navigation.navigate('MonthlyRecapSummary', { monthKey: latestRecapMonth })}
             />
           )}
 
@@ -1117,16 +1144,29 @@ const DashboardScreen = ({ navigation }) => {
       {/* Monthly recap — one-time month-end moment (replaces the old celebration
           modal; folds in the budget streak/saved wrap-up). Then persists as a
           dashboard card below. */}
-      <MonthlyRecapModal />
+      <MonthlyRecapModal
+        activeAutoModal={activeAutoModal}
+        onViewFull={(monthKey, previewReport) => {
+          setActiveAutoModal(null);
+          navigation.navigate('MonthlyRecapSummary', { monthKey, previewReport });
+        }}
+      />
 
       {/* Weekly recap — one-time centered modal after a week ends */}
-      <WeeklyRecapModal />
+      <WeeklyRecapModal
+        activeAutoModal={activeAutoModal}
+      />
 
       {/* Day-1 Aware Run welcome — auto-dismisses after 4.5s */}
-      <WelcomeStreakModal />
+      <WelcomeStreakModal
+        activeAutoModal={activeAutoModal}
+      />
 
       {/* CC outstanding true-up prompt */}
-      <CCPaymentPromptModal />
+      <CCPaymentPromptModal
+        activeAutoModal={activeAutoModal}
+        onHandled={() => setActiveAutoModal(null)}
+      />
 
       {IS_STAGE_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
@@ -1224,10 +1264,10 @@ const DashboardScreen = ({ navigation }) => {
       />
 
       {/* EPC claim sheet — surfaces automatically when a Zero-Transaction Day
-          bonus is detected. User must consciously claim; crediting is deferred
-          to claimSavingsBonus() so the balance only changes on explicit tap. */}
+          bonus is detected. The earned reward is credited when the sheet
+          completes through claimSavingsBonus(). */}
       <EpcClaimBottomSheet
-        visible={!!pendingSavingsReward && topAutoModal === 'epcClaim'}
+        visible={!!pendingSavingsReward && activeAutoModal === 'epcClaim'}
         epcAmount={pendingSavingsReward?.epcAmount ?? 0}
         rpAmount={pendingSavingsReward?.rpAmount ?? 0}
         onClaim={claimSavingsBonus}
@@ -1280,6 +1320,10 @@ const DashboardScreen = ({ navigation }) => {
       <NotificationsSheet
         visible={notificationsVisible}
         onClose={() => setNotificationsVisible(false)}
+        onOpenPending={(modal) => {
+          autoModalShownThisVisit.current = true;
+          setActiveAutoModal(modal);
+        }}
       />
 
     </View>

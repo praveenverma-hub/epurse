@@ -30,9 +30,12 @@ console.log(`\n${C.bold}══════ Auto-modal queue ══════${
 
 // ── the order ────────────────────────────────────────────────────────────────
 check('the documented order is the one in force',
-  AUTO_MODAL_PRIORITY.join(' > ') === 'ccPayment > monthlyRecap > weeklyRecap > epcClaim',
+  AUTO_MODAL_PRIORITY.join(' > ') === 'welcome > ccPayment > monthlyRecap > weeklyRecap > epcClaim',
   AUTO_MODAL_PRIORITY.join(' > '));
 check('nothing pending shows nothing', pickAutoModal({}) === null);
+
+check('the first-Home welcome outranks every later prompt',
+  pickAutoModal({ welcome: true, ccPayment: true, monthlyRecap: true, weeklyRecap: true, epcClaim: true }) === 'welcome');
 
 // A question about the user's money outranks everything: answering it changes
 // stored balances, so every figure the others would show is only right after it.
@@ -51,19 +54,31 @@ check('a switched-off recap does not block what is behind it',
 check('an unknown key is ignored rather than jumping the queue',
   pickAutoModal({ somethingNew: true, epcClaim: true }) === 'epcClaim');
 
-// ── every surface actually consults it ───────────────────────────────────────
+// ── every surface is driven by the Home coordinator ──────────────────────────
 const SRC = new URL('../../', import.meta.url).pathname;
 const read = (rel) => readFileSync(`${SRC}${rel}`, 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-for (const [name, rel] of [
-  ['MonthlyRecapModal', 'components/MonthlyRecapModal.tsx'],
-  ['WeeklyRecapModal',  'components/WeeklyRecapModal.tsx'],
-  ['CCPaymentPromptModal', 'components/CCPaymentPromptModal.js'],
-  ['EpcClaimBottomSheet (via Dashboard)', 'screens/DashboardScreen.js'],
-]) {
-  check(`${name} asks the queue before opening itself`, /useAutoModalQueue\(\)/.test(read(rel)));
+const dashboard = read('screens/DashboardScreen.js');
+check('Home asks the shared queue for the highest-priority candidate',
+  /useAutoModalQueue\(\)/.test(dashboard));
+check('Home locks the visit after presenting one automatic modal',
+  /autoModalShownThisVisit\.current\s*=\s*true/.test(dashboard));
+for (const name of ['MonthlyRecapModal', 'WeeklyRecapModal', 'WelcomeStreakModal', 'CCPaymentPromptModal']) {
+  check(`${name} receives the one active modal chosen by Home`,
+    new RegExp(`<${name}[^>]*activeAutoModal=\\{activeAutoModal\\}`).test(dashboard));
 }
+check('the EPC claim also uses Home’s one-per-visit selection',
+  /activeAutoModal\s*===\s*['"]epcClaim['"]/.test(dashboard));
+const notificationSheet = read('components/NotificationsSheet.tsx');
+check('a notification tap can explicitly open its pending modal',
+  /onOpenPending\?\.\(pendingTarget\)/.test(notificationSheet)
+  && /onOpenPending=\{\(modal\)\s*=>/.test(dashboard)
+  && /setActiveAutoModal\(modal\)/.test(dashboard));
+const ccPrompt = read('components/CCPaymentPromptModal.js');
+check('handling one card payment releases the modal instead of auto-opening the next one',
+  /onHandled\?\.\(\)/.test(ccPrompt)
+  && /onHandled=\{\(\)\s*=>\s*setActiveAutoModal\(null\)\}/.test(dashboard));
 
 // ── holding one back must not LOSE it ────────────────────────────────────────
 const store = read('store/ePurseStore.js');

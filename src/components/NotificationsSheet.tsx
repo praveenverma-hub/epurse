@@ -6,7 +6,7 @@
 // • "Mark all read" footer chip is visible only when unread count > 0.
 // =============================================================================
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Dimensions,
   Modal,
@@ -37,12 +37,14 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { timeAgo } from '../utils/format';
 import SheetCloseButton from './SheetCloseButton';
 import { openStoreListing } from './UpdateRequiredGate';
+import type { AutoModalId } from '../constants/autoModals';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
 export interface NotificationsSheetProps {
   visible: boolean;
   onClose: () => void;
+  onOpenPending?: (modal: AutoModalId) => void;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -55,8 +57,11 @@ const EXIT_MS  = 240;
 
 const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   cc_due:                'card-outline',
+  cc_payment_review:     'card-outline',
   subscription_hike:     'trending-up-outline',
   monthly_recap:         'bar-chart-outline',
+  weekly_recap:          'calendar-outline',
+  aware_savings_ready:   'gift-outline',
   aware_check_in:        'sparkles-outline',
   aware_streak_reset:    'refresh-circle-outline',
   aware_savings_claimed: 'gift-outline',
@@ -67,8 +72,11 @@ const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
 
 const KIND_TINT: Record<NotificationKind, string> = {
   cc_due:                '#F59E0B',
+  cc_payment_review:     '#7C3AED',
   subscription_hike:     '#EF4444',
   monthly_recap:         '#FF5A1F',
+  weekly_recap:          '#2563EB',
+  aware_savings_ready:   '#10B981',
   aware_check_in:        '#06B6D4',
   aware_streak_reset:    '#9CA3AF',
   aware_savings_claimed: '#10B981',
@@ -82,6 +90,7 @@ const KIND_TINT: Record<NotificationKind, string> = {
 const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
   visible,
   onClose,
+  onOpenPending,
 }) => {
   const entries     = useNotificationStore(selectNotificationEntries);
   const markRead    = useNotificationStore((s) => s.markRead);
@@ -91,6 +100,7 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
 
   const opacity   = useSharedValue<number>(0);
   const translate = useSharedValue<number>(-SHEET_MAX_H);
+  const afterCloseRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
     if (visible) {
@@ -111,13 +121,21 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
     };
   }, [visible, opacity, translate]);
 
-  const handleDismiss = (): void => {
+  const finishDismiss = (): void => {
+    onClose();
+    const afterClose = afterCloseRef.current;
+    afterCloseRef.current = null;
+    afterClose?.();
+  };
+
+  const handleDismiss = (afterClose?: () => void): void => {
+    afterCloseRef.current = afterClose ?? null;
     opacity.value = withTiming(0, { duration: EXIT_MS });
     translate.value = withTiming(
       -SHEET_MAX_H,
       { duration: EXIT_MS, easing: Easing.in(Easing.cubic) },
       (finished) => {
-        if (finished) runOnJS(onClose)();
+        if (finished) runOnJS(finishDismiss)();
       },
     );
   };
@@ -136,13 +154,13 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={handleDismiss}
+      onRequestClose={() => handleDismiss()}
     >
       <Animated.View style={[styles.backdrop, backdropStyle]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => handleDismiss()} />
 
         <Animated.View style={[styles.sheet, sheetStyle]}>
-          <SheetCloseButton onPress={handleDismiss} variant="absolute" />
+          <SheetCloseButton onPress={() => handleDismiss()} variant="absolute" />
           <View style={styles.headerRow}>
             <Text style={styles.title}>Notifications</Text>
             {unreadCount > 0 && (
@@ -170,12 +188,20 @@ const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
                   entry={entry}
                   onPress={() => {
                     markRead(entry.id);
-                    // monthly_recap rows promise "tap to view and download" — honor it
-                    // by re-opening that month's recap modal once this sheet is closed.
-                    const monthKey = entry.kind === 'monthly_recap' ? (entry.meta?.monthKey as string | undefined) : null;
-                    if (monthKey) {
-                      handleDismiss();
-                      openMonthlyRecap(monthKey);
+                    const pendingTarget: AutoModalId | null =
+                      entry.kind === 'cc_payment_review' ? 'ccPayment'
+                      : entry.kind === 'monthly_recap' ? 'monthlyRecap'
+                      : entry.kind === 'weekly_recap' ? 'weeklyRecap'
+                      : entry.kind === 'aware_savings_ready' ? 'epcClaim'
+                      : null;
+                    if (pendingTarget) {
+                      const monthKey = entry.kind === 'monthly_recap'
+                        ? (entry.meta?.monthKey as string | undefined)
+                        : undefined;
+                      handleDismiss(() => {
+                        if (monthKey) openMonthlyRecap(monthKey);
+                        onOpenPending?.(pendingTarget);
+                      });
                       return;
                     }
                     // app_update is the SOFT nudge — tapping it is the whole point of

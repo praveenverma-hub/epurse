@@ -27,8 +27,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type NotificationKind =
   | 'cc_due'
+  | 'cc_payment_review'
   | 'subscription_hike'
   | 'monthly_recap'
+  | 'weekly_recap'
+  | 'aware_savings_ready'
   | 'aware_check_in'
   | 'aware_streak_reset'
   | 'aware_savings_claimed'
@@ -64,6 +67,7 @@ interface State {
   markAllRead: () => void;
   markRead:    (id: string) => void;
   dismiss:     (id: string) => void;
+  dismissByDedupeKey: (dedupeKey: string) => void;
   clearAll:    () => void;
   pruneStale:  () => void;
 }
@@ -121,6 +125,9 @@ export const useNotificationStore = create<State>()(
 
       dismiss: (id) =>
         set({ entries: get().entries.filter((e) => e.id !== id) }),
+
+      dismissByDedupeKey: (dedupeKey) =>
+        set({ entries: get().entries.filter((e) => e.dedupeKey !== dedupeKey) }),
 
       clearAll: () => set({ entries: [] }),
 

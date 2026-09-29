@@ -307,6 +307,13 @@ export const useRewardStore = create<RewardState>()(
             lastCapResetDate:     today,
             pendingSavingsReward: { rpAmount: rpAwarded, epcAmount: epcAwarded, forDate: yesterday },
           });
+          useNotificationStore.getState().add({
+            kind:      'aware_savings_ready',
+            title:     'Your reward is ready to claim',
+            body:      `Claim +${rpAwarded} RP and +${epcAwarded} EPC for your zero-spend day.`,
+            dedupeKey: `pending:aware_savings:${yesterday}`,
+            meta:      { rp: rpAwarded, epc: epcAwarded, forDate: yesterday },
+          });
           return result;
         }
 
@@ -364,6 +371,7 @@ export const useRewardStore = create<RewardState>()(
           lastClaimedBonusDate: pending.forDate,
           pendingSavingsReward: null,
         });
+        useNotificationStore.getState().dismissByDedupeKey(`pending:aware_savings:${pending.forDate}`);
         useNotificationStore.getState().add({
           kind:      'aware_savings_claimed',
           title:     `Zero-spend bonus claimed`,

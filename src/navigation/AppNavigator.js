@@ -15,6 +15,7 @@ import SettingsScreen      from '../screens/SettingsScreen';
 import SecuritySettingsScreen from '../screens/SecuritySettingsScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import MonthlyRecapSettingsScreen from '../screens/MonthlyRecapSettingsScreen';
+import MonthlyRecapSummaryScreen from '../screens/MonthlyRecapSummaryScreen';
 import SpendRulesScreen    from '../screens/SpendRulesScreen';
 import BackupScreen        from '../screens/BackupScreen';
 import AccountDetailsScreen from '../screens/AccountDetailsScreen';
@@ -85,6 +86,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Security"       component={SecuritySettingsScreen} />
         <Stack.Screen name="Notifications"  component={NotificationsScreen} />
         <Stack.Screen name="MonthlyRecapSettings" component={MonthlyRecapSettingsScreen} />
+        <Stack.Screen name="MonthlyRecapSummary" component={MonthlyRecapSummaryScreen} />
         <Stack.Screen name="SpendRules"     component={SpendRulesScreen} />
         <Stack.Screen name="Backup"         component={BackupScreen} />
         <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />

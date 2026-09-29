@@ -21,11 +21,19 @@
 import React from 'react';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
+import type { AutoModalId } from '../constants/autoModals';
 import MonthlyRecapCard from './MonthlyRecapCard';
 import RecapModalShell from './RecapModalShell';
+import type { MonthlyReport } from '../utils/monthlyReportHtml';
 
-const MonthlyRecapModal: React.FC = () => {
+type Props = {
+  activeAutoModal: AutoModalId | null;
+  previewReport?: MonthlyReport;
+  onPreviewClose?: () => void;
+  onViewFull?: (monthKey: string, previewReport?: MonthlyReport) => void;
+};
+
+const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, previewReport, onPreviewClose, onViewFull }) => {
   const pendingMonthlyRecap      = useEPurseStore((s) => s.pendingMonthlyRecap);
   const showMonthlyRecap         = useEPurseStore((s) => s.showMonthlyRecap);
   const clearPendingMonthlyRecap = useEPurseStore((s) => s.clearPendingMonthlyRecap);
@@ -38,9 +46,11 @@ const MonthlyRecapModal: React.FC = () => {
   // COUNT changed between renders and React threw "rendered fewer hooks than
   // expected" — on the Dashboard, which re-renders constantly. Hooks can never
   // sit behind a short-circuit.
-  const topAutoModal = useAutoModalQueue();
-  const visible = !!pendingMonthlyRecap && showMonthlyRecap && topAutoModal === 'monthlyRecap';
-  const close = () => clearPendingMonthlyRecap();
+  const monthKey = previewReport?.monthKey ?? pendingMonthlyRecap;
+  const visible = !!monthKey
+    && (previewReport ? true : showMonthlyRecap)
+    && activeAutoModal === 'monthlyRecap';
+  const close = () => previewReport ? onPreviewClose?.() : clearPendingMonthlyRecap();
 
   return (
     <RecapModalShell
@@ -51,8 +61,14 @@ const MonthlyRecapModal: React.FC = () => {
       {/* No separate heading — the card's own header ("{month} recap") already
           says what this is; a second title outside its background just floated
           oddly over the backdrop. */}
-      {pendingMonthlyRecap && (
-        <MonthlyRecapCard monthKey={pendingMonthlyRecap} isNew onDownloaded={close} />
+      {monthKey && (
+        <MonthlyRecapCard
+          monthKey={monthKey}
+          isNew
+          onDownloaded={close}
+          previewReport={previewReport}
+          onViewFull={onViewFull ? () => onViewFull(monthKey, previewReport) : undefined}
+        />
       )}
     </RecapModalShell>
   );

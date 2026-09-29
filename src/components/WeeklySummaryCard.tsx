@@ -41,7 +41,7 @@ interface TopCategory {
   total: number;
 }
 
-interface WeeklySummary {
+export interface WeeklySummary {
   total: number;
   prevTotal: number;
   deltaPct: number | null;
@@ -72,6 +72,8 @@ export interface WeeklySummaryCardProps {
   /** Render the week CONTAINING this date (default = current week). The week-end
    *  recap passes a day from the just-ended week. */
   anchorDate?: Date;
+  /** Isolated stage-preview data; production continues using the store selector. */
+  previewSummary?: WeeklySummary;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -94,19 +96,33 @@ const formatWeekRange = (startMs: number): string => {
     : `${d(s)} ${mon(s)} – ${d(e)} ${mon(e)}`;
 };
 
+// Seven values share a narrow row, so chart labels use one decimal at most.
+// The rest of the card keeps the standard, more precise compact formatter.
+const formatChartAmount = (value: number): string => {
+  const n = Number(value || 0);
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  const short = (amount: number) => amount.toFixed(1).replace(/\.0$/, '');
+  if (abs >= 1e7) return `${sign}₹${short(abs / 1e7)}Cr`;
+  if (abs >= 1e5) return `${sign}₹${short(abs / 1e5)}L`;
+  if (abs >= 1e3) return `${sign}₹${short(abs / 1e3)}k`;
+  return `${sign}₹${Math.round(abs)}`;
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const WeeklySummaryCard: React.FC<WeeklySummaryCardProps> = ({ onPress, anchorDate }) => {
+const WeeklySummaryCard: React.FC<WeeklySummaryCardProps> = ({ onPress, anchorDate, previewSummary }) => {
   const theme = useTheme() as Palette;
   // Recompute only when inputs change (avoids the fresh-object-every-render warning).
   const anchorMs = anchorDate ? anchorDate.getTime() : undefined;
   const transactions = useEPurseStore((s) => s.transactions);
   const groups       = useEPurseStore((s) => s.groups);
   const categories   = useEPurseStore((s) => s.categories);
-  const summary = useMemo(
+  const storeSummary = useMemo(
     () => selectWeeklySummary(useEPurseStore.getState(), anchorMs) as WeeklySummary,
     [anchorMs, transactions, groups, categories],
   );
+  const summary = previewSummary ?? storeSummary;
   const {
     total, deltaPct, dailyAvg, txnCount, maxDay,
     perDay, topCategory, weekStartMs,
@@ -198,7 +214,6 @@ const WeeklySummaryCard: React.FC<WeeklySummaryCardProps> = ({ onPress, anchorDa
             : d.isFuture
               ? `${theme.textMuted}22`
               : `${theme.primary}40`;
-          // Today stays identifiable (accent) even when another day is selected.
           const labelColor = active || d.isToday ? theme.primary : theme.textMuted;
           return (
             <Pressable
@@ -210,11 +225,15 @@ const WeeklySummaryCard: React.FC<WeeklySummaryCardProps> = ({ onPress, anchorDa
               accessibilityLabel={`${DAY_FULL[i]}: ${formatCurrency(d.amount)}`}
             >
               <View style={styles.valueSlot}>
-                {active && !isEmpty && (
-                  <Text style={styles.valueLabel}>
-                    {d.isFuture ? '—' : formatCompact(d.amount)}
-                  </Text>
-                )}
+                <Text
+                  style={[
+                    styles.valueLabel,
+                    { color: active ? theme.primary : theme.textMuted },
+                    active && styles.valueLabelStrong,
+                  ]}
+                >
+                    {d.isFuture ? '—' : formatChartAmount(d.amount)}
+                </Text>
               </View>
               <View style={styles.track}>
                 <Animated.View
@@ -324,8 +343,8 @@ const makeStyles = (theme: Palette) =>
       gap: spacing.xs,
     },
     dayCol: { flex: 1, alignItems: 'center' },
-    // Fixed-height slot above every bar keeps baselines aligned; only the
-    // active column paints a label into it. Negative insets let a wide value
+    // Fixed-height slot above every bar keeps baselines aligned. Negative
+    // insets let a wide value
     // (e.g. ₹1.2K) center over a narrow column without truncating.
     valueSlot: { height: 15, alignSelf: 'stretch', position: 'relative' },
     valueLabel: {
@@ -333,11 +352,11 @@ const makeStyles = (theme: Palette) =>
       bottom: 0, left: -16, right: -16,
       textAlign: 'center',
       fontSize: 10.5,
-      fontWeight: '800',
-      color: theme.primary,
+      fontWeight: '600',
       letterSpacing: -0.2,
       fontVariant: ['tabular-nums'],
     },
+    valueLabelStrong: { fontWeight: '800' },
     track: {
       width: 12,
       height: CHART_H,

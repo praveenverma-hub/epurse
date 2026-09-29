@@ -197,18 +197,15 @@ export const REWARD_CONFIG = {
 // ─── COPY (user-facing strings — never hard-coded in components) ─────────────
 
 export const REWARD_COPY = {
-  WELCOME_HEADLINE:    '🚀 Day 1 Aware Run Ignited!',
+  WELCOME_EYEBROW:     'DAY 1',
+  WELCOME_HEADLINE:    'Welcome to your Aware Run',
   WELCOME_DESCRIPTION:
-    'Welcome to ePurse. Your spending awareness journey begins today. Keep ' +
-    'your Review Queue clean every day to earn Reality Points (RP), level ' +
-    'up your profile, and unlock beautiful live widgets and custom styles!',
+    'Your first day starts here. Take a moment each day to review your transactions, understand your finances, and earn rewards along the way.',
   // Used while STATIC_CONFIG.shop.enabled is false — same promise, minus the
   // widget-unlock claim the shop can't back yet.
   WELCOME_DESCRIPTION_SHOP_COMING_SOON:
-    'Welcome to ePurse. Your spending awareness journey begins today. Keep ' +
-    'your Review Queue clean every day to earn Reality Points (RP) and level ' +
-    'up your profile — dashboard widgets are coming soon!',
-  WELCOME_CTA:         'Got it',
+    'Your first day starts here. Take a moment each day to review your transactions, understand your finances, and earn rewards along the way.',
+  WELCOME_CTA:         'Continue to ePurse',
 
   CAP_HEADLINE:        '🏆 The Mindful Tracking Cap',
   CAP_DESCRIPTION:

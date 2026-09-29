@@ -26,7 +26,7 @@ export interface MonthlyReport {
   monthLabel: string;
   shortLabel: string;
   daysInMonth: number;
-  cashflow: { spent: number; income: number; net: number; savingsRate: number; prevSpent: number; spendDeltaPct: number | null };
+  cashflow: { spent: number; income: number; net: number; savingsRate: number; prevSpent: number; spendDeltaPct: number | null; refunds?: number };
   budget: Budget | null;
   categories: Cat[];
   daily: DayPt[] | null;
@@ -335,7 +335,9 @@ export function buildMonthlyReportHtml(r: MonthlyReport, opts: { userName?: stri
   .plan { display:flex; gap:14px; align-items:center; background:${alpha(ACCENT, 0.08)}; border:1px solid ${alpha(ACCENT, 0.24)}; border-radius:14px; padding:15px 17px; }
   .p-big { font-size:23px; font-weight:800; color:${ACCENT}; letter-spacing:-.4px; } .p-title { font-weight:800; font-size:13px; } .p-note { font-size:12px; color:#4A5160; margin-top:2px; }
 
-  .foot { padding:16px 30px; border-top:1px solid ${LINE}; display:flex; justify-content:space-between; font-size:10.5px; color:${MUTED}; }
+  .foot { padding:16px 30px; border-top:1px solid ${LINE}; font-size:10.5px; color:${MUTED}; }
+  .foot-main { display:flex; justify-content:space-between; }
+  .foot-privacy { margin-top:7px; line-height:1.45; }
 </style></head>
 <body><div class="doc">
   <div class="mast">
@@ -353,6 +355,9 @@ export function buildMonthlyReportHtml(r: MonthlyReport, opts: { userName?: stri
   ${payHighlightsSection(r)}
   ${planSection(r)}
   ${txnListSection(r)}
-  <div class="foot"><span>${owner} · private to your device</span><span>₹ figures in INR</span></div>
+  <div class="foot">
+    <div class="foot-main"><span>${owner} · private financial report</span><span>₹ figures in INR</span></div>
+    <div class="foot-privacy">Generated on this device by ePurse. ePurse does not upload this report. Keep the exported file secure and share it only with people and services you trust.</div>
+  </div>
 </div></body></html>`;
 }

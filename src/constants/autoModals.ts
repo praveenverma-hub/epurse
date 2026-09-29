@@ -6,7 +6,7 @@
 // wiring lives in `hooks/useAutoModalQueue.ts`.
 // =============================================================================
 
-export type AutoModalId = 'ccPayment' | 'monthlyRecap' | 'weeklyRecap' | 'epcClaim';
+export type AutoModalId = 'welcome' | 'ccPayment' | 'monthlyRecap' | 'weeklyRecap' | 'epcClaim';
 
 /**
  * Highest priority first — the first one with something pending wins, and every
@@ -15,15 +15,17 @@ export type AutoModalId = 'ccPayment' | 'monthlyRecap' | 'weeklyRecap' | 'epcCla
  * dialog they can't tell apart, and one un-dismissable on Android).
  *
  * THE ORDER, and why:
- *   1. ccPayment    — a QUESTION about the user's own money. Answering it changes
+ *   1. welcome      — the first Home visit is kept calm and introductory; all
+ *                     financial prompts remain pending for a later visit.
+ *   2. ccPayment    — a QUESTION about the user's own money. Answering it changes
  *                     stored balances, so every number the other surfaces would
  *                     show is only correct AFTER it. It also has a real deadline.
- *   2. monthlyRecap — the rarest (12 a year) and the biggest payoff, tied to a
+ *   3. monthlyRecap — the rarest (12 a year) and the biggest payoff, tied to a
  *                     boundary that has just passed and won't come round again.
- *   3. weeklyRecap  — same family, 4x more often. In the week a month closes both
+ *   4. weeklyRecap  — same family, 4x more often. In the week a month closes both
  *                     are pending, the monthly one wins, and the weekly shows on
  *                     the next open rather than being lost.
- *   4. epcClaim     — always claimable, no deadline, nothing expires. It can wait
+ *   5. epcClaim     — always claimable, no deadline, nothing expires. It can wait
  *                     for any of the above and the coins are still there.
  *
  * ADDING A NEW SELF-OPENING SURFACE? Add it here rather than letting it open
@@ -33,6 +35,7 @@ export type AutoModalId = 'ccPayment' | 'monthlyRecap' | 'weeklyRecap' | 'epcCla
  * how the weekly recap was being lost.
  */
 export const AUTO_MODAL_PRIORITY: AutoModalId[] = [
+  'welcome',
   'ccPayment',
   'monthlyRecap',
   'weeklyRecap',

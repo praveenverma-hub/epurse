@@ -18,6 +18,8 @@ import { radius, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency, formatCompact } from '../utils/format';
 import { useToast } from './Toast';
 import { exportMonthlyRecap } from '../services/recapExport';
+import type { MonthlyReport } from '../utils/monthlyReportHtml';
+import CenterModal from './CenterModal';
 
 interface Palette {
   card: string; primary: string; divider: string; background: string;
@@ -33,9 +35,15 @@ export interface MonthlyRecapCardProps {
   onDismiss?: () => void;
   /** Called after a successful export (e.g. to also close a modal). */
   onDownloaded?: () => void;
+  /** Isolated stage-preview report; production continues using the store selector. */
+  previewReport?: MonthlyReport;
+  /** Opens the complete in-app report. */
+  onViewFull?: () => void;
 }
 
-const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({ monthKey, isNew, onDismiss, onDownloaded }) => {
+const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({
+  monthKey, isNew, onDismiss, onDownloaded, previewReport, onViewFull,
+}) => {
   const theme = useTheme() as Palette;
   const toast = useToast();
   const userName = useEPurseStore((s) => s.userName);
@@ -49,12 +57,14 @@ const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({ monthKey, isNew, on
   const accounts          = useEPurseStore((s) => s.accounts);
   const budgetStreak      = useEPurseStore((s) => s.budgetStreak);
   const recapOptions      = useEPurseStore((s) => s.recapOptions);
-  const report = useMemo(
+  const storeReport = useMemo(
     () => selectMonthlyReport(monthKey, recapOptions)(useEPurseStore.getState()),
     [monthKey, recapOptions, transactions, budgetHistory, monthlyAggregates, groups, accounts, budgetStreak],
   );
+  const report = previewReport ?? storeReport;
 
   const [busy, setBusy] = useState(false);
+  const [confirmExport, setConfirmExport] = useState(false);
 
   const handleDownload = async () => {
     if (busy) return;
@@ -156,19 +166,52 @@ const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({ monthKey, isNew, on
         </View>
       )}
 
-      {/* Download */}
-      <Pressable
-        onPress={handleDownload}
-        disabled={busy}
-        style={({ pressed }) => [styles.dlBtn, { backgroundColor: theme.primary }, pressed && { opacity: 0.9 }]}
-        accessibilityRole="button"
-        accessibilityLabel="Download monthly report as PDF"
-      >
-        {busy
-          ? <ActivityIndicator color="#fff" size="small" />
-          : <><Ionicons name="download-outline" size={17} color="#fff" /><Text style={styles.dlText}>Download report</Text></>}
-      </Pressable>
-      <Text style={styles.foot}>Full breakdown, charts &amp; plan-vs-actual in the PDF</Text>
+      {/* The in-app report is the primary path. Export remains available, but
+          never becomes the only way to inspect the user's own information. */}
+      <View style={styles.actions}>
+        {onViewFull ? (
+          <Pressable
+            onPress={onViewFull}
+            style={({ pressed }) => [styles.viewBtn, { backgroundColor: theme.primary }, pressed && { opacity: 0.9 }]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.dlText}>View full summary</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => setConfirmExport(true)}
+          disabled={busy}
+          style={({ pressed }) => [
+            onViewFull ? styles.exportBtn : styles.viewBtn,
+            onViewFull
+              ? { borderColor: theme.divider, backgroundColor: theme.background }
+              : { backgroundColor: theme.primary },
+            pressed && { opacity: 0.9 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Download monthly report as PDF"
+        >
+          {busy
+            ? <ActivityIndicator color={onViewFull ? theme.primary : '#fff'} size="small" />
+            : <Ionicons name="download-outline" size={18} color={onViewFull ? theme.primary : '#fff'} />}
+          {!onViewFull ? <Text style={styles.dlText}>Download report</Text> : null}
+        </Pressable>
+      </View>
+      <Text style={styles.foot}>Review here or save a private PDF for your records</Text>
+
+      <CenterModal
+        visible={confirmExport}
+        title="Download private report?"
+        message="This PDF may contain sensitive financial information. ePurse creates it on this device and does not upload it. After you save or share it, its security depends on the location or app you choose. Please store and share it carefully."
+        primaryText="Download PDF"
+        secondaryText="Cancel"
+        onPrimary={() => {
+          setConfirmExport(false);
+          handleDownload();
+        }}
+        onSecondary={() => setConfirmExport(false)}
+        onClose={() => setConfirmExport(false)}
+      />
     </View>
   );
 };
@@ -213,7 +256,9 @@ const makeStyles = (theme: Palette) => StyleSheet.create({
 
   ribbon: { flexDirection: 'row', height: 8, borderRadius: 5, overflow: 'hidden', marginTop: 12, backgroundColor: theme.divider },
 
-  dlBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.lg, paddingVertical: 12, marginTop: 14 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  viewBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.lg, paddingHorizontal: 12 },
+  exportBtn: { width: 48, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: 1 },
   dlText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   foot: { fontSize: 10.5, color: theme.textMuted, textAlign: 'center', marginTop: 9 },
 });

@@ -15,15 +15,16 @@
 // never drops it.
 //
 // THE ORDER, and why:
-//   1. ccPayment    — a QUESTION about the user's own money. Answering it changes
+//   1. welcome      — first Home visit only; later prompts wait for another visit.
+//   2. ccPayment    — a QUESTION about the user's own money. Answering it changes
 //                     stored balances, so every number the other surfaces would
 //                     show is only correct AFTER it. It also has a real deadline.
-//   2. monthlyRecap — the rarest (12 a year) and the biggest payoff, tied to a
+//   3. monthlyRecap — the rarest (12 a year) and the biggest payoff, tied to a
 //                     boundary that has just passed and will not come round again.
-//   3. weeklyRecap  — same family, 4x more often. In the week a month closes both
+//   4. weeklyRecap  — same family, 4x more often. In the week a month closes both
 //                     are pending and the monthly one wins; the weekly then shows
 //                     on the next open rather than being lost.
-//   4. epcClaim     — always claimable, no deadline, nothing expires. It can wait
+//   5. epcClaim     — always claimable, no deadline, nothing expires. It can wait
 //                     for any of the above, and the coins are still there.
 //
 // Adding a new auto-opening surface? Put it in this list rather than letting it
@@ -45,8 +46,10 @@ export const useAutoModalQueue = (): AutoModalId | null => {
   const pendingWeeklyRecap = useEPurseStore((s: any) => s.pendingWeeklyRecap);
   const showWeeklySummary = useEPurseStore((s: any) => s.showWeeklySummary);
   const pendingSavingsReward = useRewardStore((s: any) => s.pendingSavingsReward);
+  const isFirstLaunch = useRewardStore((s: any) => s.isFirstLaunch);
 
   return pickAutoModal({
+    welcome: !!isFirstLaunch,
     ccPayment: ccQueue.length > 0,
     monthlyRecap: !!pendingMonthlyRecap && !!showMonthlyRecap,
     weeklyRecap: pendingWeeklyRecap != null && !!showWeeklySummary,

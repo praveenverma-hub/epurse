@@ -14,11 +14,17 @@
 import React from 'react';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
+import type { AutoModalId } from '../constants/autoModals';
 import RecapModalShell from './RecapModalShell';
-import WeeklySummaryCard from './WeeklySummaryCard';
+import WeeklySummaryCard, { type WeeklySummary } from './WeeklySummaryCard';
 
-const WeeklyRecapModal: React.FC = () => {
+type Props = {
+  activeAutoModal: AutoModalId | null;
+  previewSummary?: WeeklySummary;
+  onPreviewClose?: () => void;
+};
+
+const WeeklyRecapModal: React.FC<Props> = ({ activeAutoModal, previewSummary, onPreviewClose }) => {
   const pendingWeeklyRecap      = useEPurseStore((s) => s.pendingWeeklyRecap);
   const showWeeklySummary       = useEPurseStore((s) => s.showWeeklySummary);
   const clearPendingWeeklyRecap = useEPurseStore((s) => s.clearPendingWeeklyRecap);
@@ -30,21 +36,25 @@ const WeeklyRecapModal: React.FC = () => {
   // COUNT changed between renders and React threw "rendered fewer hooks than
   // expected" — on the Dashboard, which re-renders constantly. Hooks can never
   // sit behind a short-circuit.
-  const topAutoModal = useAutoModalQueue();
-  const visible = pendingWeeklyRecap != null && showWeeklySummary && topAutoModal === 'weeklyRecap';
+  const visible = (previewSummary != null || pendingWeeklyRecap != null)
+    && (previewSummary ? true : showWeeklySummary)
+    && activeAutoModal === 'weeklyRecap';
+  const close = () => previewSummary ? onPreviewClose?.() : clearPendingWeeklyRecap();
 
   return (
     <RecapModalShell
       visible={visible}
-      onClose={clearPendingWeeklyRecap}
+      onClose={close}
       align="center"
-      dismissLabel="Done"
     >
       {/* No separate heading — the card's own header ("This Week" + date range)
           already says what this is; a second title outside its background just
           floated oddly over the backdrop. */}
-      {pendingWeeklyRecap != null && (
-        <WeeklySummaryCard anchorDate={new Date(pendingWeeklyRecap)} />
+      {(previewSummary || pendingWeeklyRecap != null) && (
+        <WeeklySummaryCard
+          anchorDate={pendingWeeklyRecap != null ? new Date(pendingWeeklyRecap) : undefined}
+          previewSummary={previewSummary}
+        />
       )}
     </RecapModalShell>
   );

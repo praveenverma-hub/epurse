@@ -27,7 +27,6 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
-import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { EMPTY_ARRAY } from '../constants/empty';
 import { statementRemaining } from '../utils/ccStatement';
@@ -37,19 +36,22 @@ import { ordinalDay } from '../utils/format';
 const acctLabel = (a) =>
   [a.bankName || a.name || a.type, a.mask ? `••${a.mask}` : null].filter(Boolean).join(' ');
 
-const CCPaymentPromptModal = () => {
+const CCPaymentPromptModal = ({ activeAutoModal, onHandled, previewData = null }) => {
   const theme  = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const queue                  = useEPurseStore((s) => s.pendingCCPaymentQueue) ?? EMPTY_ARRAY;
-  const accounts               = useEPurseStore((s) => s.accounts) ?? EMPTY_ARRAY;
+  const storedQueue            = useEPurseStore((s) => s.pendingCCPaymentQueue) ?? EMPTY_ARRAY;
+  const storedAccounts         = useEPurseStore((s) => s.accounts) ?? EMPTY_ARRAY;
   const confirmCCTrueUp        = useEPurseStore((s) => s.confirmCCTrueUp);
   const settleCCPayment        = useEPurseStore((s) => s.settleCCPayment);
   const dismissCCPaymentPrompt = useEPurseStore((s) => s.dismissCCPaymentPrompt);
   const confirmPendingCycleDate = useEPurseStore((s) => s.confirmPendingCycleDate);
+  // Stage UI review can supply isolated data so trying the controls never
+  // changes a real card balance or creates a real payment transaction.
+  const queue = previewData?.queue ?? storedQueue;
+  const accounts = previewData?.accounts ?? storedAccounts;
 
   // Which reconciliation the user has picked. Defaults to the full true-up.
-  const topModal = useAutoModalQueue();
   const [choice, setChoice] = useState('trueup');
   // Which account paid the bill (null = "Not sure" → don't book a paying-side txn).
   const [sourceId, setSourceId] = useState(null);
@@ -90,7 +92,7 @@ const CCPaymentPromptModal = () => {
   // Top of the auto-modal queue, so this is really only a guard against a
   // future surface being added above it — and against this one stacking on a
   // modal some other screen has open.
-  if (!current || topModal !== 'ccPayment') return null;
+  if (!current || activeAutoModal !== 'ccPayment') return null;
 
   const { amount, accountMask, bankName, accountId } = current;
   const cardLabel = [bankName, accountMask ? `••${accountMask}` : null]
@@ -138,11 +140,17 @@ const CCPaymentPromptModal = () => {
 
   const queueCount = queue.length;
 
-  const onDismiss = () => submit(() => dismissCCPaymentPrompt());
+  const onDismiss = () => submit(() => {
+    if (!previewData) dismissCCPaymentPrompt();
+    onHandled?.();
+  });
   const onConfirm = () => submit(() => {
-    if (choice === 'trueup')      confirmCCTrueUp(sourceId);
-    else if (choice === 'settle') settleCCPayment(sourceId);
-    else                          dismissCCPaymentPrompt();
+    if (!previewData) {
+      if (choice === 'trueup')      confirmCCTrueUp(sourceId);
+      else if (choice === 'settle') settleCCPayment(sourceId);
+      else                          dismissCCPaymentPrompt();
+    }
+    onHandled?.();
   });
 
   const confirmLabel =
@@ -186,10 +194,10 @@ const CCPaymentPromptModal = () => {
               We noticed your {pendingDateText} — update it on file?
             </Text>
             <View style={styles.pendingDateActions}>
-              <TouchableOpacity onPress={() => confirmPendingCycleDate(account.id, false)} activeOpacity={0.8}>
+              <TouchableOpacity onPress={() => !previewData && confirmPendingCycleDate(account.id, false)} activeOpacity={0.8}>
                 <Text style={styles.pendingDateSkip}>Not now</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => confirmPendingCycleDate(account.id, true)} activeOpacity={0.8}>
+              <TouchableOpacity onPress={() => !previewData && confirmPendingCycleDate(account.id, true)} activeOpacity={0.8}>
                 <Text style={styles.pendingDateYes}>Update</Text>
               </TouchableOpacity>
             </View>

@@ -7,9 +7,8 @@
 //   • The reward for that calendar day is still unclaimed
 //
 // Dismissal contract:
-//   • Cannot be dismissed by tapping outside, swipe, or Android back.
-//   • Only the primary Claim action closes the sheet — the user must
-//     consciously accept the reward.
+//   • Cannot be dismissed accidentally by tapping outside, swiping, or Back.
+//   • The reward is already earned, so both the explicit × and Claim credit it.
 //
 // Animation contract:
 //   • Reanimated spring up on appear (heavy & physical).
@@ -100,7 +99,7 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
   }, [visible, sheetY, scrim, coin]);
 
   // ── Dismiss (called from timeout or didJustFinish, whichever comes first) ─
-  const dismissSheet = (): void => {
+  const dismissSheet = (afterDismiss: () => void): void => {
     if (dismissedRef.current) return;
     dismissedRef.current = true;
     setShowConfetti(false);
@@ -108,13 +107,13 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
     sheetY.value = withTiming(SCREEN_H, EXIT_TIMING, (finished) => {
       if (finished) {
         runOnJS(setMounted)(false);
-        runOnJS(onClaim)();
+        runOnJS(afterDismiss)();
       }
     });
   };
 
   const handleAnimationFinish = (): void => {
-    dismissSheet();
+    dismissSheet(onClaim);
   };
 
   // ── Claim handler ─────────────────────────────────────────────────────────
@@ -122,7 +121,7 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
     hapticSuccess();
     setShowConfetti(true);
     // Fallback: dismiss after 1.6 s in case video fails or runs longer.
-    setTimeout(dismissSheet, 1600);
+    setTimeout(() => dismissSheet(onClaim), 1600);
   };
 
   // ── Animated styles ───────────────────────────────────────────────────────
@@ -172,7 +171,7 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
 
       {/* Sheet body */}
       <Animated.View style={[styles.sheetWrap, sheetStyle]} pointerEvents="box-none">
-        <SheetCloseButton onPress={dismissSheet} variant="absolute" />
+        <SheetCloseButton onPress={() => dismissSheet(onClaim)} variant="absolute" />
         <SafeAreaView edges={['bottom']} style={styles.safe}>
           <View style={[styles.sheet, { backgroundColor: theme.card }]}>
             {/* Handle (decorative — not interactive) */}
@@ -180,7 +179,7 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
 
             {/* Coin spotlight */}
             <View style={styles.coinSpotlight}>
-              <View style={styles.coinHalo} />
+              <View style={styles.coinShadow} />
               <Animated.View style={coinStyle}>
                 <ThreeDEngravedCoin size={132} />
               </Animated.View>
@@ -188,11 +187,11 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
 
             {/* Copy */}
             <Text style={[styles.title, { color: theme.textPrimary }]}>
-              Zero-Transaction Day!
+              Your savings bonus is ready
             </Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-              Your Aware Run stays unbroken. Zero transactions yesterday
-              earns you a Savings Bonus on top of your streak.
+              No transactions were recorded yesterday. Your Aware Run continues,
+              and you’ve earned an extra bonus.
             </Text>
 
             {/* Reward pills — RP + EPC */}
@@ -214,13 +213,13 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
               style={styles.claimBtnWrap}
             >
               <LinearGradient
-                colors={['#FFE89A', '#E6B958', '#A0782A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                colors={['#8C5A14', '#B9781E', '#D9AA4E']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
                 style={styles.claimBtn}
               >
                 <Text style={styles.claimBtnText}>
-                  Claim Savings Bonus
+                  Claim Bonus
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -244,7 +243,7 @@ const styles = StyleSheet.create<{
   sheet: ViewStyle;
   handle: ViewStyle;
   coinSpotlight: ViewStyle;
-  coinHalo: ViewStyle;
+  coinShadow: ViewStyle;
   title: TextStyle;
   subtitle: TextStyle;
   rewardRow: ViewStyle;
@@ -298,12 +297,20 @@ const styles = StyleSheet.create<{
     marginTop: spacing.sm,
     marginBottom: spacing.lg,
   },
-  coinHalo: {
+  coinShadow: {
     position: 'absolute',
-    width: 168,
-    height: 168,
-    borderRadius: 84,
-    backgroundColor: '#E6B95822',
+    bottom: 25,
+    width: 118,
+    height: 5,
+    borderRadius: 4.5,
+    backgroundColor: '#6A4317',
+    opacity: 0.24,
+    transform: [{ rotate: '2deg' }],
+    shadowColor: '#3E260C',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 7,
+    elevation: 3,
   },
 
   // Typography
@@ -341,8 +348,8 @@ const styles = StyleSheet.create<{
     overflow: 'hidden',
   },
   claimBtnText: {
-    color: '#1A1305',
-    fontSize: 16,
+    color: '#FFFFFF',
+    fontSize: 17,
     fontWeight: '800',
     letterSpacing: 0.4,
   },

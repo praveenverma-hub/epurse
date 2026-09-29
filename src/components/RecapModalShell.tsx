@@ -20,8 +20,8 @@
 // labelled button reads as a stray control sitting on the backdrop UNDER the
 // card rather than as part of it, which is exactly what SheetCloseButton's own
 // doc says to drop: "a sheet needs NO bottom 'Close' button" (ui-consistency
-// §3bb). The weekly recap keeps its "Done": a centred card is a moment you
-// acknowledge, and the button is the acknowledgement.
+// §3bb). Both recap modals omit it so their close affordance is consistently
+// aligned at the top-right of the card.
 //
 // There is deliberately no third state. Omitting the label can never leave a
 // modal with no visible way out — it swaps one affordance for the other.

@@ -138,6 +138,25 @@ const GROUP_INACTIVE_PRUNE_MS = 180 * DAY_MS;
 /** CC-payment prompts only fire for recent payments; older swept SMS are ignored
  *  outright (never prompted, never filed) so ccHandledSmsIds can't balloon. */
 const CC_PROMPT_MAX_AGE_MS = 5 * DAY_MS;
+const CC_REVIEW_NOTIFICATION_KEY = 'pending:cc_payment_review';
+
+const syncCcReviewNotification = (queue = []) => {
+  const notifications = useNotificationStore.getState();
+  if (!queue.length) {
+    notifications.dismissByDedupeKey(CC_REVIEW_NOTIFICATION_KEY);
+    return;
+  }
+  const count = queue.length;
+  notifications.add({
+    kind: 'cc_payment_review',
+    title: count === 1 ? 'Card payment needs review' : `${count} card payments need review`,
+    body: count === 1
+      ? `${formatCurrency(queue[0].amount)} was detected — tap to reconcile it.`
+      : 'Review the detected payments and keep your card balances accurate.',
+    dedupeKey: CC_REVIEW_NOTIFICATION_KEY,
+    meta: { count },
+  });
+};
 // TODO: remove RAW_SMS_RETENTION_MS + rawSms/rawSender fields before production — preview-only debug data
 const RAW_SMS_RETENTION_MS = 3 * DAY_MS;
 
@@ -1459,10 +1478,27 @@ export const useEPurseStore = create(
         });
         if (!hasData) return;
         set({ pendingWeeklyRecap: lastWeekStart, weeklyRecapHandled: key });
+        try {
+          useNotificationStore.getState().add({
+            kind: 'weekly_recap',
+            title: 'Your weekly summary is ready',
+            body: 'See last week’s spending and progress.',
+            dedupeKey: `pending:weekly_recap:${key}`,
+            meta: { weekKey: key, anchorDate: lastWeekStart },
+          });
+        } catch {}
       },
 
       /** Weekly recap modal closed. */
-      clearPendingWeeklyRecap: () => set({ pendingWeeklyRecap: null }),
+      clearPendingWeeklyRecap: () => {
+        const pending = get().pendingWeeklyRecap;
+        if (pending != null) {
+          const d = new Date(pending);
+          const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+          useNotificationStore.getState().dismissByDedupeKey(`pending:weekly_recap:${key}`);
+        }
+        set({ pendingWeeklyRecap: null });
+      },
 
       // ── Monthly recap actions ─────────────────────────────────────────────
       /** Settings: show/hide the monthly recap (modal + card). */
@@ -1514,7 +1550,11 @@ export const useEPurseStore = create(
       },
 
       /** Recap modal closed — stop showing it (kept marked handled). */
-      clearPendingMonthlyRecap: () => set({ pendingMonthlyRecap: null }),
+      clearPendingMonthlyRecap: () => {
+        const pending = get().pendingMonthlyRecap;
+        if (pending) useNotificationStore.getState().dismissByDedupeKey(`recap:${pending}`);
+        set({ pendingMonthlyRecap: null });
+      },
 
       /** Re-open the recap modal for `mk` — used by notification/bell taps. */
       openMonthlyRecap: (mk) => set({ pendingMonthlyRecap: mk || null }),
@@ -3863,9 +3903,10 @@ export const useEPurseStore = create(
           bankName:    account.bankName || bankName || null,
           smsId:       sid,
         };
+        const nextQueue = [...queue, newEntry];
         set({
           accounts: accountsWithMatch,
-          pendingCCPaymentQueue: [...queue, newEntry],
+          pendingCCPaymentQueue: nextQueue,
           // A payment landed for this card. If it covers what's left on the
           // statement (or no statement is tracked), the bill is settled — drop it
           // rather than keep nagging from the Dashboard. A SMALLER payment leaves
@@ -3885,6 +3926,7 @@ export const useEPurseStore = create(
             );
           })(),
         });
+        syncCcReviewNotification(nextQueue);
         if (nudgeAllowed(state, 'ccPayment')) {
           fireCCPaymentNotification({
             amount,
@@ -3909,6 +3951,7 @@ export const useEPurseStore = create(
         const card = baseAccounts.find((a) => a.id === current.accountId);
         // True-up = "I cleared the full bill" → the statement is paid, whatever the amount.
         const applied = card ? applyStatementPayment(card, current.amount, 'trueup') : null;
+        const nextQueue = (pendingCCPaymentQueue || []).slice(1);
         set({
           accounts: baseAccounts.map((a) =>
             a.id === current.accountId
@@ -3925,8 +3968,9 @@ export const useEPurseStore = create(
           ...(card ? settleCcBillMaps(state, card, applied.remainingAfter) : {}),
           ...(booked ? { transactions: booked.transactions } : {}),
           ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
-          pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
+          pendingCCPaymentQueue: nextQueue,
         });
+        syncCcReviewNotification(nextQueue);
       },
 
       // User chose "Settle this payment" — reduce the tracked outstanding by EXACTLY
@@ -3945,6 +3989,7 @@ export const useEPurseStore = create(
         // Settle = exactly this amount → a smaller payment leaves the statement
         // PARTIALLY paid (remainingDue drops), never marked paid on the first one.
         const applied = card ? applyStatementPayment(card, current.amount, 'settle') : null;
+        const nextQueue = (pendingCCPaymentQueue || []).slice(1);
         set({
           accounts: baseAccounts.map((a) =>
             a.id === current.accountId
@@ -3960,8 +4005,9 @@ export const useEPurseStore = create(
           ...(card ? settleCcBillMaps(state, card, applied.remainingAfter) : {}),
           ...(booked ? { transactions: booked.transactions } : {}),
           ccHandledSmsIds:      appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId]),
-          pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
+          pendingCCPaymentQueue: nextQueue,
         });
+        syncCcReviewNotification(nextQueue);
       },
 
       // Reclassify an existing (mis-booked) DEBIT as a credit-card bill payment:
@@ -4049,12 +4095,14 @@ export const useEPurseStore = create(
       dismissCCPaymentPrompt: () => {
         const { pendingCCPaymentQueue, ccHandledSmsIds } = get();
         const current = (pendingCCPaymentQueue || [])[0];
+        const nextQueue = (pendingCCPaymentQueue || []).slice(1);
         set({
           ccHandledSmsIds:      current
             ? appendSuppressedSmsIds(ccHandledSmsIds || [], [current.smsId])
             : (ccHandledSmsIds || []),
-          pendingCCPaymentQueue: (pendingCCPaymentQueue || []).slice(1),
+          pendingCCPaymentQueue: nextQueue,
         });
+        syncCcReviewNotification(nextQueue);
       },
 
       ingestMessage: (rawMessage, opts = {}) => {
