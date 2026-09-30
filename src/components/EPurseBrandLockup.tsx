@@ -15,9 +15,11 @@ interface Props {
 interface InlineProps {
   size?: number;
   color?: string;
+  /** Logotype weight. 900 is the brand default; drop it where the wordmark sits beside body text. */
+  weight?: '700' | '800' | '900';
 }
 
-export const EPurseInlineWordmark: React.FC<InlineProps> = ({ size = 16, color }) => {
+export const EPurseInlineWordmark: React.FC<InlineProps> = ({ size = 16, color, weight = '900' }) => {
   const theme = useTheme();
   const ink = color || theme.textPrimary;
   return (
@@ -27,8 +29,8 @@ export const EPurseInlineWordmark: React.FC<InlineProps> = ({ size = 16, color }
       accessibilityRole="text"
       accessibilityLabel="ePurse"
     >
-      <Text style={[styles.name, styles.rotatedE, { color: ink, fontSize: size, lineHeight: size * 1.12 }]}>e</Text>
-      <Text style={[styles.name, { color: ink, fontSize: size, lineHeight: size * 1.12 }]}>Purse</Text>
+      <Text style={[styles.name, styles.rotatedE, { color: ink, fontSize: size, lineHeight: size * 1.12, fontWeight: weight }]}>e</Text>
+      <Text style={[styles.name, { color: ink, fontSize: size, lineHeight: size * 1.12, fontWeight: weight }]}>Purse</Text>
     </View>
   );
 };

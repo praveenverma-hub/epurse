@@ -87,7 +87,7 @@ const AccountCreditCardStepScreen = ({ navigation, route }: any) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top', 'bottom']}>
         <PlainScreenHeader
           title="Card Details"
           onBack={() => { hapticLight(); navigation.goBack(); }}

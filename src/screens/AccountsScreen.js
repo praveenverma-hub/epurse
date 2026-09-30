@@ -510,9 +510,12 @@ export default function AccountsScreen({ navigation }) {
               const status = ccPaymentStatus(a);
               if (status !== 'no_statement') {
                 rowSubtitle = (status === 'upcoming' || status === 'due_soon' || status === 'due_today')
-                  ? `Due ${dueRelativeText(currentPaymentWindow(a))}`
+                  ? `Payment due ${dueRelativeText(currentPaymentWindow(a))}`
+                  : status === 'due_date_passed' ? 'Payment due date passed'
                   : PAYMENT_STATUS_LABEL[status];
-                rowSubtitleColor = ccStatusColor(status, theme);
+                // `upcoming` is muted grey on the detail screen's status dot; as
+                // list text it would read as inert, so it takes the accent.
+                rowSubtitleColor = status === 'upcoming' ? theme.primary : ccStatusColor(status, theme);
               }
             } else if (lastActivityByAccount[a.id]) {
               rowSubtitle = `Last activity ${timeAgo(lastActivityByAccount[a.id])}`;
@@ -555,6 +558,7 @@ export default function AccountsScreen({ navigation }) {
                 <Text style={styles.listType} numberOfLines={1}>
                   {ACCOUNT_TYPE_LABEL[a.type] ?? a.type}
                   {(a.aliasMasks?.length ?? 0) > 0 ? ` · card ··${a.aliasMasks[0]}` : ''}
+                  {a.primary ? ' · Primary' : ''}
                 </Text>
                 {rowSubtitle ? (
                   <Text

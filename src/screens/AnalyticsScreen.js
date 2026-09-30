@@ -40,6 +40,7 @@ import SubscriptionHeartbeat from '../components/SubscriptionHeartbeat';
 import SmartLedger from '../components/SmartLedger';
 import GroupInsightCarousel from '../components/GroupInsightCarousel';
 import EmptyState from '../components/EmptyState';
+import MonthSummaryCard from '../components/MonthSummaryCard';
 import InfoSheet from '../components/InfoSheet';
 import SectionHeader from '../components/SectionHeader';
 import ProgressBar from '../components/ProgressBar';
@@ -262,6 +263,7 @@ const AnalyticsScreen = ({ navigation, headerless = false, monthOffset = 0 }) =>
         // scenes, so the hook belongs here, not on InsightsScreen (which doesn't scroll).
         {...tabBarScroll}
       >
+        <MonthSummaryCard monthOffset={monthOffset} />
         {noDataEver ? (
           <EmptyState
             icon="bar-chart-outline"

@@ -28,6 +28,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type NotificationKind =
   | 'cc_due'
   | 'cc_payment_review'
+  | 'cc_cycle_heads_up'
   | 'subscription_hike'
   | 'monthly_recap'
   | 'weekly_recap'

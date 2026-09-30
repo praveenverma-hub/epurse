@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm,
   },
   trustCopy: { flex: 1 },
-  trustLabel: { fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 1.2 },
-  trustText: { fontSize: 10, lineHeight: 15, fontWeight: '600', marginTop: 2 },
-  footer: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 18 },
+  trustLabel: { fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 1.2 },
+  trustText: { fontSize: 10, lineHeight: 15, fontWeight: '500', marginTop: 2 },
+  footer: { fontSize: 10, fontWeight: '600', letterSpacing: 0.2, marginTop: 18 },
 });

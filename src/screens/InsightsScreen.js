@@ -11,10 +11,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Modal, ScrollView, Pressable } from 'react-native';
 import { TabView } from 'react-native-tab-view';
+import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { spacing, radius, typography, shadows } from '../constants/theme';
+import { useEPurseStore, firstDataMonthKey } from '../store/ePurseStore';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 import SheetCloseButton from '../components/SheetCloseButton';
 import BudgetScreen    from './BudgetScreen';
@@ -65,12 +67,58 @@ export default function InsightsScreen({ navigation, route }) {
   // (Date's own overflow handling is exactly correct for a single subtraction
   // from a day-1 anchor, which is all this needs).
   const [monthSheetVisible, setMonthSheetVisible] = useState(false);
+  // The sheet animates itself (Modal `animationType="none"`): RN's own `slide` moves
+  // the whole window, so the dimmed backdrop slid down WITH the sheet instead of
+  // fading — the header snapped bright the instant you tapped. Here only the sheet
+  // slides and the backdrop fades, same as the Activity filter sheet.
+  const HIDDEN_Y = Dimensions.get('window').height * 0.5;
+  const sheetY = useSharedValue(HIDDEN_Y);
+  const backdropOpa = useSharedValue(0);
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpa.value }));
+
+  const openMonthSheet = () => {
+    sheetY.value = HIDDEN_Y;
+    backdropOpa.value = 0;
+    setMonthSheetVisible(true);
+  };
+  // Started from the Modal's onShow, not openMonthSheet, so the first part of the
+  // slide isn't spent before the Modal is on screen.
+  const animateSheetIn = () => {
+    sheetY.value = withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) });
+    backdropOpa.value = withTiming(0.4, { duration: 260 });
+  };
+  // The new month is applied only AFTER the sheet has gone — changing it on tap
+  // swapped the page behind the backdrop mid-close.
+  const finishClose = (offset) => {
+    setMonthSheetVisible(false);
+    if (offset != null && offset !== monthOffset) setMonthOffset(offset);
+  };
+  const closeMonthSheet = (offset = null) => {
+    sheetY.value = withTiming(
+      HIDDEN_Y,
+      { duration: 240, easing: Easing.in(Easing.cubic) },
+      (finished) => { if (finished) runOnJS(finishClose)(offset); },
+    );
+    backdropOpa.value = withTiming(0, { duration: 240 });
+  };
+
+  // Months before the user's first data can't show anything — the picker greys
+  // them out. Memoised over the raw slices (`firstDataMonthKey` scans transactions).
+  const pickerTxns   = useEPurseStore((s) => s.transactions);
+  const pickerAggs   = useEPurseStore((s) => s.monthlyAggregates);
+  const onboardedAt  = useEPurseStore((s) => s.userOnboardedAt);
+  const firstMonth   = useMemo(
+    () => firstDataMonthKey({ transactions: pickerTxns, monthlyAggregates: pickerAggs, userOnboardedAt: onboardedAt }),
+    [pickerTxns, pickerAggs, onboardedAt],
+  );
   const monthOptions = useMemo(() => {
     const today = new Date();
     return Array.from({ length: MONTH_PICKER_COUNT }, (_, i) => {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       return {
         offset: -i,
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
         label: i === 0
           ? d.toLocaleDateString('en-IN', { month: 'long' })
           : d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
@@ -115,7 +163,7 @@ export default function InsightsScreen({ navigation, route }) {
       headerRight={
         <TouchableOpacity
           style={styles.monthChip}
-          onPress={() => setMonthSheetVisible(true)}
+          onPress={openMonthSheet}
           activeOpacity={0.8}
           accessibilityRole="button"
           accessibilityLabel={`Change month, currently ${monthLabel}`}
@@ -162,37 +210,44 @@ export default function InsightsScreen({ navigation, route }) {
       <Modal
         visible={monthSheetVisible}
         transparent
-        animationType="slide"
+        animationType="none"
         statusBarTranslucent
-        onRequestClose={() => setMonthSheetVisible(false)}
+        onShow={animateSheetIn}
+        onRequestClose={() => closeMonthSheet()}
       >
-        <Pressable style={styles.scrim} onPress={() => setMonthSheetVisible(false)} />
-        <View style={[styles.sheet, { backgroundColor: theme.card }]}>
-          <SheetCloseButton onPress={() => setMonthSheetVisible(false)} variant="absolute" />
+        <Animated.View style={[styles.scrim, backdropStyle]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => closeMonthSheet()} />
+        </Animated.View>
+        <Animated.View style={[styles.sheet, { backgroundColor: theme.card }, sheetStyle]}>
+          <SheetCloseButton onPress={() => closeMonthSheet()} variant="absolute" />
           <View style={[styles.handle, { backgroundColor: theme.divider }]} />
           <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>Select Month</Text>
 
           <ScrollView contentContainerStyle={styles.sheetList} showsVerticalScrollIndicator={false}>
             {monthOptions.map((m) => {
               const active = m.offset === monthOffset;
+              const disabled = !!firstMonth && m.key < firstMonth;
               return (
                 <TouchableOpacity
                   key={m.offset}
-                  style={[styles.sheetRow, { borderColor: theme.divider }, active && { backgroundColor: theme.primary + '14', borderColor: theme.primary }]}
-                  onPress={() => { setMonthOffset(m.offset); setMonthSheetVisible(false); }}
+                  style={[styles.sheetRow, { borderColor: theme.divider }, active && { backgroundColor: theme.primary + '14', borderColor: theme.primary }, disabled && { opacity: 0.4 }]}
+                  onPress={() => closeMonthSheet(m.offset)}
+                  disabled={disabled}
                   activeOpacity={0.8}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: active }}
+                  accessibilityState={{ selected: active, disabled }}
                 >
-                  <Text style={[styles.sheetRowText, { color: active ? theme.primary : theme.textPrimary }, active && { fontWeight: '700' }]}>
+                  <Text style={[styles.sheetRowText, { color: active ? theme.primary : disabled ? theme.textMuted : theme.textPrimary }, active && { fontWeight: '700' }]}>
                     {m.label}
                   </Text>
-                  {active ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
+                  <View style={styles.sheetCheckSlot}>
+                    {active ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
+                  </View>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
-        </View>
+        </Animated.View>
       </Modal>
     </View>
   );
@@ -237,7 +292,7 @@ const styles = StyleSheet.create({
   monthChipText: { ...typography.small, color: '#fff', fontWeight: '700' },
 
   // Month-picker bottom sheet — same shape as AccountPickerSheet/GroupPickerSheet.
-  scrim: { ...StyleSheet.absoluteFill, backgroundColor: '#00000066' },
+  scrim: { ...StyleSheet.absoluteFill, backgroundColor: '#000' },
   sheet: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
@@ -246,7 +301,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: 36,
-    maxHeight: '70%',
+    maxHeight: '50%',
     ...shadows.sheet,
   },
   handle: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: spacing.md },
@@ -259,7 +314,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: radius.md,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 48,
   },
+  // Fixed slot so the checkmark appearing never changes the row's height.
+  sheetCheckSlot: { width: 18, height: 18 },
   sheetRowText: { fontSize: 14.5, fontWeight: '600' },
 });

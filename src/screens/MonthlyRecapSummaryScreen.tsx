@@ -79,6 +79,7 @@ const MonthlyRecapSummaryScreen: React.FC<Props> = ({ navigation, route }) => {
   const cf = report.cashflow;
   const netPositive = cf.net >= 0;
   const categoryMax = Math.max(1, ...report.categories.map((c) => c.total));
+  const dailyMax = Math.max(1, ...(report.daily || []).map((d) => d.amount));
   const budgetPct = report.budget?.totalCap
     ? Math.min(100, Math.round((report.budget.totalActual / report.budget.totalCap) * 100))
     : null;
@@ -141,6 +142,23 @@ const MonthlyRecapSummaryScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               </>
             ) : null}
+            {report.budget.rows.length > 0 ? (
+              <View style={styles.list}>
+                {report.budget.rows.map((row) => (
+                  <View key={row.name} style={styles.categoryTop}>
+                    <Text style={[styles.categoryName, { color: theme.textPrimary }]} numberOfLines={1}>{row.name}</Text>
+                    <Text style={[styles.muted, { color: row.over ? theme.danger : theme.textSecondary }]}>
+                      {formatCompact(row.actual)} / {formatCompact(row.cap)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {report.budget.streak > 0 ? (
+              <Text style={[styles.sectionSub, { color: theme.textSecondary, marginTop: spacing.md }]}>
+                {report.budget.streak}-month budget streak
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -154,6 +172,11 @@ const MonthlyRecapSummaryScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.categoryBody}>
                   <View style={styles.categoryTop}>
                     <Text style={[styles.categoryName, { color: theme.textPrimary }]}>{category.name}</Text>
+                    {category.moverPct != null ? (
+                      <Text style={[styles.categoryPct, { color: category.moverPct > 0 ? theme.danger : theme.success, width: undefined }]}>
+                        {category.moverPct > 0 ? '▲' : '▼'}{Math.abs(Math.round(category.moverPct))}%
+                      </Text>
+                    ) : null}
                     <Text style={[styles.categoryAmount, { color: theme.textPrimary }]}>{formatCurrency(category.total)}</Text>
                     <Text style={[styles.categoryPct, { color: theme.textMuted }]}>{Math.round(category.percent)}%</Text>
                   </View>
@@ -174,6 +197,87 @@ const MonthlyRecapSummaryScreen: React.FC<Props> = ({ navigation, route }) => {
               {report.peakDay ? <Stat label="HIGHEST-SPEND DAY" value={`${report.peakDay.weekday} · ${formatCompact(report.peakDay.amount)}`} /> : null}
               {report.biggest ? <Stat label="BIGGEST EXPENSE" value={formatCompact(report.biggest.amount)} /> : null}
             </View>
+            {report.weekdayAvg != null && report.weekendAvg != null ? (
+              <View style={styles.patternGrid}>
+                <Stat label="WEEKDAY AVG" value={formatCompact(report.weekdayAvg)} />
+                <Stat label="WEEKEND AVG" value={formatCompact(report.weekendAvg)} />
+              </View>
+            ) : null}
+            {report.daily && report.daily.length > 0 ? (
+              <View style={styles.dailyBars}>
+                {report.daily.map((d) => (
+                  <View
+                    key={d.day}
+                    style={[styles.dailyBar, {
+                      height: Math.max(2, (d.amount / dailyMax) * 56),
+                      backgroundColor: d.amount > 0 ? theme.primary : theme.divider,
+                    }]}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {report.merchants && report.merchants.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Top Merchants</Text>
+            {report.merchants.map((m) => (
+              <View key={m.name} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]} numberOfLines={1}>{m.name}</Text>
+                <Text style={[styles.muted, { color: theme.textMuted, marginRight: spacing.sm }]}>{m.count} txns</Text>
+                <Text style={[styles.strong, { color: theme.textPrimary }]}>{formatCurrency(m.amount)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {report.subscriptions.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <View style={styles.sectionHead}>
+              <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Subscriptions</Text>
+              <Text style={[styles.strong, { color: theme.textPrimary }]}>{formatCurrency(report.subscriptionTotal)}</Text>
+            </View>
+            {report.subscriptions.map((sub) => (
+              <View key={sub.merchant} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]} numberOfLines={1}>{sub.merchant}</Text>
+                {sub.priceHike ? (
+                  <Text style={[styles.muted, { color: theme.danger, marginRight: spacing.sm }]}>
+                    ▲ {formatCompact((sub.hikeTo || 0) - (sub.hikeFrom || 0))}
+                  </Text>
+                ) : null}
+                <Text style={[styles.strong, { color: theme.textPrimary }]}>{formatCurrency(sub.amount)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {report.paymentMethods && report.paymentMethods.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Payment Methods</Text>
+            {report.paymentMethods.map((pm) => (
+              <View key={pm.label} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]} numberOfLines={1}>{pm.label}</Text>
+                <Text style={[styles.strong, { color: theme.textPrimary }]}>{formatCurrency(pm.total)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {report.highlights.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Highlights</Text>
+            {report.highlights.map((h) => (
+              <View key={h.text} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Ionicons
+                  name={h.kind === 'pos' ? 'checkmark-circle-outline' : h.kind === 'neg' ? 'alert-circle-outline' : 'information-circle-outline'}
+                  size={18}
+                  color={h.kind === 'pos' ? theme.success : h.kind === 'neg' ? theme.danger : theme.textSecondary}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]}>{h.text}</Text>
+              </View>
+            ))}
           </View>
         ) : null}
 
@@ -190,11 +294,135 @@ const MonthlyRecapSummaryScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         ) : null}
 
+        {report.incomeSources && report.incomeSources.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Income Sources</Text>
+            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>What your income is made of</Text>
+            <View style={styles.list}>
+              {report.incomeSources.map((i) => (
+                <View key={i.name} style={styles.categoryRow}>
+                  <Text style={styles.emoji}>{i.emoji}</Text>
+                  <View style={styles.categoryBody}>
+                    <View style={styles.categoryTop}>
+                      <Text style={[styles.categoryName, { color: theme.textPrimary }]} numberOfLines={1}>{i.name}</Text>
+                      <Text style={[styles.categoryAmount, { color: theme.income }]}>{formatCurrency(i.total)}</Text>
+                      <Text style={[styles.categoryPct, { color: theme.textMuted }]}>{Math.round(i.percent)}%</Text>
+                    </View>
+                    <View style={[styles.categoryTrack, { backgroundColor: `${i.color}20` }]}>
+                      <View style={[styles.categoryFill, { width: `${i.percent}%`, backgroundColor: i.color }]} />
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {report.notCounted ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Not Counted as Spend</Text>
+            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>Money that moved but isn’t in Spent</Text>
+            <View style={styles.patternGrid}>
+              <Stat label="MONEY OUT" value={formatCompact(report.notCounted.totalOut)} />
+              <Stat label="MONEY IN" value={formatCompact(report.notCounted.totalIn)} />
+            </View>
+            {report.notCounted.rows.map((row) => (
+              <View key={row.name} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]} numberOfLines={1}>{row.name}</Text>
+                <Text style={[styles.strong, { color: theme.textPrimary }]}>
+                  {[row.out ? `out ${formatCompact(row.out)}` : null, row.in ? `in ${formatCompact(row.in)}` : null].filter(Boolean).join(' · ')}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {report.goals?.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Goals</Text>
+            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>Set aside this month</Text>
+            <View style={styles.list}>
+              {report.goals.map((g) => {
+                const pct = g.planned > 0 ? Math.min(100, Math.round((g.funded / g.planned) * 100)) : 100;
+                return (
+                  <View key={g.id} style={styles.categoryRow}>
+                    <Text style={styles.emoji}>{g.emoji}</Text>
+                    <View style={styles.categoryBody}>
+                      <View style={styles.categoryTop}>
+                        <Text style={[styles.categoryName, { color: theme.textPrimary }]} numberOfLines={1}>{g.name}</Text>
+                        <Text style={[styles.categoryAmount, { color: theme.textPrimary }]}>
+                          {formatCompact(g.funded)}{g.planned > 0 ? ` / ${formatCompact(g.planned)}` : ''}
+                        </Text>
+                      </View>
+                      <View style={[styles.categoryTrack, { backgroundColor: `${g.color}20` }]}>
+                        <View style={[styles.categoryFill, { width: `${pct}%`, backgroundColor: g.color }]} />
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {report.lb ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Lent & Borrowed</Text>
+            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>Outstanding now</Text>
+            <View style={styles.patternGrid}>
+              <Stat label="OWED TO YOU" value={formatCompact(report.lb.owedToYou)} tone={theme.lent} />
+              <Stat label="YOU OWE" value={formatCompact(report.lb.youOwe)} tone={theme.borrowed} />
+            </View>
+            {report.lb.lent || report.lb.borrowed || report.lb.settledBack || report.lb.repaid ? (
+              <Text style={[styles.sectionSub, { color: theme.textSecondary, marginTop: spacing.md }]}>
+                This month:{' '}
+                {[
+                  report.lb.lent ? `lent ${formatCompact(report.lb.lent)}` : null,
+                  report.lb.borrowed ? `borrowed ${formatCompact(report.lb.borrowed)}` : null,
+                  report.lb.settledBack ? `received back ${formatCompact(report.lb.settledBack)}` : null,
+                  report.lb.repaid ? `repaid ${formatCompact(report.lb.repaid)}` : null,
+                ].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
+            {report.lb.people.map((p) => (
+              <View key={p.name} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]} numberOfLines={1}>{p.name}</Text>
+                <Text style={[styles.strong, { color: p.net > 0 ? theme.lent : theme.borrowed }]}>
+                  {p.net > 0 ? 'owes you ' : 'you owe '}{formatCurrency(Math.abs(p.net))}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {report.accounts ? (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Accounts & Net Worth</Text>
+            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>Balances now</Text>
+            <View style={styles.patternGrid}>
+              <Stat label="NET WORTH" value={formatCompact(report.accounts.netWorth)} />
+              <Stat label="ASSETS" value={formatCompact(report.accounts.assets)} />
+              <Stat label="LIABILITIES" value={formatCompact(report.accounts.liabilities)} />
+            </View>
+            {report.accounts.rows.map((a) => (
+              <View key={a.label + a.type} style={[styles.simpleRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.simpleName, { color: theme.textPrimary }]} numberOfLines={1}>{a.label}</Text>
+                <Text style={[styles.strong, { color: a.balance < 0 ? theme.danger : theme.textPrimary }]}>
+                  {a.balance < 0 ? '−' : ''}{formatCurrency(Math.abs(a.balance))}{a.isCard && a.balance < 0 ? ' due' : ''}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <View style={[styles.plan, { backgroundColor: `${theme.primary}12`, borderColor: `${theme.primary}35` }]}>
           <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
           <View style={{ flex: 1 }}>
             <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Planning ahead</Text>
-            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>Suggested budget for next month</Text>
+            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>
+              Suggested budget for next month, from your {formatCompact(report.plan.avgSpend)} recent average
+              {report.plan.watchCategories.length ? `. Watch ${report.plan.watchCategories.slice(0, 2).join(' & ')} — over this month.` : '.'}
+            </Text>
           </View>
           <Text style={[styles.planValue, { color: theme.primary }]}>{formatCompact(report.plan.suggestedBudget)}</Text>
         </View>
@@ -258,6 +486,8 @@ const styles = StyleSheet.create({
   categoryPct: { ...typography.tiny, width: 30, textAlign: 'right' },
   categoryTrack: { height: 5, borderRadius: 3, marginTop: 6, overflow: 'hidden' },
   categoryFill: { height: '100%', borderRadius: 3 },
+  dailyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 56, marginTop: spacing.md },
+  dailyBar: { flex: 1, borderRadius: 1.5 },
   patternGrid: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   simpleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   simpleName: { ...typography.small, fontWeight: '700', flex: 1 },

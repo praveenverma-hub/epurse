@@ -513,6 +513,24 @@ const ensureAccountForParsed = (accounts, parsed) => {
   return { accounts: ensurePrimary([...accounts, auto]), account: auto };
 };
 
+/**
+ * What the monthly recap/PDF includes until the user changes it in Settings →
+ * Monthly Recap. THE one place these defaults live: the store seed, the reset
+ * paths, the selector and the Settings switches all read it, so a key a user
+ * saved before it existed (absent from their persisted object) resolves the same
+ * way everywhere instead of the selector saying "on" while the switch says "off".
+ */
+export const RECAP_OPTION_DEFAULTS = {
+  includePrivate: false,
+  includeGroups: true,
+  includeGoals: true,
+  includeLb: true,
+  includeAccounts: false,
+  includeIncome: false,
+  includeNotCounted: true,
+  includeTxnList: false,
+};
+
 const applyDelta = (accounts, accountId, parsed) => {
   if (!accountId) return accounts;
   const target = (accounts || []).find((a) => a.id === accountId);
@@ -1248,7 +1266,7 @@ export const useEPurseStore = create(
       pendingMonthlyRecap: null,
       // What the recap/PDF includes (profile toggles). Private included by default;
       // in-app spend logic elsewhere is unaffected. Transaction list off by default.
-      recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
+      recapOptions: RECAP_OPTION_DEFAULTS,
 
       // ── Reminders (the Reminders screen renders THIS) ────────────────────
       // One record per reminder the user can see, whatever created it:
@@ -6000,7 +6018,7 @@ export const useEPurseStore = create(
           recapMonthHandled: null,
           monthlyRecapCardDismissed: null,
           pendingMonthlyRecap: null,
-          recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
+          recapOptions: RECAP_OPTION_DEFAULTS,
           reminders: [],
           reminderNotifIds: {},
           notificationPrefs: {
@@ -6099,7 +6117,7 @@ export const useEPurseStore = create(
           recapMonthHandled: null,
           monthlyRecapCardDismissed: null,
           pendingMonthlyRecap: null,
-          recapOptions: { includePrivate: true, includeGroups: true, includeTxnList: false },
+          recapOptions: RECAP_OPTION_DEFAULTS,
           reminders: [],
           reminderNotifIds: {},
           notificationPrefs: {
@@ -6920,7 +6938,7 @@ export const useEPurseStore = create(
         recapMonthHandled: state.recapMonthHandled ?? null,
         pendingMonthlyRecap: state.pendingMonthlyRecap ?? null,
         monthlyRecapCardDismissed: state.monthlyRecapCardDismissed ?? null,
-        recapOptions: state.recapOptions ?? { includePrivate: true, includeGroups: true, includeTxnList: false },
+        recapOptions: state.recapOptions ?? RECAP_OPTION_DEFAULTS,
         reminders: state.reminders ?? [],
         reminderNotifIds: state.reminderNotifIds ?? {},
         notificationPrefs: state.notificationPrefs ?? {},
@@ -7274,6 +7292,34 @@ export const selectLatestRecapMonth = (state) => {
 };
 
 /**
+ * The earliest month (YYYY-MM) the app could have data for — the month the user
+ * registered, or earlier if live transactions / aggregates reach back further
+ * (a non-fresh-start import). Month pickers grey out anything before it: there is
+ * nothing to show for a month the user wasn't here for. Null = unknown, nothing
+ * should be disabled. Plain function over raw slices (scans transactions), so call
+ * it from a useMemo, not as a bare selector.
+ */
+export const firstDataMonthKey = (state) => {
+  const keys = Object.keys(state.monthlyAggregates || {});
+  (state.transactions || []).forEach((t) => { if (!t.isIgnored && t.createdAt) keys.push(monthKey(t.createdAt)); });
+  if (Number(state.userOnboardedAt) > 0) keys.push(monthKey(new Date(state.userOnboardedAt)));
+  return keys.length ? keys.reduce((a, b) => (a < b ? a : b)) : null;
+};
+
+/**
+ * Every completed month that has data, newest first — the list behind Settings →
+ * Monthly Recap → Past Summaries, so a summary stays reachable after its dashboard
+ * card is dismissed. Same month set as `selectLatestRecapMonth`. Returns a NEW array,
+ * so call it from a useMemo over the raw slices — never as a bare zustand selector.
+ */
+export const selectRecapMonths = (state, limit = 12) => {
+  const curMk = monthKey(new Date());
+  const set = new Set(Object.keys(state.monthlyAggregates || {}));
+  (state.transactions || []).forEach((t) => { if (!t.isIgnored) set.add(monthKey(t.createdAt)); });
+  return [...set].filter((k) => k < curMk).sort().reverse().slice(0, limit);
+};
+
+/**
  * Monthly report — the SINGLE SOURCE for the recap card, modal, and PDF.
  * Assembles cashflow, budget-vs-plan, parent-level category breakdown with
  * month-over-month movers, daily spend series, top merchants, subscriptions,
@@ -7288,9 +7334,8 @@ export const selectLatestRecapMonth = (state) => {
  * @returns selector: (state) => report object
  */
 export const selectMonthlyReport = (mk, opts = {}) => (state) => {
-  const includePrivate = opts.includePrivate !== false;   // default: include private
-  const includeGroups  = opts.includeGroups  !== false;   // default: include groups
-  const includeTxnList = opts.includeTxnList === true;     // default: no txn list
+  const o = { ...RECAP_OPTION_DEFAULTS, ...opts };
+  const { includePrivate, includeGroups, includeGoals, includeLb, includeAccounts, includeIncome, includeNotCounted, includeTxnList } = o;
 
   const [y, m] = String(mk).split('-').map(Number);
   const monthDate = new Date(y, m - 1, 15);
@@ -7500,6 +7545,114 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
     }
   }
 
+  // ── Income sources: what the income total is made of ──
+  // Same predicate as the cashflow `income` above (non-refund credits that count),
+  // so the rows always add up to it. Raw-only: a compacted month has no rows.
+  let incomeSources = null;
+  if (includeIncome && hasRaw && income > 0) {
+    const bySource = {};
+    rawKept.forEach((t) => {
+      if (t.type !== TRANSACTION_TYPES.CREDIT || isRefundCredit(t)) return;
+      if (NON_SPEND_CATEGORY_IDS.has(t.categoryId) || spendExcluded(t, state.groups)) return;
+      const p = findParentById(parentCatId(t));
+      const name = t.childCategory || p?.label || 'Other';
+      const row = bySource[name] || (bySource[name] = { name, emoji: p?.emoji || '💰', color: p?.color || '#059669', total: 0, count: 0 });
+      row.total += t.amount; row.count += 1;
+    });
+    incomeSources = Object.values(bySource)
+      .map((r) => ({ ...r, percent: (r.total / income) * 100 }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  // ── Not counted as spend: money that moved but isn't "Spent" ──
+  // Explains why balances and the Spent figure don't reconcile one-to-one: own
+  // transfers, card-bill payments, lent/borrowed, and whatever the user's own
+  // rules or excluded groups leave out. Memos (someone else paid) never moved
+  // money, so they are not listed. Amounts are the real money moved, not your share.
+  let notCounted = null;
+  if (includeNotCounted && hasRaw) {
+    const NON_SPEND_LABEL = {
+      self: 'Own-account transfers', cc_bill: 'Credit card bill payments',
+      lent: 'Money lent', borrowed: 'Money borrowed', lent_settled: 'Lent money received back',
+    };
+    const byReason = {};
+    rawKept.forEach((t) => {
+      if (isMemoTxn(t)) return;
+      let name = null;
+      if (NON_SPEND_CATEGORY_IDS.has(t.categoryId)) name = NON_SPEND_LABEL[t.categoryId] || 'Other transfers';
+      else if (spendExcluded(t, state.groups) && t.type === TRANSACTION_TYPES.DEBIT) {
+        const g = t.groupId ? (state.groups || []).find((x) => x.id === t.groupId) : null;
+        name = g && isGroupExcluded(t, state.groups) ? `${g.name} (excluded group)` : `${findParentById(parentCatId(t))?.label || 'Other'} (excluded by you)`;
+      }
+      if (!name) return;
+      const r = byReason[name] || (byReason[name] = { name, out: 0, in: 0, count: 0 });
+      if (t.type === TRANSACTION_TYPES.DEBIT) r.out += t.amount; else r.in += t.amount;
+      r.count += 1;
+    });
+    const rows = Object.values(byReason).sort((a, b) => (b.out + b.in) - (a.out + a.in));
+    if (rows.length) {
+      notCounted = { totalOut: rows.reduce((t, r) => t + r.out, 0), totalIn: rows.reduce((t, r) => t + r.in, 0), rows };
+    }
+  }
+
+  // ── Goals: what was planned vs put aside this month ──
+  // A month still inside the raw window is recomputed live (so a later edit shows);
+  // an older one falls back to its rollover snapshot — same rule as
+  // getGoalLifetimeFunded, since the raw rows it would be derived from age out.
+  let goals = [];
+  if (includeGoals) {
+    const snap = state.goalHistory?.[mk]?.perGoal;
+    const planNow = state.goalPlan?.monthKey === mk ? state.goalPlan.allocations : null;
+    const live = isCurrent || monthStartMs(mk) >= Date.now() - RAW_RETENTION_MS;
+    goals = (state.goals || [])
+      .filter((g) => !g.archivedAt)
+      .map((g) => ({
+        id: g.id, name: g.name, emoji: g.emoji || '🎯', color: g.color || '#6366F1', kind: g.kind || 'saving',
+        planned: Number(planNow ? planNow[g.id] : snap?.[g.id]?.planned) || 0,
+        funded: live ? goalFundedForMonth(state, g, mk) : Number(snap?.[g.id]?.funded) || 0,
+        target: Number(g.lifetimeTarget) > 0 ? Number(g.lifetimeTarget) : null,
+      }))
+      .filter((g) => g.planned > 0 || g.funded > 0)
+      .sort((a, b) => b.funded - a.funded);
+  }
+
+  // ── Lent & Borrowed: this month's movement + where everyone stands NOW ──
+  // The standing is a live figure (the ledger has no month-end snapshot), so it
+  // is labelled "outstanding now" wherever it is shown.
+  let lb = null;
+  if (includeLb) {
+    const inMonth = (state.lentBorrowed || []).filter((e) => e.date && monthKey(e.date) === mk);
+    const sumKind = (k) => inMonth.filter((e) => e.kind === k).reduce((t, e) => t + (e.amount || 0), 0);
+    const people = state.getPersonBalances().filter((p) => Math.abs(p.net) >= 0.5);
+    if (inMonth.length > 0 || people.length > 0) {
+      lb = {
+        lent: sumKind('lent'), borrowed: sumKind('borrowed'),
+        settledBack: sumKind('lent_settled'), repaid: sumKind('borrow_repaid'),
+        owedToYou: people.filter((p) => p.net > 0).reduce((t, p) => t + p.net, 0),
+        youOwe: people.filter((p) => p.net < 0).reduce((t, p) => t - p.net, 0),
+        people: people.slice(0, 5).map((p) => ({ name: p.person || 'Unknown', net: p.net })),
+      };
+    }
+  }
+
+  // ── Accounts & net worth: a snapshot of NOW (balances aren't kept per month) ──
+  let accountsSummary = null;
+  if (includeAccounts) {
+    const active = (state.accounts || []).filter((a) => !a.archived && a.includeInNetWorth !== false);
+    if (active.length > 0) {
+      const { assets, liabilities } = selectAssetsAndLiabilities(state);
+      accountsSummary = {
+        netWorth: selectEPurseNetWorth(state), assets, liabilities,
+        rows: active
+          .map((a) => ({
+            label: a.bankName ? `${a.bankName}${a.mask ? ' ··' + a.mask : ''}` : (a.name || a.type),
+            type: a.type, balance: a.balance ?? 0, isCard: a.type === ACCOUNT_TYPES.CREDIT_CARD,
+          }))
+          .sort((x, z) => Math.abs(z.balance) - Math.abs(x.balance)),
+      };
+    }
+  }
+
   // ── Highlights ──
   const highlights = [];
   if (budget && budget.saved > 0) highlights.push({ kind: 'pos', icon: '💰', text: `Saved ${money(budget.saved)} under budget` });
@@ -7533,6 +7686,7 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
     categories,
     daily, peakDay, noSpendDays, weekdayAvg, weekendAvg, biggest,
     merchants, subscriptions, subscriptionTotal, paymentMethods, groupSpend,
+    incomeSources, notCounted, goals, lb, accounts: accountsSummary,
     txnList,
     highlights,
     plan: { suggestedBudget, avgSpend, watchCategories },

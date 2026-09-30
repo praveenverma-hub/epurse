@@ -37,6 +37,7 @@ import {
   useGaugeWidgetActive,
 } from '../components/CustomWidgetContainer';
 import SheetCloseButton from '../components/SheetCloseButton';
+import MonthSummaryCard from '../components/MonthSummaryCard';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
 import ProgressBar from '../components/ProgressBar';
@@ -479,6 +480,7 @@ const BudgetScreen = ({ navigation, headerless = false, openPlan = false, monthO
           // scenes, so the hook belongs here, not on InsightsScreen (which doesn't scroll).
           {...tabBarScroll}
         >
+          <MonthSummaryCard monthOffset={monthOffset} />
           {isHistorical
             ? (hasHistoryEntry ? renderProgress() : renderHistoricalEmpty())
             : (budget ? renderProgress() : renderEmpty())}

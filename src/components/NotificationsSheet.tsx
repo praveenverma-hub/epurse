@@ -58,6 +58,7 @@ const EXIT_MS  = 240;
 const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   cc_due:                'card-outline',
   cc_payment_review:     'card-outline',
+  cc_cycle_heads_up:     'calendar-outline',
   subscription_hike:     'trending-up-outline',
   monthly_recap:         'bar-chart-outline',
   weekly_recap:          'calendar-outline',
@@ -70,9 +71,14 @@ const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   app_update:            'arrow-up-circle-outline',
 };
 
+// Fallback for a kind with no entry (e.g. one persisted by a newer build).
+const FALLBACK_ICON: keyof typeof Ionicons.glyphMap = 'notifications-outline';
+const FALLBACK_TINT = '#6B7280';
+
 const KIND_TINT: Record<NotificationKind, string> = {
   cc_due:                '#F59E0B',
   cc_payment_review:     '#7C3AED',
+  cc_cycle_heads_up:     '#F59E0B',
   subscription_hike:     '#EF4444',
   monthly_recap:         '#FF5A1F',
   weekly_recap:          '#2563EB',
@@ -249,8 +255,8 @@ interface RowProps {
 }
 
 const NotificationRow: React.FC<RowProps> = ({ entry, onPress, onLongPress }) => {
-  const tint     = KIND_TINT[entry.kind];
-  const iconName = KIND_ICON[entry.kind];
+  const tint     = KIND_TINT[entry.kind] ?? FALLBACK_TINT;
+  const iconName = KIND_ICON[entry.kind] ?? FALLBACK_ICON;
 
   return (
     <Pressable

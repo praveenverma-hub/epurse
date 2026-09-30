@@ -45,13 +45,20 @@ export function pastDate(days, now = new Date()) {
 
 const monthName = (d) => d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
-/** Option rows for the filter panel. Month names come from `now`, so they never go stale. */
-export function buildDateRangeOptions(custom, now = new Date()) {
+const mkOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+/**
+ * Option rows for the filter panel. Month names come from `now`, so they never go stale.
+ * `firstMonthKey` (YYYY-MM, the earliest month the user has data for) greys out a
+ * calendar month that ends before it — it can only ever be empty. Null = nothing disabled.
+ */
+export function buildDateRangeOptions(custom, now = new Date(), firstMonthKey = null) {
+  const before = (d) => !!firstMonthKey && mkOf(d) < firstMonthKey;
   return [
     { id: 'week',  label: 'Last Week',  sublabel: 'Past 7 days' },
     { id: 'mThis', label: 'This Month', sublabel: monthName(monthStart(0, now)) },
-    { id: 'mLast', label: 'Last Month', sublabel: monthName(monthStart(-1, now)) },
-    { id: 'mPrev', label: monthName(monthStart(-2, now)), sublabel: 'Month before last' },
+    { id: 'mLast', label: 'Last Month', sublabel: monthName(monthStart(-1, now)), disabled: before(monthStart(-1, now)) },
+    { id: 'mPrev', label: monthName(monthStart(-2, now)), sublabel: 'Month before last', disabled: before(monthStart(-2, now)) },
     { id: 'year1', label: 'Last 1 Year', sublabel: 'Past 365 days' },
     {
       id: 'custom',

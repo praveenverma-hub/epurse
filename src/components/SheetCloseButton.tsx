@@ -81,11 +81,14 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18, // circle
-    backgroundColor: '#4d494966', // canonical scrim (also ThemePickerSheet, AccountPickerSheet)
+    // SOLID, not the translucent scrim: at 40% alpha the page behind the sheet (text,
+    // charts) showed through the circle, and Android drew its elevation shadow through
+    // the fill. #4D4949 is the old scrim colour at full opacity.
+    backgroundColor: '#4D4949',
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.pop,
     elevation: 4,
   },
-  btnDark: { backgroundColor: 'rgba(255,255,255,0.18)' }, // bespoke dark surfaces (WelcomeStreakModal)
+  btnDark: { backgroundColor: '#3A3848' }, // bespoke dark surfaces (WelcomeStreakModal) — solid for the same reason
 });

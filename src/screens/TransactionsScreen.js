@@ -71,7 +71,7 @@ import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import { canSplitTransaction } from '../utils/split';
 import { computeLedgerTotals } from '../utils/ledgerTotals';
-import { spendExcluded } from '../store/ePurseStore';
+import { spendExcluded, firstDataMonthKey } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
@@ -89,7 +89,9 @@ import { buildDateRangeOptions, monthStart, resolveRange, inRange } from '../uti
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.84;
 
-const SPRING_CFG   = { damping: 22, stiffness: 220 };
+// overshootClamping: the default spring overshoots past 0, lifting the sheet off
+// the bottom edge for a frame.
+const SPRING_CFG   = { damping: 22, stiffness: 220, overshootClamping: true };
 const DISMISS_VEL  = 600;
 const DISMISS_DIST = 130;
 
@@ -190,6 +192,8 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   // ── Store ──────────────────────────────────────────────────────────────────
   const transactions = useEPurseStore((s) => s.transactions);
+  const monthlyAggregates = useEPurseStore((s) => s.monthlyAggregates);
+  const userOnboardedAt = useEPurseStore((s) => s.userOnboardedAt);
   const accounts     = useEPurseStore((s) => s.accounts);
   const categories   = useEPurseStore((s) => s.categories);
   const groups       = useEPurseStore((s) => s.groups);
@@ -399,12 +403,18 @@ const TransactionsScreen = ({ navigation, route }) => {
     });
     setDraftCustom(appliedCustom);
     setActivePanelId('method');
-    setSheetVisible(true);
     sheetY.value      = SHEET_H;
     backdropOpa.value = 0;
+    setSheetVisible(true);
+  }, [applied, appliedCustom, sheetY, backdropOpa]);
+
+  // Slide in only once the Modal is on screen — starting it in openSheet ran the
+  // first part of the spring before the Modal mounted, so the sheet appeared
+  // part-way up instead of sliding in.
+  const animateSheetIn = useCallback(() => {
     sheetY.value      = withSpring(0, SPRING_CFG);
     backdropOpa.value = withTiming(0.52, { duration: 280 });
-  }, [applied, appliedCustom, sheetY, backdropOpa]);
+  }, [sheetY, backdropOpa]);
 
   const closeSheet = useCallback(() => {
     sheetY.value = withTiming(
@@ -462,7 +472,12 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   // Rebuilt from `draftCustom` so the "Custom range…" row shows the dates as you
   // pick them, and from today so the month names are never stale.
-  const dateRangeOptions = useMemo(() => buildDateRangeOptions(draftCustom), [draftCustom]);
+  // A month before the user's first data can only be empty — its row is greyed out.
+  const firstMonth = useMemo(
+    () => firstDataMonthKey({ transactions, monthlyAggregates, userOnboardedAt }),
+    [transactions, monthlyAggregates, userOnboardedAt],
+  );
+  const dateRangeOptions = useMemo(() => buildDateRangeOptions(draftCustom, new Date(), firstMonth), [draftCustom, firstMonth]);
 
   const panelOptions = useMemo(() => {
     if (activePanelId === 'method')     return methodOptions;
@@ -786,7 +801,6 @@ const TransactionsScreen = ({ navigation, route }) => {
         ? 'Hidden from default views but still counted in totals.'
         : 'This transaction will be visible again in all default views.',
       primaryText: hidden ? 'Mark Private' : 'Make Public',
-      destructive: hidden,
       secondaryText: 'Cancel',
       onSecondary: () => setConfirm(null),
       onConfirm:   () => { setTransactionHidden(t.id, hidden); setConfirm(null); },
@@ -1025,6 +1039,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         transparent
         animationType="none"
         statusBarTranslucent
+        onShow={animateSheetIn}
         onRequestClose={closeSheet}
       >
         <View style={styles.sheetOverlay}>
@@ -1117,7 +1132,8 @@ const TransactionsScreen = ({ navigation, route }) => {
                             <React.Fragment key={opt.id}>
                             <Pressable
                               onPress={() => toggleDraft(activePanelId, opt.id)}
-                              style={[styles.rightItem, checked && styles.rightItemChecked]}
+                              disabled={!!opt.disabled}
+                              style={[styles.rightItem, checked && styles.rightItemChecked, opt.disabled && { opacity: 0.4 }]}
                               android_ripple={{ color: theme.primary + '18' }}
                             >
                               <View style={styles.rightItemText}>

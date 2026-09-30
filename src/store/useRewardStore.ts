@@ -250,7 +250,10 @@ export const useRewardStore = create<RewardState>()(
         // over days with zero transactions (nothing to be aware of) continues the
         // run instead of resetting it. `gapTransactionCount` = SMS txns during the
         // missed days (see selectGapTransactionCount); 0 → forgiven.
-        const forgivenGap = gap > 1 && gapTransactionCount === 0;
+        // Never on the very first check-in: its gap is Infinity and a new user has
+        // no transactions, so it would "continue" a run that doesn't exist and
+        // start at Day 2 instead of Day 1.
+        const forgivenGap = !isFirstCheckIn && gap > 1 && gapTransactionCount === 0;
 
         const newStreak  = (gap === 1 || forgivenGap)
           ? state.awareStreak + 1

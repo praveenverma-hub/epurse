@@ -59,7 +59,7 @@ const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top', 'bottom']}>
         <PlainScreenHeader
           title="My Profile"
           onBack={() => navigation.goBack()}

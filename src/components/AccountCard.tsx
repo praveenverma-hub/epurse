@@ -21,6 +21,7 @@ import {
 import type { AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Rect, Defs, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -45,6 +46,7 @@ type Account = {
   bankName?: string;
   balance: number;
   ccPaymentsTracked?: boolean;
+  primary?: boolean;
 };
 
 type Palette = { start: string; end: string; glow: string };
@@ -411,7 +413,15 @@ const FrontFace: React.FC<FrontFaceProps> = ({
             ) : null}
             <Text style={styles.typeSubtitle}>{subtitle}</Text>
           </View>
-          <Text style={styles.brandEmoji}>{emoji}</Text>
+          <View style={styles.topRight}>
+            {account.primary ? (
+              <View style={styles.primaryPill}>
+                <Ionicons name="star" size={9} color="#F2A93B" />
+                <Text style={styles.primaryPillText}>PRIMARY</Text>
+              </View>
+            ) : null}
+            <Text style={styles.brandEmoji}>{emoji}</Text>
+          </View>
         </View>
 
         {/* ── EMV chip — tap-to-flip trigger #1 ── */}
@@ -615,6 +625,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   brandEmoji: { fontSize: 18 },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // White-on-translucent so it reads on every card palette (all are dark).
+  primaryPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: '#FFFFFF26', borderRadius: 999,
+    paddingHorizontal: 7, paddingVertical: 3,
+  },
+  primaryPillText: { color: '#FFFFFFE6', fontSize: 8.5, fontWeight: '800', letterSpacing: 0.8 },
 
   chip: {
     flexDirection: 'row',

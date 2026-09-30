@@ -429,10 +429,54 @@ check('No-mask bank debit: transaction still recorded', txns().length === 1, `go
     check('includePrivate off: spent drops private (₹1000)', Math.round(exc.cashflow.spent) === 1000, `got ${exc.cashflow.spent}`);
     check('includePrivate off: private category removed', !exc.categories.some((c) => c.id === 'shopping'), exc.categories.map((c) => c.id).join(','));
 
-    const tlOn = mod.selectMonthlyReport(prevMk, { includeTxnList: true })(useStore.getState());
+    const tlOn = mod.selectMonthlyReport(prevMk, { includePrivate: true, includeTxnList: true })(useStore.getState());
     check('includeTxnList on: list built', Array.isArray(tlOn.txnList) && tlOn.txnList.length === 2);
     const tlOff = mod.selectMonthlyReport(prevMk, { includeTxnList: false })(useStore.getState());
     check('includeTxnList off: null', tlOff.txnList === null);
+  }
+
+  // Extra sections: Goals / Lent & Borrowed / Accounts — each behind its own switch.
+  {
+    const nowIso = new Date().toISOString();
+    const curMk = nowIso.slice(0, 7);
+    useStore.setState({
+      accounts: [{ id: 'acc1', bankName: 'HDFC', mask: '4021', type: 'Bank Account', balance: 5000 }],
+      transactions: [],
+      goals: [{ id: 'g1', name: 'Trip', kind: 'saving', duration: 'recurring', lifetimeTarget: null, autoRule: null, archivedAt: null }],
+      goalPlan: { monthKey: curMk, salary: 50000, allocations: { g1: 3000 } },
+      goalContributions: [{ id: 'c1', goalId: 'g1', amount: 1500, date: nowIso, source: 'manual' }],
+      lentBorrowed: [{ id: 'l1', kind: 'lent', person: 'Ravi', amount: 700, date: nowIso, phone: '9999999999' }],
+    });
+    // Accounts + Income are OFF by default (sensitive) — assert that, then opt in.
+    const dflt = mod.selectMonthlyReport(curMk)(useStore.getState());
+    check('accounts + income sections are off by default', dflt.accounts === null && dflt.incomeSources === null);
+    const on = mod.selectMonthlyReport(curMk, { includeAccounts: true })(useStore.getState());
+    check('goals section: planned vs funded', on.goals.length === 1 && on.goals[0].planned === 3000 && on.goals[0].funded === 1500, JSON.stringify(on.goals));
+    check('lb section: this month + outstanding', on.lb?.lent === 700 && on.lb.owedToYou === 700 && on.lb.people[0].name === 'Ravi', JSON.stringify(on.lb));
+    check('accounts section: net worth + rows', on.accounts?.netWorth === 5000 && on.accounts.rows.length === 1, JSON.stringify(on.accounts));
+    const off = mod.selectMonthlyReport(curMk, { includeGoals: false, includeLb: false, includeAccounts: false })(useStore.getState());
+    // Income sources + Not counted as spend (need raw rows this month).
+    useStore.setState({
+      transactions: [
+        { id: 'i1', amount: 50000, type: 'credit', categoryId: 'salary', merchant: 'ACME', accountId: 'acc1', createdAt: nowIso },
+        { id: 'i2', amount: 2000, type: 'credit', categoryId: 'other', merchant: 'Friend', accountId: 'acc1', createdAt: nowIso },
+        { id: 'e1', amount: 300, type: 'debit', categoryId: 'food', merchant: 'Cafe', accountId: 'acc1', createdAt: nowIso },
+        { id: 's1', amount: 4000, type: 'debit', categoryId: 'self', merchant: 'Own', accountId: 'acc1', createdAt: nowIso },
+        { id: 'c1b', amount: 9000, type: 'debit', categoryId: 'cc_bill', merchant: 'HDFC CC', accountId: 'acc1', createdAt: nowIso },
+      ],
+    });
+    const inc2 = mod.selectMonthlyReport(curMk, { includeIncome: true })(useStore.getState());
+    check('income sources add up to the income total',
+      inc2.incomeSources && Math.round(inc2.incomeSources.reduce((t, r) => t + r.total, 0)) === Math.round(inc2.cashflow.income)
+        && inc2.cashflow.income === 52000, JSON.stringify(inc2.incomeSources));
+    check('not-counted lists own transfers + card bills, never normal spend',
+      inc2.notCounted?.totalOut === 13000 && inc2.notCounted.rows.length === 2
+        && inc2.cashflow.spent === 300, JSON.stringify(inc2.notCounted));
+    const off2 = mod.selectMonthlyReport(curMk, { includeIncome: false, includeNotCounted: false })(useStore.getState());
+    check('income + not-counted drop with their switches', off2.incomeSources === null && off2.notCounted === null);
+    check('each new section drops when its switch is off', off.goals.length === 0 && off.lb === null && off.accounts === null);
+    check('a saved object missing the new keys still resolves to the defaults (on)',
+      mod.selectMonthlyReport(curMk, { includePrivate: false, includeGroups: true, includeTxnList: false })(useStore.getState()).goals.length === 1);
   }
   reset();
   useStore.setState({
@@ -2903,6 +2947,17 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('…and the Aware Run still advances', useReward.getState().awareStreak === 6,
     String(useReward.getState().awareStreak));
 
+  // A brand-new user: never checked in, no transactions. The gap is Infinity and
+  // the gap count 0, which used to read as a forgiven gap → streak started at 2.
+  reset();
+  useStore.setState({ transactions: [] });
+  armReward();
+  useReward.setState({ awareStreak: 1, lastCheckedInDate: null });
+  const firstEver = doCheckIn();
+  check('first-ever check-in starts the Aware Run at Day 1, not 2',
+    firstEver.newStreak === 1 && useReward.getState().awareStreak === 1,
+    String(useReward.getState().awareStreak));
+
   // An UNREVIEWED transaction still counts — reviewing is a separate reward, and
   // conflating the two is what the report sounded like at first glance.
   reset();
@@ -4082,7 +4137,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('themeId resets to the default theme, not the dirtied one',
     s.themeId !== 'carbon' && typeof s.themeId === 'string');
   check('recapOptions resets to its true default object',
-    s.recapOptions.includePrivate === true && s.recapOptions.includeGroups === true && s.recapOptions.includeTxnList === false);
+    s.recapOptions.includePrivate === false && s.recapOptions.includeGroups === true && s.recapOptions.includeTxnList === false);
   check('notificationPrefs resets to all-on',
     Object.values(s.notificationPrefs).every((v) => v === true));
   check('budgetStreak resets to zeroed',

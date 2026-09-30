@@ -3147,3 +3147,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   reaching Google), and the new full-screen splash overlay. Sentry crash reporting
   and real Google sign-in are now both confirmed working end-to-end. Skia/Reanimated
   render fine.
+
+## Sep-30-2026 — Monthly summary
+- Summary screen now shows everything the PDF does (budget rows, movers, patterns, merchants, subscriptions, payment methods, highlights).
+- New sections: Income Sources, Money Not Counted as Spend, Goals, Lent & Borrowed, Accounts & Net Worth — each has its own switch in Settings → Monthly Recap. Income + Accounts are off by default, as are Private Transactions and the full list.
+- Past Summaries list in Settings → Monthly Recap to reopen any earlier month, plus a "View Complete Summary" card at the top of Insights (Analytics + Budget) when a past month is picked.
+- Other fixes today: Aware Run no longer starts at Day 2 on first login; Mark Private confirm no longer red; unarchive account now confirms; CC list row text/colour; Insights month sheet + Activity filter sheet no longer jump.
+
+- Android 3-button navigation: the pinned bottom button on Add/Edit Account, the credit-card step and My Profile was hidden behind the system bar — it now sits above it.

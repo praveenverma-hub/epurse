@@ -17,28 +17,34 @@
 // its conditional "Report includes" sub-group.
 // =============================================================================
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Switch } from 'react-native';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, RECAP_OPTION_DEFAULTS, selectRecapMonths } from '../store/ePurseStore';
 import { spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
+import NavListRow from '../components/NavListRow';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
 const RECAP_INCLUDES = [
-  { key: 'includePrivate', label: 'Private transactions' },
-  { key: 'includeGroups',  label: 'Group & trip spend' },
-  { key: 'includeTxnList', label: 'Full transaction list (PDF)' },
+  { key: 'includeIncome',   label: 'Income Sources' },
+  { key: 'includeNotCounted', label: 'Money Not Counted as Spend' },
+  { key: 'includeGoals',    label: 'Goals Progress' },
+  { key: 'includeLb',       label: 'Lent & Borrowed' },
+  { key: 'includeAccounts', label: 'Accounts & Net Worth' },
+  { key: 'includeGroups',   label: 'Group & Trip Spend' },
+  { key: 'includePrivate',  label: 'Private Transactions' },
+  { key: 'includeTxnList',  label: 'Full Transaction List (PDF)' },
 ] as const;
 
 interface Props {
-  navigation: { goBack: () => void };
+  navigation: { goBack: () => void; navigate: (name: string, params?: object) => void };
 }
 
 const MonthlyRecapSettingsScreen: React.FC<Props> = ({ navigation }) => {
@@ -48,6 +54,14 @@ const MonthlyRecapSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const setShowMonthlyRecap = useEPurseStore((s: any) => s.setShowMonthlyRecap);
   const recapOptions = useEPurseStore((s: any) => s.recapOptions);
   const setRecapOption = useEPurseStore((s: any) => s.setRecapOption);
+  const transactions = useEPurseStore((s: any) => s.transactions);
+  const monthlyAggregates = useEPurseStore((s: any) => s.monthlyAggregates);
+  // The raw slices, memoised here — `selectRecapMonths` returns a new array, so it
+  // must not be handed to the store as a selector (zustand v5 compares by reference).
+  const pastMonths = useMemo(
+    () => selectRecapMonths({ transactions, monthlyAggregates }) as string[],
+    [transactions, monthlyAggregates],
+  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.card }]} edges={['top']}>
@@ -96,7 +110,7 @@ const MonthlyRecapSettingsScreen: React.FC<Props> = ({ navigation }) => {
               <View key={key} style={[styles.row, styles.subRow]}>
                 <Text style={[styles.subLabel, { color: theme.textPrimary }]}>{label}</Text>
                 <Switch
-                  value={!!recapOptions?.[key]}
+                  value={recapOptions?.[key] ?? RECAP_OPTION_DEFAULTS[key]}
                   onValueChange={(v) => setRecapOption(key, v)}
                   trackColor={{ true: theme.primary, false: theme.divider }}
                   thumbColor="#fff"
@@ -104,6 +118,28 @@ const MonthlyRecapSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 />
               </View>
             ))}
+          </>
+        ) : null}
+
+        {/* Always reachable, whether or not the recap card/modal is on — the card can be
+            dismissed and the notification cleared, this is the way back. */}
+        {pastMonths.length > 0 ? (
+          <>
+            <Text style={[styles.sub, { color: theme.textSecondary, borderTopColor: theme.divider }]}>
+              Past Summaries
+            </Text>
+            {pastMonths.map((mk, i) => {
+              const [y, m] = mk.split('-').map(Number);
+              return (
+                <NavListRow
+                  key={mk}
+                  icon="document-text-outline"
+                  label={new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                  divided={i > 0}
+                  onPress={() => navigation.navigate('MonthlyRecapSummary', { monthKey: mk })}
+                />
+              );
+            })}
           </>
         ) : null}
       </ScrollView>

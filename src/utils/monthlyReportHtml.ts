@@ -19,6 +19,11 @@ interface Sub { merchant: string; amount: number; priceHike: boolean; hikeFrom: 
 interface Pay { label: string; total: number; color: string; }
 interface GroupSpend { name: string; emoji: string; color: string; total: number; count: number; type: string | null; }
 interface TxnRow { dateLabel: string; merchant: string; category: string; amount: number; account: string; isPrivate: boolean; isRefund: boolean; }
+interface IncomeSource { name: string; emoji: string; color: string; total: number; count: number; percent: number; }
+interface NotCounted { totalOut: number; totalIn: number; rows: { name: string; out: number; in: number; count: number }[]; }
+interface GoalRow { id: string; name: string; emoji: string; color: string; kind: string; planned: number; funded: number; target: number | null; }
+interface LbSummary { lent: number; borrowed: number; settledBack: number; repaid: number; owedToYou: number; youOwe: number; people: { name: string; net: number }[]; }
+interface AccountsSummary { netWorth: number; assets: number; liabilities: number; rows: { label: string; type: string; balance: number; isCard: boolean }[]; }
 interface Highlight { kind: string; icon: string; text: string; }
 
 export interface MonthlyReport {
@@ -40,6 +45,11 @@ export interface MonthlyReport {
   subscriptionTotal: number;
   paymentMethods: Pay[] | null;
   groupSpend: GroupSpend[];
+  incomeSources: IncomeSource[] | null;
+  notCounted: NotCounted | null;
+  goals: GoalRow[];
+  lb: LbSummary | null;
+  accounts: AccountsSummary | null;
   txnList: TxnRow[] | null;
   highlights: Highlight[];
   plan: { suggestedBudget: number; avgSpend: number; watchCategories: string[] };
@@ -107,7 +117,7 @@ function heroSection(r: MonthlyReport): string {
   return `
   <div class="hero">
     <div class="hstat lead"><div class="lbl">Net saved</div><div class="val pos">${money(cf.net)}</div><div class="cap">${rate}% of income kept</div></div>
-    <div class="hstat"><div class="lbl">Spent</div><div class="val">${money(cf.spent)}</div><div class="cap">${delta}</div></div>
+    <div class="hstat"><div class="lbl">Spent</div><div class="val">${money(cf.spent)}</div><div class="cap">${delta}${cf.refunds ? `${delta ? ' · ' : ''}${money(cf.refunds)} refunded` : ''}</div></div>
     <div class="hstat"><div class="lbl">Income</div><div class="val">${money(cf.income)}</div><div class="cap">this month</div></div>
     <div class="hstat"><div class="lbl">Savings rate</div><div class="val">${rate}%</div><div class="cap">of income</div></div>
   </div>`;
@@ -161,6 +171,7 @@ function dailySection(r: MonthlyReport): string {
   if (!r.daily || !r.daily.length) return '';
   const stats: string[] = [];
   if (r.peakDay) stats.push(`Peak day · <b>${r.peakDay.weekday} ${r.peakDay.day}</b> — <b>${money(r.peakDay.amount)}</b>`);
+  if (r.biggest) stats.push(`Biggest expense · <b>${money(r.biggest.amount)}</b> — ${esc(r.biggest.merchant)}`);
   if (r.noSpendDays != null) stats.push(`No-spend days · <b>${r.noSpendDays}</b>`);
   if (r.weekdayAvg != null && r.weekendAvg != null) stats.push(`Weekday avg <b>${money(r.weekdayAvg)}</b> · Weekend <b>${money(r.weekendAvg)}</b>`);
   return `
@@ -212,6 +223,83 @@ function payHighlightsSection(r: MonthlyReport): string {
   const hCol = hasH ? `<div><div class="sec-h"><h2>Highlights</h2></div><div class="chips">${r.highlights.map((h) =>
     `<div class="chip ${h.kind}"><span class="ci">${h.icon}</span>${esc(h.text)}</div>`).join('')}</div></div>` : '';
   return `<div class="sec"><div class="cols2">${pCol}${hCol}</div></div>`;
+}
+
+function incomeSection(r: MonthlyReport): string {
+  if (!r.incomeSources || !r.incomeSources.length) return '';
+  const rows = r.incomeSources.map((i) =>
+    `<div class="crow"><span class="sw" style="background:${i.color}"></span><span class="c-name">${esc(i.name)}</span><span class="c-amt">${money(i.total)}</span><span class="c-pct">${Math.round(i.percent)}%</span></div>`).join('');
+  return `
+  <div class="sec">
+    <div class="sec-h"><h2>Income sources</h2><span class="sub">${money(r.cashflow.income)} in total</span></div>
+    <div class="cat-list">${rows}</div>
+  </div>`;
+}
+
+function notCountedSection(r: MonthlyReport): string {
+  const n = r.notCounted;
+  if (!n) return '';
+  const rows = n.rows.map((x) => {
+    const parts = [x.out ? `out <b>${money(x.out)}</b>` : '', x.in ? `in <b>${money(x.in)}</b>` : ''].filter(Boolean).join(' · ');
+    return `<div class="srow"><span class="s-name">${esc(x.name)}</span><span class="s-amt" style="font-weight:600">${parts}</span></div>`;
+  }).join('');
+  return `
+  <div class="sec">
+    <div class="sec-h"><h2>Not counted as spend</h2><span class="sub">moved money, but not “Spent”</span></div>
+    <div class="t-stats" style="margin:0 0 8px"><span>Out <b>${money(n.totalOut)}</b></span><span>In <b>${money(n.totalIn)}</b></span></div>
+    ${rows}
+  </div>`;
+}
+
+function goalsSection(r: MonthlyReport): string {
+  if (!r.goals || !r.goals.length) return '';
+  const rows = r.goals.map((g) => {
+    const pct = g.planned > 0 ? (g.funded / g.planned) * 100 : 100;
+    const tag = g.planned > 0
+      ? `<span class="pill ${g.funded >= g.planned ? 'under' : 'over'}">${Math.round(pct)}%</span>`
+      : '';
+    return `<div class="grow">
+      <div class="g-head"><span class="g-name">${esc(g.emoji)} ${esc(g.name)}</span><span><b>${money(g.funded)}</b>${g.planned > 0 ? ` of ${money(g.planned)}` : ''} ${tag}</span></div>
+      ${barMini(pct, g.color)}
+    </div>`;
+  }).join('');
+  return `
+  <div class="sec">
+    <div class="sec-h"><h2>Goals</h2><span class="sub">set aside this month</span></div>
+    <div class="grp-rows">${rows}</div>
+  </div>`;
+}
+
+function lbSection(r: MonthlyReport): string {
+  const l = r.lb;
+  if (!l) return '';
+  const moved: string[] = [];
+  if (l.lent) moved.push(`Lent <b>${money(l.lent)}</b>`);
+  if (l.borrowed) moved.push(`Borrowed <b>${money(l.borrowed)}</b>`);
+  if (l.settledBack) moved.push(`Received back <b>${money(l.settledBack)}</b>`);
+  if (l.repaid) moved.push(`Repaid <b>${money(l.repaid)}</b>`);
+  const people = l.people.map((p) =>
+    `<div class="srow"><span class="s-name">${esc(p.name)}</span><span class="s-amt" style="color:${p.net > 0 ? POS : NEG}">${p.net > 0 ? 'owes you ' : 'you owe '}${money(Math.abs(p.net))}</span></div>`).join('');
+  return `
+  <div class="sec">
+    <div class="sec-h"><h2>Lent &amp; borrowed</h2><span class="sub">outstanding now</span></div>
+    <div class="overall"><div class="oa"><div class="oa-top"><span>Owed to you</span><b style="color:${POS}">${money(l.owedToYou)}</b></div><div class="oa-top" style="margin:0"><span>You owe</span><b style="color:${NEG}">${money(l.youOwe)}</b></div></div></div>
+    ${moved.length ? `<div class="t-stats" style="margin:0 0 10px">${moved.map((m) => `<span>${m}</span>`).join('')}</div>` : ''}
+    ${people}
+  </div>`;
+}
+
+function accountsSection(r: MonthlyReport): string {
+  const a = r.accounts;
+  if (!a) return '';
+  const rows = a.rows.map((x) =>
+    `<div class="srow"><span class="s-name">${esc(x.label)}</span><span class="s-amt" style="color:${x.balance < 0 ? NEG : INK}">${x.balance < 0 ? '−' : ''}${money(Math.abs(x.balance))}${x.isCard && x.balance < 0 ? ' due' : ''}</span></div>`).join('');
+  return `
+  <div class="sec">
+    <div class="sec-h"><h2>Accounts &amp; net worth</h2><span class="sub">balances now</span></div>
+    <div class="overall"><div class="oa"><div class="oa-top"><span>Net worth</span><b>${money(a.netWorth)}</b></div><div class="oa-top" style="margin:0"><span>Assets ${money(a.assets)}</span><span>Liabilities ${money(a.liabilities)}</span></div></div></div>
+    ${rows}
+  </div>`;
 }
 
 function planSection(r: MonthlyReport): string {
@@ -352,6 +440,11 @@ export function buildMonthlyReportHtml(r: MonthlyReport, opts: { userName?: stri
   ${dailySection(r)}
   ${merchantsSubsSection(r)}
   ${groupSection(r)}
+  ${incomeSection(r)}
+  ${notCountedSection(r)}
+  ${goalsSection(r)}
+  ${lbSection(r)}
+  ${accountsSection(r)}
   ${payHighlightsSection(r)}
   ${planSection(r)}
   ${txnListSection(r)}

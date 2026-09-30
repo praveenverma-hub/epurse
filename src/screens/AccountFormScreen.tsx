@@ -117,6 +117,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
 
   const [confirmTypeChange, setConfirmTypeChange] = useState(false);
   const [confirmArchive, setConfirmArchive]       = useState(false);
+  const [confirmUnarchive, setConfirmUnarchive]   = useState(false);
   const [confirmDelete, setConfirmDelete]         = useState(false);
 
   const needsMask = ACCOUNT_NEEDS_MASK.has(typeDraft);
@@ -234,7 +235,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar style={theme.darkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top']}>
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.card }]} edges={['top', 'bottom']}>
         <PlainScreenHeader
           title={isEdit ? 'Edit Account' : 'Add Account'}
           onBack={() => { hapticLight(); navigation.goBack(); }}
@@ -501,7 +502,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
                 style={[styles.iconBtn, { borderColor: theme.inputBorder }]}
                 onPress={() => {
                   hapticLight();
-                  if (account.archived) unarchiveAccount(account.id);
+                  if (account.archived) setConfirmUnarchive(true);
                   else setConfirmArchive(true);
                 }}
                 activeOpacity={0.8}
@@ -562,7 +563,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
       <CenterModal
         visible={confirmArchive}
         title="Archive account?"
-        message={`"${account?.name}" moves out of your active accounts. Its transactions and history stay untouched — unarchive any time.`}
+        message={`"${account?.name}" stops counting toward your net worth and can't be your primary account${account?.type === ACCOUNT_TYPES.CREDIT_CARD ? '; its bill reminders are cancelled' : ''}. Transactions and history stay untouched — unarchive any time.`}
         primaryText="Archive"
         secondaryText="Cancel"
         onSecondary={() => setConfirmArchive(false)}
@@ -572,6 +573,21 @@ const AccountFormScreen = ({ navigation, route }: any) => {
           setConfirmArchive(false);
           navigation.goBack();
           toast.success('Account archived', account?.name);
+        }}
+      />
+
+      <CenterModal
+        visible={confirmUnarchive}
+        title="Unarchive account?"
+        message={`"${account?.name}" counts toward your net worth again.`}
+        primaryText="Unarchive"
+        secondaryText="Cancel"
+        onSecondary={() => setConfirmUnarchive(false)}
+        onClose={() => setConfirmUnarchive(false)}
+        onPrimary={() => {
+          unarchiveAccount(account.id);
+          setConfirmUnarchive(false);
+          toast.success('Account unarchived', account?.name);
         }}
       />
 

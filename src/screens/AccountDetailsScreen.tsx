@@ -902,7 +902,12 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           {
             icon: 'create-outline',
             label: 'Balance & anchoring',
-            value: 'Synced from your bank SMS. If it ever drifts, tap the balance to set the right amount — new transactions adjust from there.',
+            value: 'Synced from your bank SMS. If it ever drifts, tap the balance to set the right amount — it already includes everything before that moment, so only newer transactions adjust it.',
+          },
+          {
+            icon: 'swap-vertical-outline',
+            label: 'What Moves It',
+            value: 'Every transaction, whatever its category. Ignoring or deleting one reverses it. A split someone else paid for doesn’t touch it.',
           },
           {
             icon: 'git-merge-outline',

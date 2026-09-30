@@ -230,7 +230,7 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
               <Text style={styles.welcomeEmoji}>👋</Text>
               <View style={styles.welcomeTitleRow} accessibilityLabel="Welcome to ePurse">
                 <Text style={styles.welcomeTitle}>Welcome to </Text>
-                <EPurseInlineWordmark size={20} color={colors.textPrimary} />
+                <EPurseInlineWordmark size={17} weight="700" color={colors.textPrimary} />
               </View>
               <Text style={styles.welcomeBody} numberOfLines={2}>
                 New transactions land here to review. Swipe right to approve, left to fix the category.
@@ -477,7 +477,6 @@ const DailyQueueStack = () => {
         ? 'This transaction will be private — hidden from default views but still counted in totals.'
         : 'This transaction will be visible again in all default views.',
       primaryText: hidden ? 'Mark Private' : 'Make Public',
-      destructive: hidden,
       secondaryText: 'Cancel',
       onSecondary: () => setConfirm(null),
       onConfirm: () => { setTransactionHidden(t.id, hidden); clearAsReviewed(t.id); setConfirm(null); },
@@ -890,7 +889,7 @@ const styles = StyleSheet.create({
   welcomeInner: { flex: 1, justifyContent: 'center', gap: 4 },
   welcomeEmoji: { fontSize: 26 },
   welcomeTitleRow: { flexDirection: 'row', alignItems: 'center' },
-  welcomeTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
+  welcomeTitle: { ...typography.bodyBold, color: colors.textPrimary },
   welcomeBody:  { ...typography.small, color: colors.textSecondary, lineHeight: 18 },
 
   // RP / EPC drift badge (was xpBadge)

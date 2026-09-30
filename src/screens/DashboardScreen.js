@@ -1023,7 +1023,6 @@ const DashboardScreen = ({ navigation }) => {
               ? 'This transaction will be private — hidden from default views but still counted in totals.'
               : 'This transaction will be visible again in all default views.',
             primaryText: hidden ? 'Mark Private' : 'Make Public',
-            destructive: hidden,
             secondaryText: 'Cancel',
             onSecondary: () => setConfirm(null),
             onConfirm: () => {
