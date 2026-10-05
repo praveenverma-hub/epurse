@@ -408,7 +408,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
    */
   const setMyShareRaw = (raw: string) => {
     if (splitMode === 'amount') {
-      setMySplitAmount(Math.max(0, parseFloat(String(raw || '').replace(/[^\d.]/g, '')) || 0));
+      setMySplitAmount(Math.min(MAX_ALLOWED_AMOUNT, Math.max(0, parseFloat(String(raw || '').replace(/[^\d.]/g, '')) || 0)));
     } else {
       setMySplitPercent(Math.max(0, Math.min(100, parseInt(String(raw || '').replace(/[^\d]/g, ''), 10) || 0)));
     }
@@ -416,7 +416,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 
   const setPickRaw = (idx: number, raw: string) => {
     if (splitMode === 'amount') {
-      const v = Math.max(0, parseFloat(String(raw || '').replace(/[^\d.]/g, '')) || 0);
+      const v = Math.min(MAX_ALLOWED_AMOUNT, Math.max(0, parseFloat(String(raw || '').replace(/[^\d.]/g, '')) || 0));
       setSplitPicks((prev) => prev.map((p, i) => (i === idx ? { ...p, shareAmount: v } : p)));
     } else {
       const v = Math.max(0, Math.min(100, parseInt(String(raw || '').replace(/[^\d]/g, ''), 10) || 0));

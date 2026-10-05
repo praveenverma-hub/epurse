@@ -31,14 +31,26 @@ export const INPUT_LIMITS = {
 };
 
 // ── Names ─────────────────────────────────────────────────────────────────────
-/** Collapse runs of whitespace and hard-cap length. Safe to call per keystroke. */
+/**
+ * Per-keystroke clean: drop emoji/symbols outside a small punctuation set
+ * (names like "Dr. Reddy's", "AT&T", "7-Eleven" stay valid), no leading space,
+ * collapse whitespace runs, hard-cap length.
+ */
 export const sanitizeName = (raw, max = INPUT_LIMITS.NAME_MAX) =>
-  String(raw ?? '').replace(/\s{2,}/g, ' ').slice(0, max);
+  String(raw ?? '')
+    .replace(/[^\p{L}\p{M}\p{N}\s.,'’&()\-_/@#+]/gu, '')
+    .replace(/^\s+/, '')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, max);
 
-/** A name is valid when its trimmed length is within [NAME_MIN, NAME_MAX]. */
+/**
+ * Valid = trimmed length in [NAME_MIN, NAME_MAX] AND at least one letter or
+ * digit — length alone let "..." / "--" / "  " through as a name.
+ */
 export const isValidName = (raw) => {
   const t = String(raw ?? '').trim();
-  return t.length >= INPUT_LIMITS.NAME_MIN && t.length <= INPUT_LIMITS.NAME_MAX;
+  return t.length >= INPUT_LIMITS.NAME_MIN && t.length <= INPUT_LIMITS.NAME_MAX
+    && /[\p{L}\p{N}]/u.test(t);
 };
 
 // ── Phone (Indian mobile) ──────────────────────────────────────────────────────

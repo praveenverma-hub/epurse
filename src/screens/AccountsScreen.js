@@ -240,7 +240,7 @@ export default function AccountsScreen({ navigation }) {
   // between up/down — real "no change" reads as flat, not ±0.01%.
   const nwTrend = Math.abs(netWorthCompare.deltaPct) < 0.05 ? 'flat'
     : netWorthCompare.deltaPct > 0 ? 'up' : 'down';
-  const nwTrendColor = nwTrend === 'up' ? theme.success : nwTrend === 'down' ? theme.danger : '#FFFFFFB3';
+  const nwTrendColor = nwTrend === 'up' ? theme.success : nwTrend === 'down' ? theme.danger : '#FFFFFF';
   const nwTrendIcon = nwTrend === 'up' ? 'trending-up' : nwTrend === 'down' ? 'trending-down' : 'remove';
 
   const handleToggleBalances = async () => {
@@ -364,7 +364,9 @@ export default function AccountsScreen({ navigation }) {
                       "Net Worth" label itself, not as part of the chip. The
                       trend colour now lives in the chip's OWN tinted
                       background; the icon/value stay plain white on it. */}
-                  <View style={[styles.nwTrendChip, { backgroundColor: withAlpha(nwTrendColor, 0.3) }]}>
+                  <View style={[styles.nwTrendChip, nwTrend === 'flat'
+                    ? { backgroundColor: 'rgba(0,0,0,0.28)' }
+                    : { backgroundColor: withAlpha(nwTrendColor, 0.55) }]}>
                     <Ionicons name={nwTrendIcon} size={12} color="#fff" />
                     <Text style={styles.nwTrendPct} numberOfLines={1}>
                       {Math.round(Math.abs(netWorthCompare.deltaPct))}%

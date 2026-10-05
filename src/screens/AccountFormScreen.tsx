@@ -288,7 +288,8 @@ const AccountFormScreen = ({ navigation, route }: any) => {
             <FormField label={typeDraft === ACCOUNT_TYPES.WALLET ? 'Wallet / Provider Name' : 'Bank Name'}>
               <TextInput
                 value={bankName}
-                onChangeText={setBankName}
+                onChangeText={(t) => setBankName(sanitizeName(t))}
+                maxLength={INPUT_LIMITS.NAME_MAX}
                 placeholder={typeDraft === ACCOUNT_TYPES.WALLET ? 'e.g. Paytm, PhonePe' : 'e.g. HDFC, ICICI, SBI'}
                 placeholderTextColor={theme.textMuted}
                 style={[styles.input, { color: theme.textPrimary, borderColor: theme.inputBorder }]}

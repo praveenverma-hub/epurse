@@ -9,6 +9,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { INPUT_LIMITS, sanitizeName } from '../utils/validation';
 import {
   View,
   Text,
@@ -279,7 +280,8 @@ const LinkContactModal = ({
                   <Text style={styles.fieldLabel}>Phone number</Text>
                   <TextInput
                     value={manualPhone || (isPhoneQuery ? query : '')}
-                    onChangeText={(v) => { setManualPhone(v); setPhoneError(''); }}
+                    onChangeText={(v) => { setManualPhone(v.replace(/[^\d\s+\-()]/g, '')); setPhoneError(''); }}
+                    maxLength={INPUT_LIMITS.PHONE_LEN + 8}
                     placeholder="e.g. 98765 43210"
                     placeholderTextColor={colors.textMuted}
                     keyboardType="phone-pad"
@@ -292,7 +294,8 @@ const LinkContactModal = ({
                   </Text>
                   <TextInput
                     value={manualName}
-                    onChangeText={setManualName}
+                    onChangeText={(v) => setManualName(sanitizeName(v))}
+                    maxLength={INPUT_LIMITS.NAME_MAX}
                     placeholder="Friend"
                     placeholderTextColor={colors.textMuted}
                     style={styles.textInput}

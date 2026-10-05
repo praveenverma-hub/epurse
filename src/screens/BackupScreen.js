@@ -435,6 +435,7 @@ const BackupScreen = ({ navigation, route }) => {
                     placeholderTextColor={colors.textMuted}
                     secureTextEntry={pwSheet?.mode === 'backup' && !showPw}
                     autoCapitalize="none"
+                    maxLength={128}
                     autoFocus
                     style={[styles.input, pwSheet?.mode === 'backup' && styles.inputWithEye, !!pwErr && styles.inputError]}
                   />
@@ -460,6 +461,7 @@ const BackupScreen = ({ navigation, route }) => {
                         placeholderTextColor={colors.textMuted}
                         secureTextEntry={!showPw}
                         autoCapitalize="none"
+                        maxLength={128}
                         style={[styles.input, styles.inputWithEye, !!pwErr && styles.inputError]}
                       />
                       <TouchableOpacity

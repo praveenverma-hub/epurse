@@ -606,6 +606,7 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
               <TextInput
                 value={customDate}
                 onChangeText={setCustomDate}
+                maxLength={30}
                 placeholder="e.g. 30 June 2025"
                 placeholderTextColor={colors.textMuted}
                 style={styles.customDateInput}
@@ -625,6 +626,7 @@ const WhatsAppReminderScreen = ({ navigation, route }) => {
               <TextInput
                 value={message}
                 onChangeText={setMsgOverride}
+                maxLength={500}
                 multiline
                 style={styles.msgText}
                 textAlignVertical="top"
