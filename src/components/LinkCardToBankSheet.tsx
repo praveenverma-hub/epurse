@@ -10,7 +10,8 @@
 // =============================================================================
 
 import React from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import Modal from "./AppModal";
 import type { TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 

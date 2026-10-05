@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
   View,
   Text,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
+import Modal from "./AppModal";
 
 import { colors, radius, searchFill, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';

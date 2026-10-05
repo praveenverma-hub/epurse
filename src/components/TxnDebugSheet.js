@@ -7,9 +7,10 @@
 
 import React, { useRef, useEffect } from 'react';
 import {
-  Modal, View, Text, ScrollView, StyleSheet,
+  View, Text, ScrollView, StyleSheet,
   TouchableOpacity, Animated, Easing, Pressable, Clipboard,
 } from 'react-native';
+import Modal from "./AppModal";
 
 import { radius, spacing, typography } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';

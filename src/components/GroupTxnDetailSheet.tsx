@@ -5,13 +5,13 @@
 // =============================================================================
 import React from 'react';
 import {
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';

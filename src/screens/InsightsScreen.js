@@ -9,7 +9,8 @@
 // =============================================================================
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Modal, ScrollView, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Pressable } from 'react-native';
+import Modal from "../components/AppModal";
 import { TabView } from 'react-native-tab-view';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';

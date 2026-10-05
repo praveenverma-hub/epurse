@@ -14,12 +14,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,

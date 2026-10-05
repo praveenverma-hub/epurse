@@ -3,13 +3,13 @@
 // =============================================================================
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import { useEPurseStore } from '../store/ePurseStore';
 import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';

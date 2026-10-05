@@ -52,7 +52,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LayoutChangeEvent,
-  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -64,6 +63,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';

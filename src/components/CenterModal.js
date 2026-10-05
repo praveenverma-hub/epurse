@@ -1,5 +1,6 @@
 import React from 'react';
-import { ActivityIndicator, Modal, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import Modal from "./AppModal";
 
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
@@ -129,4 +130,3 @@ const styles = StyleSheet.create({
   primaryBtnBusy: { opacity: 0.85 },
   primaryText: { ...typography.bodyBold, color: '#fff', fontWeight: '900' },
 });
-

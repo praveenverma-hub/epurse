@@ -6,8 +6,9 @@
 
 import React, { useMemo } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, Pressable,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Pressable,
 } from 'react-native';
+import Modal from "./AppModal";
 
 import { radius, spacing, shadows } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';

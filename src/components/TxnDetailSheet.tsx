@@ -7,13 +7,13 @@
 // =============================================================================
 import React, { useMemo } from 'react';
 import {
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
 import { useEPurseStore } from '../store/ePurseStore';

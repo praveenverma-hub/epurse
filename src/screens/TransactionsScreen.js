@@ -18,7 +18,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -29,6 +28,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Modal from "../components/AppModal";
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';

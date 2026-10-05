@@ -7,7 +7,6 @@
 import React, { useRef } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;

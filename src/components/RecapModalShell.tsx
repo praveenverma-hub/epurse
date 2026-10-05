@@ -40,7 +40,8 @@
 // =============================================================================
 
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Modal from "./AppModal";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import SheetCloseButton from './SheetCloseButton';

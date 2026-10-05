@@ -13,8 +13,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Linking,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Linking,
 } from 'react-native';
+import Modal from "./AppModal";
 
 import { radius, searchFill, spacing, shadows, typography as typographyBase } from '../constants/theme';
 import type { TextStyle } from 'react-native';

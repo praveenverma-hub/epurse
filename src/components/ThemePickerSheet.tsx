@@ -10,7 +10,8 @@
 // =============================================================================
 
 import React from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import Modal from "./AppModal";
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radius, spacing, shadows } from '../constants/theme';

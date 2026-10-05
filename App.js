@@ -14,6 +14,7 @@ import { initSentry } from './src/config/sentry';
 initSentry();
 
 import AppNavigator from './src/navigation/AppNavigator';
+import AndroidSafeViewport from './src/components/AndroidSafeViewport';
 import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
 import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChannel } from './src/utils/notifications';
@@ -232,21 +233,23 @@ function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: ROOT_BG }}>
       <SafeAreaProvider>
-        <ToastProvider>
-          <StatusBar style="light" />
-          <NotificationBoot />
-          <NotificationTapBoot />
-          <RemoteConfigBoot />
-          <AppUpdateNudgeBoot />
-          <SmsSyncBoot />
-          <CompactionBoot />
-          <BudgetRolloverBoot />
-          <AuthSessionBoot />
-          <AppNavigator />
-          <AppLockGate />
-          <LoginGate />
-          <UpdateRequiredGate />
-        </ToastProvider>
+        <AndroidSafeViewport fillBackground>
+          <ToastProvider>
+            <StatusBar style="light" />
+            <NotificationBoot />
+            <NotificationTapBoot />
+            <RemoteConfigBoot />
+            <AppUpdateNudgeBoot />
+            <SmsSyncBoot />
+            <CompactionBoot />
+            <BudgetRolloverBoot />
+            <AuthSessionBoot />
+            <AppNavigator />
+            <AppLockGate />
+            <LoginGate />
+            <UpdateRequiredGate />
+          </ToastProvider>
+        </AndroidSafeViewport>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

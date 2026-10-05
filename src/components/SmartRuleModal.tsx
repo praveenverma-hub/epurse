@@ -6,13 +6,13 @@
 
 import React from 'react';
 import {
-  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import SheetCloseButton from './SheetCloseButton';
 import { shadows } from '../constants/theme';

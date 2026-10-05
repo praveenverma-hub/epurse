@@ -10,7 +10,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Modal,
   View,
   Text,
   StyleSheet,
@@ -21,6 +20,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import Modal from "./AppModal";
 
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, searchFill, spacing, typography, shadows } from '../constants/theme';

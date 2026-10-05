@@ -9,7 +9,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Dimensions,
-  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -17,6 +16,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import Animated, {
   Easing,
   cancelAnimation,

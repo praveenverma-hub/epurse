@@ -7,7 +7,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import Animated, {
   Easing,
   FadeIn,

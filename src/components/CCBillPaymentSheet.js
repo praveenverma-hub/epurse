@@ -16,9 +16,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Animated, Easing, Pressable,
 } from 'react-native';
+import Modal from "./AppModal";
 
 import { radius, spacing, shadows } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';

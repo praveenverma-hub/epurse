@@ -17,7 +17,8 @@
 // =============================================================================
 
 import React, { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Modal from "./AppModal";
 import type { TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 

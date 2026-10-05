@@ -7,13 +7,13 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import Modal from "./AppModal";
 import Animated, {
   Easing,
   useAnimatedStyle,

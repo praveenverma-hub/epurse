@@ -336,7 +336,7 @@ export default function AccountsScreen({ navigation }) {
         barHeight={HEADER_BAR_H}
         estimatedHeroHeight={HEADER_HERO_EST}
         curveRadius={radius.xl}
-        contentContainerStyle={styles.bodyContent}
+        contentContainerStyle={[styles.bodyContent, sortedAccounts.length === 0 && styles.emptyBodyContent]}
         onCollapseChange={setHeaderPinned}
         renderCollapsedBar={() => accountsBar(true)}
         renderBar={() => accountsBar(false)}
@@ -821,8 +821,7 @@ const styles = StyleSheet.create({
   rowLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 4 },
   rowLinkTxt: { ...typography.tiny, fontWeight: '700' },
 
-  // Same fix as DashboardScreen's `recentEmpty`: `compact` EmptyState is short
-  // by design, so with no accounts the whole page barely clears the header.
-  // Reserve the space a populated account list would occupy and centre inside it.
-  accountsEmpty: { minHeight: 300, justifyContent: 'center' },
+  // Fill the space between the header/list title and the bottom tab clearance.
+  emptyBodyContent: { flexGrow: 1 },
+  accountsEmpty: { flex: 1, justifyContent: 'center' },
 });

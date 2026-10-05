@@ -20,13 +20,13 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
   Dimensions,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
   type ViewStyle,
 } from 'react-native';
+import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radius, shadows, spacing, typography as typographyBase } from '../constants/theme';

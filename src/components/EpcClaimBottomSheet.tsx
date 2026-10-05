@@ -19,7 +19,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Modal,
   View,
   Text,
   StyleSheet,
@@ -29,6 +28,7 @@ import {
   ViewStyle,
   TextStyle,
 } from 'react-native';
+import Modal from "./AppModal";
 import LottieView from 'lottie-react-native';
 import Animated, {
   Easing,

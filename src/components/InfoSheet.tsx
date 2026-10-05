@@ -15,7 +15,6 @@
 import React, { useEffect, type ReactNode } from 'react';
 import {
   Dimensions,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +23,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import Modal from "./AppModal";
 import Animated, {
   Easing,
   cancelAnimation,
