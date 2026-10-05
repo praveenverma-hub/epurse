@@ -11,6 +11,7 @@ import { NativeModules } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
 import { EPurseInlineWordmark } from './EPurseBrandLockup';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
+import { useAppLockSession } from '../store/useAppLockSession';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase } from '../constants/theme';
 import { isAppLockSuppressed, consumeAppLockSuppress } from '../utils/appLockSuppress';
@@ -28,12 +29,13 @@ const AppLockGate: React.FC = () => {
   const hydrated = useStoreHydrated();
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
 
-  const [unlocked, setUnlocked] = useState(false);
+  const unlocked = useAppLockSession((s) => s.unlocked);
+  const setUnlocked = useAppLockSession((s) => s.setUnlocked);
   const [failed, setFailed] = useState(false);
   const authInFlight = useRef(false);
 
   const authenticate = useCallback(async () => {
-    if (!appLockEnabled) { setUnlocked(true); return; }
+    if (!appLockEnabled) { setUnlocked(false); return; }
     if (authInFlight.current) return;
     authInFlight.current = true;
     setFailed(false);
@@ -42,7 +44,7 @@ const AppLockGate: React.FC = () => {
       // No biometrics enrolled — don't trap the user behind a lock they have no
       // way to open (mirrors AccountDetailsScreen's own gate).
       if (secLevel <= LocalAuthentication.SecurityLevel.NONE) {
-        setUnlocked(true);
+        setUnlocked(AppState.currentState !== 'background');
         return;
       }
       const result = await LocalAuthentication.authenticateAsync({
@@ -51,7 +53,7 @@ const AppLockGate: React.FC = () => {
         fallbackLabel: 'Use Passcode',
         disableDeviceFallback: false,
       });
-      setUnlocked(result.success);
+      setUnlocked(result.success && AppState.currentState !== 'background');
       setFailed(!result.success);
     } catch {
       setUnlocked(false);
@@ -59,12 +61,11 @@ const AppLockGate: React.FC = () => {
     } finally {
       authInFlight.current = false;
     }
-  }, [appLockEnabled]);
+  }, [appLockEnabled, setUnlocked]);
 
   useEffect(() => {
     if (hydrated) authenticate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated]);
+  }, [hydrated, authenticate]);
 
   // Android takes the recent-apps (task switcher) thumbnail at the native
   // window-compositor level the instant the Activity pauses — before our JS
