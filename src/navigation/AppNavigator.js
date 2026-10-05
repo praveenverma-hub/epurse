@@ -1,5 +1,7 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useState } from 'react';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { useAppReady } from '../hooks/useAppReady';
+import { usePresentationSession } from '../store/usePresentationSession';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -47,9 +49,18 @@ const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
   const hasOnboarded = useEPurseStore((s) => s.hasOnboarded);
+  const navigationRef = useNavigationContainerRef();
+  const [navigationReady, setNavigationReady] = useState(false);
+  const appReady = useAppReady();
+  const request = usePresentationSession((s) => s.request);
+  useEffect(() => {
+    if (navigationReady && appReady && request) {
+      navigationRef.navigate('Main', { screen: 'Dashboard' });
+    }
+  }, [navigationReady, appReady, request, navigationRef]);
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={() => setNavigationReady(true)}>
       <Stack.Navigator
         initialRouteName={hasOnboarded ? 'Main' : 'Onboarding'}
         screenOptions={{

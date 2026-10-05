@@ -62,8 +62,9 @@ const read = (rel) => readFileSync(`${SRC}${rel}`, 'utf8')
 const dashboard = read('screens/DashboardScreen.js');
 check('Home asks the shared queue for the highest-priority candidate',
   /useAutoModalQueue\(\)/.test(dashboard));
-check('Home locks the visit after presenting one automatic modal',
-  /autoModalShownThisVisit\.current\s*=\s*true/.test(dashboard));
+check('the app session locks automatic presentation after one modal',
+  /claimAutomatic\(\)/.test(dashboard)
+  && /automaticShown/.test(read('store/usePresentationSession.ts')));
 for (const name of ['MonthlyRecapModal', 'WeeklyRecapModal', 'WelcomeStreakModal', 'CCPaymentPromptModal']) {
   check(`${name} receives the one active modal chosen by Home`,
     new RegExp(`<${name}[^>]*activeAutoModal=\\{activeAutoModal\\}`).test(dashboard));

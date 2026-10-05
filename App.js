@@ -14,6 +14,9 @@ import { initSentry } from './src/config/sentry';
 initSentry();
 
 import AppNavigator from './src/navigation/AppNavigator';
+import AwareRunBoot from './src/components/AwareRunBoot';
+import { usePresentationSession } from './src/store/usePresentationSession';
+import { useStoreHydrated } from './src/hooks/useStoreHydrated';
 import AndroidSafeViewport from './src/components/AndroidSafeViewport';
 import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
@@ -58,12 +61,26 @@ function NotificationBoot() {
  * app (getLastNotificationResponseAsync, checked once on mount).
  */
 function NotificationTapBoot() {
-  const openMonthlyRecap = useEPurseStore((s) => s.openMonthlyRecap);
   useEffect(() => {
+    let lastId;
     const handle = (response) => {
       const data = response?.notification?.request?.content?.data;
-      if (data?.type === 'monthly_recap' && data.monthKey) {
-        openMonthlyRecap(data.monthKey);
+      const id = response?.notification?.request?.identifier;
+      if (!id || id === lastId) return;
+      lastId = id;
+      const modalByType = {
+        cc_payment_review: 'ccPayment',
+        monthly_recap: 'monthlyRecap',
+        weekly_recap: 'weeklyRecap',
+        aware_savings_ready: 'epcClaim',
+      };
+      const modal = modalByType[data?.type];
+      if (modal) {
+        usePresentationSession.getState().requestModal(
+          modal,
+          modal === 'monthlyRecap' && typeof data.monthKey === 'string' ? data.monthKey : undefined,
+        );
+        void Notifications.clearLastNotificationResponseAsync();
       }
     };
     Notifications.getLastNotificationResponseAsync().then((response) => {
@@ -71,7 +88,7 @@ function NotificationTapBoot() {
     });
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
     return () => sub.remove();
-  }, [openMonthlyRecap]);
+  }, []);
   return null;
 }
 
@@ -186,6 +203,7 @@ function AuthSessionBoot() {
 }
 
 function BudgetRolloverBoot() {
+  const hydrated = useStoreHydrated();
   const rollover   = useEPurseStore((s) => s.rolloverBudgetIfNeeded);
   const nudge      = useEPurseStore((s) => s.maybeFireMidmonthNudge);
   const subAlerts  = useEPurseStore((s) => s.maybeFireSubscriptionAlerts);
@@ -201,6 +219,7 @@ function BudgetRolloverBoot() {
   // don't. See utils/reminderSchedule.
   const reconcileReminders = useEPurseStore((s) => s.reconcileReminders);
   useEffect(() => {
+    if (!hydrated) return;
     rollover();
     nudge();
     subAlerts();
@@ -220,7 +239,7 @@ function BudgetRolloverBoot() {
       }
     });
     return () => sub.remove();
-  }, [rollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders]);
+  }, [hydrated, rollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders]);
   return null;
 }
 
@@ -243,6 +262,7 @@ function App() {
             <SmsSyncBoot />
             <CompactionBoot />
             <BudgetRolloverBoot />
+            <AwareRunBoot />
             <AuthSessionBoot />
             <AppNavigator />
             <AppLockGate />

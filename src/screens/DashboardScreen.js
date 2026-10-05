@@ -35,7 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
-import { useEPurseStore, selectUnreviewedQueue, selectYesterdayTransactionCount, selectGapTransactionCount, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded } from '../store/ePurseStore';
+import { useEPurseStore, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded } from '../store/ePurseStore';
 import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import {
   useRewardStore,
@@ -49,7 +49,9 @@ import { STATIC_CONFIG } from '../config/staticConfig';
 import { formatCurrency } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
-import { syncNow, whenFirstSweepSettled } from '../hooks/useSmsSync';
+import { syncNow } from '../hooks/useSmsSync';
+import { useAppReady } from '../hooks/useAppReady';
+import { usePresentationSession } from '../store/usePresentationSession';
 import { TAB_BAR_HEIGHT, tabBarClearance } from '../context/TabBarVisibilityContext';
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
@@ -186,23 +188,22 @@ const DashboardScreen = ({ navigation }) => {
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const level              = useRewardStore(selectLevel);
   const awareStreak        = useRewardStore(selectAwareStreak);
-  const checkIn            = useRewardStore((s) => s.checkIn);
   const claimSavingsBonus  = useRewardStore((s) => s.claimSavingsBonus);
   const pendingSavingsReward = useRewardStore(selectPendingSavings);
   // One auto-opening modal at a time, in a fixed order — see the hook. The claim
   // sheet is LAST: nothing about it expires, so it can always wait.
   const topAutoModal = useAutoModalQueue();
-  const [activeAutoModal, setActiveAutoModal] = useState(null);
+  const [selectedAutoModal, setActiveAutoModal] = useState(null);
+  const [explicitModal, setExplicitModal] = useState(false);
+  const appReady = useAppReady();
+  const activeAutoModal = appReady ? selectedAutoModal : null;
+  const requestedModal = usePresentationSession((s) => s.request);
   const [homeFocused, setHomeFocused] = useState(false);
-  const autoModalShownThisVisit = useRef(false);
 
-  // A Home visit gets at most one automatic modal. Closing it never causes the
-  // next pending surface to jump in immediately; the queue advances when the
-  // user leaves Home and returns. This keeps several valid launch-time prompts
-  // from becoming a wall of consecutive dialogs.
+  // Automatic presentation is capped for the whole app session, not each tab visit.
   useFocusEffect(useCallback(() => {
-    autoModalShownThisVisit.current = false;
     setActiveAutoModal(null);
+    setExplicitModal(false);
     setHomeFocused(true);
     return () => {
       setHomeFocused(false);
@@ -211,11 +212,20 @@ const DashboardScreen = ({ navigation }) => {
   }, []));
 
   useEffect(() => {
-    if (!homeFocused || !hydrated || !rewardsHydrated) return;
-    if (!topAutoModal || autoModalShownThisVisit.current) return;
-    autoModalShownThisVisit.current = true;
+    if (!homeFocused || !appReady || !hydrated || !rewardsHydrated) return;
+    const session = usePresentationSession.getState();
+    if (requestedModal) {
+      if (requestedModal.monthKey) useEPurseStore.getState().openMonthlyRecap(requestedModal.monthKey);
+      session.claimAutomatic();
+      setExplicitModal(true);
+      setActiveAutoModal(requestedModal.modal);
+      session.clearRequest();
+      return;
+    }
+    if (!topAutoModal || !session.claimAutomatic()) return;
+    setExplicitModal(false);
     setActiveAutoModal(topAutoModal);
-  }, [homeFocused, hydrated, rewardsHydrated, topAutoModal]);
+  }, [homeFocused, appReady, hydrated, rewardsHydrated, topAutoModal, requestedModal]);
   const vaultTier        = vaultTierForStreak(awareStreak);
   const unignoreTransaction = useEPurseStore((s) => s.unignoreTransaction);
   const budget              = useEPurseStore((s) => s.budget);
@@ -457,55 +467,6 @@ const DashboardScreen = ({ navigation }) => {
     }
   }, [toast]);
 
-  // ── Aware Run check-in (hands-free) ──────────────────────────────────────
-  // Runs once on mount AND on every screen focus (foregrounding the app
-  // after the day rolls over still counts). checkIn() is idempotent within
-  // a calendar day, so re-firing on focus is safe.
-  //
-  // We pass YESTERDAY's SMS transaction count (not today's queue) so the
-  // store can correctly evaluate Zero-Transaction Day eligibility. The
-  // current queue is always empty at morning open — using it caused a false
-  // SAVINGS bonus every single day.
-  //
-  // ⚠ It must NOT run until the app actually knows what happened yesterday. Both
-  // preconditions below caused a real bug — a Zero-Transaction bonus awarded to a
-  // user who HAD spent the day before:
-  //
-  //   1. BOTH stores must be rehydrated. They persist separately and race: the
-  //      reward store is a handful of counters and lands first, while the finance
-  //      store carries every transaction and lands later. In that window
-  //      `lastCheckedInDate` is already yesterday (so this is not treated as a
-  //      first check-in) while `transactions` is still empty — so yesterday's
-  //      count reads 0 and the bonus fires.
-  //   2. The first SMS sweep must have settled. Yesterday's bank messages only
-  //      enter the store when the sweep imports them, and someone who did not open
-  //      the app yesterday has none of them at mount — which is exactly the person
-  //      this question is asked about.
-  //
-  // And it is not self-correcting: `checkIn` is idempotent per calendar day
-  // (gap === 0 → SAME_DAY no-op), so the first answer of the day is the final one.
-  useEffect(() => {
-    if (!hydrated || !rewardsHydrated) return undefined;
-    let cancelled = false;
-
-    // Pass yesterday's count (Zero-Transaction Day / SAVINGS eligibility) AND the
-    // missed-days count so a skipped app-open on a no-transaction day doesn't break
-    // the Aware Run (selectGapTransactionCount → forgivenGap in the reward store).
-    const runCheckIn = async () => {
-      await whenFirstSweepSettled();
-      if (cancelled) return;
-      // Read AFTER the await, never before: the sweep is the whole point.
-      const st = useEPurseStore.getState();
-      const yesterdayCount = selectYesterdayTransactionCount(st);
-      const gapCount = selectGapTransactionCount(st, useRewardStore.getState().lastCheckedInDate);
-      checkIn(yesterdayCount, gapCount);
-    };
-    const sub = navigation.addListener('focus', runCheckIn);
-    // Fire once on initial mount as well (focus listener doesn't fire on the
-    // first render because the screen is already focused).
-    runCheckIn();
-    return () => { cancelled = true; sub(); };
-  }, [navigation, checkIn, hydrated, rewardsHydrated]);
 
 
   // Recomputed on every focus, not memoized once at mount: this screen is the
@@ -1144,6 +1105,7 @@ const DashboardScreen = ({ navigation }) => {
           modal; folds in the budget streak/saved wrap-up). Then persists as a
           dashboard card below. */}
       <MonthlyRecapModal
+        explicitlyRequested={explicitModal}
         activeAutoModal={activeAutoModal}
         onViewFull={(monthKey, previewReport) => {
           setActiveAutoModal(null);
@@ -1320,7 +1282,8 @@ const DashboardScreen = ({ navigation }) => {
         visible={notificationsVisible}
         onClose={() => setNotificationsVisible(false)}
         onOpenPending={(modal) => {
-          autoModalShownThisVisit.current = true;
+          usePresentationSession.getState().claimAutomatic();
+          setExplicitModal(true);
           setActiveAutoModal(modal);
         }}
       />

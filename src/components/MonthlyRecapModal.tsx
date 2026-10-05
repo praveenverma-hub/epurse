@@ -27,13 +27,14 @@ import RecapModalShell from './RecapModalShell';
 import type { MonthlyReport } from '../utils/monthlyReportHtml';
 
 type Props = {
+  explicitlyRequested?: boolean;
   activeAutoModal: AutoModalId | null;
   previewReport?: MonthlyReport;
   onPreviewClose?: () => void;
   onViewFull?: (monthKey: string, previewReport?: MonthlyReport) => void;
 };
 
-const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, previewReport, onPreviewClose, onViewFull }) => {
+const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, explicitlyRequested = false, previewReport, onPreviewClose, onViewFull }) => {
   const pendingMonthlyRecap      = useEPurseStore((s) => s.pendingMonthlyRecap);
   const showMonthlyRecap         = useEPurseStore((s) => s.showMonthlyRecap);
   const clearPendingMonthlyRecap = useEPurseStore((s) => s.clearPendingMonthlyRecap);
@@ -48,7 +49,7 @@ const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, previewReport, on
   // sit behind a short-circuit.
   const monthKey = previewReport?.monthKey ?? pendingMonthlyRecap;
   const visible = !!monthKey
-    && (previewReport ? true : showMonthlyRecap)
+    && (previewReport || explicitlyRequested || showMonthlyRecap)
     && activeAutoModal === 'monthlyRecap';
   const close = () => previewReport ? onPreviewClose?.() : clearPendingMonthlyRecap();
 

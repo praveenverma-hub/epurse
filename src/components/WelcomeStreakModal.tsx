@@ -11,7 +11,8 @@
 //     backdrop / "Got it" pill exits early without changing the contract.
 // =============================================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useAppReady } from '../hooks/useAppReady';
 import {
   Dimensions,
   Pressable,
@@ -68,7 +69,10 @@ const WelcomeStreakModal: React.FC<Props> = ({ activeAutoModal, preview = false,
   // Tracks whether the sheet is currently visible to the Modal host. We can't
   // unmount until the slide-down completes, so this gates the Modal directly.
   const [mounted, setMounted] = useState(false);
-  const shouldShow = (preview || isFirstLaunch === true) && activeAutoModal === 'welcome';
+  const appReady = useAppReady();
+  const shouldShow = appReady && (preview || isFirstLaunch === true) && activeAutoModal === 'welcome';
+  const showingRef = useRef(shouldShow);
+  showingRef.current = shouldShow;
 
   // Y offset of the sheet — starts off-screen, springs to 0, slides back down.
   const translateY = useSharedValue<number>(SCREEN_H);
@@ -77,13 +81,19 @@ const WelcomeStreakModal: React.FC<Props> = ({ activeAutoModal, preview = false,
   // Bridge: lets the worklet flip the Zustand flag + hide the Modal back on
   // the JS thread once the exit animation finishes.
   const finishCelebration = (): void => {
+    if (!showingRef.current) return;
     setMounted(false);
     if (preview) onPreviewClose?.();
     else setFirstLaunchDone();
   };
 
   useEffect(() => {
-    if (!shouldShow) return;
+    if (!shouldShow) {
+      setMounted(false);
+      translateY.value = SCREEN_H;
+      opacity.value = 0;
+      return;
+    }
 
     setMounted(true);
 
