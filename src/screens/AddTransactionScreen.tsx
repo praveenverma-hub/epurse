@@ -70,6 +70,7 @@ const GradientButton: React.FC<{
 import InlineContactPicker from '../components/InlineContactPicker';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import { useGroupSplit } from '../hooks/useGroupSplit';
+import { useAutoCategory } from '../hooks/useAutoCategory';
 import type { Group } from '../types/group';
 import LinkContactModal from '../components/LinkContactModal';
 import CenterModal from '../components/CenterModal';
@@ -666,6 +667,17 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     closeSplitPage();
   };
 
+  // Category follows the merchant as it's typed, until picked by hand.
+  const autoCategory = useAutoCategory({
+    merchant,
+    isIncome: type === TRANSACTION_TYPES.CREDIT,
+    enabled: !isEdit,
+    apply: (p, c) => {
+      setParentCategory(p);
+      setChildCategory(c);
+    },
+  });
+
   // ── Budget breach preview ────────────────────────────────────────────────────
   const breachPreview = useMemo(() => {
     if (type !== TRANSACTION_TYPES.DEBIT) return null;
@@ -717,6 +729,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     }
     setParentCategory(parent.label);
     setChildCategory(child.label);
+    autoCategory.markManual();
     // Clear split if moving to an LB/blocked child
     if (SPLIT_BLOCKED_CHILD_LABELS.has(child.label)) {
       setIsSplit(false);
@@ -1044,6 +1057,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 leading={selectedParentDef?.emoji ?? '📌'}
                 label="Category"
                 value={childCategory || 'Select'}
+                badge={autoCategory.isAuto ? 'Auto' : undefined}
                 isPlaceholder={!childCategory}
                 accentColor={selectedParentDef?.color ?? theme.primary}
                 onPress={() => setCatPickerOpen(true)}

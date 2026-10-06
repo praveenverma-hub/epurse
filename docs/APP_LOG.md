@@ -47,6 +47,10 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   until edited); tagging a plain-split memo to a group with "You" as payer now books the debit (was left as a
   memo with no account); "Add to group" on a real bank debit locks the payer to You (could book a phantom debt).
   Shared `isPayerLockedToMe` / `defaultGroupSplit` in split.js. `test:store` +13.
+- **Category auto-fill from typed merchant (Oct-6-2026)**: both add forms fill Category as the merchant is
+  typed — the user's own past choice first, then saved rules, known brands, then ~200 everyday words
+  (`utils/categorySuggest.ts`, `hooks/useAutoCategory.ts`); "Auto" badge until picked by hand. New
+  `test:categorySuggest` (23). **Open**: no rent/housing category to map to.
 - Bulk reconciliation test (Sep-2026, `npm run test:bulk`): 35-txn volume/cross-check pass,
   0 app defects — validates balances, spend stats, budget, groups and splits together.
 - **Sep-6-2026: CC bill payment reconciliation fixes** (see Budget/Accounts below for detail).

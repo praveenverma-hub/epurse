@@ -29,6 +29,7 @@ import {
 import AccountField from './AccountField';
 import SplitPage from './SplitPage';
 import { useGroupSplit } from '../hooks/useGroupSplit';
+import { useAutoCategory } from '../hooks/useAutoCategory';
 import SplitBreakdownLines from './SplitBreakdownLines';
 import Modal from './AppModal';
 import { defaultAccountId } from '../utils/defaultAccount';
@@ -107,6 +108,17 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const amount = parseAmount(amountRaw);
   const split = useGroupSplit({ group, amount, active: visible !== false, editTxn, lockPayerToMe });
   const { isShared, payerIsMe } = split;
+  // Category follows the merchant as it's typed, until picked by hand. Off for
+  // edits and the tagging flow (category already decided there).
+  const autoCategory = useAutoCategory({
+    merchant,
+    isIncome: false,
+    enabled: !editTxn && !hideCategory,
+    apply: (p, c) => {
+      setParentCat(p || null);
+      setChildCat(c || null);
+    },
+  });
   // Tagging an existing txn → amount comes from that txn and is fixed (so the
   // split math matches the real transaction). Manual add → free entry.
   const amountLocked = typeof presetAmount === 'number' && presetAmount > 0;
@@ -116,6 +128,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     if (visible === false) return;
     setCatSheet(false);
     setSplitPageOpen(false);
+    autoCategory.reset();
 
     if (editTxn) {
       setAmountRaw(String(editTxn.amount ?? ''));
@@ -224,6 +237,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
             leading={parentCat ? '🏷️' : '📌'}
             label="Category"
             value={childCat || 'Select'}
+            badge={autoCategory.isAuto ? 'Auto' : undefined}
             isPlaceholder={!childCat}
             accentColor={theme.primary}
             onPress={() => setCatSheet(true)}
@@ -309,6 +323,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         onSave={(parent: string, child: string) => {
           setParentCat(parent);
           setChildCat(child);
+          autoCategory.markManual();
           setCatSheet(false);
         }}
       />
