@@ -1,7 +1,10 @@
 // =============================================================================
-// AddGroupExpenseScreen — full-screen "add a transaction to a group" flow,
-// opened by the Groups-tab "+" FAB. Wraps the shared GroupExpenseForm under a
-// themed gradient header. (Tagging an existing txn still uses GroupExpenseSheet.)
+// AddGroupExpenseScreen — the full-screen group expense form (shared
+// GroupExpenseForm under a header). Three modes, by route param:
+//   • new        — Groups-tab "+" FAB                     ({ groupId })
+//   • edit       — an already-grouped txn                  ({ groupId, editTxnId })
+//   • tag        — put an existing txn into a shared group ({ groupId, tagTxnId })
+// `fromQueue` (Home review queue) also counts the action as reviewing the txn.
 // =============================================================================
 import React, { useRef, useState } from 'react';
 import {
@@ -25,38 +28,70 @@ import FormFooterActions from '../components/FormFooterActions';
 import { requestAndGetLocation } from '../services/locationService';
 import { useToast } from '../components/Toast';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { useRewardStore } from '../store/useRewardStore';
+import { isPayerLockedToMe } from '../utils/split';
 import type { Group, GroupExpenseData } from '../types/group';
 
 interface NavProp {
   goBack: () => void;
 }
 interface RouteProp {
-  params?: { groupId?: string; editTxnId?: string };
+  params?: { groupId?: string; editTxnId?: string; tagTxnId?: string; fromQueue?: boolean };
 }
 
 export default function AddGroupExpenseScreen({ navigation, route }: { navigation: NavProp; route: RouteProp }) {
   const groupId = route?.params?.groupId;
   const editTxnId = route?.params?.editTxnId;
+  const tagTxnId = route?.params?.tagTxnId;
+  const fromQueue = !!route?.params?.fromQueue;
   const group = useEPurseStore((s: any) =>
     (s.groups as Group[]).find((g) => g.id === groupId) || null,
   ) as Group | null;
   const editTxn = useEPurseStore((s: any) =>
     (editTxnId ? (s.transactions as any[]).find((t) => t.id === editTxnId) : null) || null,
   ) as any | null;
+  const tagTxn = useEPurseStore((s: any) =>
+    (tagTxnId ? (s.transactions as any[]).find((t) => t.id === tagTxnId) : null) || null,
+  ) as any | null;
+  const tagTransactionToGroup = useEPurseStore((s: any) => s.tagTransactionToGroup);
+  const markReviewed = useEPurseStore((s: any) => s.markReviewed);
+  const recordReview = useRewardStore((s: any) => s.recordReview);
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense) as (id: string, data: GroupExpenseData) => void;
   const updateGroupExpense = useEPurseStore((s: any) => s.updateGroupExpense) as (id: string, data: GroupExpenseData) => void;
   const isEdit = !!editTxnId;
+  const isTag = !isEdit && !!tagTxnId;
+  // The txn this form acts on (edit / tag) — gone if deleted meanwhile.
+  const baseTxn = isEdit ? editTxn : isTag ? tagTxn : null;
   const insets = useSafeAreaInsets();
   const submitRef = useRef<(() => void) | null>(null);
   const [ready, setReady] = useState(false);
   const toast = useToast();
   const { submit, submitting } = useSubmitGuard();
 
+  // Acting on a review-queue txn counts as reviewing it (reward + leaves the queue).
+  const countReview = (id: string) => {
+    if (!fromQueue) return;
+    recordReview();
+    markReviewed(id);
+  };
+
   const handleAdd = async (expenseData: GroupExpenseData) => {
     if (isEdit && editTxnId) {
       // Keep the existing location/createdAt — editing shouldn't re-stamp them.
       updateGroupExpense(editTxnId, expenseData);
-      toast.success('Changes saved');
+      countReview(editTxnId);
+      if (!fromQueue) toast.success('Changes saved');
+      navigation.goBack();
+      return;
+    }
+    if (isTag && tagTxnId && groupId) {
+      tagTransactionToGroup(tagTxnId, groupId, expenseData.shares?.length ? {
+        paidByMemberId: expenseData.paidByMemberId,
+        paidByName: expenseData.paidByName,
+        shares: expenseData.shares,
+      } : null);
+      countReview(tagTxnId);
+      if (!fromQueue) toast.success('Added to group');
       navigation.goBack();
       return;
     }
@@ -77,7 +112,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <View style={styles.headerCentre}>
-            <Text style={styles.title}>{isEdit ? 'Edit transaction' : 'Add transaction'}</Text>
+            <Text style={styles.title}>{isEdit ? 'Edit Transaction' : isTag ? 'Add to Group' : 'Add Transaction'}</Text>
             {/* Name the group explicitly — a bare name reads as an unlabelled
                 subheading, leaving it unclear what it refers to. */}
             {group && (
@@ -91,7 +126,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
         </View>
       </SafeAreaView>
 
-      {group ? (
+      {group && (!(isEdit || isTag) || baseTxn) ? (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -106,8 +141,13 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
               group={group}
               onAdd={(expenseData: GroupExpenseData) => submit(() => handleAdd(expenseData))}
               editTxn={isEdit ? editTxn : undefined}
-              // Tagged SMS txns keep their parsed amount locked; manual ones stay editable.
-              presetAmount={isEdit && editTxn && editTxn.source !== 'manual' ? editTxn.amount : undefined}
+              // Tagging keeps the txn's amount; on edit, SMS txns keep their parsed
+              // amount locked and manual ones stay editable.
+              presetAmount={isTag ? tagTxn?.amount : isEdit && editTxn && editTxn.source !== 'manual' ? editTxn.amount : undefined}
+              // Tagging: category was already decided where the txn came from.
+              hideCategory={isTag}
+              // A real account debit can't be re-attributed to someone else.
+              lockPayerToMe={!!baseTxn && isPayerLockedToMe(baseTxn)}
               hideSubmit
               submitRef={submitRef}
               onReadyChange={setReady}
@@ -118,13 +158,15 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
           <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
             <FormFooterActions
               onCancel={() => navigation.goBack()}
-              submit={ready ? { title: isEdit ? 'Save Changes' : 'Add Expense', onPress: () => submitRef.current?.(), loading: submitting } : null}
+              submit={ready ? { title: isEdit ? 'Save Changes' : isTag ? 'Add to Group' : 'Add Expense', onPress: () => submitRef.current?.(), loading: submitting } : null}
             />
           </View>
         </KeyboardAvoidingView>
       ) : (
         <View style={styles.missing}>
-          <Text style={styles.missingTxt}>This group is no longer available.</Text>
+          <Text style={styles.missingTxt}>
+            {group ? 'This transaction is no longer available.' : 'This group is no longer available.'}
+          </Text>
         </View>
       )}
     </View>

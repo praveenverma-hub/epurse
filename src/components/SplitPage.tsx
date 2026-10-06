@@ -23,7 +23,7 @@ import { INPUT_LIMITS } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
 import GradientButtonBase from './GradientButton';
 import SplitTotalHint from './SplitTotalHint';
-import { FormField, FormChipRow, FormChip } from './FormField';
+import { FormField, FormChipRow, FormChip, useFocusBorder } from './FormField';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 const GradientButton = GradientButtonBase as React.FC<{
@@ -68,7 +68,7 @@ interface PayerSpec {
   memoNote?: string;
 }
 
-interface Props {
+export interface SplitPageProps {
   title?: string;
   onBack: () => void;
   headerRight?: React.ReactNode;
@@ -93,6 +93,12 @@ interface Props {
   onDone: () => void;
 }
 
+/** A share input with the shared focus ring (one per row, so each tracks its own focus). */
+function ShareInput({ style, ...rest }: React.ComponentProps<typeof TextInput>) {
+  const focus = useFocusBorder();
+  return <TextInput {...rest} style={[style, focus.focusStyle]} onFocus={focus.onFocus} onBlur={focus.onBlur} />;
+}
+
 const METHODS: { key: SplitMode; label: string }[] = [
   { key: 'equal', label: 'Equal' },
   { key: 'percent', label: '% Percent' },
@@ -115,7 +121,7 @@ export default function SplitPage({
   peopleFooter,
   empty,
   onDone,
-}: Props) {
+}: SplitPageProps) {
   const insets = useSafeAreaInsets();
   const sum = rows.reduce((t, r) => t + (valueUnit === 'percent' ? r.percent : r.amount), 0);
   const anyEditable = rows.some((r) => r.editable);
@@ -230,7 +236,7 @@ export default function SplitPage({
                         <View style={[styles.valueCol, valueUnit === 'percent' && styles.valueColPct]}>
                           {r.editable ? (
                             <>
-                              <TextInput
+                              <ShareInput
                                 style={[styles.input, valueUnit === 'percent' && styles.inputPct]}
                                 value={
                                   valueUnit === 'percent'

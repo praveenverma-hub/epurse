@@ -10,6 +10,7 @@ import OnboardingDeck, { AccountFilterScreen } from '../screens/OnboardingExperi
 import MainTabNavigator    from './MainTabNavigator';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
 import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
+import SplitEditorScreen from '../screens/SplitEditorScreen';
 import GroupDetailScreen from '../screens/GroupDetailScreen';
 import GroupFormScreen from '../screens/GroupFormScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
@@ -90,6 +91,8 @@ export default function AppNavigator() {
         {/* Full-screen "add" flows pushed on top of the tab bar */}
         <Stack.Screen name="AddTransaction"  component={AddTransactionScreen} />
         <Stack.Screen name="AddGroupExpense" component={AddGroupExpenseScreen} />
+        {/* The split editor of both add forms; its state lives in the form underneath. */}
+        <Stack.Screen name="SplitEditor"     component={SplitEditorScreen} />
         <Stack.Screen name="GroupDetail"     component={GroupDetailScreen} />
         <Stack.Screen name="GroupForm"       component={GroupFormScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />

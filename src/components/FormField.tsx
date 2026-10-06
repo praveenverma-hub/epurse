@@ -3,8 +3,7 @@
 //
 // Both add/edit surfaces consume these so all FOUR flows render identically:
 //   plain add / plain edit   → AddTransactionScreen
-//   group add / group edit   → GroupExpenseForm (via AddGroupExpenseScreen
-//                              full screen + GroupExpenseSheet bottom sheet)
+//   group add / edit / tag   → GroupExpenseForm (via AddGroupExpenseScreen)
 //
 // Before this existed, each file hand-rolled its own label/input/row/chip
 // styles and they had drifted apart (different amount alignment, card vs
@@ -23,6 +22,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 
 // ─── FormField — labelled wrapper ────────────────────────────────────────────
 
@@ -44,15 +44,36 @@ export const FormField: React.FC<FormFieldProps> = ({ label, hint, children, sty
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
 
+/**
+ * Focus ring for every typed field: the border takes the live theme colour while
+ * the field is being typed in, so it's always clear which one is active. Keeps any
+ * onFocus / onBlur the caller passes. Shared by the inputs below, SplitPage's
+ * share inputs and InlineContactPicker's search.
+ */
+export function useFocusBorder(props: Pick<TextInputProps, 'onFocus' | 'onBlur'> = {}) {
+  const theme = useTheme();
+  const [focused, setFocused] = React.useState(false);
+  return {
+    focusStyle: focused ? { borderColor: theme.primary } : null,
+    onFocus: (e: any) => { setFocused(true); props.onFocus?.(e); },
+    onBlur: (e: any) => { setFocused(false); props.onBlur?.(e); },
+  };
+}
+
 /** Standard single/multi-line text input. */
-export const FormTextInput: React.FC<TextInputProps> = ({ style, multiline, ...rest }) => (
-  <TextInput
-    placeholderTextColor={colors.textMuted}
-    multiline={multiline}
-    style={[styles.input, multiline && styles.inputMultiline, style]}
-    {...rest}
-  />
-);
+export const FormTextInput: React.FC<TextInputProps> = ({ style, multiline, onFocus, onBlur, ...rest }) => {
+  const focus = useFocusBorder({ onFocus, onBlur });
+  return (
+    <TextInput
+      placeholderTextColor={colors.textMuted}
+      multiline={multiline}
+      style={[styles.input, multiline && styles.inputMultiline, style, focus.focusStyle]}
+      onFocus={focus.onFocus}
+      onBlur={focus.onBlur}
+      {...rest}
+    />
+  );
+};
 
 /**
  * The amount input — same surface as FormTextInput, larger type.
@@ -67,21 +88,29 @@ export const FormAmountInput: React.FC<TextInputProps & { locked?: boolean; comp
   style,
   locked,
   compact,
+  onFocus,
+  onBlur,
   ...rest
-}) => (
-  <TextInput
-    placeholderTextColor={colors.textMuted}
-    keyboardType="decimal-pad"
-    editable={!locked}
-    style={[
-      styles.input,
-      compact ? styles.amountInputCompact : styles.amountInput,
-      locked && styles.inputLocked,
-      style,
-    ]}
-    {...rest}
-  />
-);
+}) => {
+  const focus = useFocusBorder({ onFocus, onBlur });
+  return (
+    <TextInput
+      placeholderTextColor={colors.textMuted}
+      keyboardType="decimal-pad"
+      editable={!locked}
+      style={[
+        styles.input,
+        compact ? styles.amountInputCompact : styles.amountInput,
+        locked && styles.inputLocked,
+        style,
+        !locked && focus.focusStyle,
+      ]}
+      onFocus={focus.onFocus}
+      onBlur={focus.onBlur}
+      {...rest}
+    />
+  );
+};
 
 // ─── FormSelectRow — tap-to-open row (Category, Date, …) ─────────────────────
 
@@ -331,8 +360,7 @@ const styles = StyleSheet.create({
   // One surface for every control: OUTLINED — a visible border, no fill, no
   // shadow. Two reasons this beats the old card+shadow treatment: the control
   // inherits whatever surface it sits on, so the same field looks right on the
-  // gray screen body (AddTransactionScreen) AND on the white sheet
-  // (GroupExpenseSheet); and a form is 6-8 controls in a column, where that many
+  // gray screen body AND on a white sheet; and a form is 6-8 controls in a column, where that many
   // floating cards read as separate sections and drown out the field labels.
   input: {
     backgroundColor: 'transparent',

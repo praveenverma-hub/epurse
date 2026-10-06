@@ -32,6 +32,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `GroupExpenseForm`). Plain category now optional (saves as `other`, review-later). Expense/Income is the swipeable `TabView` + `UnderlineTabBar`. New
   `FormNoteField`, `AccountField`, `utils/defaultAccount.ts`. **Not built (open)**: merchant→category
   auto-suggest, tags/recurring/exclude-from-totals (don't exist yet), per-group default split people.
+- **Split editor is a real route (Oct-7-2026)**: the split page popped in (Add Transaction) or rose
+  from the bottom (group form). It is now the `SplitEditor` stack route (native push + swipe-back);
+  the form keeps the split state and publishes it via `store/useSplitEditorRoute.ts`. Because a route
+  opens under a Modal, `GroupExpenseSheet` was deleted: tagging/editing a group txn from Dashboard,
+  Activity and the review queue now opens `AddGroupExpenseScreen` (`tagTxnId` / `editTxnId`,
+  `fromQueue`). Groups-tab edit now also locks the payer on real account debits. Not device-verified.
 - **Split single-source (Oct-5-2026)**: plain + group add forms now share ONE split page
   (`components/SplitPage.tsx`) and ONE share-maths util (`utils/splitShares.ts`, `test:splitShares`);
   plain gained **Full Owed** (payer takes 0%, others split 100), group gained the same "left to

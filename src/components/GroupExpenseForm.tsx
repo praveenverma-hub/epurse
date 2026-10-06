@@ -1,8 +1,7 @@
 // =============================================================================
 // GroupExpenseForm — the shared body for adding a manual expense to a group.
-// Rendered inside two shells:
-//   • GroupExpenseSheet  — bottom-sheet modal (tagging an existing txn from Activity).
-//   • AddGroupExpenseScreen — full screen (the Groups-tab "+" FAB).
+// Rendered by AddGroupExpenseScreen (new / edit / tag-an-existing-txn).
+// The split editor opens as the 'SplitEditor' route (useSplitEditorRoute).
 // Personal groups: amount + merchant + category.
 // Shared groups:  same + who paid + split among members (state in useGroupSplit,
 // shared with AddTransactionScreen's group mode).
@@ -27,11 +26,11 @@ import {
   FormValueCard,
 } from './FormField';
 import AccountField from './AccountField';
-import SplitPage from './SplitPage';
+import CategoryValueRow from './CategoryValueRow';
 import { useGroupSplit } from '../hooks/useGroupSplit';
 import { useAutoCategory } from '../hooks/useAutoCategory';
 import SplitBreakdownLines from './SplitBreakdownLines';
-import Modal from './AppModal';
+import { useSplitEditorRoute } from '../store/useSplitEditorRoute';
 import { defaultAccountId } from '../utils/defaultAccount';
 import type { Group, GroupExpenseData } from '../types/group';
 
@@ -102,12 +101,14 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const [parentCat, setParentCat] = useState<string | null>(null);
   const [childCat, setChildCat] = useState<string | null>(null);
   const [catSheet, setCatSheet] = useState(false);
-  // The split editor page (Paid By / Method / People).
-  const [splitPageOpen, setSplitPageOpen] = useState(false);
 
   const amount = parseAmount(amountRaw);
   const split = useGroupSplit({ group, amount, active: visible !== false, editTxn, lockPayerToMe });
   const { isShared, payerIsMe } = split;
+  // The split editor is a stack route; the state stays in useGroupSplit here.
+  const splitRoute = useSplitEditorRoute(
+    isShared ? { page: { ...split.pageProps, accentColor: theme.primary } } : null,
+  );
   // Category follows the merchant as it's typed, until picked by hand. Off for
   // edits and the tagging flow (category already decided there).
   const autoCategory = useAutoCategory({
@@ -127,7 +128,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   useEffect(() => {
     if (visible === false) return;
     setCatSheet(false);
-    setSplitPageOpen(false);
     autoCategory.reset();
 
     if (editTxn) {
@@ -233,12 +233,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       <FormValueCard>
         {/* Category — hidden when reached from the manage modal (already set there) */}
         {!hideCategory && (
-          <FormValueRow
-            leading={parentCat ? '🏷️' : '📌'}
-            label="Category"
-            value={childCat || 'Select'}
-            badge={autoCategory.isAuto ? 'Auto' : undefined}
-            isPlaceholder={!childCat}
+          <CategoryValueRow
+            parentCategory={parentCat}
+            childCategory={childCat}
+            isAuto={autoCategory.isAuto}
             accentColor={theme.primary}
             onPress={() => setCatSheet(true)}
           />
@@ -252,7 +250,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
             label="Split"
             value={split.summary}
             accentColor={theme.primary}
-            onPress={() => setSplitPageOpen(true)}
+            onPress={splitRoute.open}
           >
             <SplitBreakdownLines rows={split.breakdownRows} />
           </FormValueRow>
@@ -291,18 +289,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
           accentColor={theme.primary}
         />
       </FormValueCard>
-
-      {/* ── Split page ─────────────────────────────────────────────────────── */}
-      {isShared && (
-        <Modal visible={splitPageOpen} animationType="slide" onRequestClose={() => setSplitPageOpen(false)}>
-          <SplitPage
-            onBack={() => setSplitPageOpen(false)}
-            onDone={() => setSplitPageOpen(false)}
-            accentColor={theme.primary}
-            {...split.pageProps}
-          />
-        </Modal>
-      )}
 
       {!hideSubmit && (
         <GradientButton

@@ -1,7 +1,7 @@
 // =============================================================================
 // FormFooterActions — the pinned footer row of every entry form: an outlined
 // Cancel (secondary) beside the filled submit (primary). Used by
-// AddTransactionScreen, AddGroupExpenseScreen and GroupExpenseSheet; the shell
+// AddTransactionScreen and AddGroupExpenseScreen; the shell
 // keeps its own footer band, this is only the row inside it.
 // =============================================================================
 import React from 'react';

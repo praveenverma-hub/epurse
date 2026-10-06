@@ -45,10 +45,12 @@ import {
   FormValueRow,
   FormValueCard,
 } from '../components/FormField';
-import SplitPage, { SPLIT_MODE_LABEL, type SplitMode, type SplitPageRow } from '../components/SplitPage';
+import { useSplitEditorRoute } from '../store/useSplitEditorRoute';
+import { SPLIT_MODE_LABEL, type SplitMode, type SplitPageRow } from '../components/SplitPage';
 import { evenPercents, fullOwedShares } from '../utils/splitShares';
 import SplitBreakdownLines from '../components/SplitBreakdownLines';
 import FormFooterActions from '../components/FormFooterActions';
+import CategoryValueRow from '../components/CategoryValueRow';
 import EmptyState from '../components/EmptyState';
 import AccountField from '../components/AccountField';
 import UnderlineTabBar from '../components/UnderlineTabBar';
@@ -283,11 +285,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const [groupId,        setGroupId]        = useState<string | null>(() =>
     route?.params?.editTxnId ? null : useEPurseStore.getState().activeGroupZoneId ?? null);
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
-  const [groupSplitOpen,  setGroupSplitOpen]  = useState(false);
   // Contact search shown inline on the split page (no nested modal).
   const [addingPerson,  setAddingPerson]  = useState(false);
-  // The split editor page (Paid By / Method / People).
-  const [splitPageOpen,  setSplitPageOpen]  = useState(false);
   // null = I paid. Otherwise the split participant whose money paid the bill.
   const [splitPaidBy,    setSplitPaidBy]    = useState<{ contactId: string | null; name: string } | null>(null);
   const [note,           setNote]           = useState('');
@@ -588,10 +587,6 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     setAddingPerson(false);
   };
 
-  // Derived, not stored: the page can't outlive the split (removing the last
-  // person, or clearing it, takes the page down with it).
-  const showSplitPage = splitPageOpen && canSplitHere;
-
   // Per-person rupee amounts, shown read-only under the Split row.
   const splitBreakdownRows = [
     { name: 'You', amount: rsOf(splitMode === 'percent' ? mySplitPercent ?? 0 : mySplitAmount ?? 0), tag: !effectivePayer ? 'Paid' : undefined },
@@ -602,31 +597,19 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     })),
   ];
 
-  const confirmRemoveSplit = () => {
-    const n = splitPicks.length;
-    setConfirm({
-      title: 'Remove split?',
-      message: `This removes ${n} friend${n === 1 ? '' : 's'} from the split — their share${n === 1 ? '' : 's'} will be taken off Lent too.`,
-      primaryText: 'Remove',
-      destructive: true,
-      secondaryText: 'Cancel',
-      onConfirm: () => {
-        setIsSplit(false);
-        setSplitPicks([]);
-        setMySplitPercent(null);
-        setMySplitAmount(null);
-        setSplitPaidBy(null);
-        setSplitMethod('equal');
-        setAddingPerson(false);
-        setSplitPageOpen(false);
-        setConfirm(null);
-      },
-    });
+  const removeSplitMessage = `This removes ${splitPicks.length} friend${splitPicks.length === 1 ? '' : 's'} from the split — their share${splitPicks.length === 1 ? '' : 's'} will be taken off Lent too.`;
+  const removeSplit = () => {
+    setIsSplit(false);
+    setSplitPicks([]);
+    setMySplitPercent(null);
+    setMySplitAmount(null);
+    setSplitPaidBy(null);
+    setSplitMethod('equal');
+    setAddingPerson(false);
   };
 
   // Leaving the page with nobody added means there's no split after all.
   const closeSplitPage = () => {
-    setSplitPageOpen(false);
     setAddingPerson(false);
     if (splitPicks.length === 0) {
       setIsSplit(false);
@@ -636,24 +619,6 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     }
   };
 
-  useEffect(() => {
-    if (!showSplitPage) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      closeSplitPage();
-      return true;
-    });
-    return () => sub.remove();
-  }, [showSplitPage, splitPicks.length]);
-
-  useEffect(() => {
-    if (!groupSplitOpen) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setGroupSplitOpen(false);
-      return true;
-    });
-    return () => sub.remove();
-  }, [groupSplitOpen]);
-
   const handleSplitDone = () => {
     if (!splitValid) {
       toast.warning(
@@ -662,9 +627,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           ? 'The % shares must add up to 100.'
           : 'The ₹ shares must add up to the total amount.',
       );
-      return;
+      return false;
     }
-    closeSplitPage();
   };
 
   // Category follows the merchant as it's typed, until picked by hand.
@@ -1053,13 +1017,11 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 place, tap one only to change it — so the form doesn't read as a big
                 list to fill in. Only Amount + Merchant are mandatory. */}
             <FormValueCard>
-              <FormValueRow
-                leading={selectedParentDef?.emoji ?? '📌'}
-                label="Category"
-                value={childCategory || 'Select'}
-                badge={autoCategory.isAuto ? 'Auto' : undefined}
-                isPlaceholder={!childCategory}
-                accentColor={selectedParentDef?.color ?? theme.primary}
+              <CategoryValueRow
+                parentCategory={parentCategory}
+                childCategory={childCategory}
+                isAuto={autoCategory.isAuto}
+                accentColor={theme.primary}
                 onPress={() => setCatPickerOpen(true)}
               />
 
@@ -1083,7 +1045,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                     label="Split"
                     value={groupSplit.summary}
                     accentColor={theme.primary}
-                    onPress={() => setGroupSplitOpen(true)}
+                    onPress={splitRoute.open}
                   >
                     <SplitBreakdownLines rows={groupSplit.breakdownRows} />
                   </FormValueRow>
@@ -1099,14 +1061,22 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 <FormValueRow
                   icon="pie-chart-outline"
                   label="Split"
-                  value={splitActive ? splitSummary : splitReady ? 'Add People' : 'Fill amount and merchant first'}
+                  value={splitActive ? splitSummary : 'None'}
                   isPlaceholder={!splitActive}
                   accentColor={theme.primary}
-                  disabled={!splitActive && !splitReady}
                   onPress={() => {
+                    // Never a disabled row (same as Group) — shares need the
+                    // mandatory fields, so say which one is missing instead.
+                    if (!splitActive && !splitReady) {
+                      toast.warning(
+                        'Add the basics first',
+                        splitAmountNum > 0 ? 'Enter the merchant, then split it.' : 'Enter the amount, then split it.',
+                      );
+                      return;
+                    }
                     // Always the split page — people are added THERE ("Add Person").
                     setIsSplit(true);
-                    setSplitPageOpen(true);
+                    splitRoute.open();
                   }}
                 >
                   {splitActive ? <SplitBreakdownLines rows={splitBreakdownRows} /> : null}
@@ -1165,6 +1135,90 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
               </View>
             ) : null}
     </>
+  );
+
+  // The plain split editor's content (rendered by the SplitEditor route).
+  const plainSplitPage = {
+    accentColor: theme.primary,
+    payer: (
+      splitPicks.length > 0
+        ? {
+            options: [
+              { id: 'me', label: 'You' },
+              ...splitPicks.map((p: any, idx: number) => ({ id: pickKey(p, idx), label: p.name })),
+            ],
+            selectedId: effectivePayer ? pickKey(effectivePayer, splitPicks.findIndex((p) => samePick(p, effectivePayer))) : 'me',
+            onSelect: selectPayer,
+            lockedNote: payerLockedToMe
+              ? "You — the money already left your account, so this can't change."
+              : undefined,
+            memoNote: effectivePayer
+              ? `${effectivePayer.name} paid — your share becomes money you owe them.`
+              : undefined,
+          }
+        : undefined
+    ),
+    mode: splitMethod,
+    onModeChange: handleSplitMethod,
+    valueUnit: splitMode,
+    total: splitAmountNum,
+    rows: splitPageRows,
+    peopleAction: (
+      <TouchableOpacity
+        style={styles.addPersonBtn}
+        onPress={() => setAddingPerson((v) => !v)}
+        activeOpacity={0.8}
+        hitSlop={8}
+      >
+        <Ionicons name={addingPerson ? 'close' : 'person-add-outline'} size={16} color={theme.primary} />
+        <Text style={[styles.addPersonText, { color: theme.primary }]}>
+          {addingPerson ? 'Cancel' : 'Add Person'}
+        </Text>
+      </TouchableOpacity>
+    ),
+    peopleFooter: (
+      addingPerson ? (
+        <View style={styles.contactSearchBlock}>
+          <InlineContactPicker
+            onPick={addPerson}
+            excludeIds={splitPicks.map((p) => p.contactId).filter(Boolean)}
+            accentColor={theme.primary}
+            autoFocus
+          />
+        </View>
+      ) : null
+    ),
+    empty: (
+      splitPicks.length === 0 ? (
+        <>
+          <EmptyState
+            compact
+            icon="people-outline"
+            iconSize={64}
+            title="Split This Expense"
+            subtitle="Search for the people you're sharing it with. You can divide it equally or set each share."
+            style={styles.splitEmpty}
+          />
+          <InlineContactPicker onPick={addPerson} accentColor={theme.primary} />
+        </>
+      ) : undefined
+    ),
+  };
+
+  // The split editor is its own stack route; its state stays here (see useSplitEditorRoute).
+  const splitRoute = useSplitEditorRoute(
+    activeGroup
+      ? groupSplit.isShared
+        ? { page: { ...groupSplit.pageProps, title: activeGroup.name, accentColor: theme.primary } }
+        : null
+      : canSplitHere
+        ? {
+            page: plainSplitPage,
+            onDone: handleSplitDone,
+            onClose: closeSplitPage,
+            remove: splitPicks.length > 0 ? { message: removeSplitMessage, onConfirm: removeSplit } : undefined,
+          }
+        : null,
   );
 
   const canSubmit = (parseFloat(amount) || 0) > 0 && merchant.trim().length > 0;
@@ -1302,18 +1356,6 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         </View>
       </Modal>
 
-      {/* ── Group split page — same SplitPage, driven by useGroupSplit. */}
-      {groupSplitOpen && activeGroup && groupSplit.isShared ? (
-        <View style={styles.splitPage}>
-          <SplitPage
-            {...groupSplit.pageProps}
-            title={activeGroup.name}
-            onBack={() => setGroupSplitOpen(false)}
-            onDone={() => setGroupSplitOpen(false)}
-            accentColor={theme.primary}
-          />
-        </View>
-      ) : null}
 
       <GroupPickerSheet
         visible={groupPickerOpen}
@@ -1328,92 +1370,6 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         }}
       />
 
-      {/* ── Split page — the shared SplitPage in a full-screen overlay (not a Modal,
-          so the confirm dialog can still present over it). */}
-      {showSplitPage ? (
-        <View style={styles.splitPage}>
-          <SplitPage
-            onBack={closeSplitPage}
-            onDone={handleSplitDone}
-            accentColor={theme.primary}
-            headerRight={
-              splitPicks.length > 0 ? (
-                <TouchableOpacity
-                  onPress={confirmRemoveSplit}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove split"
-                >
-                  <Ionicons name="trash-outline" size={22} color={colors.danger} />
-                </TouchableOpacity>
-              ) : undefined
-            }
-            payer={
-              splitPicks.length > 0
-                ? {
-                    options: [
-                      { id: 'me', label: 'You' },
-                      ...splitPicks.map((p: any, idx: number) => ({ id: pickKey(p, idx), label: p.name })),
-                    ],
-                    selectedId: effectivePayer ? pickKey(effectivePayer, splitPicks.findIndex((p) => samePick(p, effectivePayer))) : 'me',
-                    onSelect: selectPayer,
-                    lockedNote: payerLockedToMe
-                      ? "You — the money already left your account, so this can't change."
-                      : undefined,
-                    memoNote: effectivePayer
-                      ? `${effectivePayer.name} paid — your share becomes money you owe them.`
-                      : undefined,
-                  }
-                : undefined
-            }
-            mode={splitMethod}
-            onModeChange={handleSplitMethod}
-            valueUnit={splitMode}
-            total={splitAmountNum}
-            rows={splitPageRows}
-            peopleAction={
-              <TouchableOpacity
-                style={styles.addPersonBtn}
-                onPress={() => setAddingPerson((v) => !v)}
-                activeOpacity={0.8}
-                hitSlop={8}
-              >
-                <Ionicons name={addingPerson ? 'close' : 'person-add-outline'} size={16} color={theme.primary} />
-                <Text style={[styles.addPersonText, { color: theme.primary }]}>
-                  {addingPerson ? 'Cancel' : 'Add Person'}
-                </Text>
-              </TouchableOpacity>
-            }
-            peopleFooter={
-              addingPerson ? (
-                <View style={styles.contactSearchBlock}>
-                  <InlineContactPicker
-                    onPick={addPerson}
-                    excludeIds={splitPicks.map((p) => p.contactId).filter(Boolean)}
-                    accentColor={theme.primary}
-                    autoFocus
-                  />
-                </View>
-              ) : null
-            }
-            empty={
-              splitPicks.length === 0 ? (
-                <>
-                  <EmptyState
-                    compact
-                    icon="people-outline"
-                    iconSize={64}
-                    title="Split This Expense"
-                    subtitle="Search for the people you're sharing it with. You can divide it equally or set each share."
-                    style={styles.splitEmpty}
-                  />
-                  <InlineContactPicker onPick={addPerson} accentColor={theme.primary} />
-                </>
-              ) : undefined
-            }
-          />
-        </View>
-      ) : null}
     </View>
   );
 };
@@ -1425,8 +1381,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 const styles = StyleSheet.create({
   // Gray body, kept deliberately (tried white Jul-31, reverted): it separates the
   // scrolling form from the white header/footer bands. The outlined controls
-  // (FormField.tsx) read correctly on gray AND on the white GroupExpenseSheet, which
-  // is the point of them being unfilled — the surface can differ per shell.
+  // (FormField.tsx) read correctly on any surface, which is the point of them
+  // being unfilled — the surface can differ per shell.
   root: { flex: 1, backgroundColor: colors.background },
   headerSafe: {
     backgroundColor: colors.card,
@@ -1454,7 +1410,6 @@ const styles = StyleSheet.create({
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
   // Covers the whole screen (header included).
-  splitPage: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.background },
   // Hairline + gap so the contact search reads as its own block, not part of the shares card.
   contactSearchBlock: { marginTop: spacing.lg, paddingTop: spacing.lg, borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
   splitEmpty: { paddingVertical: spacing.xl },

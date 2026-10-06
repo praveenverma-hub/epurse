@@ -42,7 +42,6 @@ import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
 import SplitConfigModal from './SplitConfigModal';
 import GroupPickerSheet from './GroupPickerSheet';
-import GroupExpenseSheet from './GroupExpenseSheet';
 import CenterModal from './CenterModal';
 import InfoSheet from './InfoSheet';
 import InfoIcon from './InfoIcon';
@@ -323,8 +322,6 @@ const DailyQueueStack = () => {
   const [lbLinkData, setLbLinkData] = useState(null); // { txn, categoryId }
   const [splitTxn,   setSplitTxn]   = useState(null);
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
-  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
-  const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split on a grouped txn
   const [ccBillTxn,  setCcBillTxn]  = useState(null); // txn being reclassified as a CC bill payment
   const [confirm,    setConfirm]    = useState(null);
   const [showCapInfo, setShowCapInfo] = useState(false);
@@ -458,8 +455,8 @@ const DailyQueueStack = () => {
     // Read the freshest txn from the store (category may have just changed in the modal).
     const fresh = useEPurseStore.getState().transactions.find((t) => t.id === pickerTxn.id) || pickerTxn;
     setPickerTxn(null);
-    setEditGroupTxn({ txn: fresh, group });
-  }, [pickerTxn, groups]);
+    navigation.navigate('AddGroupExpense', { groupId: group.id, editTxnId: fresh.id, fromQueue: true });
+  }, [pickerTxn, groups, navigation]);
 
   const handleOpenSplit = useCallback(() => {
     const t = pickerTxn;
@@ -665,7 +662,7 @@ const DailyQueueStack = () => {
           const txn = groupPickerTxn;
           setGroupPickerTxn(null);
           if (group?.type === 'shared') {
-            setGroupExpenseTxn({ txn, group });
+            navigation.navigate('AddGroupExpense', { groupId: group.id, tagTxnId: txn.id, fromQueue: true });
           } else {
             tagTransactionToGroup(txn.id, groupId);
             clearAsReviewed(txn.id);
@@ -673,42 +670,7 @@ const DailyQueueStack = () => {
         }}
       />
 
-      {groupExpenseTxn && (
-        <GroupExpenseSheet
-          visible={!!groupExpenseTxn}
-          group={groupExpenseTxn.group}
-          presetAmount={groupExpenseTxn.txn?.amount}
-          lockPayerToMe={isPayerLockedToMe(groupExpenseTxn.txn)}
-          onClose={() => setGroupExpenseTxn(null)}
-          onAdd={(expenseData) => {
-            tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
-              paidByMemberId: expenseData.paidByMemberId,
-              paidByName: expenseData.paidByName,
-              shares: expenseData.shares,
-            } : null);
-            clearAsReviewed(groupExpenseTxn.txn.id);
-            setGroupExpenseTxn(null);
-          }}
-        />
-      )}
 
-      {/* ── Set / edit who-owes on an already-grouped txn (e.g. Group-Zone-tagged) ── */}
-      {editGroupTxn && (
-        <GroupExpenseSheet
-          visible={!!editGroupTxn}
-          group={editGroupTxn.group}
-          editTxn={editGroupTxn.txn}
-          presetAmount={editGroupTxn.txn?.amount}
-          showCategory
-          lockPayerToMe={isPayerLockedToMe(editGroupTxn.txn)}
-          onClose={() => setEditGroupTxn(null)}
-          onAdd={(expenseData) => {
-            updateGroupExpense(editGroupTxn.txn.id, expenseData);
-            clearAsReviewed(editGroupTxn.txn.id);
-            setEditGroupTxn(null);
-          }}
-        />
-      )}
 
       {/* ── Confirm (hide / ignore / delete) ── */}
       <CenterModal

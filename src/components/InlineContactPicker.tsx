@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
+import { useFocusBorder } from './FormField';
 import {
   fetchContactsForPicker,
   getContactsPermissionStatus,
@@ -35,6 +36,7 @@ export default function InlineContactPicker({ onPick, excludeIds = [], accentCol
   const [contacts, setContacts] = useState<InlineContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [granted, setGranted] = useState(true);
+  const focus = useFocusBorder();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +78,7 @@ export default function InlineContactPicker({ onPick, excludeIds = [], accentCol
 
   return (
     <View>
-      <View style={styles.searchBox}>
+      <View style={[styles.searchBox, focus.focusStyle]}>
         <Ionicons name="search-outline" size={18} color={colors.textMuted} />
         <TextInput
           value={query}
@@ -85,6 +87,8 @@ export default function InlineContactPicker({ onPick, excludeIds = [], accentCol
           placeholderTextColor={colors.textMuted}
           style={styles.searchInput}
           autoFocus={autoFocus}
+          onFocus={focus.onFocus}
+          onBlur={focus.onBlur}
         />
       </View>
 

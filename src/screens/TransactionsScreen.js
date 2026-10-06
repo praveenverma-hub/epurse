@@ -66,7 +66,6 @@ import CenterModal from '../components/CenterModal';
 import DateField from '../components/DateField';
 import { useToast } from '../components/Toast';
 import GroupPickerSheet from '../components/GroupPickerSheet';
-import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import { canSplitTransaction, isPayerLockedToMe } from '../utils/split';
@@ -276,8 +275,6 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [confirm,         setConfirm]         = useState(null);
   const [debugTxn,        setDebugTxn]        = useState(null);
   const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
-  const [groupExpenseTxn, setGroupExpenseTxn] = useState(null); // { txn, group } — tag NEW into group
-  const [editGroupTxn,    setEditGroupTxn]    = useState(null); // { txn, group } — set/edit split
   const [groupDetailTxn,  setGroupDetailTxn]  = useState(null); // { txn, group } — tap a shared-group row → view detail
   const [detailTxn,       setDetailTxn]       = useState(null); // plain txn — tap a row → view detail before edit
   const [ccBillTxn,       setCcBillTxn]       = useState(null); // txn being reclassified as a CC bill payment
@@ -1243,7 +1240,7 @@ const TransactionsScreen = ({ navigation, route }) => {
                 const group = groups.find((g) => g.id === activeTxn.groupId);
                 const fresh = useEPurseStore.getState().transactions.find((t) => t.id === activeTxn.id) || activeTxn;
                 setActiveTxn(null);
-                setEditGroupTxn({ txn: fresh, group });
+                navigation.navigate('AddGroupExpense', { groupId: group.id, editTxnId: fresh.id });
               }
             : undefined
         }
@@ -1338,7 +1335,7 @@ const TransactionsScreen = ({ navigation, route }) => {
           const txn = groupPickerTxn;
           setGroupPickerTxn(null);
           if (group?.type === 'shared') {
-            setGroupExpenseTxn({ txn, group });
+            navigation.navigate('AddGroupExpense', { groupId: group.id, tagTxnId: txn.id });
           } else {
             tagTransactionToGroup(txn.id, groupId);
             toast.success('Added to group');
@@ -1346,58 +1343,18 @@ const TransactionsScreen = ({ navigation, route }) => {
         }}
       />
 
-      {groupExpenseTxn && (
-        <GroupExpenseSheet
-          visible={!!groupExpenseTxn}
-          group={groupExpenseTxn.group}
-          presetAmount={groupExpenseTxn.txn?.amount}
-          lockPayerToMe={isPayerLockedToMe(groupExpenseTxn.txn)}
-          onClose={() => setGroupExpenseTxn(null)}
-          onAdd={(expenseData) => {
-            tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
-              paidByMemberId: expenseData.paidByMemberId,
-              paidByName: expenseData.paidByName,
-              shares: expenseData.shares,
-            } : null);
-            toast.success('Added to group');
-            setGroupExpenseTxn(null);
-          }}
-        />
-      )}
 
-      {editGroupTxn && (
-        <GroupExpenseSheet
-          visible={!!editGroupTxn}
-          group={editGroupTxn.group}
-          editTxn={editGroupTxn.txn}
-          presetAmount={
-            // Lock the amount ONLY for SMS-derived rows, where the bank is the source
-            // of truth. A MANUAL group expense stays editable — the rule
-            // AddGroupExpenseScreen already used. Passing it unconditionally made the
-            // same manual expense editable from the Groups tab but frozen here.
-            editGroupTxn.txn?.source !== 'manual' ? editGroupTxn.txn?.amount : undefined
-          }
-          showCategory
-          lockPayerToMe={isPayerLockedToMe(editGroupTxn.txn)}
-          onClose={() => setEditGroupTxn(null)}
-          onAdd={(expenseData) => {
-            updateGroupExpense(editGroupTxn.txn.id, expenseData);
-            toast.success('Changes saved');
-            setEditGroupTxn(null);
-          }}
-        />
-      )}
 
       {/* Tapping a shared-group transaction card opens this first — who paid,
           per-member shares, your position — with an Edit pill into the same
-          split editor (editGroupTxn) used everywhere else. */}
+          split editor (AddGroupExpense, edit mode) used everywhere else. */}
       <GroupTxnDetailSheet
         txn={groupDetailTxn?.txn || null}
         onClose={() => setGroupDetailTxn(null)}
         onEdit={() => {
           const { txn, group } = groupDetailTxn;
           setGroupDetailTxn(null);
-          setEditGroupTxn({ txn, group });
+          navigation.navigate('AddGroupExpense', { groupId: group.id, editTxnId: txn.id });
         }}
       />
 
