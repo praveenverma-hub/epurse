@@ -1,4 +1,5 @@
 import { TRANSACTION_TYPES } from '../constants/categories';
+import { evenAmounts } from './splitShares';
 
 /** Categories where split does not apply (MVP). */
 export const SPLIT_BLOCKED_CATEGORY_IDS = new Set([
@@ -276,4 +277,32 @@ export function splitParticipantsLabel(splitWith) {
   const first = (splitWith[0].name || '?').trim().split(/\s+/)[0] || '?';
   if (splitWith.length === 1) return first;
   return `${first} +${splitWith.length - 1}`;
+}
+
+/**
+ * Whether a transaction's payer must stay "You" when it's added to / edited in a
+ * group: real money already left one of my accounts (it has an `accountId` and
+ * isn't a memo), so naming someone else as payer would book a debt that never
+ * happened on top of a debit that did. The ONE rule for every group sheet.
+ */
+export function isPayerLockedToMe(txn) {
+  return !!txn && !isMemoTxn(txn) && !!txn.accountId;
+}
+
+/**
+ * The split a SHARED group gets when an expense lands in it without anyone
+ * choosing one (Group Zone auto-tag): I paid, everyone — me included — owes an
+ * equal share. Same default the Add Transaction form shows for a picked group.
+ * Personal groups have no split → null.
+ */
+export function defaultGroupSplit(group, amount) {
+  if (!group || group.type !== 'shared') return null;
+  const ms = group.members || [];
+  const members = ms.some((m) => m.memberId === 'me') ? ms : [{ memberId: 'me', name: 'You' }, ...ms];
+  const parts = evenAmounts(Number(amount) || 0, members.length);
+  return {
+    paidByMemberId: 'me',
+    paidByName: 'You',
+    shares: members.map((m, i) => ({ memberId: m.memberId, name: m.name, shareAmount: parts[i] })),
+  };
 }

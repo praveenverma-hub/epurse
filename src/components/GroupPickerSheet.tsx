@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import Modal from "./AppModal";
+import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
@@ -29,6 +30,10 @@ interface GroupPickerSheetProps {
   /** Called with the chosen group; parent decides whether to open the split sheet next. */
   onPick: (groupId: string, group: Group) => void;
   onCreateNew: () => void;
+  /** Pre-ticks the current group (an entry form re-opening the picker). */
+  selectedId?: string | null;
+  /** Adds a "No Group" row that clears the choice. */
+  onClear?: () => void;
 }
 
 export default function GroupPickerSheet({
@@ -37,6 +42,8 @@ export default function GroupPickerSheet({
   onClose,
   onPick,
   onCreateNew,
+  selectedId = null,
+  onClear,
 }: GroupPickerSheetProps) {
   const theme = useTheme();
   const groups = useEPurseStore((s: any) => s.groups) as Group[];
@@ -48,8 +55,8 @@ export default function GroupPickerSheet({
   // still show when the sheet reopens for txn B. Every close path (pick,
   // dismiss, create-new) flips `visible` false — clear the pick then.
   useEffect(() => {
-    if (!visible) setSelected(null);
-  }, [visible]);
+    setSelected(visible ? selectedId : null);
+  }, [visible, selectedId]);
 
   // Current-month total per group (your share) — personal groups track monthly,
   // so the subtitle must match the Groups tab's "this month" figure, not all-time.
@@ -85,6 +92,24 @@ export default function GroupPickerSheet({
           ) : null}
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+            {onClear ? (
+              <TouchableOpacity
+                style={[styles.row, !selected && { backgroundColor: theme.primary + '14' }]}
+                onPress={() => {
+                  setSelected(null);
+                  onClear();
+                }}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.iconBox, { backgroundColor: colors.divider }]}>
+                  <Ionicons name="remove-circle-outline" size={22} color={colors.textSecondary} />
+                </View>
+                <View style={styles.rowMid}>
+                  <Text style={styles.rowName}>No Group</Text>
+                </View>
+                {!selected && <Text style={[styles.check, { color: theme.primary }]}>✓</Text>}
+              </TouchableOpacity>
+            ) : null}
             {groups.length === 0 && (
               <Text style={styles.empty}>No groups yet. Create one below.</Text>
             )}

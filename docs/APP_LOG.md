@@ -38,6 +38,15 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   allocate" hint; `SplitConfigModal` now uses the util's even-percent preset (You absorb the
   remainder; previously the earliest rows each took +1).
 - **Divider thickness single-source (Oct-6-2026)**: all `StyleSheet.hairlineWidth` separators (56 uses, 36 files) now read `DIVIDER_W` (=1) from `constants/theme.js`; `test:parse` bans the raw hairline.
+- **Group expenses from Home (Oct-6-2026)**: Add Transaction has an optional Group row (starts on the active
+  Group Zone, "No Group" opts out via `skipGroupZone`); a picked group books through `addGroupExpense`. Group split
+  state extracted to `hooks/useGroupSplit.ts`, shared with `GroupExpenseForm`. `test:store` +7 (zone opt-out,
+  Home→personal group). **Open**: step 2 — point the Groups tab's Add Expense at this screen and retire
+  `AddGroupExpenseScreen`.
+- **Group edge cases fixed (Oct-6-2026)**: Group Zone auto-tag into a shared group now splits equally (was unsplit
+  until edited); tagging a plain-split memo to a group with "You" as payer now books the debit (was left as a
+  memo with no account); "Add to group" on a real bank debit locks the payer to You (could book a phantom debt).
+  Shared `isPayerLockedToMe` / `defaultGroupSplit` in split.js. `test:store` +13.
 - Bulk reconciliation test (Sep-2026, `npm run test:bulk`): 35-txn volume/cross-check pass,
   0 app defects — validates balances, spend stats, budget, groups and splits together.
 - **Sep-6-2026: CC bill payment reconciliation fixes** (see Budget/Accounts below for detail).

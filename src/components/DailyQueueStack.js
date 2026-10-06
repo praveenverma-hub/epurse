@@ -36,7 +36,7 @@ import {
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
-import { canSplitTransaction } from '../utils/split';
+import { canSplitTransaction, isPayerLockedToMe } from '../utils/split';
 import CategoryPickerModal from './CategoryPickerModal';
 import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
@@ -678,6 +678,7 @@ const DailyQueueStack = () => {
           visible={!!groupExpenseTxn}
           group={groupExpenseTxn.group}
           presetAmount={groupExpenseTxn.txn?.amount}
+          lockPayerToMe={isPayerLockedToMe(groupExpenseTxn.txn)}
           onClose={() => setGroupExpenseTxn(null)}
           onAdd={(expenseData) => {
             tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
@@ -699,7 +700,7 @@ const DailyQueueStack = () => {
           editTxn={editGroupTxn.txn}
           presetAmount={editGroupTxn.txn?.amount}
           showCategory
-          lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
+          lockPayerToMe={isPayerLockedToMe(editGroupTxn.txn)}
           onClose={() => setEditGroupTxn(null)}
           onAdd={(expenseData) => {
             updateGroupExpense(editGroupTxn.txn.id, expenseData);

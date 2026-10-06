@@ -17,7 +17,7 @@ register(`${PROJECT_ROOT}/src/utils/__tests__/_store-hook.mjs`, import.meta.url)
 const mod = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 const useStore = mod.useEPurseStore || mod.default;
 const beh = await import(`${PROJECT_ROOT}/src/analytics/behavioralSelectors.js`);
-const { isGroupExcluded, isMemoTxn, splitLbChipKind } =
+const { isGroupExcluded, isMemoTxn, splitLbChipKind, isPayerLockedToMe, defaultGroupSplit } =
   await import(`${PROJECT_ROOT}/src/utils/split.js`);
 
 const reset = () =>
@@ -4586,6 +4586,108 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('the cap drops the OLDEST entries, keeping the newest',
     card.paymentHistory[0].amount === 102 && card.paymentHistory[23].amount === 125,
     JSON.stringify(card.paymentHistory.map((h) => h.amount)));
+}
+
+// ── Group edge cases (Oct-6-26, user-reported) ────────────────────────────────
+console.log('\n— group edge cases —');
+{
+  const G = () => useStore.getState();
+  const lbFor = (txnId) => G().lentBorrowed.filter((l) => l.sourceTxnId === txnId);
+  const freshTrip = () => {
+    reset();
+    useStore.setState({ accounts: [{ id: 'aE', type: 'bank', name: 'HDFC ••2222', balance: 10000, primary: true }] });
+    return G().createGroup({ name: 'Trip', type: 'shared',
+      members: [{ memberId: 'm1', name: 'Rohit', contactId: 'c1' }, { memberId: 'm2', name: 'Pooja', contactId: 'c2' }] });
+  };
+
+  // 1. Zone on a SHARED group: a plain add used to land tagged but UNSPLIT.
+  let gid = freshTrip();
+  useStore.setState({ activeGroupZoneId: gid });
+  G().addTransaction({ amount: 300, type: 'debit', merchant: 'Hotel', categoryId: 'travel', accountId: 'aE' });
+  let t = G().transactions[0];
+  check('zone/shared: auto-tagged expense gets the equal split', t.groupSplit?.shares?.length === 3 &&
+    t.groupSplit.shares.every((x) => x.shareAmount === 100), JSON.stringify(t.groupSplit));
+  check('zone/shared: …and each member owes their share', lbFor(t.id).length === 2 &&
+    lbFor(t.id).every((l) => Number(l.amount) === 100), JSON.stringify(lbFor(t.id).map((l) => l.amount)));
+
+  // 1b. Same for an SMS that lands while the zone is on.
+  ingest('HDFCBK', 'Rs.600 debited from A/c XX2222 at RESORT on 22-07-26.', { receivedAt: T0, smsId: 'zone-sms' });
+  t = G().transactions.find((x) => x.smsId === 'zone-sms' || /RESORT/i.test(x.merchant || ''));
+  check('zone/shared SMS: auto-tagged SMS expense is split too', t?.groupId === gid && t?.groupSplit?.shares?.length === 3,
+    JSON.stringify({ g: t?.groupId, s: t?.groupSplit }));
+
+  // 2. Plain split with contacts who are ALSO group members, then added to the group.
+  gid = freshTrip();
+  G().addTransaction({ amount: 300, type: 'debit', merchant: 'Dinner', categoryId: 'food', accountId: 'aE', isSplit: true,
+    myPercent: 34, splitOthers: [{ contactId: 'c1', name: 'Rohit', percent: 33 }, { contactId: 'c2', name: 'Pooja', percent: 33 }] });
+  t = G().transactions[0];
+  check('contacts-in-group: plain split books one LB row per contact', lbFor(t.id).length === 2 && lbFor(t.id).every((l) => !l.groupId));
+  G().tagTransactionToGroup(t.id, gid, defaultGroupSplit(G().groups[0], 300));
+  t = G().transactions[0];
+  check('contacts-in-group: adding to the group swaps the plain split for the group one',
+    !t.isSplit && t.groupSplit && lbFor(t.id).length === 2 && lbFor(t.id).every((l) => l.groupId === gid));
+  check('contacts-in-group: no double debit', G().accounts[0].balance === 9700, `${G().accounts[0].balance}`);
+
+  // 3. A plain-split MEMO (Rohit paid) added to the group with ME as payer.
+  gid = freshTrip();
+  G().addTransaction({ amount: 200, type: 'debit', merchant: 'Cab', categoryId: 'travel', accountId: 'aE', isSplit: true,
+    myPercent: 50, splitPaidBy: { contactId: 'c1', name: 'Rohit' }, splitOthers: [{ contactId: 'c1', name: 'Rohit', percent: 50 }] });
+  t = G().transactions[0];
+  check('memo→group: starts as a memo with no debit', t.isSplitMemo && G().accounts[0].balance === 10000);
+  G().tagTransactionToGroup(t.id, gid, { paidByMemberId: 'me', paidByName: 'You',
+    shares: [{ memberId: 'me', name: 'You', shareAmount: 100 }, { memberId: 'm1', name: 'Rohit', shareAmount: 100 }] });
+  t = G().transactions[0];
+  check('memo→group (I paid): no longer a memo', !t.isSplitMemo && !t.isGroupMemo, JSON.stringify({ s: t.isSplitMemo, g: t.isGroupMemo }));
+  check('memo→group (I paid): the debit the memo never made is booked', t.accountId === 'aE' && G().accounts[0].balance === 9800,
+    `${t.accountId} ${G().accounts[0].balance}`);
+
+  // 3b. Same memo added with ROHIT still the payer — stays someone else's money.
+  gid = freshTrip();
+  G().addTransaction({ amount: 200, type: 'debit', merchant: 'Cab', categoryId: 'travel', accountId: 'aE', isSplit: true,
+    myPercent: 50, splitPaidBy: { contactId: 'c1', name: 'Rohit' }, splitOthers: [{ contactId: 'c1', name: 'Rohit', percent: 50 }] });
+  t = G().transactions[0];
+  G().tagTransactionToGroup(t.id, gid, { paidByMemberId: 'm1', paidByName: 'Rohit',
+    shares: [{ memberId: 'me', name: 'You', shareAmount: 100 }, { memberId: 'm1', name: 'Rohit', shareAmount: 100 }] });
+  t = G().transactions[0];
+  check('memo→group (Rohit paid): becomes a GROUP memo, still no debit', t.isGroupMemo && !t.isSplitMemo && !t.accountId &&
+    G().accounts[0].balance === 10000, JSON.stringify({ g: t.isGroupMemo, a: t.accountId, b: G().accounts[0].balance }));
+
+  // 4. The payer-lock rule every group sheet now shares.
+  check('payer lock: a real account debit is locked to You', isPayerLockedToMe({ accountId: 'aE' }));
+  check('payer lock: a memo is not', !isPayerLockedToMe({ isSplitMemo: true, memoAccountId: 'aE' }) && !isPayerLockedToMe({ isGroupMemo: true }));
+  check('defaultGroupSplit: personal group → no split', defaultGroupSplit({ type: 'personal' }, 100) === null);
+}
+
+// ── Home form ↔ Group Zone (Oct-6-26) ──────────────────────────────────────────
+// The Add Transaction form now offers the zone group in its own Group row. When the
+// user picks "No Group" it sends `skipGroupZone`, and the store must respect that
+// instead of re-tagging the expense behind their back.
+console.log('\n— home form vs group zone —');
+{
+  reset();
+  const G = () => useStore.getState();
+  useStore.setState({ accounts: [{ id: 'accZ', type: 'bank', name: 'HDFC ••1111', balance: 5000, primary: true }] });
+  const zid = G().createGroup({ name: 'Zone Trip', type: 'personal' });
+  useStore.setState({ activeGroupZoneId: zid });
+
+  G().addTransaction({ amount: 100, type: 'debit', merchant: 'Chai', categoryId: 'food', accountId: 'accZ' });
+  const tagged = G().transactions.find((t) => t.merchant === 'Chai');
+  check('zone: a plain add with no opt-out is still auto-tagged (unchanged behaviour)', tagged?.groupId === zid, `${tagged?.groupId}`);
+
+  G().addTransaction({ amount: 200, type: 'debit', merchant: 'Snacks', categoryId: 'food', accountId: 'accZ', skipGroupZone: true });
+  const opted = G().transactions.find((t) => t.merchant === 'Snacks');
+  check('zone: skipGroupZone keeps a "No Group" choice untagged', !opted?.groupId, `${opted?.groupId}`);
+  check('zone: skipGroupZone is not persisted on the transaction', !('skipGroupZone' in (opted || {})));
+  check('zone: the opted-out expense still debits the account', G().accounts.find((a) => a.id === 'accZ').balance === 4700,
+    `${G().accounts.find((a) => a.id === 'accZ').balance}`);
+
+  // Home form → personal group: books through addGroupExpense with no shares.
+  const before = G().groups.find((g) => g.id === zid).totalSpend || 0;
+  G().addGroupExpense(zid, { amount: 300, merchant: 'Lunch', paidByMemberId: 'me', paidByName: 'You', shares: [], accountId: 'accZ' });
+  const lunch = G().transactions.find((t) => t.merchant === 'Lunch');
+  check('home→personal group: tagged, no groupSplit', lunch?.groupId === zid && !lunch?.groupSplit, JSON.stringify(lunch?.groupSplit));
+  check('home→personal group: group total grows by the amount', (G().groups.find((g) => g.id === zid).totalSpend || 0) === before + 300);
+  check('home→personal group: uncategorised falls back to "other"', lunch?.categoryId === 'other', lunch?.categoryId);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

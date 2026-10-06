@@ -96,6 +96,7 @@ import {
   spendContribution,
   countsForSpend,
   buildGroupLbRows,
+  defaultGroupSplit,
 } from '../utils/split';
 
 // =============================================================================
@@ -3289,7 +3290,9 @@ export const useEPurseStore = create(
             `IdM${String(nextSeq).padStart(4, '0')}`;
           // contactInfo is consumed locally to spawn an LB entry — do not
           // forward it onto the persisted transaction shape.
-          const { splitOthers, contactInfo, ...txnRest } = txn;
+          // skipGroupZone: the entry form already offered the zone group and the
+          // user chose otherwise — don't re-tag behind their back. Not persisted.
+          const { splitOthers, contactInfo, skipGroupZone, ...txnRest } = txn;
           const newTxn = {
             id,
             createdAt: new Date().toISOString(),
@@ -3443,12 +3446,15 @@ export const useEPurseStore = create(
             clearAccountMeta(newTxn);
           }
 
-          // Group Zone: auto-tag a plain expense to the active zone group (no split —
-          // the user refines/untags later). Skips income, self/LB, splits, already-tagged.
+          // Group Zone: auto-tag a plain expense to the active zone group. A SHARED zone
+          // gets the default equal split (defaultGroupSplit) — tagging with no split left
+          // it unsplit until edited from the Groups tab. Skips income, self/LB, splits,
+          // already-tagged.
           let zoneGroups = s.groups;
           const zoneId = s.activeGroupZoneId;
           if (
             zoneId &&
+            !skipGroupZone &&
             !newTxn.groupId &&
             !newTxn.isSplit &&
             newTxn.type === TRANSACTION_TYPES.DEBIT &&
@@ -3456,6 +3462,12 @@ export const useEPurseStore = create(
             s.groups.some((g) => g.id === zoneId)
           ) {
             newTxn.groupId = zoneId;
+            const zoneGroup = s.groups.find((g) => g.id === zoneId);
+            const zoneSplit = defaultGroupSplit(zoneGroup, newTxn.amount);
+            if (zoneSplit) {
+              newTxn.groupSplit = zoneSplit;
+              nextLent = [...buildGroupLbRows(zoneGroup, newTxn), ...nextLent];
+            }
             zoneGroups = s.groups.map((g) =>
               g.id === zoneId
                 ? { ...g, totalSpend: (g.totalSpend || 0) + (Number(newTxn.amount) || 0), lastActivityAt: new Date().toISOString() }
@@ -3555,14 +3567,31 @@ export const useEPurseStore = create(
           const amount = Number(txn.amount) || 0;
           const nowIso = new Date().toISOString();
 
-          // Build the updated txn. A shared-group split SUPERSEDES any direct split representation.
-          const updatedTxn = { ...txn, groupId };
+          // Build the updated txn. A shared-group split SUPERSEDES any direct split
+          // representation — dropped via clearPlainSplit (the one path that drops a
+          // plain split), so a plain-split MEMO doesn't stay a memo under a group that
+          // says I paid (no account would ever be debited).
+          let updatedTxn = { ...txn, groupId };
+          let accounts = s.accounts;
           if (groupSplit) {
             updatedTxn.groupSplit = groupSplit;
             if (group.type === 'shared') {
-              updatedTxn.isSplit = false;
-              updatedTxn.splitWith = [];
+              const wasPlainMemo = !!txn.isSplitMemo;
+              const { patch, restoreAccountId } = txn.isSplit ? clearPlainSplit(txn) : { patch: {}, restoreAccountId: null };
+              updatedTxn = { ...updatedTxn, ...patch, isSplit: false, splitWith: [] };
               delete updatedTxn.myShareAmount;
+              if (groupSplit.paidByMemberId === 'me') {
+                delete updatedTxn.isGroupMemo;
+                // My money now paid: book the debit the memo never made.
+                if (wasPlainMemo && restoreAccountId) {
+                  updatedTxn.accountId = restoreAccountId;
+                  accounts = applyDelta(accounts, restoreAccountId, updatedTxn);
+                }
+              } else if (wasPlainMemo) {
+                // Still someone else's money — stays a memo, now a group one.
+                delete updatedTxn.accountId;
+                updatedTxn.isGroupMemo = true;
+              }
             }
           }
           const updatedTxns = s.transactions.map((t) => (t.id === txnId ? updatedTxn : t));
@@ -3584,7 +3613,7 @@ export const useEPurseStore = create(
             }
             return g;
           });
-          return { transactions: updatedTxns, groups: updatedGroups, lentBorrowed };
+          return { transactions: updatedTxns, groups: updatedGroups, lentBorrowed, ...(accounts !== s.accounts ? { accounts } : {}) };
         });
       },
 
@@ -4509,7 +4538,9 @@ export const useEPurseStore = create(
               !t.isSplit &&
               !NON_SPEND_CATS.has(t.categoryId)
             ) {
-              get().tagTransactionToGroup(t.id, zoneId);
+              get().tagTransactionToGroup(
+                t.id, zoneId, defaultGroupSplit(get().groups.find((g) => g.id === zoneId), t.amount),
+              );
             }
           });
         }

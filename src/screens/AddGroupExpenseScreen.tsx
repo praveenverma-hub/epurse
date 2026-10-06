@@ -21,15 +21,11 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import GroupExpenseForm from '../components/GroupExpenseForm';
-import GradientButtonBase from '../components/GradientButton';
+import FormFooterActions from '../components/FormFooterActions';
 import { requestAndGetLocation } from '../services/locationService';
 import { useToast } from '../components/Toast';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupExpenseData } from '../types/group';
-
-const GradientButton = GradientButtonBase as React.FC<{
-  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean; flat?: boolean;
-}>;
 
 interface NavProp {
   goBack: () => void;
@@ -118,18 +114,13 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
             />
           </ScrollView>
 
-          {/* Pinned bottom bar — shown once the amount is filled. */}
-          {ready ? (
+          {/* Pinned bottom bar — Cancel always; the submit once amount + merchant are filled. */}
           <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
-            <GradientButton
-              flat
-              title={isEdit ? 'Save changes' : 'Add Expense'}
-              onPress={() => submitRef.current?.()}
-              loading={submitting}
-              style={{ width: '100%' }}
+            <FormFooterActions
+              onCancel={() => navigation.goBack()}
+              submit={ready ? { title: isEdit ? 'Save Changes' : 'Add Expense', onPress: () => submitRef.current?.(), loading: submitting } : null}
             />
           </View>
-          ) : null}
         </KeyboardAvoidingView>
       ) : (
         <View style={styles.missing}>

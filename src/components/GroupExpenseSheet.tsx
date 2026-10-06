@@ -20,13 +20,9 @@ import { colors, radius, spacing, typography as typographyBase } from '../consta
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import GroupExpenseForm from './GroupExpenseForm';
 import SheetCloseButton from './SheetCloseButton';
-import GradientButtonBase from './GradientButton';
+import FormFooterActions from './FormFooterActions';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupExpenseData } from '../types/group';
-
-const GradientButton = GradientButtonBase as React.FC<{
-  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean; flat?: boolean;
-}>;
 
 interface GroupExpenseSheetProps {
   visible: boolean;
@@ -97,20 +93,12 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
               />
             </ScrollView>
 
-            {/* Pinned footer — Cancel + Add side by side. */}
+            {/* Pinned footer — the shared Cancel + submit row. */}
             <View style={styles.footer}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8} disabled={submitting}>
-                <Text style={styles.cancelTxt}>Cancel</Text>
-              </TouchableOpacity>
-              {ready ? (
-              <GradientButton
-                flat
-                title={isEdit ? 'Save' : 'Add Expense'}
-                onPress={() => submitRef.current?.()}
-                loading={submitting}
-                style={styles.submitBtn}
+              <FormFooterActions
+                onCancel={onClose}
+                submit={ready ? { title: isEdit ? 'Save' : 'Add Expense', onPress: () => submitRef.current?.(), loading: submitting } : null}
               />
-              ) : null}
             </View>
           </View>
         </View>
@@ -141,11 +129,5 @@ const styles = StyleSheet.create({
   body: { flexShrink: 1 },
   bodyContent: { paddingBottom: spacing.sm },
   // Pinned footer: Cancel (ghost) + Add (primary) side by side.
-  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
-  cancelBtn: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
-  },
-  cancelTxt:   { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
-  submitBtn:   { flex: 1 },
+  footer: { marginTop: spacing.md },
 });

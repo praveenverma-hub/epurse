@@ -86,7 +86,7 @@ import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
-import { canSplitTransaction, countsForSpend, debitDisplayAmount } from '../utils/split';
+import { canSplitTransaction, countsForSpend, debitDisplayAmount, isPayerLockedToMe } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
 
 import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
@@ -1155,6 +1155,7 @@ const DashboardScreen = ({ navigation }) => {
           visible={!!groupExpenseTxn}
           group={groupExpenseTxn.group}
           presetAmount={groupExpenseTxn.txn?.amount}
+          lockPayerToMe={isPayerLockedToMe(groupExpenseTxn.txn)}
           onClose={() => setGroupExpenseTxn(null)}
           onAdd={(expenseData) => {
             tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
@@ -1181,7 +1182,7 @@ const DashboardScreen = ({ navigation }) => {
             editGroupTxn.txn?.source !== 'manual' ? editGroupTxn.txn?.amount : undefined
           }
           showCategory
-          lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
+          lockPayerToMe={isPayerLockedToMe(editGroupTxn.txn)}
           onClose={() => setEditGroupTxn(null)}
           onAdd={(expenseData) => {
             updateGroupExpense(editGroupTxn.txn.id, expenseData);

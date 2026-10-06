@@ -69,7 +69,7 @@ import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupExpenseSheet from '../components/GroupExpenseSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
-import { canSplitTransaction } from '../utils/split';
+import { canSplitTransaction, isPayerLockedToMe } from '../utils/split';
 import { computeLedgerTotals } from '../utils/ledgerTotals';
 import { spendExcluded, firstDataMonthKey } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
@@ -1351,6 +1351,7 @@ const TransactionsScreen = ({ navigation, route }) => {
           visible={!!groupExpenseTxn}
           group={groupExpenseTxn.group}
           presetAmount={groupExpenseTxn.txn?.amount}
+          lockPayerToMe={isPayerLockedToMe(groupExpenseTxn.txn)}
           onClose={() => setGroupExpenseTxn(null)}
           onAdd={(expenseData) => {
             tagTransactionToGroup(groupExpenseTxn.txn.id, groupExpenseTxn.group.id, expenseData.shares?.length ? {
@@ -1377,7 +1378,7 @@ const TransactionsScreen = ({ navigation, route }) => {
             editGroupTxn.txn?.source !== 'manual' ? editGroupTxn.txn?.amount : undefined
           }
           showCategory
-          lockPayerToMe={!editGroupTxn.txn?.isGroupMemo && !!editGroupTxn.txn?.accountId}
+          lockPayerToMe={isPayerLockedToMe(editGroupTxn.txn)}
           onClose={() => setEditGroupTxn(null)}
           onAdd={(expenseData) => {
             updateGroupExpense(editGroupTxn.txn.id, expenseData);

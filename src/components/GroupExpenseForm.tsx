@@ -4,14 +4,14 @@
 //   • GroupExpenseSheet  — bottom-sheet modal (tagging an existing txn from Activity).
 //   • AddGroupExpenseScreen — full screen (the Groups-tab "+" FAB).
 // Personal groups: amount + merchant + category.
-// Shared groups:  same + who paid + split among members.
+// Shared groups:  same + who paid + split among members (state in useGroupSplit,
+// shared with AddTransactionScreen's group mode).
 // =============================================================================
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButtonBase from './GradientButton';
-import { formatCurrency } from '../utils/format';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { useEPurseStore } from '../store/ePurseStore';
@@ -27,12 +27,12 @@ import {
   FormValueCard,
 } from './FormField';
 import AccountField from './AccountField';
-import SplitPage, { SPLIT_MODE_LABEL, type SplitMode } from './SplitPage';
-import { evenAmounts, fullOwedShares } from '../utils/splitShares';
+import SplitPage from './SplitPage';
+import { useGroupSplit } from '../hooks/useGroupSplit';
 import SplitBreakdownLines from './SplitBreakdownLines';
 import Modal from './AppModal';
 import { defaultAccountId } from '../utils/defaultAccount';
-import type { Group, GroupShare, GroupExpenseData } from '../types/group';
+import type { Group, GroupExpenseData } from '../types/group';
 
 const GradientButton = GradientButtonBase as React.FC<{
   title: string;
@@ -97,10 +97,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const [date, setDate] = useState(() => new Date());
   const [merchant, setMerchant] = useState('');
   const [note, setNote] = useState('');
-  const [payerIdx, setPayerIdx] = useState(0); // index into allMembers
-  const [splitMode, setSplitMode] = useState<SplitMode>('equal');
-  const [shares, setShares] = useState<GroupShare[]>([]);
-  const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [accountId, setAccountId] = useState<string | null>(null);
   const [parentCat, setParentCat] = useState<string | null>(null);
   const [childCat, setChildCat] = useState<string | null>(null);
@@ -108,26 +104,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   // The split editor page (Paid By / Method / People).
   const [splitPageOpen, setSplitPageOpen] = useState(false);
 
-  const isShared = group?.type === 'shared';
-  // Guarantee the built-in 'me' member is present for shared groups, even if a stored
-  // group lost it (e.g. an older edit) — so "You" always shows in payer + split.
-  // For personal groups, use a single-member array ['me'] for the split calculation
-  // (personal groups have no member list, but the user is always the implicit payer).
-  const allMembers = useMemo(() => {
-    if (!isShared) {
-      // Personal group → single implicit member 'me' for split math.
-      return [{ memberId: 'me', name: 'You', isMe: true }];
-    }
-    const ms = group?.members || [];
-    if (!ms.some((m) => m.memberId === 'me')) {
-      return [{ memberId: 'me', name: 'You', isMe: true }, ...ms];
-    }
-    return ms;
-  }, [group, isShared]);
   const amount = parseAmount(amountRaw);
-  const meIdx = useMemo(() => Math.max(0, allMembers.findIndex((m) => m.isMe || m.memberId === 'me')), [allMembers]);
-  // memberId of the currently-selected payer — drives the "Paid / owes" labels.
-  const payerMemberId = allMembers[payerIdx]?.memberId;
+  const split = useGroupSplit({ group, amount, active: visible !== false, editTxn, lockPayerToMe });
+  const { isShared, payerIsMe } = split;
   // Tagging an existing txn → amount comes from that txn and is fixed (so the
   // split math matches the real transaction). Manual add → free entry.
   const amountLocked = typeof presetAmount === 'number' && presetAmount > 0;
@@ -139,7 +118,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     setSplitPageOpen(false);
 
     if (editTxn) {
-      const eg = editTxn.groupSplit;
       setAmountRaw(String(editTxn.amount ?? ''));
       setDate(editTxn.createdAt ? new Date(editTxn.createdAt) : new Date());
       // 'Group Expense' is the placeholder default — show it as empty so the hint shows.
@@ -148,47 +126,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       setParentCat(editTxn.parentCategory ?? null);
       setChildCat(editTxn.childCategory ?? null);
       setAccountId(editTxn.accountId ?? defaultAccountId(accounts));
-
-      if (eg && eg.shares?.length) {
-        const pIdx = allMembers.findIndex((m) => m.memberId === eg.paidByMemberId);
-        setPayerIdx(pIdx >= 0 ? pIdx : 0);
-        const amt = Number(editTxn.amount) || 0;
-        setShares(
-          eg.shares.map((sh: any) => ({
-            memberId: sh.memberId,
-            name: sh.name,
-            shareAmount: Number(sh.shareAmount) || 0,
-            percent: amt > 0 ? Math.round(((Number(sh.shareAmount) || 0) / amt) * 100) : 0,
-          })),
-        );
-        // Detect the ORIGINAL split shape so editing behaves naturally and stays
-        // in sync (equal/fullOwed auto-rebalance when the amount changes; only a
-        // genuinely custom split locks to manual 'amount' entry):
-        //   • equal    → all members' shares are (near-)equal
-        //   • fullOwed → payer's share is 0 and the others' shares are (near-)equal
-        //   • else     → custom amounts
-        const payerId = eg.paidByMemberId;
-        const eq = (vals: number[]) => vals.length > 0 && vals.every((v) => Math.abs(v - vals[0]) <= 1);
-        const allVals = eg.shares.map((x: any) => Number(x.shareAmount) || 0);
-        const payerShare = Number(eg.shares.find((x: any) => x.memberId === payerId)?.shareAmount) || 0;
-        const otherVals = eg.shares.filter((x: any) => x.memberId !== payerId).map((x: any) => Number(x.shareAmount) || 0);
-        setSplitMode(
-          eg.shares.length > 1 && eq(allVals)
-            ? 'equal'
-            : payerShare === 0 && otherVals.length > 0 && eq(otherVals)
-              ? 'fullOwed'
-              : 'amount',
-        );
-      } else {
-        setPayerIdx(0);
-        setSplitMode('equal');
-        if (group?.members) {
-          setShares(group.members.map((m) => ({
-            memberId: m.memberId, name: m.name, shareAmount: 0,
-            percent: Math.round(100 / group.members.length),
-          })));
-        }
-      }
       return;
     }
 
@@ -196,89 +133,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     setDate(new Date());
     setMerchant('');
     setNote('');
-    setPayerIdx(0);
-    setSplitMode('equal');
     setAccountId(defaultAccountId(accounts));
     setParentCat(null);
     setChildCat(null);
-    if (group?.members) {
-      setShares(
-        group.members.map((m) => ({
-          memberId: m.memberId,
-          name: m.name,
-          shareAmount: 0,
-          percent: Math.round(100 / group.members.length),
-        })),
-      );
-    }
-  }, [visible, group, accounts, amountLocked, presetAmount, editTxn, allMembers]);
-
-  // When the payer is locked to me (editing a real account debit), force it — runs
-  // after the reset/prefill effect so it overrides any prefilled payer.
-  useEffect(() => {
-    if (lockPayerToMe) setPayerIdx(meIdx);
-  }, [lockPayerToMe, meIdx, visible, editTxn]);
-
-  // Initialize selectedMembers when group changes or form resets
-  useEffect(() => {
-    if (visible === false) return;
-    if (editTxn?.groupSplit?.shares) {
-      // In edit mode, select members who have non-zero shares
-      const active = new Set<string>(
-        editTxn.groupSplit.shares.filter((s: any) => (Number(s.shareAmount) || 0) > 0).map((s: any) => String(s.memberId))
-      );
-      setSelectedMembers(active);
-    } else {
-      // Default: select all members
-      setSelectedMembers(new Set(allMembers.map(m => m.memberId)));
-    }
-  }, [visible, allMembers, editTxn]);
-
-  // Auto-split shares (equal / fullOwed) are computed fresh at submit time
-  // (handleAdd) to avoid races where submitRef reads a stale snapshot. This effect
-  // only fills the display preview; the saved shares come from handleAdd's live calc.
-  useEffect(() => {
-    if ((splitMode !== 'equal' && splitMode !== 'fullOwed') || !allMembers.length) return;
-    const amt = amount || 0;
-
-    if (splitMode === 'fullOwed') {
-      // Payer covers the bill; the OTHER members split the full amount equally.
-      const owed = fullOwedShares(amt, allMembers.length, payerIdx);
-      setShares(allMembers.map((m, i) => ({
-        memberId: m.memberId, name: m.name, shareAmount: owed[i], percent: amt > 0 ? Math.round((owed[i] / amt) * 100) : 0,
-      })));
-      return;
-    }
-
-    // Equal split among SELECTED members only
-    const selected = allMembers.filter((m) => selectedMembers.has(m.memberId));
-    const parts = evenAmounts(amt, selected.length);
-    const n = selected.length || 1;
-    setShares(allMembers.map((m) => {
-      const k = selected.findIndex((x) => x.memberId === m.memberId);
-      return { memberId: m.memberId, name: m.name, shareAmount: k >= 0 ? parts[k] : 0, percent: k >= 0 ? Math.round(100 / n) : 0 };
-    }));
-  }, [amount, splitMode, allMembers, payerIdx, selectedMembers]);
-
-  const updateShare = useCallback((idx: number, value: number, field: 'percent' | 'shareAmount') => {
-    setShares((prev) => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
-      return next;
-    });
-  }, []);
-
-  const handleSetMode = useCallback((m: SplitMode) => {
-    setSplitMode((prev) => {
-      // Switching INTO manual ₹ entry → clear the fields so the user types each
-      // amount from scratch (0/empty by default). equal & fullOwed are seeded by
-      // the auto-split effect; percent keeps its values.
-      if (m === 'amount' && prev !== 'amount') {
-        setShares((s) => s.map((x) => ({ ...x, shareAmount: 0 })));
-      }
-      return m;
-    });
-  }, []);
+  }, [visible, group, accounts, amountLocked, presetAmount, editTxn]);
 
   const handleAdd = () => {
     if (amount <= 0) {
@@ -293,70 +151,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       toast.warning('Missing merchant', 'Please enter who you paid / received from.');
       return;
     }
-    const payer = allMembers[payerIdx] || { memberId: 'me', name: 'You' };
-
-    // Resolve final per-member shareAmounts from the active split mode, and validate
-    // they reconcile to the full amount (so account delta = my share + lent legs).
-    let finalShares: GroupShare[] = [];
-    if (isShared) {
-      if (splitMode === 'percent') {
-        const sumPct = shares.reduce((s, x) => s + (Number(x.percent) || 0), 0);
-        if (Math.abs(sumPct - 100) > 0.5) {
-          toast.warning('Percentages must total 100%', `Currently ${Math.round(sumPct)}%.`);
-          return;
-        }
-        // Convert % → ₹; the last member absorbs the rounding remainder so shares sum exactly.
-        let allocated = 0;
-        finalShares = shares.map((x, i) => {
-          const amt = i === shares.length - 1
-            ? parseFloat((amount - allocated).toFixed(2))
-            : parseFloat(((amount * (Number(x.percent) || 0)) / 100).toFixed(2));
-          allocated = parseFloat((allocated + amt).toFixed(2));
-          return { memberId: x.memberId, name: x.name, shareAmount: amt };
-        });
-      } else if (splitMode === 'amount') {
-        const sumAmt = shares.reduce((s, x) => s + (Number(x.shareAmount) || 0), 0);
-        if (Math.abs(sumAmt - amount) > 0.5) {
-          toast.warning('Shares must total the amount', `Currently ${formatCurrency(sumAmt)} of ${formatCurrency(amount)}.`);
-          return;
-        }
-        finalShares = shares.map((x) => ({ memberId: x.memberId, name: x.name, shareAmount: Number(x.shareAmount) || 0 }));
-      } else if (splitMode === 'fullOwed') {
-        // Payer covers the bill (share 0); the OTHER members owe — equal by default
-        // but each is editable. If untouched (others sum to ~0), fall back to an
-        // equal split; otherwise honour the entered amounts and validate the total.
-        const others = shares.filter((x) => x.memberId !== payerMemberId);
-        const sumOthers = others.reduce((s, x) => s + (Number(x.shareAmount) || 0), 0);
-        if (sumOthers <= 0.005) {
-          const parts = evenAmounts(amount, others.length || 1);
-          const amtBy: Record<string, number> = {};
-          others.forEach((x, k) => { amtBy[x.memberId] = parts[k]; });
-          finalShares = shares.map((x) => ({ memberId: x.memberId, name: x.name, shareAmount: x.memberId === payerMemberId ? 0 : (amtBy[x.memberId] || 0) }));
-        } else {
-          if (Math.abs(sumOthers - amount) > 0.5) {
-            toast.warning('Shares must total the amount', `Others total ${formatCurrency(sumOthers)} of ${formatCurrency(amount)}.`);
-            return;
-          }
-          finalShares = shares.map((x) => ({ memberId: x.memberId, name: x.name, shareAmount: x.memberId === payerMemberId ? 0 : (Number(x.shareAmount) || 0) }));
-        }
-      } else {
-        // equal — compute fresh from the live amount + SELECTED members at submit time.
-        // Do NOT trust the `shares` STATE here: it's filled asynchronously by the
-        // equal-split effect, and the pinned-footer submit (submitRef) can fire
-        // while that snapshot still holds 0 for "me" — which, since equal mode has
-        // no sum reconciliation, would silently persist a 0 share (the bug where
-        // the txn/group card showed ₹0 while totals were correct).
-        const selected = allMembers.filter(m => selectedMembers.has(m.memberId));
-        if (selected.length === 0) {
-          toast.warning('No members selected', 'Select at least one member for equal split.');
-          return;
-        }
-        const parts = evenAmounts(amount, selected.length);
-        finalShares = allMembers.map((m) => {
-          const k = selected.findIndex((x) => x.memberId === m.memberId);
-          return { memberId: m.memberId, name: m.name, shareAmount: k >= 0 ? parts[k] : 0 };
-        });
-      }
+    const res = split.resolveShares();
+    if (!res.ok) {
+      toast.warning(res.title, res.message);
+      return;
     }
 
     const expenseData: GroupExpenseData = {
@@ -373,10 +171,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       // categoryId is derived from the two-tier labels by addGroupExpense; pass labels through.
       ...(parentCat ? { parentCategory: parentCat } : {}),
       ...(childCat ? { childCategory: childCat } : {}),
-      paidByMemberId: payer.memberId,
-      paidByName: payer.name,
-      shares: finalShares,
-      accountId: payer.memberId === 'me' ? accountId : null,
+      paidByMemberId: res.paidByMemberId,
+      paidByName: res.paidByName,
+      shares: res.shares,
+      accountId: res.paidByMemberId === 'me' ? accountId : null,
     };
     onAdd(expenseData);
   };
@@ -389,25 +187,6 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
 
   // Expose the latest submit handler so a shell can drive its pinned footer button.
   useEffect(() => { if (submitRef) submitRef.current = handleAdd; });
-
-  // ── Split summary (the one-line row on the main form) ───────────────────────
-  const payerName = allMembers[payerIdx]?.isMe ? 'You' : allMembers[payerIdx]?.name || 'You';
-  const participantCount =
-    splitMode === 'equal'
-      ? selectedMembers.size
-      : splitMode === 'fullOwed'
-        ? Math.max(0, allMembers.length - 1)
-        : shares.filter((x) => (Number(x.shareAmount) || 0) > 0 || (Number(x.percent) || 0) > 0).length;
-  const payerIsMe = !!allMembers[payerIdx]?.isMe;
-  // Per-member rupee amounts for the read-only breakdown under the Split row.
-  // Percent mode stores only `percent` until submit, so derive ₹ from it here.
-  const splitBreakdownRows = shares
-    .map((x) => ({
-      name: x.memberId === 'me' ? 'You' : x.name || 'Member',
-      amount: splitMode === 'percent' ? (amount * (Number(x.percent) || 0)) / 100 : Number(x.shareAmount) || 0,
-      tag: x.memberId === payerMemberId ? 'Paid' : undefined,
-    }))
-    .filter((r) => r.amount > 0);
 
   return (
     <>
@@ -455,13 +234,13 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
             what) lives on its own page. Shared groups only. */}
         {isShared && (
           <FormValueRow
-            icon="people-outline"
+            icon="pie-chart-outline"
             label="Split"
-            value={`${payerName} paid · ${SPLIT_MODE_LABEL[splitMode]}`}
+            value={split.summary}
             accentColor={theme.primary}
             onPress={() => setSplitPageOpen(true)}
           >
-            <SplitBreakdownLines rows={splitBreakdownRows} />
+            <SplitBreakdownLines rows={split.breakdownRows} />
           </FormValueRow>
         )}
 
@@ -506,38 +285,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
             onBack={() => setSplitPageOpen(false)}
             onDone={() => setSplitPageOpen(false)}
             accentColor={theme.primary}
-            payer={{
-              options: allMembers.map((m) => ({ id: m.memberId, label: m.isMe ? 'You' : m.name })),
-              selectedId: payerMemberId ?? 'me',
-              onSelect: (id) => setPayerIdx(Math.max(0, allMembers.findIndex((m) => m.memberId === id))),
-              lockedNote: lockPayerToMe ? "You — the money already left your account, so this can't change." : undefined,
-            }}
-            mode={splitMode}
-            onModeChange={handleSetMode}
-            valueUnit={splitMode === 'percent' ? 'percent' : 'amount'}
-            total={amount}
-            rows={shares.map((s, idx) => {
-              const isPayer = s.memberId === payerMemberId;
-              return {
-                id: s.memberId,
-                name: s.name || 'Member',
-                isMe: s.memberId === 'me',
-                isPayer,
-                percent: Number(s.percent) || 0,
-                amount: Number(s.shareAmount) || 0,
-                // equal → ticks; fullOwed → only the payer is locked (0).
-                editable: splitMode === 'amount' || splitMode === 'percent' || (splitMode === 'fullOwed' && !isPayer),
-                onChange: (v: number) => updateShare(idx, v, splitMode === 'percent' ? 'percent' : 'shareAmount'),
-                checked: selectedMembers.has(s.memberId),
-                onToggle: splitMode === 'equal'
-                  ? () => setSelectedMembers((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(s.memberId)) next.delete(s.memberId); else next.add(s.memberId);
-                      return next;
-                    })
-                  : undefined,
-              };
-            })}
+            {...split.pageProps}
           />
         </Modal>
       )}

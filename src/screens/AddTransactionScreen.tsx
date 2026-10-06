@@ -48,6 +48,7 @@ import {
 import SplitPage, { SPLIT_MODE_LABEL, type SplitMode, type SplitPageRow } from '../components/SplitPage';
 import { evenPercents, fullOwedShares } from '../utils/splitShares';
 import SplitBreakdownLines from '../components/SplitBreakdownLines';
+import FormFooterActions from '../components/FormFooterActions';
 import EmptyState from '../components/EmptyState';
 import AccountField from '../components/AccountField';
 import UnderlineTabBar from '../components/UnderlineTabBar';
@@ -67,6 +68,9 @@ const GradientButton: React.FC<{
   icon?: React.ReactNode;
 }> = GradientButtonBase as any;
 import InlineContactPicker from '../components/InlineContactPicker';
+import GroupPickerSheet from '../components/GroupPickerSheet';
+import { useGroupSplit } from '../hooks/useGroupSplit';
+import type { Group } from '../types/group';
 import LinkContactModal from '../components/LinkContactModal';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
@@ -238,6 +242,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const updateTransaction = useEPurseStore((s: any) => s.updateTransaction);
   const setTransactionSplit = useEPurseStore((s: any) => s.setTransactionSplit);
   const ingestMessage  = useEPurseStore((s: any) => s.ingestMessage);
+  const groups         = useEPurseStore((s: any) => s.groups);
+  const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense);
   const budget         = useEPurseStore((s: any) => s.budget);
   const transactions   = useEPurseStore((s: any) => s.transactions);
   const getBudgetUsage = useEPurseStore((s: any) => s.getBudgetUsage);
@@ -271,6 +277,12 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const [splitMethod,    setSplitMethod]    = useState<SplitMode>('equal');
   const [mySplitPercent, setMySplitPercent] = useState<number | null>(null);
   const [mySplitAmount,  setMySplitAmount]  = useState<number | null>(null);
+  // Optional group for a NEW expense. Starts on the active Group Zone (the zone's
+  // whole point is "everything I add goes here"), and None is always one tap away.
+  const [groupId,        setGroupId]        = useState<string | null>(() =>
+    route?.params?.editTxnId ? null : useEPurseStore.getState().activeGroupZoneId ?? null);
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false);
+  const [groupSplitOpen,  setGroupSplitOpen]  = useState(false);
   // Contact search shown inline on the split page (no nested modal).
   const [addingPerson,  setAddingPerson]  = useState(false);
   // The split editor page (Paid By / Method / People).
@@ -369,6 +381,12 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     merchant.trim().length > 0;
 
   const splitAmountNum = parseFloat(amount) || 0;
+
+  // A group applies to a NEW expense that could be split — not income, not
+  // Lent/Borrowed, not an edit (group txns have their own edit flow).
+  const group = (groups as Group[]).find((g) => g.id === groupId) ?? null;
+  const activeGroup = !isEdit && canSplitHere ? group : null;
+  const groupSplit = useGroupSplit({ group: activeGroup, amount: splitAmountNum });
 
   /**
    * Who paid — the plain-split mirror of a shared group's payer, chosen from
@@ -626,6 +644,15 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     return () => sub.remove();
   }, [showSplitPage, splitPicks.length]);
 
+  useEffect(() => {
+    if (!groupSplitOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setGroupSplitOpen(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [groupSplitOpen]);
+
   const handleSplitDone = () => {
     if (!splitValid) {
       toast.warning(
@@ -731,6 +758,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       rawMerchant:     merchant.trim(),
       note:            note.trim(),
       isReviewed:      !!parentCategory,
+      // The Group row already offered the zone group; "None" here must stay None.
+      skipGroupZone:   true,
       source:          'manual',
       isSplit:         wantSplit,
       splitOthers: wantSplit
@@ -829,6 +858,59 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     navigation.goBack();
   };
 
+  /** Picking a group replaces any people added by hand with the group's members. */
+  const applyGroup = (id: string | null) => {
+    setGroupId(id);
+    setIsSplit(false);
+    setSplitPicks([]);
+    setMySplitPercent(null);
+    setMySplitAmount(null);
+    setSplitPaidBy(null);
+    setSplitMethod('equal');
+  };
+
+  const pickGroup = (id: string | null) => {
+    setGroupPickerOpen(false);
+    if (id && splitPicks.length > 0) {
+      // Let the picker sheet finish dismissing — iOS won't present a second
+      // native modal while the first is still animating out.
+      setTimeout(() => setConfirm({
+        title: 'Use the group split?',
+        message: `The ${splitPicks.length === 1 ? 'person' : 'people'} you added will be replaced by the group's members.`,
+        primaryText: 'Use Group',
+        destructive: true,
+        secondaryText: 'Cancel',
+        onConfirm: () => {
+          applyGroup(id);
+          setConfirm(null);
+        },
+      }), 350);
+      return;
+    }
+    applyGroup(id);
+  };
+
+  /** A group expense books through the group path (shares, group total, member debts). */
+  const commitGroupExpense = async (res: { paidByMemberId: string; paidByName: string; shares: any[] }) => {
+    if (!activeGroup) return;
+    const location = await requestAndGetLocation();
+    addGroupExpense(activeGroup.id, {
+      amount: parseFloat(amount),
+      merchant: merchant.trim(),
+      ...(parentCategory ? { parentCategory, childCategory } : {}),
+      paidByMemberId: res.paidByMemberId,
+      paidByName: res.paidByName,
+      shares: res.shares,
+      // Someone else paid → a memo, no account touched.
+      accountId: res.paidByMemberId === 'me' ? resolvedAccountId : null,
+      date: date.toISOString(),
+      note: note.trim(),
+      ...(location ? { location } : {}),
+    });
+    toast.success('Expense added', `${merchant.trim()} · ${activeGroup.name}`);
+    navigation.goBack();
+  };
+
   const handleSave = () => {
     const num = parseFloat(amount);
     if (!num || num <= 0) {
@@ -850,6 +932,16 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         'Missing sub-category',
         `Tap "${parentCategory}" to expand and pick a sub-category.`,
       );
+      return;
+    }
+
+    if (activeGroup) {
+      const res = groupSplit.resolveShares();
+      if (!res.ok) {
+        toast.warning(res.title, res.message);
+        return;
+      }
+      submit(() => commitGroupExpense(res));
       return;
     }
 
@@ -957,6 +1049,33 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 onPress={() => setCatPickerOpen(true)}
               />
 
+              {/* Group — optional, new expenses only. Picking one turns the Split row
+                  into the group's member split and books through the group path. */}
+              {!isEdit && canSplitHere ? (
+                <FormValueRow
+                  icon="people-outline"
+                  label="Group"
+                  value={activeGroup ? activeGroup.name : 'None'}
+                  isPlaceholder={!activeGroup}
+                  accentColor={theme.primary}
+                  onPress={() => setGroupPickerOpen(true)}
+                />
+              ) : null}
+
+              {activeGroup ? (
+                groupSplit.isShared ? (
+                  <FormValueRow
+                    icon="pie-chart-outline"
+                    label="Split"
+                    value={groupSplit.summary}
+                    accentColor={theme.primary}
+                    onPress={() => setGroupSplitOpen(true)}
+                  >
+                    <SplitBreakdownLines rows={groupSplit.breakdownRows} />
+                  </FormValueRow>
+                ) : null
+              ) : (
+              <>
               {/* Split: a one-line SUMMARY + the breakdown. The editor lives on its
                   own page. Hidden for income / Lent / Borrowed, where a split is
                   meaningless. Shown in EDIT mode too — hiding it there was the root
@@ -964,7 +1083,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                   nothing on screen revealed). */}
               {canSplitHere ? (
                 <FormValueRow
-                  icon="people-outline"
+                  icon="pie-chart-outline"
                   label="Split"
                   value={splitActive ? splitSummary : splitReady ? 'Add People' : 'Fill amount and merchant first'}
                   isPlaceholder={!splitActive}
@@ -979,13 +1098,18 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                   {splitActive ? <SplitBreakdownLines rows={splitBreakdownRows} /> : null}
                 </FormValueRow>
               ) : null}
+              </>
+              )}
 
+              {/* Account — unless someone else paid the group bill (a memo touches no account). */}
+              {!activeGroup || groupSplit.payerIsMe ? (
               <AccountField
                 accounts={accounts}
                 value={resolvedAccountId}
                 onChange={setAccountId}
                 accentColor={theme.primary}
               />
+              ) : null}
 
               <DateField
                 variant="value"
@@ -1079,19 +1203,18 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           style={{ flex: 1 }}
         />
 
-        {/* Pinned bottom bar — single primary action, shown once the mandatory
-            fields (amount + merchant) are filled — same as the group form. Category is optional. */}
-        {canSubmit ? (
+        {/* Pinned bottom bar — Cancel always; the submit appears once the mandatory
+            fields (amount + merchant) are filled. Category is optional. */}
         <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
-          <GradientButton
-            flat
-            title={isEdit ? 'Save Changes' : type === TRANSACTION_TYPES.CREDIT ? 'Add Income' : 'Add Expense'}
-            onPress={handleSave}
-            loading={submitting}
-            style={{ width: '100%' }}
+          <FormFooterActions
+            onCancel={() => navigation.goBack()}
+            submit={canSubmit ? {
+              title: isEdit ? 'Save Changes' : type === TRANSACTION_TYPES.CREDIT ? 'Add Income' : 'Add Expense',
+              onPress: handleSave,
+              loading: submitting,
+            } : null}
           />
         </View>
-        ) : null}
 
             <CenterModal
               visible={!!confirm}
@@ -1164,6 +1287,32 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           </View>
         </View>
       </Modal>
+
+      {/* ── Group split page — same SplitPage, driven by useGroupSplit. */}
+      {groupSplitOpen && activeGroup && groupSplit.isShared ? (
+        <View style={styles.splitPage}>
+          <SplitPage
+            {...groupSplit.pageProps}
+            title={activeGroup.name}
+            onBack={() => setGroupSplitOpen(false)}
+            onDone={() => setGroupSplitOpen(false)}
+            accentColor={theme.primary}
+          />
+        </View>
+      ) : null}
+
+      <GroupPickerSheet
+        visible={groupPickerOpen}
+        txn={splitAmountNum > 0 ? { merchant: merchant.trim() || 'New expense', amount: splitAmountNum } : null}
+        selectedId={groupId}
+        onClear={() => pickGroup(null)}
+        onPick={(id: string) => pickGroup(id)}
+        onClose={() => setGroupPickerOpen(false)}
+        onCreateNew={() => {
+          setGroupPickerOpen(false);
+          navigation.navigate('GroupForm');
+        }}
+      />
 
       {/* ── Split page — the shared SplitPage in a full-screen overlay (not a Modal,
           so the confirm dialog can still present over it). */}
