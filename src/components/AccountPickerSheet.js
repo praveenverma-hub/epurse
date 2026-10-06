@@ -9,6 +9,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Pressable,
 } from 'react-native';
 import Modal from "./AppModal";
+import { Ionicons } from '@expo/vector-icons';
 
 import { radius, spacing, shadows } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';
@@ -17,7 +18,7 @@ import { formatCurrency } from '../utils/format';
 import { useTheme } from '../hooks/useTheme';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
-const TYPE_EMOJI = {
+export const TYPE_EMOJI = {
   [ACCOUNT_TYPES.BANK]:        '🏦',
   [ACCOUNT_TYPES.CREDIT_CARD]: '💳',
   [ACCOUNT_TYPES.DEBIT_CARD]:  '🏧',
@@ -34,6 +35,8 @@ const AccountPickerSheet = ({
   onClose,
   skipLabel,
   onSkip,
+  selectedId = undefined,
+  showBalance = true,
 }) => {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -66,9 +69,12 @@ const AccountPickerSheet = ({
                   {a.bankName || a.name || a.type}
                   {a.mask ? `  ••${a.mask}` : ''}
                 </Text>
-                <Text style={styles.rowType} numberOfLines={1}>{a.type}</Text>
+                <Text style={styles.rowType} numberOfLines={1}>{a.primary ? `${a.type} · Primary` : a.type}</Text>
               </View>
-              <Text style={styles.rowBal} numberOfLines={1}>{formatCurrency(a.balance ?? 0)}</Text>
+              {showBalance ? (
+                <Text style={styles.rowBal} numberOfLines={1}>{formatCurrency(a.balance ?? 0)}</Text>
+              ) : null}
+              {selectedId === a.id ? <Ionicons name="checkmark-circle" size={20} color={theme.primary} /> : null}
             </TouchableOpacity>
           ))}
         </ScrollView>

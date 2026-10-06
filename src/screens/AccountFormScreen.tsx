@@ -40,7 +40,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, shadows, typography as typographyBase, BUTTON_H } from '../constants/theme';
+import { radius, spacing, shadows, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import {
   ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL,
   ACCOUNT_NEEDS_MASK, ACCOUNT_NEEDS_BANK,
@@ -712,7 +712,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   toggleMid: { flex: 1 },
   toggleLabel: { ...typography.body, fontWeight: '600' },
@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   footerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconBtn: {

@@ -24,7 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../components/Toast';
 import CenterModal from '../components/CenterModal';
@@ -547,7 +547,7 @@ const styles = StyleSheet.create({
   noteText: { ...typography.tiny, fontWeight: '600', flex: 1, lineHeight: 16 },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm + 2 },
-  rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+  rowDivided: { borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
   rowIcon: { width: 22, textAlign: 'center' },
   rowTextWrap: { flex: 1 },
   rowLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },

@@ -36,7 +36,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { spacing, radius, shadows, withAlpha, typography as typographyBase } from '../constants/theme';
+import { spacing, radius, shadows, withAlpha, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 // The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { ACCOUNT_TYPES } from '../constants/categories';
@@ -1145,7 +1145,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: spacing.sm + 2,
   },
-  infoRowDivider: { borderTopWidth: StyleSheet.hairlineWidth },
+  infoRowDivider: { borderTopWidth: DIVIDER_W },
   infoLabel: { ...typography.small, fontWeight: '500' },
   infoValue: { ...typography.small, fontWeight: '700' },
 
@@ -1191,7 +1191,7 @@ const styles = StyleSheet.create({
   flowStat: { flex: 1, alignItems: 'center' },
   flowLabel: { ...typography.tiny, fontWeight: '600', marginBottom: 4 },
   flowValue: { ...typography.small, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  flowDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: 2 },
+  flowDivider: { width: DIVIDER_W, alignSelf: 'stretch', marginVertical: 2 },
   trendCard: { paddingTop: spacing.md, paddingBottom: spacing.sm },
 
   listContent: { paddingBottom: spacing.xxl * 2, flexGrow: 1 },

@@ -3,7 +3,7 @@
 // opened by the Groups-tab "+" FAB. Wraps the shared GroupExpenseForm under a
 // themed gradient header. (Tagging an existing txn still uses GroupExpenseSheet.)
 // =============================================================================
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -28,7 +28,7 @@ import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupExpenseData } from '../types/group';
 
 const GradientButton = GradientButtonBase as React.FC<{
-  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean;
+  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean; flat?: boolean;
 }>;
 
 interface NavProp {
@@ -52,6 +52,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
   const isEdit = !!editTxnId;
   const insets = useSafeAreaInsets();
   const submitRef = useRef<(() => void) | null>(null);
+  const [ready, setReady] = useState(false);
   const toast = useToast();
   const { submit, submitting } = useSubmitGuard();
 
@@ -113,18 +114,22 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
               presetAmount={isEdit && editTxn && editTxn.source !== 'manual' ? editTxn.amount : undefined}
               hideSubmit
               submitRef={submitRef}
+              onReadyChange={setReady}
             />
           </ScrollView>
 
-          {/* Pinned bottom bar — single primary action. */}
+          {/* Pinned bottom bar — shown once the amount is filled. */}
+          {ready ? (
           <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
             <GradientButton
+              flat
               title={isEdit ? 'Save changes' : 'Add Expense'}
               onPress={() => submitRef.current?.()}
               loading={submitting}
               style={{ width: '100%' }}
             />
           </View>
+          ) : null}
         </KeyboardAvoidingView>
       ) : (
         <View style={styles.missing}>

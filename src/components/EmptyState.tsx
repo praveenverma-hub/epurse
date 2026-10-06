@@ -35,6 +35,8 @@ interface EmptyStateProps {
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   /** Fallback pictograph when no themed icon fits. `icon` wins if both are set. */
   emoji?: string;
+  /** Overrides the default glyph size (42 full / 30 compact) for a hero empty. */
+  iconSize?: number;
   title?: string;
   subtitle?: string;
   actionLabel?: string;
@@ -47,6 +49,7 @@ interface EmptyStateProps {
 const EmptyState: React.FC<EmptyStateProps> = ({
   icon,
   emoji,
+  iconSize,
   title,
   subtitle,
   actionLabel,
@@ -60,7 +63,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   return (
     <View style={[compact ? styles.compact : styles.full, style]}>
       {icon ? (
-        <Ionicons name={icon} size={compact ? 30 : 42} color={theme.textMuted} />
+        <Ionicons name={icon} size={iconSize ?? (compact ? 30 : 42)} color={theme.textMuted} />
       ) : glyph ? (
         <Text style={[styles.emoji, compact && styles.emojiCompact]}>{glyph}</Text>
       ) : null}

@@ -19,10 +19,7 @@ import type { StyleProp, ViewStyle, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import {
-  colors, radius, spacing, mix, withAlpha, readableOn,
-  typography as typographyBase,
-} from '../constants/theme';
+import { colors, radius, spacing, mix, withAlpha, readableOn, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -85,7 +82,7 @@ const NavListRow = ({
       style={[
         styles.row,
         tile && styles.rowTile,
-        divided && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.divider },
+        divided && { borderTopWidth: DIVIDER_W, borderTopColor: theme.divider },
         style,
       ]}
       onPress={onPress}

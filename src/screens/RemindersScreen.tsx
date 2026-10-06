@@ -33,7 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography as typographyBase, shadows, BUTTON_H } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, shadows, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import { REPEAT, describeRepeat, nextOccurrence } from '../utils/reminderSchedule';
 import { formatCurrency } from '../utils/format';
 import EmptyState from '../components/EmptyState';
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     flexShrink: 0,
   },
-  divider: { height: StyleSheet.hairlineWidth, marginTop: spacing.md, marginBottom: spacing.sm },
+  divider: { height: DIVIDER_W, marginTop: spacing.md, marginBottom: spacing.sm },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   addBtn: {
     flexDirection: 'row',

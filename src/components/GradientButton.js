@@ -15,6 +15,7 @@ const GradientButton = ({
   style,
   textStyle,
   icon,
+  flat,   // no drop shadow — for CTAs pinned in a form footer
 }) => {
   const themeGradient = useGradient();
   const palette = useTheme();
@@ -25,7 +26,7 @@ const GradientButton = ({
       activeOpacity={0.85}
       onPress={onPress}
       disabled={disabled || loading}
-      style={[styles.shadow, { opacity: disabled ? 0.6 : 1 }, style]}
+      style={[flat ? styles.flat : styles.shadow, { opacity: disabled ? 0.6 : 1 }, style]}
     >
       <LinearGradient
         colors={finalGradient}
@@ -50,6 +51,9 @@ const GradientButton = ({
 
 const styles = StyleSheet.create({
   shadow: { ...shadows.elevated, borderRadius: radius.lg },
+  // Every shadow key zeroed: an override only replaces the keys it names, and a
+  // surviving Android `elevation` paints a hard rectangle (ui-consistency §3b).
+  flat: { borderRadius: radius.lg, shadowColor: 'transparent', shadowOpacity: 0, shadowRadius: 0, shadowOffset: { width: 0, height: 0 }, elevation: 0 },
   btn: {
     flexDirection: 'row',
     alignItems: 'center',

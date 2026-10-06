@@ -9,7 +9,7 @@
 // =============================================================================
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { spacing, radius, typography as typographyBase } from '../constants/theme';
+import { spacing, radius, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 
@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
   // Inset top and bottom so it reads as a divider between cells rather than a
   // seam splitting the surface into two shapes.
   divider: {
-    width: StyleSheet.hairlineWidth,
+    width: DIVIDER_W,
     backgroundColor: '#FFFFFF3D',
     marginVertical: spacing.sm,
   },

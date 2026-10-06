@@ -32,7 +32,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, radius, spacing, typography, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { NON_BUDGETABLE_PARENT_IDS } from '../constants/twoTierCategories';
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   // The hairline is the section separator that used to be implicit in the
   // card's own edge — a plain page needs it stated, not assumed.
   sectionSep: {
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
     borderTopColor: colors.divider,
     marginTop: spacing.lg,
     paddingTop: spacing.lg,
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
   },
   rowDivided: {
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
     borderTopColor: colors.divider,
   },
   rowEmoji: { fontSize: 18 },

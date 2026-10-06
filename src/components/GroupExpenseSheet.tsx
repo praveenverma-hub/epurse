@@ -4,7 +4,7 @@
 // (Dashboard / Transactions / DailyQueueStack). The Groups-tab "+" FAB uses the
 // full-screen AddGroupExpenseScreen instead — both share GroupExpenseForm.
 // =============================================================================
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -25,7 +25,7 @@ import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import type { Group, GroupExpenseData } from '../types/group';
 
 const GradientButton = GradientButtonBase as React.FC<{
-  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean;
+  title: string; onPress: () => void; style?: object; loading?: boolean; disabled?: boolean; flat?: boolean;
 }>;
 
 interface GroupExpenseSheetProps {
@@ -50,6 +50,7 @@ interface GroupExpenseSheetProps {
 
 export default function GroupExpenseSheet({ visible, group, onClose, onAdd, presetAmount, editTxn, showCategory = false, lockPayerToMe = false }: GroupExpenseSheetProps) {
   const submitRef = useRef<(() => void) | null>(null);
+  const [ready, setReady] = useState(false);
   // Guarded here rather than in each of the 3 callers (Dashboard/Transactions/
   // DailyQueueStack) that supply `onAdd` — one fix covers every entry point.
   const { submit, submitting } = useSubmitGuard();
@@ -92,6 +93,7 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
                 hideCategory={!showCategory}
                 hideSubmit
                 submitRef={submitRef}
+                onReadyChange={setReady}
               />
             </ScrollView>
 
@@ -100,12 +102,15 @@ export default function GroupExpenseSheet({ visible, group, onClose, onAdd, pres
               <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8} disabled={submitting}>
                 <Text style={styles.cancelTxt}>Cancel</Text>
               </TouchableOpacity>
+              {ready ? (
               <GradientButton
+                flat
                 title={isEdit ? 'Save' : 'Add Expense'}
                 onPress={() => submitRef.current?.()}
                 loading={submitting}
                 style={styles.submitBtn}
               />
+              ) : null}
             </View>
           </View>
         </View>

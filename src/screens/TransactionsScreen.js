@@ -43,7 +43,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, searchFill, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, searchFill, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from '../components/GradientButton';
 import SheetCloseButton from '../components/SheetCloseButton';
@@ -1595,7 +1595,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
     backgroundColor: colors.background,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   activeFilterLabel: { fontSize: 12, color: colors.textSecondary, fontWeight: '500' },
@@ -1663,7 +1663,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   sheetTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A', letterSpacing: -0.2 },
@@ -1673,14 +1673,14 @@ const styles = StyleSheet.create({
   leftPanel: {
     width: '35%',
     backgroundColor: '#F8FAFC',
-    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: DIVIDER_W,
     borderRightColor: colors.divider,
   },
   leftItem: {
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     alignItems: 'flex-start',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
     position: 'relative',
   },
@@ -1698,7 +1698,7 @@ const styles = StyleSheet.create({
   rightItem: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: spacing.md, paddingHorizontal: spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
+    borderBottomWidth: DIVIDER_W, borderBottomColor: colors.divider,
     gap: spacing.sm,
   },
   rightItemChecked: { backgroundColor: '#F5F7FF' },
@@ -1739,7 +1739,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: Platform.OS === 'ios' ? spacing.xl : spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider,
+    borderTopWidth: DIVIDER_W, borderTopColor: colors.divider,
     backgroundColor: colors.card,
   },
   clearAllBtn:  {

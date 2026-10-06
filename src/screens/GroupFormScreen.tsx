@@ -22,7 +22,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
-import { BUTTON_H, colors, radius, searchFill, shadows, spacing, typography as typographyBase } from '../constants/theme';
+import { BUTTON_H, colors, radius, searchFill, shadows, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
@@ -496,7 +496,7 @@ const styles = StyleSheet.create({
   toggleRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     paddingVertical: spacing.md, marginTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider,
+    borderTopWidth: DIVIDER_W, borderTopColor: colors.divider,
   },
   toggleLeft:   { flex: 1 },
   toggleLabel:  { ...typography.body, color: colors.textPrimary, fontWeight: '600' },

@@ -19,7 +19,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import type { StyleProp, ViewStyle, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 
 // The JS theme widens fontWeight to `string` (see ui-consistency §1).
 const typography = typographyBase as unknown as Record<string, TextStyle>;
@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
   },
   bordered: {
     backgroundColor: colors.card,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   slot: {

@@ -19,7 +19,7 @@ import type { MonthlyReport } from '../utils/monthlyReportHtml';
 import { useTheme } from '../hooks/useTheme';
 import { exportMonthlyRecap } from '../services/recapExport';
 import { formatCompact, formatCurrency } from '../utils/format';
-import { radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
+import { radius, shadows, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   dailyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 56, marginTop: spacing.md },
   dailyBar: { flex: 1, borderRadius: 1.5 },
   patternGrid: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  simpleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
+  simpleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: DIVIDER_W },
   simpleName: { ...typography.small, fontWeight: '700', flex: 1 },
   plan: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg },
   planValue: { fontSize: 20, fontWeight: '900' },

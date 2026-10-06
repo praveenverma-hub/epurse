@@ -25,7 +25,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows, BUTTON_H, chromeHairline } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, BUTTON_H, chromeHairline, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { INPUT_LIMITS } from '../utils/validation';
 import { BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCategories';
@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
     backgroundColor: colors.card,
   },
@@ -509,7 +509,7 @@ const styles = StyleSheet.create({
   pickerRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   pickerEmoji: { fontSize: 22 },

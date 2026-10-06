@@ -167,6 +167,10 @@ if (allocatingSelector.length) {
 // far more expensive than one that throws.
 const REMOVED_APIS = [
   ['StyleSheet.absoluteFillObject', 'use StyleSheet.absoluteFill (removed in RN 0.86)'],
+  // Not removed, but banned: dividers take their thickness from `DIVIDER_W` (theme.js)
+  // so one token controls every separator. A raw hairline is ~1 device pixel and
+  // disappears on the light `colors.divider` tint.
+  ['StyleSheet.hairlineWidth', "use DIVIDER_W from constants/theme"],
 ];
 const removedUsage = [];
 for (const f of files) {
@@ -174,6 +178,7 @@ for (const f of files) {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   src.split('\n').forEach((line, i) => {
     for (const [api, advice] of REMOVED_APIS) {
+      if (f.endsWith('constants/theme.js')) continue;
       if (line.includes(api)) removedUsage.push(`${f}:${i + 1}  ${api} — ${advice}`);
     }
   });

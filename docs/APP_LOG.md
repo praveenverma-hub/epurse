@@ -26,6 +26,18 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - E2E MVP acceptance pass (Sep-2026, `npm run test:e2e`): found and fixed 3 real bugs —
   cashback/discount "on \<date\>" colliding with the promo filter, cross-bank self-transfer
   needing transfer-language (not just ref) to link, verb-before-mask direction reversal.
+- **Add Transaction revamp (Oct-5-2026)**: plain + group forms cut to the fast path — type switch → Amount →
+  Merchant → Category → Split summary row → Account (compact, primary default, tap → picker) → Date → collapsed
+  "Add Note". Split editor moved to its own page (plain: overlay in `AddTransactionScreen`; group: Modal in
+  `GroupExpenseForm`). Plain category now optional (saves as `other`, review-later). Expense/Income is the swipeable `TabView` + `UnderlineTabBar`. New
+  `FormNoteField`, `AccountField`, `utils/defaultAccount.ts`. **Not built (open)**: merchant→category
+  auto-suggest, tags/recurring/exclude-from-totals (don't exist yet), per-group default split people.
+- **Split single-source (Oct-5-2026)**: plain + group add forms now share ONE split page
+  (`components/SplitPage.tsx`) and ONE share-maths util (`utils/splitShares.ts`, `test:splitShares`);
+  plain gained **Full Owed** (payer takes 0%, others split 100), group gained the same "left to
+  allocate" hint; `SplitConfigModal` now uses the util's even-percent preset (You absorb the
+  remainder; previously the earliest rows each took +1).
+- **Divider thickness single-source (Oct-6-2026)**: all `StyleSheet.hairlineWidth` separators (56 uses, 36 files) now read `DIVIDER_W` (=1) from `constants/theme.js`; `test:parse` bans the raw hairline.
 - Bulk reconciliation test (Sep-2026, `npm run test:bulk`): 35-txn volume/cross-check pass,
   0 app defects — validates balances, spend stats, budget, groups and splits together.
 - **Sep-6-2026: CC bill payment reconciliation fixes** (see Budget/Accounts below for detail).

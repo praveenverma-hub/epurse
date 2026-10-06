@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { selectTransactions } from '../store/ePurseStore';
 import { NON_SPEND_CATEGORY_IDS, ACCOUNT_TYPES } from '../constants/categories';
-import { colors, radius, spacing, typography, shadows, progressTrack } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, progressTrack, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, isSameMonth } from '../utils/format';
 import { debitDisplayAmount, countsForSpend, spendContribution } from '../utils/split';
@@ -665,7 +665,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
     borderTopColor: colors.divider,
   },
   rowDot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.md },
@@ -687,7 +687,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
     borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: DIVIDER_W,
     borderColor: colors.divider,
   },
   statLabelLight:  { ...typography.tiny, color: colors.textSecondary },

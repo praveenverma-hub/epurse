@@ -25,7 +25,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore, RECAP_OPTION_DEFAULTS, selectRecapMonths } from '../store/ePurseStore';
-import { spacing, typography as typographyBase } from '../constants/theme';
+import { spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import NavListRow from '../components/NavListRow';
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   // card's own edge — a plain page needs it stated, not assumed.
   sub: {
     ...typography.small,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
     marginTop: spacing.md,
     paddingTop: spacing.lg,
     marginBottom: spacing.xs,

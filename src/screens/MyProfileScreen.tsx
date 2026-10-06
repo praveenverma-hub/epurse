@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../components/Toast';
-import { radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone } from '../utils/validation';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   rowIcon: { width: 22, textAlign: 'center' },
   rowValue: { ...typography.body, fontWeight: '600', flex: 1 },
-  footer: { padding: spacing.lg, borderTopWidth: StyleSheet.hairlineWidth },
+  footer: { padding: spacing.lg, borderTopWidth: DIVIDER_W },
   saveBtn: { minHeight: BUTTON_H, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
   saveBtnText: { fontSize: 16, fontWeight: '700' },
 });

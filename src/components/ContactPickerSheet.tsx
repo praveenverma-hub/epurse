@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import Modal from "./AppModal";
 
-import { radius, searchFill, spacing, shadows, typography as typographyBase } from '../constants/theme';
+import { radius, searchFill, spacing, shadows, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import type { TextStyle } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 import SheetCloseButton from './SheetCloseButton';
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
   },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   avatarText: { ...typography.bodyBold, fontWeight: '700' },

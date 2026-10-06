@@ -31,7 +31,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import { sanitizeAmount, parseAmount, sanitizeDay } from '../utils/validation';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   saveBtn: {
     minHeight: BUTTON_H,

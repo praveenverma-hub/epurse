@@ -33,7 +33,7 @@ import {
   selectTotalRP,
   selectAwareStreak,
 } from '../store/useRewardStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
@@ -862,7 +862,7 @@ const styles = StyleSheet.create({
   cardAmount:   { ...typography.h3, fontWeight: '700' },
 
   cardDivider: {
-    height: StyleSheet.hairlineWidth,
+    height: DIVIDER_W,
     backgroundColor: colors.divider,
   },
 

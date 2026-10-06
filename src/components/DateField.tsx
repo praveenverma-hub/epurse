@@ -16,7 +16,7 @@ import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { FormSelectRow } from './FormField';
+import { FormSelectRow, FormValueRow } from './FormField';
 import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { formatDateLabel } from '../utils/format';
@@ -40,7 +40,7 @@ interface DateFieldProps {
    *   the card. The date always shows, in the ordinary field text colour —
    *   "Today" / "Yesterday" for the two recent days, else the real date.
    */
-  variant?: 'row' | 'icon';
+  variant?: 'row' | 'icon' | 'value';
   /**
    * `icon` only. Which surface the surrounding form uses, so the button matches
    * its neighbours (ui-consistency §3b: anything beside an outlined field is
@@ -97,6 +97,16 @@ export default function DateField({
           {formatDateLabel(value)}
         </Text>
       </TouchableOpacity>
+    ) : variant === 'value' ? (
+      // One-line "Date ... Today" row for the value card of the entry forms.
+      <FormValueRow
+        icon="calendar-outline"
+        label="Date"
+        value={formatDateLabel(value)}
+        onPress={openPicker}
+        disabled={disabled}
+        accentColor={accentColor}
+      />
     ) : (
       <FormSelectRow
         leading={<Ionicons name="calendar-outline" size={19} color={tint} />}

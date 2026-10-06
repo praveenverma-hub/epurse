@@ -18,6 +18,7 @@ import GradientButton from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
+import { evenPercents } from '../utils/splitShares';
 import { useToast } from './Toast';
 import CenterModal from './CenterModal';
 import {
@@ -44,15 +45,18 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
 
   const amount = Number(transaction?.amount) || 0;
 
-  const equalisePercents = useCallback((nextSelectedSize) => {
-    const n = 1 + nextSelectedSize;
-    if (n <= 0) return { my: 100, each: 0 };
-    const base = Math.floor(100 / n);
-    const rem = 100 - base * n; // distribute to earliest rows: You then contacts
-    const my = base + (rem > 0 ? 1 : 0);
-    const each = base;
-    return { my, each, rem };
-  }, []);
+  // Even shares via the shared splitShares util (same presets the add-form split
+  // pages use): You absorb the remainder. Mutates `m`'s values, sets your own.
+  const applyEvenShares = useCallback((m) => {
+    const pct = evenPercents(m.size + 1);
+    setMyPercent(pct[0]);
+    setMyAmount(amount ? (amount * pct[0]) / 100 : 0);
+    let i = 1;
+    m.forEach((v, k) => {
+      m.set(k, { ...v, percent: pct[i], shareAmount: amount ? (amount * pct[i]) / 100 : 0 });
+      i += 1;
+    });
+  }, [amount]);
 
   const loadContacts = useCallback(async () => {
     setLoading(true);
@@ -105,15 +109,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
           shareAmount: 0,
         });
       });
-      const { my, each, rem } = equalisePercents(initial.size);
-      setMyPercent(my);
-      setMyAmount(amount ? (amount * my) / 100 : 0);
-      let idx = 0;
-      initial.forEach((v, k) => {
-        const p = each + (idx + 1 < rem ? 1 : 0);
-        initial.set(k, { ...v, percent: p, shareAmount: amount ? (amount * p) / 100 : 0 });
-        idx += 1;
-      });
+      applyEvenShares(initial);
     } else {
       setMode('percent');
       setMyPercent(100);
@@ -122,20 +118,12 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
 
     // If this is a brand-new selection, initialise to equal split.
     if (!transaction?.isSplit) {
-      const { my, each, rem } = equalisePercents(initial.size);
-      setMyPercent(my);
-      setMyAmount(amount ? (amount * my) / 100 : 0);
-      let idx = 0;
-      initial.forEach((v, k) => {
-        const p = each + (idx + 1 < rem ? 1 : 0);
-        initial.set(k, { ...v, percent: p, shareAmount: amount ? (amount * p) / 100 : 0 });
-        idx += 1;
-      });
+      applyEvenShares(initial);
     }
 
     setSelected(initial);
     loadContacts();
-  }, [visible, transaction?.id, transaction?.amount, transaction?.categoryId, loadContacts, amount, equalisePercents]);
+  }, [visible, transaction?.id, transaction?.amount, transaction?.categoryId, loadContacts, amount, applyEvenShares]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -154,19 +142,11 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
       if (next.has(c.id)) next.delete(c.id);
       else next.set(c.id, { contactId: c.id, name: c.name, percent: 0, shareAmount: 0 });
 
-      const { my, each, rem } = equalisePercents(next.size);
-      setMyPercent(my);
-      setMyAmount(amount ? (amount * my) / 100 : 0);
-      let idx = 0;
-      next.forEach((v, k) => {
-        const p = each + (idx + 1 < rem ? 1 : 0);
-        next.set(k, { ...v, percent: p, shareAmount: amount ? (amount * p) / 100 : 0 });
-        idx += 1;
-      });
+      applyEvenShares(next);
       return next;
     });
     setQuery('');
-  }, [amount, equalisePercents]);
+  }, [amount, applyEvenShares]);
 
   const selectedList = useMemo(() => Array.from(selected.entries()), [selected]);
   const sumOthers = useMemo(
@@ -209,18 +189,10 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
     setSelected((prev) => {
       const next = new Map(prev);
       next.delete(id);
-      const { my, each, rem } = equalisePercents(next.size);
-      setMyPercent(my);
-      setMyAmount(amount ? (amount * my) / 100 : 0);
-      let idx = 0;
-      next.forEach((v, k) => {
-        const p = each + (idx + 1 < rem ? 1 : 0);
-        next.set(k, { ...v, percent: p, shareAmount: amount ? (amount * p) / 100 : 0 });
-        idx += 1;
-      });
+      applyEvenShares(next);
       return next;
     });
-  }, [amount, equalisePercents]);
+  }, [amount, applyEvenShares]);
 
   const setModeSafe = useCallback(
     (m) => {

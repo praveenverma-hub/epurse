@@ -24,7 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { spacing, typography as typographyBase } from '../constants/theme';
+import { spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import SectionHeader from '../components/SectionHeader';
 import PlainScreenHeader from '../components/PlainScreenHeader';
@@ -82,7 +82,7 @@ const NotificationsScreen: React.FC<Props> = ({ navigation }) => {
           stops the notification — you'll still find it in the bell.
         </Text>
         {NUDGE_ROWS.map(({ key, icon, label, hint }, i) => (
-          <View key={key} style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.divider }]}>
+          <View key={key} style={[styles.row, i > 0 && { borderTopWidth: DIVIDER_W, borderTopColor: theme.divider }]}>
             <Ionicons name={icon as any} size={18} color={theme.primary} style={styles.rowIcon} />
             <View style={styles.rowMid}>
               <Text style={[styles.rowLabel, { color: theme.textPrimary }]}>{label}</Text>

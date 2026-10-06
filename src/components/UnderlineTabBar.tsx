@@ -9,7 +9,7 @@
 import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { colors, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 
@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderTopWidth: 1.5,
     borderTopColor: colors.divider,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   tab: {

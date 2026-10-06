@@ -58,7 +58,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography as typographyBase, shadows, withAlpha } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, shadows, withAlpha, DIVIDER_W } from '../constants/theme';
 import { formatCurrency, monthKey } from '../utils/format';
 import {
   ALLOCATION_STEP, allocatedTotal, snapAmount, allocationWithinSalary,
@@ -722,7 +722,7 @@ const GoalsScreen = ({ navigation }: any) => {
                               styles.lrow,
                               {
                                 borderTopColor: theme.divider,
-                                borderTopWidth: i === 0 && !budgetCap ? 0 : StyleSheet.hairlineWidth,
+                                borderTopWidth: i === 0 && !budgetCap ? 0 : DIVIDER_W,
                               },
                             ]}
                           >
@@ -801,7 +801,7 @@ const GoalsScreen = ({ navigation }: any) => {
                             key={cell.k}
                             style={[
                               styles.reconCell,
-                              { borderLeftColor: theme.divider, borderLeftWidth: i === 0 ? 0 : StyleSheet.hairlineWidth },
+                              { borderLeftColor: theme.divider, borderLeftWidth: i === 0 ? 0 : DIVIDER_W },
                             ]}
                           >
                             <Text style={[styles.reconK, { color: theme.textMuted }]}>{cell.k.toUpperCase()}</Text>
@@ -967,7 +967,7 @@ const styles = StyleSheet.create({
     ...typography.tiny,
     textAlign: 'center',
     paddingBottom: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
   },
   headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   // Clears the floating + (60pt button + its bottom inset), so the last card
@@ -1040,7 +1040,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: spacing.md,
     paddingTop: spacing.md - 2,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   reconCell: { flex: 1, paddingHorizontal: spacing.xs, alignItems: 'center' },
   reconK: { ...typography.tiny, fontWeight: '700', letterSpacing: 0.4, fontSize: 9 },
@@ -1049,7 +1049,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   saveRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   cancelBtn: {

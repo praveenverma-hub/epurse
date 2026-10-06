@@ -26,9 +26,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import {
-  radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn,
-} from '../constants/theme';
+import { radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn, DIVIDER_W } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import Confetti from './Confetti';
 import GradientButtonBase from './GradientButton';
@@ -146,7 +144,7 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
                 <Text style={[styles.rewardV, { color: theme.primary }]}>+{reward!.rpAwarded}</Text>
                 <Text style={[styles.rewardK, { color: theme.textMuted }]}>RP</Text>
               </View>
-              <View style={[styles.rewardCell, { borderLeftColor: theme.divider, borderLeftWidth: StyleSheet.hairlineWidth }]}>
+              <View style={[styles.rewardCell, { borderLeftColor: theme.divider, borderLeftWidth: DIVIDER_W }]}>
                 <Text style={[styles.rewardV, { color: theme.success }]}>+{reward!.epcAwarded}</Text>
                 <Text style={[styles.rewardK, { color: theme.textMuted }]}>EPC</Text>
               </View>

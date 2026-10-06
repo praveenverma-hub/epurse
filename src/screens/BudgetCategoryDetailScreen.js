@@ -21,7 +21,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';
 import { computeBudgetStatus, budgetStatusAdvice } from '../utils/budgetStatus';
@@ -313,7 +313,7 @@ const styles = StyleSheet.create({
 
   compareRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
   compareCol: { flex: 1, alignItems: 'center' },
-  compareDivider: { width: StyleSheet.hairlineWidth, height: 36, backgroundColor: colors.divider },
+  compareDivider: { width: DIVIDER_W, height: 36, backgroundColor: colors.divider },
   compareLabel: { ...typography.tiny, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
   compareValue: { fontSize: 20, fontWeight: '800', color: colors.textPrimary, marginTop: 4, letterSpacing: -0.3 },
 

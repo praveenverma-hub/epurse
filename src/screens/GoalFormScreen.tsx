@@ -45,9 +45,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import {
-  radius, shadows, spacing, typography as typographyBase, BUTTON_H,
-} from '../constants/theme';
+import { radius, shadows, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import {
   INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount, parseAmount,
 } from '../utils/validation';
@@ -916,7 +914,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   saveBtn: {
     flex: 1,

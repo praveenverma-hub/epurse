@@ -7,20 +7,10 @@
 // Shared groups:  same + who paid + split among members.
 // =============================================================================
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
+import { spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButtonBase from './GradientButton';
-// The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
-const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { formatCurrency } from '../utils/format';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
@@ -32,16 +22,23 @@ import {
   FormField,
   FormTextInput,
   FormAmountInput,
-  FormSelectRow,
-  FormChipRow,
-  FormChip,
+  FormNoteField,
+  FormValueRow,
+  FormValueCard,
 } from './FormField';
+import AccountField from './AccountField';
+import SplitPage, { SPLIT_MODE_LABEL, type SplitMode } from './SplitPage';
+import { evenAmounts, fullOwedShares } from '../utils/splitShares';
+import SplitBreakdownLines from './SplitBreakdownLines';
+import Modal from './AppModal';
+import { defaultAccountId } from '../utils/defaultAccount';
 import type { Group, GroupShare, GroupExpenseData } from '../types/group';
 
 const GradientButton = GradientButtonBase as React.FC<{
   title: string;
   onPress: () => void;
   disabled?: boolean;
+  flat?: boolean;
   style?: object;
 }>;
 
@@ -51,9 +48,6 @@ interface AccountLike {
   type?: string;
 }
 
-// 'fullOwed' = the payer covers the whole bill; every OTHER member owes an equal
-// share of the full amount and the payer's own share is 0.
-type SplitMode = 'equal' | 'percent' | 'amount' | 'fullOwed';
 
 interface GroupExpenseFormProps {
   /** Target group. */
@@ -90,9 +84,11 @@ interface GroupExpenseFormProps {
    * the user's account, so flipping it to a memo would wrongly reverse the balance.
    */
   lockPayerToMe?: boolean;
+  /** Fires when the mandatory fields (amount + merchant) become filled/empty — shells use it to show their Add button. */
+  onReadyChange?: (ready: boolean) => void;
 }
 
-export default function GroupExpenseForm({ group, onAdd, presetAmount, visible = true, hideCategory = false, editTxn, hideSubmit = false, submitRef, lockPayerToMe = false }: GroupExpenseFormProps) {
+export default function GroupExpenseForm({ group, onAdd, presetAmount, visible = true, hideCategory = false, editTxn, hideSubmit = false, submitRef, lockPayerToMe = false, onReadyChange }: GroupExpenseFormProps) {
   const theme = useTheme();
   const toast = useToast();
   const accounts = useEPurseStore((s: any) => s.accounts) as AccountLike[];
@@ -109,6 +105,8 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const [parentCat, setParentCat] = useState<string | null>(null);
   const [childCat, setChildCat] = useState<string | null>(null);
   const [catSheet, setCatSheet] = useState(false);
+  // The split editor page (Paid By / Method / People).
+  const [splitPageOpen, setSplitPageOpen] = useState(false);
 
   const isShared = group?.type === 'shared';
   // Guarantee the built-in 'me' member is present for shared groups, even if a stored
@@ -138,6 +136,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   useEffect(() => {
     if (visible === false) return;
     setCatSheet(false);
+    setSplitPageOpen(false);
 
     if (editTxn) {
       const eg = editTxn.groupSplit;
@@ -148,7 +147,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       setNote(editTxn.note || '');
       setParentCat(editTxn.parentCategory ?? null);
       setChildCat(editTxn.childCategory ?? null);
-      setAccountId(editTxn.accountId ?? accounts[0]?.id ?? null);
+      setAccountId(editTxn.accountId ?? defaultAccountId(accounts));
 
       if (eg && eg.shares?.length) {
         const pIdx = allMembers.findIndex((m) => m.memberId === eg.paidByMemberId);
@@ -199,7 +198,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     setNote('');
     setPayerIdx(0);
     setSplitMode('equal');
-    setAccountId(accounts[0]?.id || null);
+    setAccountId(defaultAccountId(accounts));
     setParentCat(null);
     setChildCat(null);
     if (group?.members) {
@@ -244,39 +243,21 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
 
     if (splitMode === 'fullOwed') {
       // Payer covers the bill; the OTHER members split the full amount equally.
-      const otherIdx = allMembers.map((_, i) => i).filter((i) => i !== payerIdx);
-      const n = otherIdx.length || 1;
-      const each = amt > 0 ? parseFloat((amt / n).toFixed(2)) : 0;
-      const next = allMembers.map((m) => ({ memberId: m.memberId, name: m.name, shareAmount: 0, percent: 0 }));
-      let allocated = 0;
-      otherIdx.forEach((idx, k) => {
-        const a = amt > 0 && k === otherIdx.length - 1 ? parseFloat((amt - allocated).toFixed(2)) : each;
-        allocated = parseFloat((allocated + a).toFixed(2));
-        next[idx] = { memberId: allMembers[idx].memberId, name: allMembers[idx].name, shareAmount: a, percent: amt > 0 ? Math.round((a / amt) * 100) : 0 };
-      });
-      setShares(next);
+      const owed = fullOwedShares(amt, allMembers.length, payerIdx);
+      setShares(allMembers.map((m, i) => ({
+        memberId: m.memberId, name: m.name, shareAmount: owed[i], percent: amt > 0 ? Math.round((owed[i] / amt) * 100) : 0,
+      })));
       return;
     }
 
     // Equal split among SELECTED members only
-    const selected = allMembers.filter(m => selectedMembers.has(m.memberId));
+    const selected = allMembers.filter((m) => selectedMembers.has(m.memberId));
+    const parts = evenAmounts(amt, selected.length);
     const n = selected.length || 1;
-    const each = amt > 0 ? parseFloat((amt / n).toFixed(2)) : 0;
-    const next = allMembers.map((m) => {
-      if (!selectedMembers.has(m.memberId)) {
-        return { memberId: m.memberId, name: m.name, shareAmount: 0, percent: 0 };
-      }
-      const idx = selected.findIndex(s => s.memberId === m.memberId);
-      return {
-        memberId: m.memberId,
-        name: m.name,
-        shareAmount: amt > 0 && idx === selected.length - 1
-          ? parseFloat((amt - each * (selected.length - 1)).toFixed(2))
-          : each,
-        percent: Math.round(100 / n),
-      };
-    });
-    setShares(next);
+    setShares(allMembers.map((m) => {
+      const k = selected.findIndex((x) => x.memberId === m.memberId);
+      return { memberId: m.memberId, name: m.name, shareAmount: k >= 0 ? parts[k] : 0, percent: k >= 0 ? Math.round(100 / n) : 0 };
+    }));
   }, [amount, splitMode, allMembers, payerIdx, selectedMembers]);
 
   const updateShare = useCallback((idx: number, value: number, field: 'percent' | 'shareAmount') => {
@@ -306,6 +287,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     }
     if (amount > MAX_ALLOWED_AMOUNT) {
       toast.error('Amount too large', 'Maximum allowed is ₹10,00,00,000 (10 crore).');
+      return;
+    }
+    if (merchantRequired && !merchant.trim()) {
+      toast.warning('Missing merchant', 'Please enter who you paid / received from.');
       return;
     }
     const payer = allMembers[payerIdx] || { memberId: 'me', name: 'You' };
@@ -343,15 +328,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         const others = shares.filter((x) => x.memberId !== payerMemberId);
         const sumOthers = others.reduce((s, x) => s + (Number(x.shareAmount) || 0), 0);
         if (sumOthers <= 0.005) {
-          const n = others.length || 1;
-          const each = parseFloat((amount / n).toFixed(2));
-          let allocated = 0;
+          const parts = evenAmounts(amount, others.length || 1);
           const amtBy: Record<string, number> = {};
-          others.forEach((x, k) => {
-            const a = k === others.length - 1 ? parseFloat((amount - allocated).toFixed(2)) : each;
-            allocated = parseFloat((allocated + a).toFixed(2));
-            amtBy[x.memberId] = a;
-          });
+          others.forEach((x, k) => { amtBy[x.memberId] = parts[k]; });
           finalShares = shares.map((x) => ({ memberId: x.memberId, name: x.name, shareAmount: x.memberId === payerMemberId ? 0 : (amtBy[x.memberId] || 0) }));
         } else {
           if (Math.abs(sumOthers - amount) > 0.5) {
@@ -372,20 +351,10 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
           toast.warning('No members selected', 'Select at least one member for equal split.');
           return;
         }
-        const n = selected.length;
-        const each = parseFloat((amount / n).toFixed(2));
+        const parts = evenAmounts(amount, selected.length);
         finalShares = allMembers.map((m) => {
-          if (!selectedMembers.has(m.memberId)) {
-            return { memberId: m.memberId, name: m.name, shareAmount: 0 };
-          }
-          const idx = selected.findIndex(s => s.memberId === m.memberId);
-          return {
-            memberId: m.memberId,
-            name: m.name,
-            shareAmount: idx === n - 1
-              ? parseFloat((amount - each * (n - 1)).toFixed(2))
-              : each,
-          };
+          const k = selected.findIndex((x) => x.memberId === m.memberId);
+          return { memberId: m.memberId, name: m.name, shareAmount: k >= 0 ? parts[k] : 0 };
         });
       }
     }
@@ -412,15 +381,40 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     onAdd(expenseData);
   };
 
+  // Tagging an existing transaction keeps ITS merchant, so only a new/edited entry needs one.
+  const merchantRequired = !(amountLocked && !editTxn);
+  useEffect(() => {
+    onReadyChange?.(amount > 0 && (!merchantRequired || merchant.trim().length > 0));
+  }, [amount, merchant, merchantRequired, onReadyChange]);
+
   // Expose the latest submit handler so a shell can drive its pinned footer button.
   useEffect(() => { if (submitRef) submitRef.current = handleAdd; });
+
+  // ── Split summary (the one-line row on the main form) ───────────────────────
+  const payerName = allMembers[payerIdx]?.isMe ? 'You' : allMembers[payerIdx]?.name || 'You';
+  const participantCount =
+    splitMode === 'equal'
+      ? selectedMembers.size
+      : splitMode === 'fullOwed'
+        ? Math.max(0, allMembers.length - 1)
+        : shares.filter((x) => (Number(x.shareAmount) || 0) > 0 || (Number(x.percent) || 0) > 0).length;
+  const payerIsMe = !!allMembers[payerIdx]?.isMe;
+  // Per-member rupee amounts for the read-only breakdown under the Split row.
+  // Percent mode stores only `percent` until submit, so derive ₹ from it here.
+  const splitBreakdownRows = shares
+    .map((x) => ({
+      name: x.memberId === 'me' ? 'You' : x.name || 'Member',
+      amount: splitMode === 'percent' ? (amount * (Number(x.percent) || 0)) / 100 : Number(x.shareAmount) || 0,
+      tag: x.memberId === payerMemberId ? 'Paid' : undefined,
+    }))
+    .filter((r) => r.amount > 0);
 
   return (
     <>
       {/* Amount — prefilled & locked when tagging an existing transaction */}
       <FormField
         label="Amount (₹)"
-        hint={amountLocked ? 'From the transaction — not editable' : 'Up to 10 crore'}
+        hint={amountLocked ? 'From the transaction — not editable' : undefined}
       >
         <FormAmountInput
           placeholder="0"
@@ -432,237 +426,126 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
         />
       </FormField>
 
-      {/* Date — hidden when tagging an existing transaction with no `editTxn`
-          loaded (we don't know its real date here, so there's nothing
-          meaningful to show); locked (but shown) when editing one we DO
-          have loaded, same reasoning as the locked amount. */}
-      {(!amountLocked || editTxn) && (
-        <FormField label="Date" hint={amountLocked ? 'From the transaction' : undefined}>
-          <DateField
-            value={date}
-            onChange={setDate}
-            maximumDate={new Date()}
-            disabled={amountLocked}
-            accentColor={theme.primary}
-          />
-        </FormField>
-      )}
-
       {/* Merchant */}
-      <FormField label="Merchant / Person">
+      <FormField label="Merchant / Description">
         <FormTextInput
-          placeholder="e.g. Dinner / Groceries / Rohit"
+          placeholder="e.g. Dinner, Groceries, Cab"
           value={merchant}
           onChangeText={setMerchant}
           maxLength={INPUT_LIMITS.MERCHANT_MAX}
         />
       </FormField>
 
-      {/* Category — hidden when reached from the manage modal (already set there) */}
-      {!hideCategory && (
-        <FormField label="Category">
-          <FormSelectRow
-            leading={childCat ? '🏷️' : '📌'}
-            value={childCat ? `${parentCat}  ›  ${childCat}` : 'Select category'}
+      {/* Optional fields as ONE card of already-filled values (see FormValueRow);
+          only Amount is mandatory here. */}
+      <FormValueCard>
+        {/* Category — hidden when reached from the manage modal (already set there) */}
+        {!hideCategory && (
+          <FormValueRow
+            leading={parentCat ? '🏷️' : '📌'}
+            label="Category"
+            value={childCat || 'Select'}
             isPlaceholder={!childCat}
-            resolved={!!childCat}
             accentColor={theme.primary}
             onPress={() => setCatSheet(true)}
           />
-        </FormField>
-      )}
+        )}
 
-      {/* Account — personal groups (no payer concept) */}
-      {!isShared && accounts.length > 1 && (
-        <FormField label="Account">
-          <FormChipRow>
-            {accounts.map((a) => (
-              <FormChip
-                key={a.id}
-                label={a.name}
-                active={accountId === a.id}
-                onPress={() => setAccountId(a.id)}
-                accentColor={theme.primary}
-              />
-            ))}
-          </FormChipRow>
-        </FormField>
-      )}
-
-      {/* Payer → account → split (shared only) */}
-      {isShared && (
-        <>
-          {lockPayerToMe ? (
-            // Real account debit → you paid; flipping to a memo would reverse the balance.
-            <FormField label="Who paid?" hint="The money already left your account, so this can't change.">
-              <View style={[styles.paidByMeNote, { borderColor: theme.primary + '44', backgroundColor: theme.primary + '0F' }]}>
-                <Text style={[styles.paidByMeTxt, { color: theme.primary }]}>👤 Paid by you</Text>
-              </View>
-            </FormField>
-          ) : (
-            <FormField label="Who paid?">
-              <FormChipRow>
-                {allMembers.map((m, i) => (
-                  <FormChip
-                    key={m.memberId}
-                    label={m.isMe ? '👤 You' : m.name}
-                    active={payerIdx === i}
-                    onPress={() => setPayerIdx(i)}
-                    accentColor={theme.primary}
-                  />
-                ))}
-              </FormChipRow>
-            </FormField>
-          )}
-
-          {/* Account — only when YOU paid; sits below "Who paid" */}
-          {allMembers[payerIdx]?.isMe && accounts.length > 1 && (
-            <FormField label="Account">
-              <FormChipRow>
-                {accounts.map((a) => (
-                  <FormChip
-                    key={a.id}
-                    label={a.name}
-                    active={accountId === a.id}
-                    onPress={() => setAccountId(a.id)}
-                    accentColor={theme.primary}
-                  />
-                ))}
-              </FormChipRow>
-            </FormField>
-          )}
-
-          <FormField
+        {/* Split — a one-line summary + breakdown; the editor (payer, mode, who owes
+            what) lives on its own page. Shared groups only. */}
+        {isShared && (
+          <FormValueRow
+            icon="people-outline"
             label="Split"
-            hint={splitMode === 'fullOwed' ? 'You pay the whole bill — everyone else owes an equal share.' : undefined}
+            value={`${payerName} paid · ${SPLIT_MODE_LABEL[splitMode]}`}
+            accentColor={theme.primary}
+            onPress={() => setSplitPageOpen(true)}
           >
-            <FormChipRow>
-              {(['equal', 'percent', 'amount', 'fullOwed'] as SplitMode[]).map((m) => (
-                <FormChip
-                  key={m}
-                  label={m === 'equal' ? '⚖️ Equal' : m === 'percent' ? '% Percent' : m === 'amount' ? '₹ Amount' : 'Full owed'}
-                  active={splitMode === m}
-                  onPress={() => handleSetMode(m)}
-                  accentColor={theme.primary}
-                  icon={m === 'fullOwed' ? (
-                    <Ionicons
-                      name="hand-left-outline"
-                      size={14}
-                      color={splitMode === m ? theme.primary : colors.textSecondary}
-                    />
-                  ) : undefined}
-                />
-              ))}
-            </FormChipRow>
-          </FormField>
+            <SplitBreakdownLines rows={splitBreakdownRows} />
+          </FormValueRow>
+        )}
 
-          {/* Per-member breakdown — scrollable bordered box. Equal shows checkboxes
-              for member selection; percent/amount are editable; Full-owed locks ONLY
-              the payer (others edit their owed ₹). Each row is annotated with who
-              paid vs. who owes. */}
-          <FormField
-            label="Who owes what"
-            hint={splitMode === 'equal' ? 'Untick anyone who isn’t part of this expense.' : undefined}
-          >
-          <ScrollView
-            style={styles.sharesList}
-            contentContainerStyle={styles.sharesListContent}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {shares.map((s, idx) => {
-              const isPayer = s.memberId === payerMemberId;
-              const isMe = s.memberId === 'me';
-              const payerIsMe = payerMemberId === 'me';
-              const isPercent = splitMode === 'percent';
-              const isEqualMode = splitMode === 'equal';
-              const isSelected = selectedMembers.has(s.memberId);
-              // equal → checkboxes (interactive); fullOwed → only the payer is locked (0).
-              const editable = splitMode === 'amount' || isPercent || (splitMode === 'fullOwed' && !isPayer);
-              // Payer fronted the bill; everyone else owes them their share. When
-              // YOU paid, the others "owe you"; otherwise they just "owe".
-              const oweLabel = isPayer ? '✓ Paid' : isMe ? 'owe' : payerIsMe ? 'Owes you' : 'Owes';
-              return (
-              <View key={s.memberId} style={[styles.shareRow, idx < shares.length - 1 && styles.shareRowDivider]}>
-                {isEqualMode && (
-                  <TouchableOpacity
-                    style={styles.checkboxWrap}
-                    onPress={() => {
-                      setSelectedMembers(prev => {
-                        const next = new Set(prev);
-                        if (next.has(s.memberId)) {
-                          next.delete(s.memberId);
-                        } else {
-                          next.add(s.memberId);
-                        }
-                        return next;
-                      });
-                    }}
-                  >
-                    <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                <View style={styles.shareNameWrap}>
-                  <Text style={styles.shareName} numberOfLines={1}>
-                    {isMe ? '👤 You' : s.name}
-                  </Text>
-                  {!isEqualMode && (
-                    <Text style={[styles.shareOwe, isPayer && styles.sharePaid]} numberOfLines={1}>
-                      {oweLabel}
-                    </Text>
-                  )}
-                </View>
-                {/* Computed ₹ preview for percent mode — fixed width, sits before the input column. */}
-                {isPercent && editable && (
-                  <Text style={styles.shareAmt} numberOfLines={1}>
-                    {amount > 0 ? formatCurrency((amount * (s.percent || 0)) / 100) : ''}
-                  </Text>
-                )}
-                {/* Amount column — FIXED width whether it's a plain ₹ (locked) or an input+suffix,
-                    so the name + owe-label line up in a clean column across every row. */}
-                <View style={styles.shareAmountCol}>
-                  {!editable ? (
-                    <Text style={styles.shareEqualAmt} numberOfLines={1}>{formatCurrency(Number(s.shareAmount) || 0)}</Text>
-                  ) : (
-                    <>
-                      <TextInput
-                        style={styles.shareInput}
-                        value={isPercent ? (s.percent ? String(s.percent) : '') : (s.shareAmount ? String(s.shareAmount) : '')}
-                        onChangeText={(v) => updateShare(idx, parseFloat(v.replace(/[^\d.]/g, '')) || 0, isPercent ? 'percent' : 'shareAmount')}
-                        keyboardType="decimal-pad"
-                        maxLength={isPercent ? 3 : INPUT_LIMITS.AMOUNT_MAX_LEN}
-                        placeholder="0"
-                        placeholderTextColor={colors.textMuted}
-                      />
-                      <Text style={styles.shareSuffix}>{isPercent ? '%' : '₹'}</Text>
-                    </>
-                  )}
-                </View>
-              </View>
-              );
-            })}
-          </ScrollView>
-          </FormField>
-        </>
-      )}
+        {/* Account — personal groups always; shared only when YOU paid (otherwise
+            it's a memo with no account). Defaults to the primary account. */}
+        {(!isShared || payerIsMe) && (
+          <AccountField
+            accounts={accounts}
+            value={accountId}
+            onChange={setAccountId}
+            accentColor={theme.primary}
+          />
+        )}
 
-      {/* Note — last field, same position as on the plain-transaction form. */}
-      <FormField label="Note (optional)">
-        <FormTextInput
-          placeholder="What else should we know?"
+        {/* Date — hidden when tagging an existing transaction with no `editTxn`
+            loaded (we don't know its real date here, so there's nothing
+            meaningful to show); locked (but shown) when editing one we DO
+            have loaded, same reasoning as the locked amount. */}
+        {(!amountLocked || editTxn) && (
+          <DateField
+            variant="value"
+            value={date}
+            onChange={setDate}
+            maximumDate={new Date()}
+            disabled={amountLocked}
+            accentColor={theme.primary}
+          />
+        )}
+
+        <FormNoteField
           value={note}
           onChangeText={setNote}
-          multiline
           maxLength={INPUT_LIMITS.NOTE_MAX}
+          accentColor={theme.primary}
         />
-      </FormField>
+      </FormValueCard>
+
+      {/* ── Split page ─────────────────────────────────────────────────────── */}
+      {isShared && (
+        <Modal visible={splitPageOpen} animationType="slide" onRequestClose={() => setSplitPageOpen(false)}>
+          <SplitPage
+            onBack={() => setSplitPageOpen(false)}
+            onDone={() => setSplitPageOpen(false)}
+            accentColor={theme.primary}
+            payer={{
+              options: allMembers.map((m) => ({ id: m.memberId, label: m.isMe ? 'You' : m.name })),
+              selectedId: payerMemberId ?? 'me',
+              onSelect: (id) => setPayerIdx(Math.max(0, allMembers.findIndex((m) => m.memberId === id))),
+              lockedNote: lockPayerToMe ? "You — the money already left your account, so this can't change." : undefined,
+            }}
+            mode={splitMode}
+            onModeChange={handleSetMode}
+            valueUnit={splitMode === 'percent' ? 'percent' : 'amount'}
+            total={amount}
+            rows={shares.map((s, idx) => {
+              const isPayer = s.memberId === payerMemberId;
+              return {
+                id: s.memberId,
+                name: s.name || 'Member',
+                isMe: s.memberId === 'me',
+                isPayer,
+                percent: Number(s.percent) || 0,
+                amount: Number(s.shareAmount) || 0,
+                // equal → ticks; fullOwed → only the payer is locked (0).
+                editable: splitMode === 'amount' || splitMode === 'percent' || (splitMode === 'fullOwed' && !isPayer),
+                onChange: (v: number) => updateShare(idx, v, splitMode === 'percent' ? 'percent' : 'shareAmount'),
+                checked: selectedMembers.has(s.memberId),
+                onToggle: splitMode === 'equal'
+                  ? () => setSelectedMembers((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(s.memberId)) next.delete(s.memberId); else next.add(s.memberId);
+                      return next;
+                    })
+                  : undefined,
+              };
+            })}
+          />
+        </Modal>
+      )}
 
       {!hideSubmit && (
         <GradientButton
-          title={editTxn ? 'Save changes' : 'Add Expense'}
+          flat
+          title={editTxn ? 'Save Changes' : 'Add Expense'}
           onPress={handleAdd}
           disabled={amount <= 0}
           style={{ marginTop: spacing.md }}
@@ -684,56 +567,3 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  paidByMeNote: {
-    alignSelf: 'flex-start',
-    marginTop: spacing.sm, marginBottom: spacing.xs,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderRadius: radius.pill, borderWidth: 1,
-  },
-  paidByMeTxt: { ...typography.small, fontWeight: '700' },
-  // Bordered, scrollable box so a long member list doesn't push the form around.
-  // Outlined, no fill — matches the shared FormField controls.
-  sharesList: {
-    maxHeight: 200,
-    borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md,
-    backgroundColor: 'transparent',
-  },
-  sharesListContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-  shareRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  shareRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
-  checkboxWrap: { marginRight: spacing.sm },
-  checkbox: {
-    width: 20, height: 20, borderRadius: 4,
-    borderWidth: 1.5, borderColor: colors.inputBorder,
-    backgroundColor: 'transparent',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
-  // Name + owe-label on one row: the name FILLS the space (flex:1) so the owe-label
-  // is pushed to the wrapper's right edge — making the labels line up in a clean
-  // right-aligned column across rows instead of floating after each (ragged) name.
-  shareNameWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: spacing.sm },
-  shareName: { ...typography.body, color: colors.textPrimary, flex: 1 },
-  shareOwe: { ...typography.tiny, color: colors.textMuted, fontWeight: '600', marginLeft: spacing.xs, flexShrink: 0, textAlign: 'right' },
-  sharePaid: { color: colors.success },
-  // Wide enough to view ~6 digits; fixed width keeps the input column aligned.
-  shareInput: {
-    width: 100, backgroundColor: 'transparent',
-    borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 6,
-    textAlign: 'center', color: colors.textPrimary,
-    ...typography.bodyBold, fontWeight: '700',
-    borderWidth: 1, borderColor: colors.inputBorder,
-  },
-  shareSuffix: { marginLeft: 4, ...typography.small, color: colors.textSecondary },
-  // Fixed width + right-aligned so rows with fewer digits don't shift the input.
-  shareAmt:    { width: 78, textAlign: 'right', marginRight: spacing.sm, ...typography.small, color: colors.textMuted },
-  // Fixed-width amount column: holds either the locked ₹ text OR the input+suffix, so
-  // every row's amount block is the same width and the name/owe-label column stays aligned.
-  shareAmountCol: { width: 116, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
-  shareEqualAmt: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', textAlign: 'right' },
-});

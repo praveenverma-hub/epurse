@@ -25,7 +25,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme, useLbGradients } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidAmount } from '../utils/validation';
@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
     backgroundColor: colors.card,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
@@ -836,7 +836,7 @@ const styles = StyleSheet.create({
   },
   summaryCell: { flex: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   summaryDivider: {
-    width: StyleSheet.hairlineWidth,
+    width: DIVIDER_W,
     backgroundColor: colors.divider,
     marginVertical: spacing.sm,
   },
@@ -878,7 +878,7 @@ const styles = StyleSheet.create({
     ...typography.small, color: colors.textMuted, padding: spacing.lg, textAlign: 'center',
   },
   entryDivider: {
-    height: StyleSheet.hairlineWidth,
+    height: DIVIDER_W,
     backgroundColor: colors.divider,
     marginLeft: spacing.md + 36 + spacing.sm, // clears the icon tile, matches the text column start
   },
@@ -920,7 +920,7 @@ const styles = StyleSheet.create({
     // paddingBottom is set inline — it's the larger of the home-indicator inset
     // or this same spacing.md, so the button never sits flush against a notch.
     backgroundColor: colors.card,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
     borderTopColor: colors.divider,
   },
   footerLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },

@@ -33,9 +33,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import {
-  radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn, mix,
-} from '../constants/theme';
+import { radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn, mix, DIVIDER_W } from '../constants/theme';
 import { REWARD_CONFIG, goalRewardDisplay } from '../config/rewardConfig';
 import { useRewardStore } from '../store/useRewardStore';
 import { formatCompact } from '../utils/format';
@@ -491,7 +489,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
             key={s.k}
             style={[
               styles.stat,
-              { borderLeftColor: theme.divider, borderLeftWidth: i === 0 ? 0 : StyleSheet.hairlineWidth },
+              { borderLeftColor: theme.divider, borderLeftWidth: i === 0 ? 0 : DIVIDER_W },
             ]}
           >
             <Text style={[styles.statV, { color: theme.textPrimary }]} numberOfLines={1}>{s.v}</Text>
@@ -589,7 +587,7 @@ const styles = StyleSheet.create({
     height: RIBBON_H,
     borderTopLeftRadius: INNER_RADIUS,
     borderTopRightRadius: INNER_RADIUS,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: DIVIDER_W,
     paddingHorizontal: spacing.sm - 2,
     alignItems: 'center',
     justifyContent: 'center',

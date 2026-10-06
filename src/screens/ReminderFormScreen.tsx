@@ -36,7 +36,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { colors, radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
+import { colors, radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidName } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
 import { REPEAT, describeRepeat, nextOccurrence } from '../utils/reminderSchedule';
@@ -540,7 +540,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: DIVIDER_W,
   },
   footerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   // BUTTON_H tall like Save (matching PADDING isn't matching height), but only

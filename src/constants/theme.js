@@ -223,6 +223,14 @@ export const spacing = {
  */
 export const BUTTON_H = 48;
 
+/**
+ * Thickness of every divider / row separator in the app. `StyleSheet.hairlineWidth`
+ * (~0.33dp, a single device pixel) vanished on the light `colors.divider` tint, so
+ * separators read as missing. 1dp is the one value to change; `test:parse` forbids
+ * `StyleSheet.hairlineWidth` outside this file so it can't creep back.
+ */
+export const DIVIDER_W = 0.75;
+
 export const radius = {
   sm: 8,
   md: 12,

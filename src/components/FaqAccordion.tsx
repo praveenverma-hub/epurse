@@ -4,7 +4,7 @@ import { LayoutAnimation, Platform, StyleSheet, Text, TouchableOpacity, UIManage
 import { Ionicons } from '@expo/vector-icons';
 import type { StyleProp, TextStyle, ViewStyle } from 'react-native';
 
-import { radius, spacing, typography as typographyBase } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
@@ -61,7 +61,7 @@ const FaqAccordion: React.FC<Props> = ({ items, title, style }) => {
           return (
             <View
               key={item.id}
-              style={i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.divider }}
+              style={i > 0 && { borderTopWidth: DIVIDER_W, borderTopColor: theme.divider }}
             >
               <TouchableOpacity
                 style={styles.header}

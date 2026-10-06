@@ -23,7 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import PlainScreenHeader from '../components/PlainScreenHeader';
-import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H, withAlpha } from '../constants/theme';
+import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H, withAlpha, DIVIDER_W } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
@@ -830,7 +830,7 @@ const styles = StyleSheet.create({
   // Members tab and the Settle Up button below are the settle entry points).
   statsRow: { flexDirection: 'row', alignItems: 'center' },
   statCell: { flex: 1 },
-  statDivider: { width: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginHorizontal: spacing.md },
+  statDivider: { width: DIVIDER_W, backgroundColor: colors.divider, marginHorizontal: spacing.md },
   statLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '800', letterSpacing: 0.6 },
   statValue: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 3 },
 
@@ -891,7 +891,7 @@ const styles = StyleSheet.create({
   sectionBottomGap: { marginBottom: spacing.lg },
   pendingCard: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden' },
   pendingRow: { flexDirection: 'row', alignItems: 'center', padding: spacing.md },
-  pendingRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+  pendingRowDivider: { borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
   avatarTxt: { fontWeight: '800', fontSize: 13 },
   // Amount leads (the headline figure); "{name} owes you"/"You owe {name}"
