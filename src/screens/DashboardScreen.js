@@ -80,7 +80,13 @@ import TransactionItem from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import FAB from '../components/FAB';
-import CategoryPickerModal from '../components/CategoryPickerModal';
+import CategoryPickerModal from '../components/ManageTransactionModal';
+const managePreviewTransaction = { id: 'visual-preview-only', merchant: 'Lunch with team', amount: 850, type: 'debit', categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants', bankName: 'Everyday account', accountMask: '5004', createdAt: '2026-10-07T07:10:00.000Z', note: 'Lunch with the team' };
+function ManagePreview() {
+  const [visible, setVisible] = React.useState(true);
+  const categories = useEPurseStore((s) => s.categories);
+  return <CategoryPickerModal visible={visible} transaction={managePreviewTransaction} categories={categories} onClose={() => setVisible(false)} onSelectCategory={() => {}} onSelectLentBorrow={() => {}} onToggleHidden={() => {}} onIgnore={() => {}} onPressSplit={() => {}} onPressAddToGroup={() => {}} onDelete={() => {}} />;
+}
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
@@ -895,8 +901,10 @@ const DashboardScreen = ({ navigation }) => {
       </CollapsingHeaderScreen>
 
       <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
+      <ManagePreview />
 
       <CategoryPickerModal
+        transaction={activeTxn}
         visible={!!activeTxn}
         categories={categories}
         categoryLocked={!!activeTxn?.lbLocked}

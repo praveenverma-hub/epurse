@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import Modal from "./AppModal";
 
-import { colors, radius, searchFill, spacing, typography } from '../constants/theme';
+import { radius, searchFill, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import GradientButton from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
@@ -31,8 +31,9 @@ import {
  * Configure split (you + selected contacts).
  * `onApply(others, meta)` where meta = { mode: 'percent'|'amount', myPercent?: number, myAmount?: number }
  */
-const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
+const SplitConfigModal = ({ visible, transaction, onClose, onApply, embedded = false, onDraftChange, initialDraft }) => {
   const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   const toast = useToast();
   const [confirm, setConfirm] = useState(null);
   const [contacts, setContacts] = useState([]);
@@ -42,6 +43,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
   const [selected, setSelected] = useState(new Map()); // id -> { contactId, name, percent, shareAmount }
   const [myPercent, setMyPercent] = useState(100);
   const [myAmount, setMyAmount] = useState(0);
+  const [edited, setEdited] = useState(false);
 
   const amount = Number(transaction?.amount) || 0;
 
@@ -80,6 +82,17 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
       return;
     }
     const initial = new Map();
+    setEdited(false);
+    if (embedded && initialDraft) {
+      const draftMode = initialDraft.meta?.mode || 'percent';
+      setMode(draftMode);
+      setMyPercent(initialDraft.meta?.myPercent ?? 100);
+      setMyAmount(initialDraft.meta?.myAmount ?? amount);
+      initialDraft.others.forEach((person, index) => initial.set(person.contactId || `legacy_${index}`, { ...person }));
+      setSelected(initial);
+      loadContacts();
+      return;
+    }
     if (transaction?.isSplit && transaction?.splitWith?.length && amount > 0) {
       setMode('percent');
       // restore from existing split amounts
@@ -123,7 +136,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
 
     setSelected(initial);
     loadContacts();
-  }, [visible, transaction?.id, transaction?.amount, transaction?.categoryId, loadContacts, amount, applyEvenShares]);
+  }, [visible, transaction?.id, transaction?.amount, embedded ? null : transaction?.categoryId, loadContacts, amount, applyEvenShares]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -137,6 +150,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
   }, [filtered, query]);
 
   const toggleContact = useCallback((c) => {
+    setEdited(true);
     setSelected((prev) => {
       const next = new Map(prev);
       if (next.has(c.id)) next.delete(c.id);
@@ -163,7 +177,20 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
     selectedList.length > 0 &&
     (mode === 'percent' ? sumAll === 100 : Math.abs(sumAllAmt - amount) <= 0.01);
 
+  useEffect(() => {
+    if (!embedded || !onDraftChange) return;
+    onDraftChange({
+      edited,
+      valid: !edited && !!transaction?.isSplit ? true : valid && !loading,
+      others: Array.from(selected.values()).map((person) => mode === 'amount'
+        ? { contactId: person.contactId ?? null, name: person.name, shareAmount: Number(person.shareAmount) || 0 }
+        : { contactId: person.contactId ?? null, name: person.name, percent: Number(person.percent) || 0 }),
+      meta: mode === 'amount' ? { mode, myAmount: Number(myAmount) || 0 } : { mode, myPercent: Number(myPercent) || 0 },
+    });
+  }, [embedded, onDraftChange, edited, valid, loading, selected, mode, myAmount, myPercent, transaction?.isSplit]);
+
   const setOtherPercent = useCallback((id, raw) => {
+    setEdited(true);
     const v = Math.max(0, Math.min(100, parseInt(String(raw || '').replace(/[^\d]/g, ''), 10) || 0));
     setSelected((prev) => {
       const next = new Map(prev);
@@ -175,6 +202,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
   }, [amount]);
 
   const setOtherAmount = useCallback((id, raw) => {
+    setEdited(true);
     const v = Math.max(0, parseFloat(String(raw || '').replace(/[^\d.]/g, '')) || 0);
     setSelected((prev) => {
       const next = new Map(prev);
@@ -186,6 +214,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
   }, []);
 
   const removeSelected = useCallback((id) => {
+    setEdited(true);
     setSelected((prev) => {
       const next = new Map(prev);
       next.delete(id);
@@ -197,6 +226,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
   const setModeSafe = useCallback(
     (m) => {
       if (m === mode) return;
+      setEdited(true);
       setMode(m);
       if (m === 'amount') {
         setMyAmount(amount ? (amount * (Number(myPercent) || 0)) / 100 : 0);
@@ -304,16 +334,18 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
       : '';
 
   const blocked = transaction && !canSplitTransaction(transaction);
+  const Shell = embedded ? View : Modal;
+  const Body = embedded ? View : ScrollView;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
-        <SheetCloseButton onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-          <ScrollView
-            style={styles.body}
+    <Shell {...(embedded ? {} : { visible, animationType: 'slide', transparent: true, onRequestClose: onClose })}>
+      <View style={embedded ? undefined : styles.backdrop}>
+        {!embedded && <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />}
+        {!embedded && <SheetCloseButton onPress={onClose} />}
+        <View style={embedded ? undefined : styles.sheet}>
+          {!embedded && <View style={styles.handle} />}
+          <Body
+            style={embedded ? undefined : styles.body}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -325,7 +357,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
               </TouchableOpacity>
             ) : null}
           </View>
-          {transaction?.merchant ? (
+          {!embedded && transaction?.merchant ? (
             <Text style={styles.sub} numberOfLines={1}>
               {transaction.merchant} · {formatCurrency(transaction.amount)}
             </Text>
@@ -372,6 +404,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
                         <TextInput
                           value={String(myAmount ?? 0)}
                           onChangeText={(t) => {
+                            setEdited(true);
                             const v = Math.max(0, parseFloat(String(t || '').replace(/[^\d.]/g, '')) || 0);
                             setMyAmount(v);
                           }}
@@ -385,6 +418,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
                         <TextInput
                           value={String(myPercent)}
                           onChangeText={(t) => {
+                            setEdited(true);
                             const v = Math.max(0, Math.min(100, parseInt(String(t || '').replace(/[^\d]/g, ''), 10) || 0));
                             setMyPercent(v);
                           }}
@@ -451,12 +485,12 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
                 value={query}
                 onChangeText={setQuery}
                 placeholder="Search name or number"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={theme.textMuted}
                 style={[styles.search, { backgroundColor: searchFill(theme) }]}
               />
 
               {loading ? (
-                <ActivityIndicator style={{ marginVertical: spacing.lg }} color={colors.primary} />
+                <ActivityIndicator style={{ marginVertical: spacing.lg }} color={theme.primary} />
               ) : contacts.length === 0 ? (
                 <View style={styles.empty}>
                   <Text style={styles.emptyText}>
@@ -504,10 +538,10 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
 
             </>
           )}
-          </ScrollView>
+          </Body>
 
           {/* Pinned footer — Cancel + Apply side by side. */}
-          <View style={styles.footer}>
+          {!embedded && <View style={styles.footer}>
             <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.8}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
@@ -519,7 +553,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
                 style={styles.submitBtn}
               />
             )}
-          </View>
+          </View>}
         </View>
       </View>
 
@@ -534,15 +568,15 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply }) => {
         onSecondary={() => setConfirm(null)}
         onClose={() => setConfirm(null)}
       />
-    </Modal>
+    </Shell>
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (theme) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: '#0006', justifyContent: 'flex-end' },
   dismissArea: { flex: 1 },
   sheet: {
-    backgroundColor: colors.card,
+    backgroundColor: theme.card,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: spacing.lg,
@@ -553,35 +587,35 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.divider,
+    backgroundColor: theme.divider,
     alignSelf: 'center',
     marginBottom: spacing.md,
   },
-  title: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.xs },
+  title: { ...typography.h2, color: theme.textPrimary, marginBottom: spacing.xs },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.xs,
   },
-  sub: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.sm },
-  hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.sm },
-  warn: { ...typography.small, color: colors.warning, marginBottom: spacing.md },
+  sub: { ...typography.body, color: theme.textSecondary, marginBottom: spacing.sm },
+  hint: { ...typography.small, color: theme.textSecondary, marginBottom: spacing.sm },
+  warn: { ...typography.small, color: theme.warning, marginBottom: spacing.md },
   clearBtnTop: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radius.pill,
-    backgroundColor: colors.danger + '12',
+    backgroundColor: theme.danger + '12',
     borderWidth: 1,
-    borderColor: colors.danger + '33',
+    borderColor: theme.danger + '33',
   },
-  clearText: { color: colors.danger, ...typography.small, fontWeight: '700' },
+  clearText: { color: theme.danger, ...typography.small, fontWeight: '700' },
   selectedBox: {
-    backgroundColor: colors.background,
+    backgroundColor: theme.background,
     borderRadius: radius.lg,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: theme.divider,
     marginBottom: spacing.sm,
     gap: spacing.xs,
   },
@@ -591,7 +625,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.xs,
   },
-  selectedTitle: { ...typography.small, color: colors.textSecondary, fontWeight: '800' },
+  selectedTitle: { ...typography.small, color: theme.textSecondary, fontWeight: '800' },
   modeRow: { flexDirection: 'row', gap: spacing.xs },
   modeChip: {
     minWidth: 36,
@@ -599,14 +633,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     alignItems: 'center',
-    backgroundColor: colors.card,
+    backgroundColor: theme.card,
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: theme.divider,
   },
-  modeChipOn: { backgroundColor: colors.primary + '14', borderColor: colors.primary + '66' },
-  modeChipTxt: { ...typography.small, color: colors.textSecondary, fontWeight: '800' },
-  modeChipTxtOn: { color: colors.primary },
-  selectedEmpty: { ...typography.small, color: colors.textSecondary, marginTop: spacing.xs },
+  modeChipOn: { backgroundColor: theme.primary + '14', borderColor: theme.primary + '66' },
+  modeChipTxt: { ...typography.small, color: theme.textSecondary, fontWeight: '800' },
+  modeChipTxtOn: { color: theme.primary },
+  selectedEmpty: { ...typography.small, color: theme.textSecondary, marginTop: spacing.xs },
   selRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -614,49 +648,49 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   selLeft: { flex: 1, paddingRight: spacing.md },
-  selName: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
-  selAmt: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
+  selName: { ...typography.bodyBold, color: theme.textPrimary, fontWeight: '700' },
+  selAmt: { ...typography.tiny, color: theme.textSecondary, marginTop: 2 },
   pctWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pctInput: {
     width: 54,
-    backgroundColor: colors.card,
+    backgroundColor: theme.card,
     borderRadius: radius.md,
     paddingHorizontal: 10,
     paddingVertical: 8,
     textAlign: 'center',
-    color: colors.textPrimary,
+    color: theme.textPrimary,
     ...typography.bodyBold,
     fontWeight: '800',
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: theme.divider,
   },
   valueInputWide: {
     width: 96,
     textAlign: 'right',
     paddingHorizontal: 8,
   },
-  pctSuffix: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
+  pctSuffix: { ...typography.small, color: theme.textSecondary, fontWeight: '700' },
   removeBtn: {
     width: 28,
     height: 28,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.danger + '14',
+    backgroundColor: theme.danger + '14',
     borderWidth: 1,
-    borderColor: colors.danger + '33',
+    borderColor: theme.danger + '33',
     marginLeft: 2,
   },
-  removeTxt: { color: colors.danger, fontWeight: '900', fontSize: 16, lineHeight: 16 },
+  removeTxt: { color: theme.danger, fontWeight: '900', fontSize: 16, lineHeight: 16 },
   sumHint: { ...typography.tiny, marginTop: spacing.xs, fontWeight: '700' },
-  sumOk: { color: colors.success },
-  sumBad: { color: colors.warning },
+  sumOk: { color: theme.success },
+  sumBad: { color: theme.warning },
   search: {
-    backgroundColor: colors.background,
+    backgroundColor: theme.background,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
-    color: colors.textPrimary,
+    color: theme.textPrimary,
     ...typography.body,
     marginBottom: spacing.sm,
   },
@@ -669,38 +703,38 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: 4,
   },
-  rowOn: { backgroundColor: colors.primary + '14' },
+  rowOn: { backgroundColor: theme.primary + '14' },
   avatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primary + '22',
+    backgroundColor: theme.primary + '22',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.sm,
   },
-  avatarTxt: { color: colors.primary, fontWeight: '800' },
-  name: { flex: 1, ...typography.body, color: colors.textPrimary },
-  nameOn: { fontWeight: '700', color: colors.primary },
-  phone: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  check: { width: 28, color: colors.primary, fontWeight: '800', textAlign: 'right' },
+  avatarTxt: { color: theme.primary, fontWeight: '800' },
+  name: { flex: 1, ...typography.body, color: theme.textPrimary },
+  nameOn: { fontWeight: '700', color: theme.primary },
+  phone: { ...typography.tiny, color: theme.textSecondary, marginTop: 2 },
+  check: { width: 28, color: theme.primary, fontWeight: '800', textAlign: 'right' },
   empty: { paddingVertical: spacing.lg, alignItems: 'center' },
-  emptyText: { ...typography.small, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
+  emptyText: { ...typography.small, color: theme.textSecondary, textAlign: 'center', marginBottom: spacing.md },
   permBtn: {
-    backgroundColor: colors.primary + '18',
+    backgroundColor: theme.primary + '18',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm + 2,
     borderRadius: radius.pill,
   },
-  permBtnText: { color: colors.primary, fontWeight: '700' },
+  permBtnText: { color: theme.primary, fontWeight: '700' },
   // flexShrink lets the body yield height to the pinned footer when content is tall.
   body: { flexShrink: 1 },
   footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
   cancelBtn: {
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: theme.divider,
   },
-  cancelText: { color: colors.textSecondary, ...typography.bodyBold, fontWeight: '700' },
+  cancelText: { color: theme.textSecondary, ...typography.bodyBold, fontWeight: '700' },
   submitBtn: { flex: 1 },
 });
 

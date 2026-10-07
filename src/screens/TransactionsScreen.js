@@ -57,7 +57,7 @@ import {
 } from '../utils/txnArrange';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
-import CategoryPickerModal from '../components/CategoryPickerModal';
+import CategoryPickerModal from '../components/ManageTransactionModal';
 import LinkContactModal from '../components/LinkContactModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
@@ -1210,6 +1210,7 @@ const TransactionsScreen = ({ navigation, route }) => {
 
       {/* ── Transaction interaction modals ───────────────────────────────── */}
       <CategoryPickerModal
+        transaction={activeTxn}
         visible={!!activeTxn}
         categories={categories}
         selectedCategoryId={activeTxn?.categoryId}

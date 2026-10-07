@@ -37,7 +37,7 @@ import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../cons
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import { canSplitTransaction, isPayerLockedToMe } from '../utils/split';
-import CategoryPickerModal from './CategoryPickerModal';
+import CategoryPickerModal from './ManageTransactionModal';
 import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
 import SplitConfigModal from './SplitConfigModal';
@@ -588,12 +588,15 @@ const DailyQueueStack = () => {
       {/* ── Swipe hint footer ── */}
       {displayQueue.length > 0 && (
         <Text style={styles.footerHint}>
-          Swipe right to approve · left to re-categorise
+          Swipe right to approve · left to manage
         </Text>
       )}
 
       {/* ── Category picker ── */}
       <CategoryPickerModal
+        transaction={pickerTxn}
+        fromQueue
+        onManaged={clearAsReviewed}
         visible={!!pickerTxn}
         categories={categories}
         selectedCategoryId={pickerTxn?.categoryId}

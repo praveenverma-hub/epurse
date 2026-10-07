@@ -35,7 +35,7 @@ import ProgressBar from '../components/ProgressBar';
 import UnderlineTabBar from '../components/UnderlineTabBar';
 import TransactionItemRaw from '../components/TransactionItem';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
-import CategoryPickerModal from '../components/CategoryPickerModal';
+import CategoryPickerModal from '../components/ManageTransactionModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
 import EditIcon from '../components/EditIcon';
@@ -669,6 +669,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       />
 
       <CategoryPickerModal
+        transaction={categoryTxn}
         visible={!!categoryTxn}
         categories={categories}
         selectedCategoryId={categoryTxn?.categoryId}
