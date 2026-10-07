@@ -46,6 +46,7 @@ import CenterModal from './CenterModal';
 import InfoSheet from './InfoSheet';
 import InfoIcon from './InfoIcon';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
+import { IS_STAGE_BUILD } from '../constants/buildVariant';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_H         = 152;
@@ -287,6 +288,29 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
   );
 };
 
+// TEMP mock for testing the review queue / Manage sheet — dev & stage builds only,
+// never production. Re-seeded fresh (unreviewed) on every mount, and has no
+// accountId so swiping / ignoring / deleting it never moves a balance.
+// Remove MOCK_REVIEW_TXN + its effect when done.
+const MOCK_REVIEW_TXN_ID = 'mock-review-txn';
+const MOCK_REVIEW_TXN = {
+  id: MOCK_REVIEW_TXN_ID,
+  source: 'sms',
+  type: 'debit',
+  amount: 850,
+  merchant: 'Lunch With Team',
+  categoryId: '',
+  parentCategory: '',
+  childCategory: '',
+  bankName: 'HDFC Bank',
+  accountType: 'BANK',
+  accountMask: '4521',
+  accountId: null,
+  isReviewed: false,
+  isIgnored: false,
+  isHidden: false,
+};
+
 // =============================================================================
 // DailyQueueStack — container
 // =============================================================================
@@ -297,6 +321,16 @@ const DailyQueueStack = () => {
   // array every call, and zustand v5 dropped the memoised selector that made
   // that safe — without it this re-renders forever.
   const queue    = useEPurseStore(useShallow(selectUnreviewedQueue));
+
+  useEffect(() => {
+    if (!IS_STAGE_BUILD) return;
+    useEPurseStore.setState((st) => ({
+      transactions: [
+        { ...MOCK_REVIEW_TXN, createdAt: new Date().toISOString() },
+        ...st.transactions.filter((t) => t.id !== MOCK_REVIEW_TXN_ID),
+      ],
+    }));
+  }, []);
   const groups   = useEPurseStore((s) => s.groups);
   const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
   const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);
@@ -444,19 +478,6 @@ const DailyQueueStack = () => {
     clearAsReviewed(pickerTxn.id);
     setPickerTxn(null);
   }, [pickerTxn, untagTransactionFromGroup, clearAsReviewed]);
-
-  // Set / edit "who owes" on a shared-group-tagged txn (e.g. one auto-tagged by a
-  // Group Zone). Opens the group-expense editor — paid by me + equal split by default,
-  // category shown — and persists via updateGroupExpense (keeps account/total/LB in sync).
-  const handleEditGroup = useCallback(() => {
-    if (!pickerTxn) return;
-    const group = groups.find((g) => g.id === pickerTxn.groupId);
-    if (!group || group.type !== 'shared') return;
-    // Read the freshest txn from the store (category may have just changed in the modal).
-    const fresh = useEPurseStore.getState().transactions.find((t) => t.id === pickerTxn.id) || pickerTxn;
-    setPickerTxn(null);
-    navigation.navigate('AddGroupExpense', { groupId: group.id, editTxnId: fresh.id, fromQueue: true });
-  }, [pickerTxn, groups, navigation]);
 
   const handleOpenSplit = useCallback(() => {
     const t = pickerTxn;
@@ -613,12 +634,6 @@ const DailyQueueStack = () => {
         onSelectLentBorrow={handleSelectLentBorrow}
         onPressAddToGroup={pickerTxn?.lbLocked ? undefined : handleAddToGroup}
         onPressRemoveFromGroup={handleRemoveFromGroup}
-        onPressEditGroup={
-          pickerTxn?.groupId && groups.find((g) => g.id === pickerTxn.groupId)?.type === 'shared'
-            ? handleEditGroup
-            : undefined
-        }
-        groupHasSplit={!!pickerTxn?.groupSplit}
         onPressSplit={handleOpenSplit}
         onToggleHidden={handleToggleHidden}
         onIgnore={handleIgnore}

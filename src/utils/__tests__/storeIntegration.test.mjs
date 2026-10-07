@@ -4281,6 +4281,82 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('v39: an already-set colorKey survives untouched', already.colorKey === 'SBI');
 }
 
+// ── Ignore and Private are exclusive (v40) ───────────────────────────────────
+{
+  reset();
+  const id = 'excl-1';
+  useStore.setState({ transactions: [{ id, type: 'debit', amount: 100, source: 'manual', isHidden: true, createdAt: new Date().toISOString() }] });
+  useStore.getState().ignoreTransaction(id);
+  const t1 = useStore.getState().transactions.find((t) => t.id === id);
+  check('ignoring a Private txn clears Private', t1.isIgnored && !t1.isHidden, JSON.stringify(t1));
+  useStore.getState().setTransactionHidden(id, true);
+  check('Private is refused on an ignored txn', !useStore.getState().transactions.find((t) => t.id === id).isHidden);
+  useStore.getState().unignoreTransaction(id);
+  useStore.getState().setTransactionHidden(id, true);
+  check('…and allowed again once restored', useStore.getState().transactions.find((t) => t.id === id).isHidden === true);
+
+  const migrate = useStore.persist.getOptions().migrate;
+  const m = migrate({ transactions: [
+    { id: 'b', isIgnored: true, isHidden: true },
+    { id: 'h', isIgnored: false, isHidden: true },
+  ], archivedTransactions: [{ id: 'ab', isIgnored: true, isHidden: true }] }, 39);
+  check('v40: a txn that was both ignored + Private keeps Ignore, loses Private',
+    m.transactions[0].isIgnored && !m.transactions[0].isHidden && !m.archivedTransactions[0].isHidden);
+  check('v40: a plain Private txn is untouched', m.transactions[1].isHidden === true);
+  const m2 = migrate({ groups: [{ id: 'g1', type: 'shared' }], transactions: [
+    { id: 's', isIgnored: true, isSplit: true, splitWith: [{ name: 'Rohit' }] },
+    { id: 'g', isIgnored: true, groupId: 'g1', groupSplit: { shares: [] } },
+    { id: 'live', isIgnored: false, isSplit: true, splitWith: [{ name: 'Aman' }] },
+  ] }, 39);
+  check('v40: an already-ignored split / shared-group txn is cleaned for Restore',
+    !m2.transactions[0].isSplit && !m2.transactions[1].groupId && !m2.transactions[1].groupSplit);
+  check('v40: a live (not ignored) split is untouched', m2.transactions[2].isSplit === true);
+}
+
+// ── Ignore → Restore is CLEAN; groups take money OUT only ────────────────────
+{
+  reset();
+  const S = () => useStore.getState();
+  const acc = S().addAccount({ type: 'Bank', name: 'HDFC', mask: '1111', balance: 10000 });
+  S().addTransaction({ type: 'debit', amount: 900, merchant: 'Dinner', categoryId: 'food', accountId: acc, skipGroupZone: true });
+  const id = S().transactions[0].id;
+  S().setTransactionSplit(id, [{ name: 'Rohit' }, { name: 'Aman' }], { mode: 'equal' });
+  const lbFor = (tid) => S().lentBorrowed.filter((l) => l.sourceTxnId === tid).length;
+  const tx = (tid) => S().transactions.find((t) => t.id === tid);
+  check('split creates 2 Lent rows', lbFor(id) === 2);
+  S().ignoreTransaction(id);
+  check('ignoring a split drops its Lent rows AND the split itself', lbFor(id) === 0 && !tx(id).isSplit && tx(id).splitWith.length === 0);
+  S().unignoreTransaction(id);
+  check('restore brings back a clean full expense (no phantom split)', !tx(id).isSplit && lbFor(id) === 0 && S().accounts[0].balance === 9100,
+    JSON.stringify({ isSplit: tx(id).isSplit, bal: S().accounts[0].balance }));
+
+  const shared = S().createGroup({ name: 'Goa', type: 'shared', members: [{ memberId: 'c1', name: 'Rahul' }] });
+  S().addTransaction({ type: 'debit', amount: 600, merchant: 'Hotel', categoryId: 'travel', accountId: acc, skipGroupZone: true });
+  const gid = S().transactions.find((t) => t.merchant === 'Hotel').id;
+  S().tagTransactionToGroup(gid, shared, { paidByMemberId: 'me', paidByName: 'You',
+    shares: [{ memberId: 'me', shareAmount: 300 }, { memberId: 'c1', shareAmount: 300 }] });
+  const total = () => S().groups.find((g) => g.id === shared).totalSpend;
+  check('shared-group split books a Lent row + group spend', lbFor(gid) === 1 && total() === 600, `${lbFor(gid)} / ${total()}`);
+  S().ignoreTransaction(gid);
+  check('ignoring it leaves the shared group (tag + split) and its spend', !tx(gid).groupId && !tx(gid).groupSplit && total() === 0);
+  S().unignoreTransaction(gid);
+  check('restore does not re-add it to the group', !tx(gid).groupId && total() === 0 && lbFor(gid) === 0);
+
+  const personal = S().createGroup({ name: 'Office', type: 'personal' });
+  S().addTransaction({ type: 'debit', amount: 200, merchant: 'Lunch', categoryId: 'food', accountId: acc, skipGroupZone: true });
+  const pid = S().transactions.find((t) => t.merchant === 'Lunch').id;
+  S().tagTransactionToGroup(pid, personal);
+  S().ignoreTransaction(pid);
+  S().unignoreTransaction(pid);
+  check('a PERSONAL group tag survives ignore → restore (no split to drop)', tx(pid).groupId === personal);
+
+  S().addTransaction({ type: 'credit', amount: 500, merchant: 'Refund', categoryId: 'other', accountId: acc, skipGroupZone: true });
+  const cid = S().transactions.find((t) => t.merchant === 'Refund').id;
+  const before = total();
+  S().tagTransactionToGroup(cid, shared);
+  check('money IN never joins a group (no inflated group spend)', !tx(cid).groupId && total() === before);
+}
+
 // ── setIncludeInNetWorth + selectEPurseNetWorth skips archived/excluded ──────
 {
   reset();

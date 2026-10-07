@@ -57,10 +57,11 @@ export function applyManageDraft(store, txn, draft) {
       current.updateTwoTierCategory(txn.id, draft.parentCategory, draft.childCategory);
     } else current.updateTransactionCategory(txn.id, draft.categoryId);
   }
-  if (draft.isHidden !== !!txn.isHidden) current.setTransactionHidden(txn.id, draft.isHidden);
   if (draft.isRefund !== !!txn.isRefund) current.setTransactionRefund(txn.id, draft.isRefund);
-  // Restore first so the existing split/group guards see an active transaction.
+  // Restore first so the existing split/group guards see an active transaction —
+  // and so Private can apply (the store refuses Private on an ignored txn).
   if (txn.isIgnored && !draft.isIgnored) current.unignoreTransaction(txn.id);
+  if (draft.isHidden !== !!txn.isHidden) current.setTransactionHidden(txn.id, draft.isHidden);
   if (draft.groupId !== (txn.groupId || null)) {
     if (draft.groupId) current.tagTransactionToGroup(txn.id, draft.groupId);
     else current.untagTransactionFromGroup(txn.id);

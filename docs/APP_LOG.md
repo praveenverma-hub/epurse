@@ -32,6 +32,38 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `GroupExpenseForm`). Plain category now optional (saves as `other`, review-later). Expense/Income is the swipeable `TabView` + `UnderlineTabBar`. New
   `FormNoteField`, `AccountField`, `utils/defaultAccount.ts`. **Not built (open)**: merchant→category
   auto-suggest, tags/recurring/exclude-from-totals (don't exist yet), per-group default split people.
+- **Option exclusivity sweep (Oct-8-2026)**: (1) BUG: ignoring a split/group txn deleted its Lent rows but
+  Restore left it claiming the split — now Ignore strips the split (and a SHARED group's tag + split;
+  personal group tags stay), so Restore is a clean expense; v40 migration cleans already-ignored rows and
+  the Ignore confirm says the split goes too. (2) Manage hides Group while a direct split exists (it used to
+  silently drop the split). (3) Money IN can't join a group (store no-op + Manage hides Group) — it inflated
+  group spend. Tests in test:store.
+- **Ignore and Private are exclusive (Oct-8-2026, store v40)**: a txn could be both. Now
+  `ignoreTransaction` clears `isHidden`; `setTransactionHidden(id, true)` is a no-op on an ignored txn
+  (restore first); `applyManageDraft` restores BEFORE applying Private; Manage hides the Private action
+  while Ignore is on (toggling Ignore off brings back the txn's own Private state). v40 migration clears
+  Private on any txn (incl. archived) that was both. `backupService` STORE_VERSION → 40. Tests in
+  test:store.
+- **Manage: quick category picks + search (Oct-7-2026)**: the Category section in Manage is now a
+  search box (focus ring) with an arrow at its right end that opens the full accordion picker, and,
+  when nothing is typed, up to 5 one-tap sub-category chips — current → what this merchant was tagged
+  before (`categorySuggest`) → most used. Typing shows up to 6 matching sub-categories (child label
+  first, then parent) plus Settlements / Credit Card Bill. Lent/Borrowed never appear as chips (need a
+  person) but are searchable and still route through the person-link flow on Done. Pure ranking in
+  `utils/categoryQuickPick.ts` (`test:categoryQuickPick`, 14).
+  Oct-8: results are capped chips (8, "All ›" last; arrow in the box only while empty), sheet 75%,
+  and typed text also runs `suggestCategory` — "petrol"/"swiggy"/"uber" add their category chip after
+  the name matches.
+  "Most used" chips now favour the last 45 days (`RECENT_USE_DAYS`); all-time only fills leftover slots.
+- **Manage modal polish (Oct-7-2026)**: `ManageTransactionModal.js` (the Oct-7 draft-then-Done revamp)
+  had big 2×2 grey action cards that shrank when a panel opened. Now one compact size with an icon,
+  coloured as before the revamp (Private green, Ignore amber / Restore green, Split blue, group
+  primary, Delete solid red icon beside the group button). X / backdrop / back just close (the draft
+  is dropped, nothing was written) — no discard confirm; Done only confirms for Ignore/Restore.
+  Removed a leftover `ManagePreview` that opened a fake Manage sheet on every Dashboard mount.
+  Category step reverted to the pre-revamp accordion picker (parents → child chips, Credit Card Bill,
+  Settlements) — now the shared `CategoryTreeList` exported from `CategoryPickerModal.tsx`; the
+  revamp's search list is gone.
 - **Split editor is a real route (Oct-7-2026)**: the split page popped in (Add Transaction) or rose
   from the bottom (group form). It is now the `SplitEditor` stack route (native push + swipe-back);
   the form keeps the split state and publishes it via `store/useSplitEditorRoute.ts`. Because a route

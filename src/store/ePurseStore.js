@@ -570,6 +570,26 @@ const applyDelta = (accounts, accountId, parsed) => {
  * Missing it is silent money loss: the txn stops being a memo but the balance never
  * gets the outflow back.
  */
+/**
+ * What Ignore strips so Restore is clean: the plain split (incl. "someone else
+ * paid" memo flags — the account is NOT re-pointed, so Restore never debits money
+ * the user didn't pay) and a SHARED group's split + tag. A personal group tag stays
+ * (no split there). Ignore deletes the matching Lent/Borrowed rows itself.
+ */
+const ignoredSplitPatch = (txn, groups) => {
+  const shared = !!txn.groupId && (groups || []).find((g) => g.id === txn.groupId)?.type === 'shared';
+  if (!txn.isSplit && !txn.isSplitMemo && !shared) return {};
+  return {
+    isSplit: false,
+    splitWith: [],
+    myShareAmount: undefined,
+    isSplitMemo: undefined,
+    splitPaidBy: undefined,
+    memoAccountId: undefined,
+    ...(shared ? { groupId: null, groupSplit: undefined, isGroupMemo: undefined } : {}),
+  };
+};
+
 const clearPlainSplit = (txn) => {
   const wasMemo = !!txn.isSplitMemo;
   const parkedAccountId = txn.memoAccountId || txn.accountId || null;
@@ -3561,6 +3581,9 @@ export const useEPurseStore = create(
           // debt record just vanishes. Groups already have their own independent
           // who-owes-whom via split legs; the two systems must not mix.
           if (txn.lbLocked) return s;
+          // Groups track spending: money IN (refund, salary) would inflate the group's
+          // total spend, so credits never join a group.
+          if (txn.type === TRANSACTION_TYPES.CREDIT) return s;
           const group = s.groups.find((g) => g.id === groupId);
           if (!group) return s;
           const prevGroupId = txn.groupId || null;
@@ -4616,8 +4639,12 @@ export const useEPurseStore = create(
           let accounts = applyDelta(s.accounts, txn.accountId, { ...txn, type: oppositeType(txn.type) });
           children.forEach((c) => { accounts = applyDelta(accounts, c.accountId, { ...c, type: oppositeType(c.type) }); });
           return {
+            // Ignore and Private are exclusive: an ignored txn is out of everything
+            // already, so it can't also be Private. Its split / shared-group split is
+            // dropped too (its Lent rows go below), so a Restore brings back a CLEAN
+            // transaction rather than one claiming a split that no longer exists.
             transactions: s.transactions.map((t) =>
-              ignoreIds.has(t.id) ? { ...t, isIgnored: true } : t
+              ignoreIds.has(t.id) ? { ...t, isIgnored: true, isHidden: false, ...ignoredSplitPatch(t, s.groups) } : t
             ),
             accounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
@@ -5044,10 +5071,11 @@ export const useEPurseStore = create(
           return { lentBorrowed };
         }),
 
+      // No-op on an ignored txn (Ignore and Private are exclusive — restore first).
       setTransactionHidden: (id, hidden) =>
         set((s) => ({
           transactions: s.transactions.map((t) =>
-            t.id === id ? { ...t, isHidden: !!hidden } : t
+            t.id === id && !(hidden && t.isIgnored) ? { ...t, isHidden: !!hidden } : t
           ),
         })),
 
@@ -6175,7 +6203,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 39,
+      version: 40,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -6923,6 +6951,17 @@ export const useEPurseStore = create(
             ...state,
             accounts: (state.accounts || []).map((a) => ({ ...a, colorKey: a.colorKey ?? null })),
           };
+        }
+
+        // v40: Ignore and Private became exclusive — clear Private on any txn
+        // that was both (ignored wins: it's already out of every view/total).
+        // Also strip a split / shared-group split off already-ignored txns (Ignore
+        // deleted their Lent rows long ago), so a later Restore is clean.
+        if (version < 40) {
+          const unhide = (list) => (list || []).map((t) => (t.isIgnored
+            ? { ...t, ...(t.isHidden ? { isHidden: false } : {}), ...ignoredSplitPatch(t, state.groups) }
+            : t));
+          state = { ...state, transactions: unhide(state.transactions), archivedTransactions: unhide(state.archivedTransactions) };
         }
 
         return state;

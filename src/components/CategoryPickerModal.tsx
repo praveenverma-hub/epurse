@@ -210,6 +210,150 @@ const ParentRow: React.FC<ParentRowProps> = ({
   );
 };
 
+// ─── CategoryTreeList ────────────────────────────────────────────────────────
+// The two-tier accordion (parents → child chips, Credit Card Bill under Bills,
+// Settlements below). Shared by this modal and ManageTransactionModal's
+// category step. No ScrollView of its own — the host scrolls.
+
+interface CategoryTreeListProps {
+  categories: LegacyCat[];
+  selectedCategoryId?: string;
+  selectedParent?: string;
+  selectedChild?: string;
+  /** Re-runs the auto-expand of the selected parent when it changes (e.g. `visible`). */
+  resetKey?: unknown;
+  /** A child chip — LB children included; the host decides what LB means. */
+  onSelectTwoTier: (parent: ParentCat, child: ChildCat) => void;
+  /** lent_settled / borrow_repaid. */
+  onSelectSettlement: (categoryId: string) => void;
+  /** Credit Card Bill (opens the card-reconcile flow). */
+  onSelectCategory: (categoryId: string) => void;
+}
+
+export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
+  categories,
+  selectedCategoryId,
+  selectedParent,
+  selectedChild,
+  resetKey,
+  onSelectTwoTier,
+  onSelectSettlement,
+  onSelectCategory,
+}) => {
+  const theme = useTheme();
+  const categoryTree = useCategoryTree();   // built-ins + user's custom categories
+  const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
+
+  // Auto-expand the active parent. cc_bill never carries parent/child labels,
+  // so it's keyed off selectedCategoryId (lands with Bills & Utilities open).
+  useEffect(() => {
+    if (selectedCategoryId === 'cc_bill') setExpandedParentId('bills');
+    else if (selectedParent) {
+      const match = categoryTree.find((p) => p.label === selectedParent);
+      setExpandedParentId(match?.id ?? null);
+    } else setExpandedParentId(null);
+  }, [resetKey, selectedParent, selectedCategoryId]);
+
+  const settlementCats = categories.filter((c) => LB_SETTLEMENT_IDS.has(c.id));
+  // Fall back to a fixed label so the row shows even if an older persisted category
+  // list doesn't yet include cc_bill (it's injected on rehydrate, but don't depend on it).
+  const ccBillCat = categories.find((c) => c.id === 'cc_bill')
+    ?? { id: 'cc_bill', name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' };
+
+  // Rendered as Bills & Utilities' `extraContent` (below), not a normal tree
+  // child — picking it opens the card-reconcile sheet via onSelectCategory,
+  // never onSelectTwoTier.
+  const ccBillRow = (
+    <TouchableOpacity
+      style={[
+        styles.ccBillRow,
+        { borderColor: theme.divider, backgroundColor: theme.card },
+        selectedCategoryId === 'cc_bill' && {
+          borderColor: theme.primary,
+          backgroundColor: theme.primary + '14',
+        },
+      ]}
+      onPress={() => onSelectCategory('cc_bill')}
+      activeOpacity={0.72}
+    >
+      <Text style={styles.rowEmoji}>{ccBillCat.emoji}</Text>
+      <View style={styles.rowMid}>
+        <Text
+          style={[
+            styles.rowLabel,
+            selectedCategoryId === 'cc_bill' && { color: theme.primary, fontWeight: '700' },
+          ]}
+        >
+          {ccBillCat.name}
+        </Text>
+        <Text style={styles.lbHint}>Paid a card bill · excluded from spend</Text>
+      </View>
+      {selectedCategoryId === 'cc_bill' && (
+        <Text style={{ color: theme.primary, fontWeight: '800' }}>✓</Text>
+      )}
+    </TouchableOpacity>
+  );
+
+  return (
+    <>
+      {categoryTree.map((parent) => (
+        <ParentRow
+          key={parent.id}
+          parent={parent}
+          isExpanded={expandedParentId === parent.id}
+          selectedParent={selectedParent}
+          selectedChild={selectedChild}
+          onParentPress={() => setExpandedParentId((prev) => (prev === parent.id ? null : parent.id))}
+          onChildPress={onSelectTwoTier}
+          extraContent={parent.id === 'bills' ? ccBillRow : undefined}
+        />
+      ))}
+
+      {/* Settlement categories — lent_settled / borrow_repaid */}
+      {settlementCats.length > 0 && (
+        <View style={styles.settlementSection}>
+          <Text style={styles.settlementSectionLabel}>SETTLEMENTS</Text>
+          {settlementCats.map((cat) => {
+            const active = selectedCategoryId === cat.id;
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={[
+                  styles.parentRow,
+                  styles.settlementRow,
+                  active && {
+                    borderWidth: 1.5,
+                    borderColor: colors.success + '66',
+                    backgroundColor: colors.success + '10',
+                  },
+                ]}
+                onPress={() => onSelectSettlement(cat.id)}
+                activeOpacity={0.72}
+              >
+                <Text style={styles.rowEmoji}>{cat.emoji}</Text>
+                <View style={styles.rowMid}>
+                  <Text
+                    style={[
+                      styles.rowLabel,
+                      active && { color: colors.success, fontWeight: '700' },
+                    ]}
+                  >
+                    {cat.name}
+                  </Text>
+                  <Text style={styles.lbHint}>Links to person · tracks balance</Text>
+                </View>
+                {active && (
+                  <Text style={{ color: colors.success, fontWeight: '800' }}>✓</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+    </>
+  );
+};
+
 // ─── CategoryPickerModal ─────────────────────────────────────────────────────
 
 const CategoryPickerModal: React.FC<Props> = ({
@@ -244,87 +388,6 @@ const CategoryPickerModal: React.FC<Props> = ({
   groupHasSplit,
 }) => {
   const theme = useTheme();
-  const categoryTree = useCategoryTree();   // built-ins + user's custom categories
-  const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
-
-  // Auto-expand the active parent when the sheet opens. cc_bill never carries a
-  // parentCategory/childCategory label (see twoTierCategories.ts's cc_bill alias
-  // comment), so it's keyed off selectedCategoryId instead — otherwise reopening
-  // the picker on an already-tagged card-bill payment would land with Bills &
-  // Utilities collapsed and its own row (further down, inside that section) out
-  // of view.
-  useEffect(() => {
-    if (visible) {
-      if (selectedCategoryId === 'cc_bill') {
-        setExpandedParentId('bills');
-      } else if (selectedParent) {
-        const match = categoryTree.find((p) => p.label === selectedParent);
-        setExpandedParentId(match?.id ?? null);
-      }
-    }
-    if (!visible) {
-      const t = setTimeout(() => setExpandedParentId(null), 260);
-      return () => clearTimeout(t);
-    }
-  }, [visible, selectedParent, selectedCategoryId]);
-
-  const handleParentPress = (parentId: string) => {
-    setExpandedParentId((prev) => (prev === parentId ? null : parentId));
-  };
-
-  const handleChildPress = (parent: ParentCat, child: ChildCat) => {
-    const lbId = LB_CHILD_LABEL_TO_ID[child.label];
-    if (lbId && onSelectLentBorrow) {
-      onSelectLentBorrow(lbId);
-      return;
-    }
-    if (onSelectTwoTier) {
-      onSelectTwoTier(parent.label, child.label);
-    } else {
-      onSelectCategory(parent.id);
-    }
-  };
-
-  const settlementCats = categories.filter((c) => LB_SETTLEMENT_IDS.has(c.id));
-  // Fall back to a fixed label so the row shows even if an older persisted category
-  // list doesn't yet include cc_bill (it's injected on rehydrate, but don't depend on it).
-  const ccBillCat = categories.find((c) => c.id === 'cc_bill')
-    ?? { id: 'cc_bill', name: 'Credit Card Bill', color: '#8B5CF6', emoji: '💳' };
-
-  // Rendered as Bills & Utilities' `extraContent` (below), not a normal tree
-  // child — picking it opens the card-reconcile sheet via onSelectCategory,
-  // never onSelectTwoTier, so it can't route through handleChildPress.
-  const ccBillRow = (
-    <TouchableOpacity
-      style={[
-        styles.ccBillRow,
-        { borderColor: theme.divider, backgroundColor: theme.card },
-        selectedCategoryId === 'cc_bill' && {
-          borderColor: theme.primary,
-          backgroundColor: theme.primary + '14',
-        },
-      ]}
-      onPress={() => onSelectCategory('cc_bill')}
-      activeOpacity={0.72}
-    >
-      <Text style={styles.rowEmoji}>{ccBillCat.emoji}</Text>
-      <View style={styles.rowMid}>
-        <Text
-          style={[
-            styles.rowLabel,
-            selectedCategoryId === 'cc_bill' && { color: theme.primary, fontWeight: '700' },
-          ]}
-        >
-          {ccBillCat.name}
-        </Text>
-        <Text style={styles.lbHint}>Paid a card bill · excluded from spend</Text>
-      </View>
-      {selectedCategoryId === 'cc_bill' && (
-        <Text style={{ color: theme.primary, fontWeight: '800' }}>✓</Text>
-      )}
-    </TouchableOpacity>
-  );
-
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -369,66 +432,21 @@ const CategoryPickerModal: React.FC<Props> = ({
               style={styles.list}
               keyboardShouldPersistTaps="handled"
             >
-              {categoryTree.map((parent) => (
-                <ParentRow
-                  key={parent.id}
-                  parent={parent}
-                  isExpanded={expandedParentId === parent.id}
-                  selectedParent={selectedParent}
-                  selectedChild={selectedChild}
-                  onParentPress={() => handleParentPress(parent.id)}
-                  onChildPress={handleChildPress}
-                  extraContent={parent.id === 'bills' ? ccBillRow : undefined}
-                />
-              ))}
-
-              {/* Settlement categories — lent_settled / borrow_repaid */}
-              {settlementCats.length > 0 && (
-                <View style={styles.settlementSection}>
-                  <Text style={styles.settlementSectionLabel}>SETTLEMENTS</Text>
-                  {settlementCats.map((cat) => {
-                    const active = selectedCategoryId === cat.id;
-                    return (
-                      <TouchableOpacity
-                        key={cat.id}
-                        style={[
-                          styles.parentRow,
-                          styles.settlementRow,
-                          active && {
-                            borderWidth: 1.5,
-                            borderColor: colors.success + '66',
-                            backgroundColor: colors.success + '10',
-                          },
-                        ]}
-                        onPress={() => {
-                          if (onSelectLentBorrow) {
-                            onSelectLentBorrow(cat.id);
-                          } else {
-                            onSelectCategory(cat.id);
-                          }
-                        }}
-                        activeOpacity={0.72}
-                      >
-                        <Text style={styles.rowEmoji}>{cat.emoji}</Text>
-                        <View style={styles.rowMid}>
-                          <Text
-                            style={[
-                              styles.rowLabel,
-                              active && { color: colors.success, fontWeight: '700' },
-                            ]}
-                          >
-                            {cat.name}
-                          </Text>
-                          <Text style={styles.lbHint}>Links to person · tracks balance</Text>
-                        </View>
-                        {active && (
-                          <Text style={{ color: colors.success, fontWeight: '800' }}>✓</Text>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
+              <CategoryTreeList
+                categories={categories}
+                selectedCategoryId={selectedCategoryId}
+                selectedParent={selectedParent}
+                selectedChild={selectedChild}
+                resetKey={visible}
+                onSelectTwoTier={(parent, child) => {
+                  const lbId = LB_CHILD_LABEL_TO_ID[child.label];
+                  if (lbId && onSelectLentBorrow) onSelectLentBorrow(lbId);
+                  else if (onSelectTwoTier) onSelectTwoTier(parent.label, child.label);
+                  else onSelectCategory(parent.id);
+                }}
+                onSelectSettlement={(id) => (onSelectLentBorrow ? onSelectLentBorrow(id) : onSelectCategory(id))}
+                onSelectCategory={onSelectCategory}
+              />
             </ScrollView>
           )}
 

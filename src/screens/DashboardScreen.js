@@ -81,12 +81,6 @@ import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import FAB from '../components/FAB';
 import CategoryPickerModal from '../components/ManageTransactionModal';
-const managePreviewTransaction = { id: 'visual-preview-only', merchant: 'Lunch with team', amount: 850, type: 'debit', categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants', bankName: 'Everyday account', accountMask: '5004', createdAt: '2026-10-07T07:10:00.000Z', note: 'Lunch with the team' };
-function ManagePreview() {
-  const [visible, setVisible] = React.useState(true);
-  const categories = useEPurseStore((s) => s.categories);
-  return <CategoryPickerModal visible={visible} transaction={managePreviewTransaction} categories={categories} onClose={() => setVisible(false)} onSelectCategory={() => {}} onSelectLentBorrow={() => {}} onToggleHidden={() => {}} onIgnore={() => {}} onPressSplit={() => {}} onPressAddToGroup={() => {}} onDelete={() => {}} />;
-}
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import LinkContactModal from '../components/LinkContactModal';
 import SplitConfigModal from '../components/SplitConfigModal';
@@ -185,7 +179,6 @@ const DashboardScreen = ({ navigation }) => {
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTwoTierCategory = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
-  const relinkLentBorrowedEntry = useEPurseStore((s) => s.relinkLentBorrowedEntry);
   const lentBorrowedAll = useEPurseStore((s) => s.lentBorrowed);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const setTransactionRefund = useEPurseStore((s) => s.setTransactionRefund);
@@ -901,7 +894,6 @@ const DashboardScreen = ({ navigation }) => {
       </CollapsingHeaderScreen>
 
       <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
-      <ManagePreview />
 
       <CategoryPickerModal
         transaction={activeTxn}
@@ -909,11 +901,6 @@ const DashboardScreen = ({ navigation }) => {
         categories={categories}
         categoryLocked={!!activeTxn?.lbLocked}
         linkedPerson={linkedLbEntry?.person || null}
-        onEditPerson={linkedLbEntry ? () => {
-          const t = activeTxn;
-          setActiveTxn(null);
-          setLbLinkTxn({ txn: t, categoryId: t.categoryId, suggestedPersons: [], mode: 'edit' });
-        } : undefined}
         selectedCategoryId={activeTxn?.categoryId}
         selectedParent={activeTxn?.parentCategory}
         selectedChild={activeTxn?.childCategory}
@@ -940,16 +927,6 @@ const DashboardScreen = ({ navigation }) => {
           toast.success('Removed from group');
           setActiveTxn(null);
         }}
-        onPressEditGroup={(() => {
-          const g = activeTxn?.groupId ? groups.find((grp) => grp.id === activeTxn.groupId) : null;
-          if (!g || g.type !== 'shared' || (g.members?.length ?? 0) <= 1) return undefined;
-          return () => {
-            const fresh = useEPurseStore.getState().transactions.find((t) => t.id === activeTxn.id) || activeTxn;
-            setActiveTxn(null);
-            navigation.navigate('AddGroupExpense', { groupId: g.id, editTxnId: fresh.id });
-          };
-        })()}
-        groupHasSplit={!!activeTxn?.groupSplit}
         onPressSplit={() => {
           const t = activeTxn;
           setActiveTxn(null);
@@ -1062,20 +1039,12 @@ const DashboardScreen = ({ navigation }) => {
         suggestedPersons={lbLinkTxn?.suggestedPersons || []}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
-          if (lbLinkTxn.mode === 'edit') {
-            relinkLentBorrowedEntry(lbLinkTxn.txn.id, contactInfo);
-          } else {
-            updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
-          }
+          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
           setLbLinkTxn(null);
         }}
         onSkip={() => {
           if (!lbLinkTxn) return;
-          // Editing an existing link: Skip just cancels — resetting to "Unlinked"
-          // would be a destructive default for a correction flow.
-          if (lbLinkTxn.mode !== 'edit') {
-            updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
-          }
+          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
           setLbLinkTxn(null);
         }}
         onClose={() => setLbLinkTxn(null)}
