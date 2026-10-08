@@ -130,6 +130,7 @@ const Ring: React.FC<RingProps> = ({ data, index, size, isSelected, anySelected 
     scale.value = withSpring(isSelected ? 1.05 : 1.0, {
       damping: 22,
       stiffness: 220,
+      mass: 1,
     });
     opacity.value = withTiming(
       anySelected && !isSelected ? 0.22 : 1.0,
@@ -429,6 +430,7 @@ const RingTipOverlay: React.FC<RingTipOverlayProps> = ({
     scale.value = withSpring(isSelected ? 1.18 : 1.0, {
       damping: 18,
       stiffness: 220,
+      mass: 1,
     });
     opacity.value = withTiming(
       anySelected && !isSelected ? 0.22 : 1.0,

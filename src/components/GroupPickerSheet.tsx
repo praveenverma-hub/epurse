@@ -36,27 +36,19 @@ interface GroupPickerSheetProps {
   onClear?: () => void;
 }
 
-export default function GroupPickerSheet({
-  visible,
-  txn,
-  onClose,
-  onPick,
-  onCreateNew,
-  selectedId = null,
-  onClear,
-}: GroupPickerSheetProps) {
+interface GroupPickerListProps {
+  selectedId: string | null;
+  onPick: (group: Group) => void;
+  onCreateNew: () => void;
+  /** Adds a "No Group" row that clears the choice. */
+  onClear?: () => void;
+}
+
+/** The picker's rows, unwrapped — shared by this sheet and Manage's in-sheet Select Group panel. */
+export function GroupPickerList({ selectedId, onPick, onCreateNew, onClear }: GroupPickerListProps) {
   const theme = useTheme();
   const groups = useEPurseStore((s: any) => s.groups) as Group[];
   const transactions = useEPurseStore((s: any) => s.transactions) as any[];
-  const [selected, setSelected] = useState<string | null>(null);
-
-  // This sheet is one long-lived instance re-used across every open (no `key`
-  // tying it to a transaction), so a checkmark set for txn A would otherwise
-  // still show when the sheet reopens for txn B. Every close path (pick,
-  // dismiss, create-new) flips `visible` false — clear the pick then.
-  useEffect(() => {
-    setSelected(visible ? selectedId : null);
-  }, [visible, selectedId]);
 
   // Current-month total per group (your share) — personal groups track monthly,
   // so the subtitle must match the Groups tab's "this month" figure, not all-time.
@@ -72,10 +64,79 @@ export default function GroupPickerSheet({
     return m;
   }, [transactions]);
 
-  const handlePick = (g: Group) => {
-    setSelected(g.id);
-    onPick(g.id, g);
-  };
+  const check = <Ionicons name="checkmark-circle" size={20} color={theme.primary} />;
+
+  return (
+    <>
+      {onClear ? (
+        <TouchableOpacity
+          style={[styles.row, !selectedId && { backgroundColor: theme.primary + '14' }]}
+          onPress={onClear}
+          activeOpacity={0.75}
+        >
+          <View style={[styles.iconBox, { backgroundColor: colors.divider }]}>
+            <Ionicons name="remove-circle-outline" size={22} color={colors.textSecondary} />
+          </View>
+          <View style={styles.rowMid}>
+            <Text style={styles.rowName}>No Group</Text>
+          </View>
+          {!selectedId && check}
+        </TouchableOpacity>
+      ) : null}
+      {groups.length === 0 && (
+        <Text style={styles.empty}>No groups yet. Create one below.</Text>
+      )}
+      {groups.map((g) => (
+        <TouchableOpacity
+          key={g.id}
+          style={[styles.row, selectedId === g.id && { backgroundColor: theme.primary + '14' }]}
+          onPress={() => onPick(g)}
+          activeOpacity={0.75}
+        >
+          <View style={[styles.iconBox, { backgroundColor: (g.color || '#6366F1') + '22' }]}>
+            <Text style={styles.iconTxt}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
+          </View>
+          <View style={styles.rowMid}>
+            <Text style={styles.rowName}>{g.name}</Text>
+            <Text style={styles.rowMeta}>
+              {g.type === 'shared'
+                ? `${g.members?.length ?? 0} members · ${formatCurrency(g.totalSpend || 0)} spent`
+                : `Personal · ${formatCurrency(monthTotalByGroup[g.id] || 0)} this month`}
+            </Text>
+          </View>
+          {selectedId === g.id && check}
+        </TouchableOpacity>
+      ))}
+
+      {/* Create new */}
+      <TouchableOpacity style={styles.newRow} onPress={onCreateNew} activeOpacity={0.75}>
+        <View style={[styles.iconBox, { backgroundColor: theme.primary + '18' }]}>
+          <Ionicons name="add" size={22} color={theme.primary} />
+        </View>
+        <Text style={styles.newLabel}>New Group</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
+export default function GroupPickerSheet({
+  visible,
+  txn,
+  onClose,
+  onPick,
+  onCreateNew,
+  selectedId = null,
+  onClear,
+}: GroupPickerSheetProps) {
+  const [selected, setSelected] = useState<string | null>(null);
+
+  // This sheet is one long-lived instance re-used across every open (no `key`
+  // tying it to a transaction), so a checkmark set for txn A would otherwise
+  // still show when the sheet reopens for txn B. Every close path (pick,
+  // dismiss, create-new) flips `visible` false — clear the pick then.
+  useEffect(() => {
+    setSelected(visible ? selectedId : null);
+  }, [visible, selectedId]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -92,58 +153,12 @@ export default function GroupPickerSheet({
           ) : null}
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-            {onClear ? (
-              <TouchableOpacity
-                style={[styles.row, !selected && { backgroundColor: theme.primary + '14' }]}
-                onPress={() => {
-                  setSelected(null);
-                  onClear();
-                }}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.iconBox, { backgroundColor: colors.divider }]}>
-                  <Ionicons name="remove-circle-outline" size={22} color={colors.textSecondary} />
-                </View>
-                <View style={styles.rowMid}>
-                  <Text style={styles.rowName}>No Group</Text>
-                </View>
-                {!selected && <Text style={[styles.check, { color: theme.primary }]}>✓</Text>}
-              </TouchableOpacity>
-            ) : null}
-            {groups.length === 0 && (
-              <Text style={styles.empty}>No groups yet. Create one below.</Text>
-            )}
-            {groups.map((g) => (
-              <TouchableOpacity
-                key={g.id}
-                style={[styles.row, selected === g.id && { backgroundColor: theme.primary + '14' }]}
-                onPress={() => handlePick(g)}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.iconBox, { backgroundColor: (g.color || '#6366F1') + '22' }]}>
-                  <Text style={styles.iconTxt}>{g.emoji || (g.type === 'shared' ? '👥' : '📁')}</Text>
-                </View>
-                <View style={styles.rowMid}>
-                  <Text style={styles.rowName}>{g.name}</Text>
-                  <Text style={styles.rowMeta}>
-                    {g.type === 'shared'
-                      ? `${g.members?.length ?? 0} members · ${formatCurrency(g.totalSpend || 0)} spent`
-                      : `Personal · ${formatCurrency(monthTotalByGroup[g.id] || 0)} this month`}
-                  </Text>
-                </View>
-                {selected === g.id && (
-                  <Text style={[styles.check, { color: theme.primary }]}>✓</Text>
-                )}
-              </TouchableOpacity>
-            ))}
-
-            {/* Create new */}
-            <TouchableOpacity style={styles.newRow} onPress={onCreateNew} activeOpacity={0.75}>
-              <View style={[styles.iconBox, { backgroundColor: theme.primary + '18' }]}>
-                <Text style={[styles.iconTxt, { color: theme.primary }]}>＋</Text>
-              </View>
-              <Text style={styles.newLabel}>New group</Text>
-            </TouchableOpacity>
+            <GroupPickerList
+              selectedId={selected}
+              onPick={(g) => { setSelected(g.id); onPick(g.id, g); }}
+              onCreateNew={onCreateNew}
+              onClear={onClear ? () => { setSelected(null); onClear(); } : undefined}
+            />
           </ScrollView>
 
         </View>
@@ -188,7 +203,6 @@ const styles = StyleSheet.create({
   rowMid:    { flex: 1 },
   rowName:   { ...typography.bodyBold, color: colors.textPrimary },
   rowMeta:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  check:     { fontWeight: '800', fontSize: 16 },
   newRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: spacing.sm + 2,

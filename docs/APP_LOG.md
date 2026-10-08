@@ -32,6 +32,16 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `GroupExpenseForm`). Plain category now optional (saves as `other`, review-later). Expense/Income is the swipeable `TabView` + `UnderlineTabBar`. New
   `FormNoteField`, `AccountField`, `utils/defaultAccount.ts`. **Not built (open)**: merchant→category
   auto-suggest, tags/recurring/exclude-from-totals (don't exist yet), per-group default split people.
+- **Split amount edits (Oct-9-2026)**: changing the amount of a split txn now RESCALES the split (same
+  proportions, same payer) instead of dropping it — BUG fixed: on a "someone else paid" split it debited the
+  whole new amount from your account and deleted your debt to them. **Removing a txn from a group never changes
+  who owes whom** (store `untagTransactionFromGroup`, every caller): its split becomes a plain split (I paid → they
+  still owe me; they paid → still a memo, I still owe them). The edit form shows that split in the Split row on
+  No Group, and removing the debt is the Split row's own remove.
+- **One edit form for plain + group txns (Oct-9-2026)**: Edit Transaction gains the Group row (add, move
+  between groups, remove) with the shared/personal split restored from the txn; every Edit pill now opens
+  `AddTransaction`. BUG fixed: editing a PERSONAL-group txn silently did nothing but toasted "Changes saved".
+  Tests: test:store "edit form: group transitions" (16). **Open**: `AddGroupExpense` edit mode now unused — delete.
 - **Option exclusivity sweep (Oct-8-2026)**: (1) BUG: ignoring a split/group txn deleted its Lent rows but
   Restore left it claiming the split — now Ignore strips the split (and a SHARED group's tag + split;
   personal group tags stay), so Restore is a clean expense; v40 migration cleans already-ignored rows and
@@ -2503,6 +2513,15 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## UI Consistency / Navigation
 
 **Done**
+- Oct-9-2026: Manage sheet gets a Note row (last item, saved with Done) — new store
+  `setTransactionNote` works on any txn incl. group/LB-linked; trims, caps at 140, blank clears.
+- Oct-9-2026: review-queue card wobbled on snap-back after the Expo 57 / Reanimated 4 upgrade —
+  v4's `withSpring` defaults are mass 4 / stiffness 900, so a damping-only config went from
+  ratio ~0.8 to ~0.13. `DailyQueueStack` now uses a full `SNAP_BACK` config; the same missing `mass`
+  fixed in AddTransactionScreen, ShopScreen, HabitLeakMatrix, ConcentricSpendingRings, TransactionsScreen
+  `SPRING_CFG` (all pinned to mass 1 = pre-upgrade feel). `test:parse` now fails any `withSpring` without `mass`.
+- Oct-9-2026: disabled CTAs are a grey fill (`theme.disabledBackground` / `disabledText`), not a
+  faded brand gradient — `GradientButton` handles it app-wide; ui-consistency §3d-i.
 - Sep-23-2026: money colours use the new financial semantics — income/expense for generic
   credit/debit amounts & refund badges, lent/borrowed for every LB + group-debt amount and chip
   (was success green / raw `#EF4444` red / info blue). `FINANCE_COLORS` mirrors them onto `theme.*`.

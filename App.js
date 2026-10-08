@@ -14,6 +14,7 @@ import { initSentry } from './src/config/sentry';
 initSentry();
 
 import AppNavigator from './src/navigation/AppNavigator';
+import AppKeyboardAvoidingView from './src/components/AppKeyboardAvoidingView';
 import AwareRunBoot from './src/components/AwareRunBoot';
 import { usePresentationSession } from './src/store/usePresentationSession';
 import { useStoreHydrated } from './src/hooks/useStoreHydrated';
@@ -253,6 +254,7 @@ function App() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: ROOT_BG }}>
       <SafeAreaProvider>
         <AndroidSafeViewport fillBackground>
+          <AppKeyboardAvoidingView style={{ flex: 1 }}>
           <ToastProvider>
             <StatusBar style="light" />
             <NotificationBoot />
@@ -269,6 +271,7 @@ function App() {
             <LoginGate />
             <UpdateRequiredGate />
           </ToastProvider>
+          </AppKeyboardAvoidingView>
         </AndroidSafeViewport>
       </SafeAreaProvider>
     </GestureHandlerRootView>

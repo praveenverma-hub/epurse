@@ -84,6 +84,7 @@ import { applyStatementPayment, statementRemaining } from '../utils/ccStatement'
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { locationKey } from '../utils/location';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
+import { INPUT_LIMITS } from '../utils/validation';
 import { useNotificationStore } from './useNotificationStore';
 import {
   computeEqualSplit,
@@ -3649,39 +3650,41 @@ export const useEPurseStore = create(
           const groupId = txn.groupId;
           const group = s.groups.find((g) => g.id === groupId);
 
-          // A MEMO (someone else paid) has NO accountId — no money ever left an account
-          // of mine. Simply stripping isGroupMemo would turn it into a plain debit that
-          // counts fully in spend while no balance moves: a phantom expense conjured by
-          // an untag. It converts to the plain-split memo shape instead — the app's
-          // existing vocabulary for exactly this situation — so it stays out of spend
-          // (isMemoTxn covers both flags) and I still owe the payer my share.
+          // Leaving a group never changes who owes whom (user rule, Oct-9-26): a SHARED
+          // group's split becomes the same plain split the app books for "split with B".
+          //  • I paid → plain split; the others' Lent rows survive.
+          //  • someone else paid (a MEMO, no accountId) → plain-split memo; my Borrowed row
+          //    survives. Merely stripping isGroupMemo would leave a debit that counts as
+          //    spend while no balance moved — a phantom expense conjured by an untag.
+          // Dropping the debt is a separate, explicit step (remove the split).
           const memberOf = (memberId) =>
             (group?.members || []).find((m) => m.memberId === memberId) || {};
           const wasMemo = !!txn.isGroupMemo;
-          const shares = (wasMemo && txn.groupSplit?.shares) || [];
-          const memoPatch = wasMemo && shares.length
+          const shares = (group?.type === 'shared' && txn.groupSplit?.shares) || [];
+          const owing = shares.filter((sh) => sh.memberId !== 'me' && (wasMemo || (Number(sh.shareAmount) || 0) > 0));
+          const splitPatch = owing.length
             ? {
                 isSplit: true,
-                isSplitMemo: true,
                 myShareAmount: Number(shares.find((sh) => sh.memberId === 'me')?.shareAmount) || 0,
-                splitPaidBy: {
-                  contactId: memberOf(txn.groupSplit.paidByMemberId).contactId ?? null,
-                  name: memberOf(txn.groupSplit.paidByMemberId).name
-                    || txn.groupSplit.paidByName || 'Friend',
-                },
-                splitWith: shares
-                  .filter((sh) => sh.memberId !== 'me')
-                  .map((sh) => ({
-                    contactId: memberOf(sh.memberId).contactId ?? null,
-                    name: (memberOf(sh.memberId).name || sh.name || 'Friend').trim(),
-                    shareAmount: Number(sh.shareAmount) || 0,
-                  })),
+                ...(wasMemo ? {
+                  isSplitMemo: true,
+                  splitPaidBy: {
+                    contactId: memberOf(txn.groupSplit.paidByMemberId).contactId ?? null,
+                    name: memberOf(txn.groupSplit.paidByMemberId).name
+                      || txn.groupSplit.paidByName || 'Friend',
+                  },
+                } : {}),
+                splitWith: owing.map((sh) => ({
+                  contactId: memberOf(sh.memberId).contactId ?? null,
+                  name: (memberOf(sh.memberId).name || sh.name || 'Friend').trim(),
+                  shareAmount: Number(sh.shareAmount) || 0,
+                })),
               }
             : null;
 
           const updatedTxns = s.transactions.map((t) => {
             if (t.id !== txnId) return t;
-            const next = { ...t, ...(memoPatch || {}) };
+            const next = { ...t, ...(splitPatch || {}) };
             delete next.groupId;
             delete next.groupSplit;
             delete next.isGroupMemo;
@@ -3692,10 +3695,9 @@ export const useEPurseStore = create(
               ? { ...g, totalSpend: Math.max(0, (g.totalSpend || 0) - amount) }
               : g
           );
-          // Strip the debt with the tag — EXCEPT for a converted memo, where I still owe
-          // the payer my share; those rows survive, just no longer scoped to the group
-          // (so a group-scoped settle can't claim them).
-          const lentBorrowed = memoPatch
+          // A kept split keeps its debt rows, just no longer scoped to the group (so a
+          // group-scoped settle can't claim them). No split to keep → nothing owed.
+          const lentBorrowed = splitPatch
             ? s.lentBorrowed.map((l) => {
                 if (l.sourceTxnId !== txnId) return l;
                 const { groupId: _g, ...rest } = l;
@@ -4716,10 +4718,11 @@ export const useEPurseStore = create(
         if (parentCategory) updatedTxn.parentCategory = parentCategory; else delete updatedTxn.parentCategory;
         if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
 
-        // Amount/category changes can invalidate an existing direct split
-        // (shares were computed against the old amount/category) — clear it,
-        // matching updateTransactionCategory's mustClearSplit guard.
-        const mustClearSplit = old.isSplit && (newAmount !== old.amount || !canSplitTransaction(updatedTxn));
+        // A category the split can't live on clears it (matching updateTransactionCategory's
+        // guard). An AMOUNT change keeps it and rescales the shares below — clearing it there
+        // dropped a "Rohit paid" memo's payer and booked the whole bill as my own debit.
+        const mustClearSplit = old.isSplit && !canSplitTransaction(updatedTxn);
+        const rescaleSplit = old.isSplit && !mustClearSplit && newAmount !== old.amount && Number(old.amount) > 0;
         if (mustClearSplit) {
           updatedTxn.isSplit = false;
           updatedTxn.splitWith = [];
@@ -4762,6 +4765,20 @@ export const useEPurseStore = create(
               : s.lentBorrowed,
           };
         });
+
+        // Same proportions, new total: setTransactionSplit rebuilds the Lent/Borrowed rows
+        // and keeps the payer, so a memo stays a memo (no balance moves).
+        if (rescaleSplit) {
+          const ratio = newAmount / Number(old.amount);
+          const round2 = (v) => Math.round(v * 100) / 100;
+          const others = (old.splitWith || []).map((o) => ({
+            contactId: o.contactId ?? null,
+            name: o.name,
+            shareAmount: round2((Number(o.shareAmount) || 0) * ratio),
+          }));
+          const myAmount = round2(newAmount - others.reduce((sum, o) => sum + o.shareAmount, 0));
+          get().setTransactionSplit(txnId, others, { mode: 'amount', myAmount, paidBy: old.splitPaidBy || null });
+        }
 
         // A memo isn't my spend, so it can't breach my budget.
         if (updatedTxn.categoryId && !stillMemo) get().checkBudgetBreach(updatedTxn.categoryId);
@@ -5077,6 +5094,18 @@ export const useEPurseStore = create(
           transactions: s.transactions.map((t) =>
             t.id === id && !(hidden && t.isIgnored) ? { ...t, isHidden: !!hidden } : t
           ),
+        })),
+
+      /** Set or clear the free-text note on ANY txn (plain, group, LB-linked) — display-only, no ledger effect. */
+      setTransactionNote: (id, note) =>
+        set((s) => ({
+          transactions: s.transactions.map((t) => {
+            if (t.id !== id) return t;
+            const clean = String(note ?? '').trim().slice(0, INPUT_LIMITS.NOTE_MAX);
+            if (clean) return { ...t, note: clean };
+            const { note: _drop, ...rest } = t;
+            return rest;
+          }),
         })),
 
       /**

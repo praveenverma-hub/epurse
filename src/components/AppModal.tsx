@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, Platform, type ModalProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AndroidSafeViewport from './AndroidSafeViewport';
+import AppKeyboardAvoidingView from './AppKeyboardAvoidingView';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useEPurseStore } from '../store/ePurseStore';
 import { useAppLockSession } from '../store/useAppLockSession';
@@ -18,12 +19,14 @@ export default function AppModal({ children, ...props }: ModalProps) {
   if (!hydrated || (lockEnabled && !unlocked)) return null;
 
   return (
-    <Modal {...props}>
+    <Modal {...props} statusBarTranslucent={Platform.OS === 'android' ? false : props.statusBarTranslucent}>
       {Platform.OS === 'android' ? (
         <SafeAreaProvider>
-          <AndroidSafeViewport>{children}</AndroidSafeViewport>
+          <AndroidSafeViewport>
+            <AppKeyboardAvoidingView independentWindow style={{ flex: 1 }}>{children}</AppKeyboardAvoidingView>
+          </AndroidSafeViewport>
         </SafeAreaProvider>
-      ) : children}
+      ) : <AppKeyboardAvoidingView independentWindow style={{ flex: 1 }}>{children}</AppKeyboardAvoidingView>}
     </Modal>
   );
 }

@@ -860,10 +860,12 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     categoryId: t0.categoryId, parentCategory: t0.parentCategory,
     childCategory: t0.childCategory, note: '', createdAt: t0.createdAt,
   });
-  // Documents WHY the re-apply is needed — this is the state the old flow shipped.
-  check('split edit: updateTransaction alone still drops the split (by design)',
-    useStore.getState().transactions[0].isSplit === false &&
-    useStore.getState().lentBorrowed.length === 0);
+  // Oct-9-26: an amount edit KEEPS the split and rescales it (it used to drop it).
+  const tr = useStore.getState().transactions[0];
+  check('split edit: updateTransaction alone keeps the split, rescaled to the new total',
+    tr.isSplit === true && useStore.getState().lentBorrowed.length === 2 &&
+    Math.abs(tr.myShareAmount + tr.splitWith.reduce((s, o) => s + o.shareAmount, 0) - 1200) < 0.01,
+    `${tr.isSplit} ${tr.myShareAmount} ${JSON.stringify(tr.splitWith.map((o) => o.shareAmount))}`);
 
   useStore.getState().setTransactionSplit(t0.id, picks, { mode: 'percent', myPercent: myPct });
   const t1 = useStore.getState().transactions[0];
@@ -965,7 +967,8 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     txn0().accountId === 'a1' && txn0().isSplit === false);
   check('split payer: clearing a memo drops its borrowed row', lbRows().length === 0);
 
-  // ── An amount edit drops the split (by design) — a memo must not strand.
+  // ── An amount edit on a memo keeps it Rahul's money (Oct-9-26). It used to drop the
+  //    split and debit the whole new amount from MY account although Rahul paid.
   addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
   const memoId = txn0().id;
   useStore.getState().updateTransaction(memoId, {
@@ -973,13 +976,12 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants',
     note: '', createdAt: txn0().createdAt,
   });
-  check('split payer: an amount edit that drops a memo split re-debits the new amount',
-    bal() === 8800, `bal ${bal()}`);
-  check('split payer: an amount edit leaves no stranded memo',
-    !txn0().isSplitMemo && !txn0().splitPaidBy && txn0().accountId === 'a1');
-  check('split payer: a re-debited ex-memo is back in spend',
-    useStore.getState().getMonthlySpend() === 1200,
-    `spend ${useStore.getState().getMonthlySpend()}`);
+  check('split payer: an amount edit on a memo moves no balance', bal() === 10000, `bal ${bal()}`);
+  check('split payer: …it stays Rahul\'s memo, parked on the same account',
+    txn0().isSplitMemo && txn0().splitPaidBy?.name === 'Rahul' && !txn0().accountId && txn0().memoAccountId === 'a1');
+  check('split payer: …I now owe Rahul half the new total, and it stays out of spend',
+    lbRows().length === 1 && Number(lbRows()[0].amount) === 600 && useStore.getState().getMonthlySpend() === 0,
+    `${JSON.stringify(lbRows().map((l) => l.amount))} spend ${useStore.getState().getMonthlySpend()}`);
 
   // ── Editing a memo WITHOUT changing the amount keeps it a memo and moves nothing.
   addSplit({ splitPaidBy: { contactId: 'c1', name: 'Rahul' } });
@@ -4281,6 +4283,20 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('v39: an already-set colorKey survives untouched', already.colorKey === 'SBI');
 }
 
+// ── setTransactionNote (Manage sheet's Note) ─────────────────────────────────
+{
+  reset();
+  const id = 'note-1';
+  useStore.setState({ transactions: [{ id, type: 'debit', amount: 100, source: 'sms', groupId: 'g1', createdAt: new Date().toISOString() }] });
+  useStore.getState().setTransactionNote(id, '  team lunch  ');
+  check('note is trimmed and saved, even on a group txn', useStore.getState().transactions[0].note === 'team lunch');
+  useStore.getState().setTransactionNote(id, 'x'.repeat(500));
+  check('note is capped at NOTE_MAX (140)', useStore.getState().transactions[0].note.length === 140);
+  useStore.getState().setTransactionNote(id, '   ');
+  check('a blank note removes the field', !('note' in useStore.getState().transactions[0]));
+  check('…and leaves the rest of the txn alone', useStore.getState().transactions[0].groupId === 'g1');
+}
+
 // ── Ignore and Private are exclusive (v40) ───────────────────────────────────
 {
   reset();
@@ -4764,6 +4780,115 @@ console.log('\n— home form vs group zone —');
   check('home→personal group: tagged, no groupSplit', lunch?.groupId === zid && !lunch?.groupSplit, JSON.stringify(lunch?.groupSplit));
   check('home→personal group: group total grows by the amount', (G().groups.find((g) => g.id === zid).totalSpend || 0) === before + 300);
   check('home→personal group: uncategorised falls back to "other"', lunch?.categoryId === 'other', lunch?.categoryId);
+}
+
+// ── Edit form ↔ groups (Oct-9-26) ─────────────────────────────────────────────
+// AddTransactionScreen is now the ONE edit form for plain and group txns. These
+// replay its commitEdit call ORDER for each transition — the ordering is the logic.
+console.log('\n— edit form: group transitions —');
+{
+  const G = () => useStore.getState();
+  const lbFor = (id) => G().lentBorrowed.filter((l) => l.sourceTxnId === id);
+  const bal = () => G().accounts.find((a) => a.id === 'aX').balance;
+  const tx = (id) => G().transactions.find((t) => t.id === id);
+  const total = (gid) => G().groups.find((g) => g.id === gid).totalSpend || 0;
+  const setup = () => {
+    reset();
+    useStore.setState({ accounts: [{ id: 'aX', type: 'bank', name: 'HDFC ••3333', balance: 10000, primary: true }] });
+    const shared = G().createGroup({ name: 'Flat', type: 'shared', members: [{ memberId: 'm1', name: 'Rohit', contactId: 'c1' }] });
+    const solo = G().createGroup({ name: 'House', type: 'personal' });
+    const other = G().createGroup({ name: 'Goa', type: 'shared', members: [{ memberId: 'm9', name: 'Asha', contactId: 'c9' }] });
+    return { shared, solo, other };
+  };
+  const meHalf = (amt, mid, name) => ({ paidByMemberId: 'me', paidByName: 'You',
+    shares: [{ memberId: 'me', name: 'You', shareAmount: amt / 2 }, { memberId: mid, name, shareAmount: amt / 2 }] });
+
+  // 1. The bug: editing a PERSONAL-group txn used to silently no-op (updateTransaction refuses groupId).
+  let g = setup();
+  let id = G().addGroupExpense(g.solo, { amount: 400, merchant: 'Cement', paidByMemberId: 'me', paidByName: 'You', shares: [], accountId: 'aX' });
+  G().updateGroupExpense(id, { amount: 500, merchant: 'Cement bags', paidByMemberId: 'me', paidByName: 'You', shares: [], accountId: 'aX' });
+  check('edit personal-group txn: the change actually saves', tx(id).merchant === 'Cement bags' && tx(id).amount === 500);
+  check('…balance and group total follow the new amount', bal() === 9500 && total(g.solo) === 500, `${bal()} ${total(g.solo)}`);
+
+  // 2. Plain → shared group (I paid): tag, then updateGroupExpense with the split.
+  g = setup();
+  G().addTransaction({ amount: 600, type: 'debit', merchant: 'Groceries', categoryId: 'food', accountId: 'aX' });
+  id = G().transactions[0].id;
+  G().tagTransactionToGroup(id, g.shared, null);
+  G().updateGroupExpense(id, { amount: 600, merchant: 'Groceries', categoryId: 'food', ...meHalf(600, 'm1', 'Rohit'), accountId: 'aX' });
+  check('plain→shared: tagged with the split', tx(id).groupId === g.shared && tx(id).groupSplit?.shares?.length === 2);
+  check('plain→shared: Rohit owes his half', lbFor(id).length === 1 && Number(lbFor(id)[0].amount) === 300 && lbFor(id)[0].groupId === g.shared);
+  check('plain→shared: debited once, not twice', bal() === 9400, `${bal()}`);
+  check('plain→shared: group total = the bill', total(g.shared) === 600);
+
+  // 3. Shared → another shared group: old total drops, LB rows rebuilt for the new members.
+  G().tagTransactionToGroup(id, g.other, null);
+  G().updateGroupExpense(id, { amount: 600, merchant: 'Groceries', categoryId: 'food', ...meHalf(600, 'm9', 'Asha'), accountId: 'aX' });
+  check('shared→other group: totals move', total(g.shared) === 0 && total(g.other) === 600, `${total(g.shared)} ${total(g.other)}`);
+  check('shared→other group: only the new group\'s debt remains', lbFor(id).length === 1 && lbFor(id)[0].groupId === g.other
+    && /Asha/.test(lbFor(id)[0].person || lbFor(id)[0].name || ''), JSON.stringify(lbFor(id)));
+  check('shared→other group: balance untouched by the move', bal() === 9400, `${bal()}`);
+
+  // 4. Group → none (I paid): leaving the group keeps who owes whom (Oct-9-26). Form order:
+  //    untag → updateTransaction → then the Split row's choice.
+  G().untagTransactionFromGroup(id);
+  G().updateTransaction(id, { amount: 600, type: 'debit', accountId: 'aX', merchant: 'Groceries', categoryId: 'food' });
+  check('group→none: out of the group, now a plain split', !tx(id).groupId && !tx(id).groupSplit && tx(id).isSplit
+    && tx(id).myShareAmount === 300 && tx(id).splitWith?.[0]?.name === 'Asha', JSON.stringify(tx(id).splitWith));
+  check('group→none: Asha still owes 300 — no longer group-scoped', lbFor(id).length === 1 && Number(lbFor(id)[0].amount) === 300
+    && lbFor(id)[0].kind === 'lent' && !lbFor(id)[0].groupId, JSON.stringify(lbFor(id)));
+  check('group→none: total released, balance unchanged', total(g.other) === 0 && bal() === 9400, `${total(g.other)} ${bal()}`);
+  // 4b. …then the user removes the split in the Split row: the debt goes, the money doesn't move.
+  G().setTransactionSplit(id, [], {});
+  check('group→none, split removed: nothing owed, balance unchanged', !tx(id).isSplit && lbFor(id).length === 0 && bal() === 9400);
+
+  // 5. Group MEMO (Rohit paid) → none: stays Rohit's money — no debit, I still owe my share.
+  g = setup();
+  id = G().addGroupExpense(g.shared, { amount: 200, merchant: 'Cab', paidByMemberId: 'm1', paidByName: 'Rohit',
+    shares: [{ memberId: 'me', name: 'You', shareAmount: 100 }, { memberId: 'm1', name: 'Rohit', shareAmount: 100 }] });
+  G().untagTransactionFromGroup(id);
+  G().updateTransaction(id, { amount: 200, type: 'debit', accountId: 'aX', merchant: 'Cab', categoryId: 'travel' });
+  check('group memo→none: still Rohit\'s money (no debit)', bal() === 10000 && tx(id).isSplitMemo && tx(id).splitPaidBy?.name === 'Rohit',
+    `${bal()} ${tx(id).isSplitMemo}`);
+  check('group memo→none: I still owe Rohit 100', lbFor(id).length === 1 && Number(lbFor(id)[0].amount) === 100 && !lbFor(id)[0].groupId);
+  // 5b. …then the user removes the split: it becomes MY expense, debited once from the form's account — no phantom.
+  G().setTransactionSplit(id, [], {});
+  check('group memo→none, split removed: debited once on the chosen account', !tx(id).isSplitMemo && tx(id).accountId === 'aX'
+    && bal() === 9800 && lbFor(id).length === 0, `${tx(id).accountId} ${bal()} ${lbFor(id).length}`);
+
+  // 7. Amount edit on a "Rohit paid" split (Oct-9-26): keeps the payer, rescales the shares.
+  g = setup();
+  G().addTransaction({ amount: 200, type: 'debit', merchant: 'Cab', categoryId: 'travel', accountId: 'aX', isSplit: true, source: 'manual',
+    myPercent: 50, splitPaidBy: { contactId: 'c1', name: 'Rohit' }, splitOthers: [{ contactId: 'c1', name: 'Rohit', percent: 50 }] });
+  let mid = G().transactions[0].id;
+  G().updateTransaction(mid, { amount: 250, type: 'debit', accountId: 'aX', merchant: 'Cab', categoryId: 'travel' });
+  check('memo amount edit: still Rohit\'s money — no debit', tx(mid).isSplitMemo && bal() === 10000, `${tx(mid).isSplitMemo} ${bal()}`);
+  check('memo amount edit: I now owe Rohit 125', lbFor(mid).length === 1 && Number(lbFor(mid)[0].amount) === 125 && lbFor(mid)[0].kind === 'borrowed',
+    JSON.stringify(lbFor(mid).map((l) => [l.kind, l.amount])));
+  check('memo amount edit: shares sum to the new total', Math.abs(tx(mid).myShareAmount + tx(mid).splitWith[0].shareAmount - 250) < 0.01);
+
+  // 7b. Same on a split I paid: Lent rows rescale, balance moves by the difference only.
+  g = setup();
+  G().addTransaction({ amount: 300, type: 'debit', merchant: 'Dinner', categoryId: 'food', accountId: 'aX', isSplit: true, source: 'manual',
+    myPercent: 34, splitOthers: [{ contactId: 'c1', name: 'Rohit', percent: 33 }, { contactId: 'c2', name: 'Pooja', percent: 33 }] });
+  mid = G().transactions[0].id;
+  G().updateTransaction(mid, { amount: 600, type: 'debit', accountId: 'aX', merchant: 'Dinner', categoryId: 'food' });
+  check('paid split amount edit: split kept, Lent rows doubled', tx(mid).isSplit && lbFor(mid).length === 2 &&
+    lbFor(mid).every((l) => l.kind === 'lent' && Number(l.amount) === 198), JSON.stringify(lbFor(mid).map((l) => l.amount)));
+  check('paid split amount edit: balance = 10000 − 600', bal() === 9400, `${bal()}`);
+
+  // 6. Plain-split MEMO → shared group with me paying: clear split first (restores the parked account), then tag+update.
+  g = setup();
+  G().addTransaction({ amount: 300, type: 'debit', merchant: 'Dinner', categoryId: 'food', accountId: 'aX', isSplit: true,
+    myPercent: 50, splitPaidBy: { contactId: 'c1', name: 'Rohit' }, splitOthers: [{ contactId: 'c1', name: 'Rohit', percent: 50 }] });
+  id = G().transactions[0].id;
+  check('split memo→group: starts with no debit', bal() === 10000);
+  G().setTransactionSplit(id, [], {});
+  G().tagTransactionToGroup(id, g.shared, null);
+  G().updateGroupExpense(id, { amount: 300, merchant: 'Dinner', categoryId: 'food', ...meHalf(300, 'm1', 'Rohit'), accountId: 'aX' });
+  check('split memo→group (I paid): debited exactly once', bal() === 9700, `${bal()}`);
+  check('split memo→group: only the group\'s debt row remains', lbFor(id).length === 1 && lbFor(id)[0].groupId === g.shared,
+    JSON.stringify(lbFor(id)));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

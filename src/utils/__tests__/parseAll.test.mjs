@@ -191,6 +191,54 @@ if (removedUsage.length) {
   pass++;
 }
 
+// ── withSpring configs must be COMPLETE ────────────────────────────────────
+// Reanimated 4 changed withSpring's defaults from mass 1 / stiffness 100 to
+// mass 4 / stiffness 900 (SDK-57 upgrade). A PARTIAL config silently inherits
+// them: the review-queue card's `{ damping: 16 }` went from a smooth settle
+// (damping ratio ~0.8) to a wobble (~0.13), and five more animations drifted
+// with it (Oct-9-26). Every config must name `mass` — inline, or in a same-file
+// `const` it's passed by name. No config at all is the new defaults, so also flagged.
+const partialSpring = [];
+for (const f of files) {
+  const src = readFileSync(f, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const call = /\bwithSpring\s*\(/g;
+  let m;
+  while ((m = call.exec(src))) {
+    let i = call.lastIndex, depth = 1;
+    while (i < src.length && depth) {
+      if ('([{'.includes(src[i])) depth++;
+      else if (')]}'.includes(src[i])) depth--;
+      i++;
+    }
+    const args = src.slice(call.lastIndex, i - 1);
+    // Second top-level argument = the config.
+    let d = 0, cut = -1;
+    for (let k = 0; k < args.length; k++) {
+      if ('([{'.includes(args[k])) d++;
+      else if (')]}'.includes(args[k])) d--;
+      else if (args[k] === ',' && d === 0) { cut = k; break; }
+    }
+    let config = cut < 0 ? '' : args.slice(cut + 1).trim();
+    const named = config.match(/^([A-Za-z_$][\w$]*)\s*(,|$)/);
+    if (named) {
+      const decl = src.match(new RegExp(`\\b${named[1]}\\s*=\\s*\\{[^}]*\\}`));
+      config = decl ? decl[0] : `${named[1]} (not declared in this file — can't verify)`;
+    }
+    if (!/\bmass\s*:/.test(config)) {
+      const line = src.slice(0, m.index).split('\n').length;
+      partialSpring.push(`${f}:${line}  withSpring(${args.replace(/\s+/g, ' ').slice(0, 60)})`);
+    }
+  }
+}
+if (partialSpring.length) {
+  failures.push({ f: 'spring-config', msg: 'withSpring config missing mass — see below' });
+  partialSpring.forEach((l) => console.log(`  ${C.red}✗ withSpring without mass (Reanimated 4 default is 4)${C.reset}\n      ${l}`));
+} else {
+  console.log(`  ${C.green}✓ every withSpring config names its mass${C.reset}`);
+  pass++;
+}
+
 console.log(`\n${'─'.repeat(34)}`);
-console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 3} passed${C.reset}`);
+console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 4} passed${C.reset}`);
 process.exit(failures.length === 0 ? 0 : 1);

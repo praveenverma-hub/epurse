@@ -5,10 +5,10 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Platform,
   Dimensions,
 } from 'react-native';
+import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import { TabView } from 'react-native-tab-view';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';

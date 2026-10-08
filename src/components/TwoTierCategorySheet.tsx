@@ -247,14 +247,14 @@ export const TwoTierCategorySheet: React.FC<Props> = ({
           {/* Save button */}
           <View style={styles.footer}>
             <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: theme.primary }, !canSave && styles.saveBtnDisabled]}
+              style={[styles.saveBtn, { backgroundColor: theme.primary }, !canSave && { backgroundColor: theme.disabledBackground }]}
               onPress={() => {
                 if (canSave) onSave(selectedParent!.label, selectedChild!.label);
               }}
               disabled={!canSave}
               activeOpacity={0.85}
             >
-              <Text style={[styles.saveBtnText, !canSave && styles.saveBtnTextDisabled]}>
+              <Text style={[styles.saveBtnText, !canSave && { color: theme.disabledText }]}>
                 {canSave
                   ? `${selectedParent!.emoji}  Save: ${selectedChild!.label}`
                   : 'Select a category above'}
@@ -387,11 +387,9 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
-  saveBtnDisabled: { backgroundColor: '#F4F5F7' },
   saveBtnText: {
     fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  saveBtnTextDisabled: { color: '#9CA3AF' },
 });

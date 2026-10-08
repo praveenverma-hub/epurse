@@ -8,7 +8,6 @@
 // =============================================================================
 import React, { useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -16,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,13 +30,14 @@ import { useToast } from '../components/Toast';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useRewardStore } from '../store/useRewardStore';
 import { isPayerLockedToMe } from '../utils/split';
+import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
 import type { Group, GroupExpenseData } from '../types/group';
 
 interface NavProp {
   goBack: () => void;
 }
 interface RouteProp {
-  params?: { groupId?: string; editTxnId?: string; tagTxnId?: string; fromQueue?: boolean };
+  params?: { groupId?: string; editTxnId?: string; tagTxnId?: string; fromQueue?: boolean; reviewFlow?: boolean };
 }
 
 export default function AddGroupExpenseScreen({ navigation, route }: { navigation: NavProp; route: RouteProp }) {
@@ -44,6 +45,7 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
   const editTxnId = route?.params?.editTxnId;
   const tagTxnId = route?.params?.tagTxnId;
   const fromQueue = !!route?.params?.fromQueue;
+  const reviewFlow = !!route?.params?.reviewFlow;
   const group = useEPurseStore((s: any) =>
     (s.groups as Group[]).find((g) => g.id === groupId) || null,
   ) as Group | null;
@@ -85,6 +87,19 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
       return;
     }
     if (isTag && tagTxnId && groupId) {
+      if (reviewFlow) {
+        setReviewFlowDraft(tagTxnId, {
+          ...peekReviewFlowDraft(tagTxnId),
+          groupId,
+          groupSplit: expenseData.shares?.length ? {
+            paidByMemberId: expenseData.paidByMemberId,
+            paidByName: expenseData.paidByName,
+            shares: expenseData.shares,
+          } : null,
+        });
+        navigation.goBack();
+        return;
+      }
       tagTransactionToGroup(tagTxnId, groupId, expenseData.shares?.length ? {
         paidByMemberId: expenseData.paidByMemberId,
         paidByName: expenseData.paidByName,
@@ -145,9 +160,11 @@ export default function AddGroupExpenseScreen({ navigation, route }: { navigatio
               // amount locked and manual ones stay editable.
               presetAmount={isTag ? tagTxn?.amount : isEdit && editTxn && editTxn.source !== 'manual' ? editTxn.amount : undefined}
               // Tagging: category was already decided where the txn came from.
+              presetMerchant={isTag ? tagTxn?.merchant : undefined}
               hideCategory={isTag}
               // A real account debit can't be re-attributed to someone else.
               lockPayerToMe={!!baseTxn && isPayerLockedToMe(baseTxn)}
+              reviewFlow={reviewFlow}
               hideSubmit
               submitRef={submitRef}
               onReadyChange={setReady}

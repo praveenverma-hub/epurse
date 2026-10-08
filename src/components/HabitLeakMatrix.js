@@ -52,9 +52,9 @@ const BubbleItem = ({ b, x, y, r, color, isExpanded }) => {
 
   useEffect(() => {
     if (isExpanded) {
-      scale.value = withSpring(1.18, { damping: 10, stiffness: 180 });
+      scale.value = withSpring(1.18, { damping: 10, stiffness: 180, mass: 1 });
     } else {
-      scale.value = withSpring(1, { damping: 14 });
+      scale.value = withSpring(1, { damping: 14, stiffness: 100, mass: 1 });
     }
   }, [isExpanded]);
 

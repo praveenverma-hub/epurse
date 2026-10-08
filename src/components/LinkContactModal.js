@@ -18,9 +18,9 @@ import {
   TextInput,
   FlatList,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import KeyboardAvoidingView from './AppKeyboardAvoidingView';
 import Modal from "./AppModal";
 
 import { Ionicons } from '@expo/vector-icons';

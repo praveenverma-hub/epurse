@@ -9,7 +9,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -36,17 +36,15 @@ import {
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
-import { canSplitTransaction, isPayerLockedToMe } from '../utils/split';
+import { canSplitTransaction } from '../utils/split';
 import CategoryPickerModal from './ManageTransactionModal';
 import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
-import SplitConfigModal from './SplitConfigModal';
-import GroupPickerSheet from './GroupPickerSheet';
 import CenterModal from './CenterModal';
 import InfoSheet from './InfoSheet';
+import { setReviewFlowDraft, takePendingReviewFlowDraft } from '../utils/reviewFlowDraft';
 import InfoIcon from './InfoIcon';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
-import { IS_STAGE_BUILD } from '../constants/buildVariant';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_H         = 152;
@@ -72,8 +70,8 @@ const InboxZero = () => {
   useEffect(() => {
     scale.value = withRepeat(
       withSequence(
-        withSpring(1.06, { damping: 6, stiffness: 120 }),
-        withSpring(1.00, { damping: 6, stiffness: 120 }),
+        withSpring(1.06, { damping: 6, stiffness: 120, mass: 1 }),
+        withSpring(1.00, { damping: 6, stiffness: 120, mass: 1 }),
       ),
       -1,
       false,
@@ -98,6 +96,11 @@ const InboxZero = () => {
 // =============================================================================
 // SwipeableCard — a single review card (top card is gesture-interactive)
 // =============================================================================
+// Reanimated 4 changed withSpring's defaults to mass 4 / stiffness 900, so a
+// damping-only config went from a smooth settle (ratio ~0.8) to a wobble (~0.13).
+// Always spell out all three.
+const SNAP_BACK = { damping: 16, stiffness: 100, mass: 1 };
+
 const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCategory }) => {
   const isTop = index === 0;
 
@@ -151,12 +154,12 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
           if (done) runOnJS(handleApprove)();
         });
       } else if (shouldReject) {
-        translateX.value = withSpring(0, { damping: 16 });
-        rotate.value     = withSpring(0, { damping: 16 });
+        translateX.value = withSpring(0, SNAP_BACK);
+        rotate.value     = withSpring(0, SNAP_BACK);
         runOnJS(handlePickCategory)();
       } else {
-        translateX.value = withSpring(0, { damping: 16 });
-        rotate.value     = withSpring(0, { damping: 16 });
+        translateX.value = withSpring(0, SNAP_BACK);
+        rotate.value     = withSpring(0, SNAP_BACK);
       }
     });
 
@@ -288,49 +291,18 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
   );
 };
 
-// TEMP mock for testing the review queue / Manage sheet — dev & stage builds only,
-// never production. Re-seeded fresh (unreviewed) on every mount, and has no
-// accountId so swiping / ignoring / deleting it never moves a balance.
-// Remove MOCK_REVIEW_TXN + its effect when done.
-const MOCK_REVIEW_TXN_ID = 'mock-review-txn';
-const MOCK_REVIEW_TXN = {
-  id: MOCK_REVIEW_TXN_ID,
-  source: 'sms',
-  type: 'debit',
-  amount: 850,
-  merchant: 'Lunch With Team',
-  categoryId: '',
-  parentCategory: '',
-  childCategory: '',
-  bankName: 'HDFC Bank',
-  accountType: 'BANK',
-  accountMask: '4521',
-  accountId: null,
-  isReviewed: false,
-  isIgnored: false,
-  isHidden: false,
-};
-
 // =============================================================================
 // DailyQueueStack — container
 // =============================================================================
 const DailyQueueStack = () => {
   const theme      = useTheme();
   const navigation = useNavigation();
+  const focused = useIsFocused();
   // useShallow is required: the selector filters+sorts, so it returns a NEW
   // array every call, and zustand v5 dropped the memoised selector that made
   // that safe — without it this re-renders forever.
   const queue    = useEPurseStore(useShallow(selectUnreviewedQueue));
 
-  useEffect(() => {
-    if (!IS_STAGE_BUILD) return;
-    useEPurseStore.setState((st) => ({
-      transactions: [
-        { ...MOCK_REVIEW_TXN, createdAt: new Date().toISOString() },
-        ...st.transactions.filter((t) => t.id !== MOCK_REVIEW_TXN_ID),
-      ],
-    }));
-  }, []);
   const groups   = useEPurseStore((s) => s.groups);
   const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
   const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);
@@ -343,19 +315,15 @@ const DailyQueueStack = () => {
   const updateTwoTierCategory    = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
   // Full manage-panel actions (parity with Dashboard/Activity, available in the queue).
-  const setTransactionSplit       = useEPurseStore((s) => s.setTransactionSplit);
   const setTransactionHidden      = useEPurseStore((s) => s.setTransactionHidden);
   const ignoreTransaction         = useEPurseStore((s) => s.ignoreTransaction);
   const deleteTransaction         = useEPurseStore((s) => s.deleteTransaction);
-  const tagTransactionToGroup     = useEPurseStore((s) => s.tagTransactionToGroup);
   const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
-  const updateGroupExpense        = useEPurseStore((s) => s.updateGroupExpense);
 
   // Category picker state
   const [pickerTxn,  setPickerTxn]  = useState(null);
+  const [manageInitialDraft, setManageInitialDraft] = useState(null);
   const [lbLinkData, setLbLinkData] = useState(null); // { txn, categoryId }
-  const [splitTxn,   setSplitTxn]   = useState(null);
-  const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
   const [ccBillTxn,  setCcBillTxn]  = useState(null); // txn being reclassified as a CC bill payment
   const [confirm,    setConfirm]    = useState(null);
   const [showCapInfo, setShowCapInfo] = useState(false);
@@ -363,6 +331,17 @@ const DailyQueueStack = () => {
   // InboxZero: show celebration when user clears the last card this session
   const prevLenRef = useRef(queue.length);
   const [showZero, setShowZero] = useState(false);
+
+  useEffect(() => {
+    if (!focused) return;
+    const pending = takePendingReviewFlowDraft();
+    if (!pending) return;
+    const txn = useEPurseStore.getState().transactions.find((item) => item.id === pending.txnId);
+    if (txn) {
+      setManageInitialDraft(pending.draft || null);
+      setPickerTxn(txn);
+    }
+  }, [focused]);
 
   useEffect(() => {
     if (prevLenRef.current > 0 && queue.length === 0) {
@@ -401,6 +380,7 @@ const DailyQueueStack = () => {
   const handlePickCategory = useCallback((txn) => {
     // The welcome card has no category to edit — left-swipe is a no-op.
     if (txn?.__welcome) return;
+    setManageInitialDraft(null);
     setPickerTxn(txn);
   }, []);
 
@@ -452,6 +432,7 @@ const DailyQueueStack = () => {
 
   const handlePickerClose = useCallback(() => {
     setPickerTxn(null);
+    setManageInitialDraft(null);
   }, []);
 
   const handleLbClose = useCallback(() => {
@@ -466,12 +447,6 @@ const DailyQueueStack = () => {
   }, [recordReview, markReviewed]);
 
   // ── Manage actions (parity with the full panel) ──
-  const handleAddToGroup = useCallback(() => {
-    const t = pickerTxn;
-    setPickerTxn(null);
-    setGroupPickerTxn(t);
-  }, [pickerTxn]);
-
   const handleRemoveFromGroup = useCallback(() => {
     if (!pickerTxn) return;
     untagTransactionFromGroup(pickerTxn.id);
@@ -479,11 +454,15 @@ const DailyQueueStack = () => {
     setPickerTxn(null);
   }, [pickerTxn, untagTransactionFromGroup, clearAsReviewed]);
 
-  const handleOpenSplit = useCallback(() => {
+  const handleOpenSplit = useCallback((draft) => {
     const t = pickerTxn;
     setPickerTxn(null);
-    setSplitTxn(t);
-  }, [pickerTxn]);
+    if (t) {
+      setReviewFlowDraft(t.id, draft || {});
+      // Let the native Manage sheet finish dismissing before pushing the editor.
+      setTimeout(() => navigation.navigate('AddTransaction', { editTxnId: t.id, openSplit: true, fromQueue: true }), 250);
+    }
+  }, [pickerTxn, navigation]);
 
   const handleToggleHidden = useCallback((hidden) => {
     if (!pickerTxn) return;
@@ -616,6 +595,7 @@ const DailyQueueStack = () => {
       {/* ── Category picker ── */}
       <CategoryPickerModal
         transaction={pickerTxn}
+        initialDraft={manageInitialDraft}
         fromQueue
         onManaged={clearAsReviewed}
         visible={!!pickerTxn}
@@ -632,7 +612,8 @@ const DailyQueueStack = () => {
         onSelectCategory={handleSelectCategory}
         onSelectTwoTier={handleSelectTwoTier}
         onSelectLentBorrow={handleSelectLentBorrow}
-        onPressAddToGroup={pickerTxn?.lbLocked ? undefined : handleAddToGroup}
+        // Presence enables Manage's inline group panel.
+        onPressAddToGroup={pickerTxn?.lbLocked ? undefined : () => {}}
         onPressRemoveFromGroup={handleRemoveFromGroup}
         onPressSplit={handleOpenSplit}
         onToggleHidden={handleToggleHidden}
@@ -656,37 +637,6 @@ const DailyQueueStack = () => {
         onClose={handleLbClose}
       />
 
-      {/* ── Split ── */}
-      <SplitConfigModal
-        visible={!!splitTxn}
-        transaction={splitTxn}
-        onClose={() => setSplitTxn(null)}
-        onApply={(others, meta) => {
-          if (splitTxn) {
-            setTransactionSplit(splitTxn.id, others, meta);
-            clearAsReviewed(splitTxn.id);
-          }
-          setSplitTxn(null);
-        }}
-      />
-
-      {/* ── Add to group ── */}
-      <GroupPickerSheet
-        visible={!!groupPickerTxn}
-        txn={groupPickerTxn}
-        onClose={() => setGroupPickerTxn(null)}
-        onCreateNew={() => { setGroupPickerTxn(null); navigation.navigate('Groups'); }}
-        onPick={(groupId, group) => {
-          const txn = groupPickerTxn;
-          setGroupPickerTxn(null);
-          if (group?.type === 'shared') {
-            navigation.navigate('AddGroupExpense', { groupId: group.id, tagTxnId: txn.id, fromQueue: true });
-          } else {
-            tagTransactionToGroup(txn.id, groupId);
-            clearAsReviewed(txn.id);
-          }
-        }}
-      />
 
 
 

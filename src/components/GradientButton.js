@@ -26,10 +26,11 @@ const GradientButton = ({
       activeOpacity={0.85}
       onPress={onPress}
       disabled={disabled || loading}
-      style={[flat ? styles.flat : styles.shadow, { opacity: disabled ? 0.6 : 1 }, style]}
+      // Disabled = flat grey fill (no shadow, no faded brand colour).
+      style={[flat || disabled ? styles.flat : styles.shadow, style]}
     >
       <LinearGradient
-        colors={finalGradient}
+        colors={disabled ? [palette.disabledBackground, palette.disabledBackground] : finalGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.btn}
@@ -39,7 +40,7 @@ const GradientButton = ({
         ) : (
           <>
             {icon}
-            <Text style={[styles.text, { color: palette.textOnGradient }, textStyle]}>
+            <Text style={[styles.text, { color: palette.textOnGradient }, textStyle, disabled && { color: palette.disabledText }]}>
               {titleCaseLabel(title)}
             </Text>
           </>

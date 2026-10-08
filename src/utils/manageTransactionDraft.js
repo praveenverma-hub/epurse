@@ -9,14 +9,18 @@ export function createManageDraft(txn) {
     isIgnored: !!txn.isIgnored,
     isRefund: !!txn.isRefund,
     groupId: txn.groupId || null,
+    groupSplit: null,
     split: null, // null means untouched, { others: [] } explicitly removes it
     specialCategory: null,
+    note: txn.note || '',
   };
 }
 
 export function manageDraftChanged(txn, draft) {
   const original = createManageDraft(txn);
-  return Object.keys(original).some((key) => JSON.stringify(original[key]) !== JSON.stringify(draft[key]));
+  // Whitespace-only note edits aren't a change (the store trims on save).
+  const norm = (key, d) => key === 'note' ? (d.note || '').trim() : d[key];
+  return Object.keys(original).some((key) => JSON.stringify(norm(key, original)) !== JSON.stringify(norm(key, draft)));
 }
 
 /** Commit through the existing ledger actions; never patch transaction fields
@@ -63,9 +67,12 @@ export function applyManageDraft(store, txn, draft) {
   if (txn.isIgnored && !draft.isIgnored) current.unignoreTransaction(txn.id);
   if (draft.isHidden !== !!txn.isHidden) current.setTransactionHidden(txn.id, draft.isHidden);
   if (draft.groupId !== (txn.groupId || null)) {
-    if (draft.groupId) current.tagTransactionToGroup(txn.id, draft.groupId);
+    if (draft.groupId) current.tagTransactionToGroup(txn.id, draft.groupId, draft.groupSplit || null);
     else current.untagTransactionFromGroup(txn.id);
+  } else if (draft.groupSplit && JSON.stringify(draft.groupSplit) !== JSON.stringify(txn.groupSplit || null)) {
+    current.tagTransactionToGroup(txn.id, draft.groupId, draft.groupSplit);
   }
   if (draft.split) current.setTransactionSplit(txn.id, draft.split.others, draft.split.meta);
+  if (draft.note.trim() !== (txn.note || '').trim()) current.setTransactionNote(txn.id, draft.note);
   if (!txn.isIgnored && draft.isIgnored) current.ignoreTransaction(txn.id);
 }

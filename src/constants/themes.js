@@ -244,6 +244,9 @@ export const LIGHT_NEUTRALS = {
   textMuted: '#9CA3AF',
   textOnGradient: '#FFFFFF',
   shadow: '#000000',
+  // A disabled CTA is a flat grey fill, never a faded brand colour.
+  disabledBackground: '#ECE9F1',
+  disabledText: '#9B96A5',
 };
 
 // ----- Neutrals (dark) ------------------------------------------------------
@@ -258,6 +261,8 @@ export const DARK_NEUTRALS = {
   textMuted: '#6B7280',
   textOnGradient: '#FFFFFF',
   shadow: '#000000',
+  disabledBackground: '#2A2D34',
+  disabledText: '#6B7280',
 };
 
 // ----- Status colors (theme-agnostic) ---------------------------------------

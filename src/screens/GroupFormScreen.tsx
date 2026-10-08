@@ -9,7 +9,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +29,7 @@ import PlainScreenHeader from '../components/PlainScreenHeader';
 import GradientButtonBase from '../components/GradientButton';
 import { FormTextInput } from '../components/FormField';
 import AppSwitch from '../components/AppSwitch';
+import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
 import { useEPurseStore } from '../store/ePurseStore';
 import { fetchContactsForPicker, getContactsPermissionStatus } from '../services/contactsService';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
@@ -146,6 +147,22 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
       } else {
         const id = createGroup(data);
         toast.success('Group created');
+        const returnTxnId = route?.params?.returnToGroupTxnId as string | undefined;
+        if (returnTxnId) {
+          // Personal group from the review queue: nothing left to ask — straight back to Manage.
+          if (route?.params?.returnFromQueue && type !== 'shared') {
+            setReviewFlowDraft(returnTxnId, { ...peekReviewFlowDraft(returnTxnId), groupId: id, groupSplit: null });
+            navigation.goBack();
+            return;
+          }
+          navigation.replace('AddGroupExpense', {
+            groupId: id,
+            tagTxnId: returnTxnId,
+            ...(route?.params?.returnFromQueue ? { fromQueue: true } : {}),
+            ...(route?.params?.returnFromQueue ? { reviewFlow: true } : {}),
+          });
+          return;
+        }
         // Replace, not push — the form shouldn't sit in the back stack between
         // the list and the new group's own detail screen.
         navigation.replace('GroupDetail', { groupId: id });

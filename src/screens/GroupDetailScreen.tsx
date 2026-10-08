@@ -664,7 +664,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         onClose={() => setDetailTxn(null)}
         onEdit={(t: any) => {
           setDetailTxn(null);
-          navigation.navigate('AddGroupExpense', { groupId: t.groupId, editTxnId: t.id });
+          navigation.navigate('AddTransaction', { editTxnId: t.id });
         }}
       />
 

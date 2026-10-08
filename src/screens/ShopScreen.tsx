@@ -229,8 +229,8 @@ const ShopCard: React.FC<ShopCardProps> = ({ item, currentLevel, currentCoins, D
 
   const bounce = () => {
     scale.value = withSequence(
-      withSpring(1.06, { damping: 7,  stiffness: 220 }),
-      withSpring(1.00, { damping: 12, stiffness: 220 }),
+      withSpring(1.06, { damping: 7,  stiffness: 220, mass: 1 }),
+      withSpring(1.00, { damping: 12, stiffness: 220, mass: 1 }),
     );
   };
 

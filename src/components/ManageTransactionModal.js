@@ -1,31 +1,38 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import KeyboardAvoidingView from './AppKeyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Modal from './AppModal';
+import CenterModal from './CenterModal';
 import GradientButton from './GradientButton';
 import SheetCloseButton from './SheetCloseButton';
+import { GroupPickerList } from './GroupPickerSheet';
 import SplitConfigModal from './SplitConfigModal';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { useEPurseStore } from '../store/ePurseStore';
-import { DIVIDER_W, radius, spacing, typography } from '../constants/theme';
+import { DIVIDER_W, radius, readableOn, spacing, typography } from '../constants/theme';
 import { LB_CHILD_LABEL_TO_ID, LB_ALL_CATS, LB_SETTLEMENT_IDS, twoTierToLegacyCatId } from '../constants/twoTierCategories';
 import { CategoryTreeList } from './CategoryPickerModal';
-import { useFocusBorder } from './FormField';
+import { FormNoteField, FormValueCard, useFocusBorder } from './FormField';
+import { INPUT_LIMITS } from '../utils/validation';
 import { buildCategoryHistory, suggestCategory } from '../utils/categorySuggest';
 import { quickPicks, searchCategories } from '../utils/categoryQuickPick';
 import { canSplitTransaction } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 import { applyManageDraft, createManageDraft, manageDraftChanged } from '../utils/manageTransactionDraft';
+import { setReviewFlowDraft } from '../utils/reviewFlowDraft';
 
 // A fresh draft per opening. Closing never writes to the ledger.
+const GROUP_TONE = '#A8409F';
+
 export default function ManageTransactionModal(props) {
   if (!props.visible || !props.transaction) return null;
   return <ManageSession key={props.transaction.id} {...props} />;
 }
 
-function ManageSession({ transaction: txn, categories, categoryLocked, linkedPerson,
+function ManageSession({ transaction: txn, initialDraft, categories, categoryLocked, linkedPerson,
   onClose, onManaged, fromQueue = false, onSelectCategory,
   onSelectLentBorrow, onPressSplit, onToggleHidden, onIgnore, onRestore, onDelete,
   onPressAddToGroup, onPressRemoveFromGroup, canRefund, onToggleRefund }) {
@@ -35,7 +42,7 @@ function ManageSession({ transaction: txn, categories, categoryLocked, linkedPer
   const tree = useCategoryTree();
   const groups = useEPurseStore((s) => s.groups);
   const accounts = useEPurseStore((s) => s.accounts);
-  const [draft, setDraft] = useState(() => createManageDraft(txn));
+  const [draft, setDraft] = useState(() => ({ ...createManageDraft(txn), ...(initialDraft || {}) }));
   const [panel, setPanel] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [splitValid, setSplitValid] = useState(true);
@@ -76,6 +83,8 @@ function ManageSession({ transaction: txn, categories, categoryLocked, linkedPer
   // Closing never writes, so it needs no confirm — the draft is simply dropped.
   const close = onClose;
   const back = () => setPanel(null);
+  // Category and group pickers take over the whole sheet (back arrow returns).
+  const fullPanel = panel === 'category' || panel === 'group';
   const selectCategory = (categoryId, parentCategory, childCategory, specialCategory = null) => {
     if (specialCategory && draft.split?.others.length) {
       setError('Save or remove the person split before switching to a linked payment or settlement.');
@@ -149,44 +158,68 @@ function ManageSession({ transaction: txn, categories, categoryLocked, linkedPer
     if (edited) setDraft((old) => ({ ...old, split: { others, meta } }));
   }, []);
 
-  const commit = () => {
+  const commit = (d = draft) => {
     if (committing.current) return;
     committing.current = true;
     try {
       // Shared groups retain their existing who-paid/who-owes editor. Choosing
       // one here does not prematurely attach it or invent a second split model.
-      const shared = group?.type === 'shared' && draft.groupId !== (txn.groupId || null);
-      applyManageDraft(useEPurseStore, txn, shared ? { ...draft, groupId: txn.groupId || null } : draft);
-      if (draft.specialCategory) {
-        if (draft.specialCategory === 'cc_bill') onSelectCategory('cc_bill');
-        else (onSelectLentBorrow || onSelectCategory)(draft.specialCategory);
+      const target = groups.find((g) => g.id === d.groupId);
+      const shared = !d.groupSplit && target?.type === 'shared' && d.groupId !== (txn.groupId || null);
+      applyManageDraft(useEPurseStore, txn, shared ? { ...d, groupId: txn.groupId || null } : d);
+      if (d.specialCategory) {
+        if (d.specialCategory === 'cc_bill') onSelectCategory('cc_bill');
+        else (onSelectLentBorrow || onSelectCategory)(d.specialCategory);
         return;
       }
       if (shared) {
         onClose();
-        navigation.navigate('AddGroupExpense', { groupId: group.id, tagTxnId: txn.id, ...(fromQueue ? { fromQueue: true } : {}) });
+        navigation.navigate('AddGroupExpense', { groupId: target.id, tagTxnId: txn.id, ...(fromQueue ? { fromQueue: true } : {}) });
         return;
       }
-      if (!draft.isIgnored) onManaged?.(txn.id);
+      if (!d.isIgnored) onManaged?.(txn.id);
       onClose();
     } catch (e) {
       setConfirmation(null);
       setError(e.message || 'Could not save these changes. Please try again.');
     } finally { committing.current = false; }
   };
-  const done = () => {
-    if (draft.isIgnored !== !!txn.isIgnored) setConfirmation('save');
-    else commit();
+  const done = () => commit();
+  // A shared group needs who-paid/who-owes, so picking one opens that editor right away.
+  // The queue returns here with the split in the draft; elsewhere the other edits save first.
+  const pickSharedGroup = (item) => {
+    if (!fromQueue) { commit({ ...draft, groupId: item.id, groupSplit: null }); return; }
+    setReviewFlowDraft(txn.id, draft);
+    onClose();
+    navigation.navigate('AddGroupExpense', { groupId: item.id, tagTxnId: txn.id, fromQueue: true, reviewFlow: true });
+  };
+  const createGroup = () => {
+    // The queue brings the user back to this sheet with the draft (and new group) intact.
+    if (fromQueue) {
+      setReviewFlowDraft(txn.id, draft);
+      onClose();
+      navigation.navigate('GroupForm', { returnToGroupTxnId: txn.id, returnFromQueue: true });
+      return;
+    }
+    if (changed) { setError('Save or discard your changes before creating a group.'); return; }
+    onClose();
+    navigation.navigate('Groups');
   };
   // One size everywhere; each action keeps its own colour. `selected` = on in the draft.
-  const action = (label, icon, tone, selected, onPress, flex = 1) => (
-    <TouchableOpacity key={label} onPress={onPress} activeOpacity={0.85}
-      accessibilityRole="button" accessibilityState={{ selected }}
-      style={[styles.action, { flex, backgroundColor: tone + (selected ? '2E' : '14'), borderColor: tone + (selected ? 'CC' : '55') }]}>
-      <Ionicons name={selected ? 'checkmark-circle' : icon} size={18} color={tone} />
-      <Text style={[styles.actionTitle, { color: tone }]} numberOfLines={1}>{label}</Text>
-    </TouchableOpacity>
-  );
+  const action = (label, icon, tone, selected, onPress) => {
+    // Selected = solid fill, deepened just enough for white ink to stay readable
+    // (warning amber is too light as-is).
+    const fill = selected ? readableOn('#FFFFFF', tone) : null;
+    const ink = selected ? '#FFFFFF' : tone;
+    return (
+      <TouchableOpacity key={label} onPress={onPress} activeOpacity={0.85}
+        accessibilityRole="button" accessibilityState={{ selected }}
+        style={[styles.action, { flex: 1, backgroundColor: fill || tone + '14', borderColor: fill || tone + '55' }]}>
+        <Ionicons name={selected ? 'checkmark-circle' : icon} size={20} color={ink} />
+        <Text style={[styles.actionTitle, { color: ink }]} numberOfLines={1}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
   const chip = (key, emoji, label, on, color, onPress) => (
     <TouchableOpacity key={key} onPress={onPress} activeOpacity={0.72}
       accessibilityRole="button" accessibilityState={{ selected: on }}
@@ -208,51 +241,55 @@ function ManageSession({ transaction: txn, categories, categoryLocked, linkedPer
       <Ionicons name="chevron-forward" size={14} color={theme.primary} />
     </TouchableOpacity>
   );
-  const row = (label, emoji, selected, onPress, subtitle) => (
-    <TouchableOpacity key={label} style={[styles.row, selected && styles.selectedRow]} onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected }} activeOpacity={0.75}>
-      <Text style={styles.emoji}>{emoji}</Text>
-      <View style={styles.grow}><Text style={styles.rowTitle}>{label}</Text>{!!subtitle && <Text style={styles.meta}>{subtitle}</Text>}</View>
-      <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={20} color={selected ? theme.primary : theme.textMuted} />
-    </TouchableOpacity>
-  );
   const splitEditing = panel === 'split';
+  // Actions are laid out from one list so any combination fills its rows evenly.
+  // Delete always closes the last row at a quarter width — never a full-width red bar.
+  const actionItems = [
+    // Ignore and Private are exclusive — Private hides while ignored.
+    !!onToggleHidden && !draft.isIgnored && action('Private', 'eye-off-outline', theme.success, draft.isHidden, () => { patch({ isHidden: !draft.isHidden }); changePanel('private'); }),
+    ignoreAvailable && action(txn.isIgnored ? 'Restore' : 'Ignore', txn.isIgnored ? 'refresh-outline' : 'ban-outline', txn.isIgnored ? theme.success : theme.warning, draft.isIgnored !== !!txn.isIgnored, () => { patch(draft.isIgnored ? { isIgnored: false, isHidden: !!txn.isHidden && !txn.isIgnored } : { isIgnored: true, isHidden: false }); changePanel('ignore'); }),
+    splitAllowed && action(directSplit ? 'Edit Split' : 'Split', 'pie-chart-outline', theme.info, directSplit || splitEditing, () => {
+      if (fromQueue && onPressSplit) { onPressSplit(draft); return; }
+      setSplitStarted(true); changePanel('split');
+    }),
+    // Muted magenta: the free hue between Done's violet and Delete's red (Ignore
+    // amber, Private green and Split blue are taken too).
+    groupAvailable && groupAllowed && action(group ? group.name : 'Add to Group', 'people-outline', GROUP_TONE, !!group || panel === 'group', () => {
+      changePanel('group');
+    }),
+  ].filter(Boolean);
+  // Up to 2 actions share one row with Delete; 3–4 split so Delete joins the last one.
+  const firstRowCount = actionItems.length + (onDelete ? 1 : 0) <= 3 ? actionItems.length : Math.min(3, actionItems.length - 1);
+  const actionRows = [actionItems.slice(0, firstRowCount), actionItems.slice(firstRowCount)].filter((r) => r.length);
+  if (onDelete) {
+    const last = actionRows[actionRows.length - 1] || (actionRows[0] = []);
+    last.push(
+      <TouchableOpacity key="delete" style={[styles.deleteIcon, { backgroundColor: theme.danger + '14', borderColor: theme.danger + '55' }]} onPress={() => setConfirmation('delete')} activeOpacity={0.85}
+        accessibilityRole="button" accessibilityLabel="Delete transaction">
+        <Ionicons name="trash-outline" size={18} color={theme.danger} />
+        {last.length <= 1 && <Text style={[styles.actionTitle, { color: theme.danger }]} numberOfLines={1}>Delete</Text>}
+      </TouchableOpacity>,
+    );
+  }
   const saveDisabled = !changed || (draft.split !== null && !splitValid)
     || (splitEditing && !splitValid && !draft.isIgnored);
-  // Only Ignore / Restore asks before saving (balances and totals move).
-  let confirmTitle = draft.isIgnored ? 'Ignore Transaction?' : 'Restore Transaction?';
-  const sharedGroupSplit = !!txn.groupId && groups.find((g) => g.id === txn.groupId)?.type === 'shared';
-  let confirmBody = draft.isIgnored
-    ? `Ignore removes it from your balances and every total and chart. It will be treated as if it never happened.${
-      txn.isSplit || txn.isSplitMemo ? ' Its split is removed too — Restore brings it back without one.'
-      : sharedGroupSplit ? ' It also leaves its group and that split — Restore brings it back without them.' : ''}`
-    : 'Restore adds it back to balances, totals, and charts.';
-  if (confirmation === 'delete') { confirmTitle = 'Delete Transaction?'; confirmBody = 'This action cannot be undone.'; }
+  // Only Delete asks first — Ignore/Restore are reversible and already explained inline.
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={() => confirmation ? setConfirmation(null) : panel === 'category' ? back() : close()}>
+    <Modal visible transparent animationType="slide" onRequestClose={() => fullPanel ? back() : close()}>
       <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={close} accessibilityLabel="Close Manage transaction" />
         <SheetCloseButton onPress={close} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.heading}>
-            {(panel === 'category' || confirmation) && <TouchableOpacity onPress={() => confirmation ? setConfirmation(null) : back()} style={styles.backButton} accessibilityLabel="Back to Manage transaction"><Ionicons name="chevron-back" size={22} color={theme.textPrimary} /></TouchableOpacity>}
-            <Text style={styles.title}>{confirmation ? confirmTitle : panel === 'category' ? 'Select Category' : 'Manage Transaction'}</Text>
+            {fullPanel && <TouchableOpacity onPress={back} style={styles.backButton} accessibilityLabel="Back to Manage transaction"><Ionicons name="chevron-back" size={22} color={theme.textPrimary} /></TouchableOpacity>}
+            <Text style={[styles.title, fullPanel && styles.titleCentered]}>{panel === 'category' ? 'Select Category' : panel === 'group' ? 'Select Group' : 'Manage Transaction'}</Text>
+            {/* Mirrors the back button so a nested panel's title sits on true centre, as on screens. */}
+            {fullPanel && <View style={styles.backSpacer} />}
           </View>
-          {confirmation ? <>
-            <Text style={styles.confirmBody}>{confirmBody}</Text>
-            <View style={styles.confirmActions}>
-              <TouchableOpacity style={styles.cancel} onPress={() => setConfirmation(null)}><Text style={styles.rowTitle}>Cancel</Text></TouchableOpacity>
-              <GradientButton style={styles.grow} title={confirmation === 'delete' ? 'Delete' : draft.isIgnored ? 'Ignore' : 'Restore'}
-                {...(confirmation === 'delete' ? { colors: [theme.danger, theme.danger], textStyle: { color: '#FFFFFF' } } : {})}
-                onPress={() => {
-                  if (confirmation === 'delete') { useEPurseStore.getState().deleteTransaction(txn.id); onClose(); }
-                  else commit();
-                }} />
-            </View>
-          </> : <>
-            {panel !== 'category' && <View style={styles.context}>
+          <>
+            {!fullPanel && <View style={styles.context}>
               <View style={styles.avatar}><Ionicons name="receipt-outline" size={23} color={theme.primary} /></View>
               <View style={styles.grow}>
                 <Text style={styles.merchant} numberOfLines={1}>{txn.merchant || 'Transaction'}</Text>
@@ -272,8 +309,19 @@ function ManageSession({ transaction: txn, categories, categoryLocked, linkedPer
                   onSelectSettlement={chooseSpecial}
                   onSelectCategory={chooseSpecial}
                 />
+              </> : panel === 'group' ? <>
+                {/* Same list as the standalone Add to Group sheet. "No Group" only once there's a group to leave. */}
+                <GroupPickerList
+                  selectedId={draft.groupId}
+                  onPick={(item) => {
+                    if (draft.split?.others.length) { setError('Finish or remove the person split before choosing a group. Group splits use the existing group editor.'); return; }
+                    if (item.type === 'shared' && item.id !== txn.groupId) { pickSharedGroup(item); return; }
+                    patch({ groupId: item.id, groupSplit: null }); back();
+                  }}
+                  onClear={onPressRemoveFromGroup && (draft.groupId || txn.groupId) ? () => { patch({ groupId: null, groupSplit: null }); back(); } : undefined}
+                  onCreateNew={createGroup}
+                />
               </> : <>
-                {!!txn.note && txn.note.trim().toLowerCase() !== (txn.merchant || '').trim().toLowerCase() && <Text style={styles.note}>{txn.note}</Text>}
                 <Text style={styles.sectionLabel}>Category</Text>
                 {categoryLocked ? <View style={styles.notice}><Ionicons name="lock-closed-outline" size={20} color={theme.primary} /><Text style={styles.noticeText}>{linkedPerson ? `Linked to ${linkedPerson}. Category is locked.` : 'Linked to a lent/borrow record. Category is locked.'}</Text></View>
                   : <>
@@ -301,43 +349,41 @@ function ManageSession({ transaction: txn, categories, categoryLocked, linkedPer
                   </>}
                 {draft.specialCategory && <Text style={styles.explanation}>Done opens {draft.specialCategory === 'cc_bill' ? 'the credit-card payment reconciliation' : 'the person-link'} flow to finish this change.</Text>}
                 <Text style={styles.sectionLabel}>Actions</Text>
-                <View style={styles.actions}>
-                  {/* Ignore and Private are exclusive — Private hides while ignored. */}
-                  {!!onToggleHidden && !draft.isIgnored && action('Private', 'eye-off-outline', theme.success, draft.isHidden, () => { patch({ isHidden: !draft.isHidden }); changePanel('private'); })}
-                  {ignoreAvailable && action(txn.isIgnored ? 'Restore' : 'Ignore', txn.isIgnored ? 'refresh-outline' : 'ban-outline', txn.isIgnored ? theme.success : theme.warning, draft.isIgnored !== !!txn.isIgnored, () => { patch(draft.isIgnored ? { isIgnored: false, isHidden: !!txn.isHidden && !txn.isIgnored } : { isIgnored: true, isHidden: false }); changePanel('ignore'); })}
-                  {splitAllowed && action(directSplit ? 'Edit Split' : 'Split', 'pie-chart-outline', theme.info, splitEditing, () => { setSplitStarted(true); changePanel('split'); })}
-                </View>
-                {!!(onDelete || (groupAvailable && groupAllowed)) && <View style={styles.actionsSecond}>
-                  {!!onDelete && <TouchableOpacity style={styles.deleteIcon} onPress={() => setConfirmation('delete')} activeOpacity={0.85}
-                    accessibilityRole="button" accessibilityLabel="Delete transaction">
-                    <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
-                    {!(groupAvailable && groupAllowed) && <Text style={styles.deleteText}>Delete Transaction</Text>}
-                  </TouchableOpacity>}
-                  {groupAvailable && groupAllowed && action(group ? group.name : 'Add to Group', 'people-outline', theme.primary, panel === 'group', () => changePanel('group'), 4)}
-                </View>}
+                {actionRows.map((row, i) => <View key={i} style={i ? styles.actionsSecond : styles.actions}>{row}</View>)}
                 {panel === 'private' && <Text style={styles.explanation}>{draft.isHidden ? 'Hidden from default views, but still counted in totals. Find it using the Private filter in Activity.' : 'Visible in default views again.'}</Text>}
-                {panel === 'ignore' && <Text style={styles.explanation}>{draft.isIgnored ? 'Excluded from balances, totals and charts. Your existing category and tags are retained.' : 'Included in balances, totals and charts.'}</Text>}
+                {panel === 'ignore' && <Text style={styles.explanation}>{draft.isIgnored
+                  ? `Excluded from balances, totals and charts.${txn.isSplit || txn.isSplitMemo ? ' Its split is removed too.' : ''} Find it using the Ignored filter in Activity.`
+                  : 'Counts toward balances, totals and charts again.'}</Text>}
                 {splitStarted && <View style={panel === 'split' && splitAllowed ? undefined : { display: 'none' }}>
                   <SplitConfigModal embedded visible transaction={splitTransaction} initialDraft={draft.split} onDraftChange={onSplitDraft} onClose={() => setPanel(null)} onApply={(others, meta) => { patch({ split: { others, meta } }); setSplitValid(true); setSplitStarted(false); setPanel(null); }} />
-                </View>}
-                {panel === 'group' && groupAllowed && <View>
-                  <Text style={styles.sectionLabel}>Select Group</Text>
-                  {!!onPressRemoveFromGroup && row('No group', '−', !draft.groupId, () => patch({ groupId: null }))}
-                  {!!onPressAddToGroup && groups.map((item) => row(item.name, item.emoji || '👥', item.id === draft.groupId,
-                    () => { if (draft.split?.others.length) { setError('Finish or remove the person split before choosing a group. Group splits use the existing group editor.'); return; } patch({ groupId: item.id }); }, item.type === 'shared' ? 'Shared · opens group expense editor' : 'Personal group'))}
-                  {!groups.length && <Text style={styles.explanation}>No groups yet.</Text>}
-                  {!!onPressAddToGroup && <TouchableOpacity style={styles.link} onPress={() => { if (changed) { setError('Save or discard your changes before creating a group.'); return; } onClose(); navigation.navigate('Groups'); }}><Text style={styles.linkText}>Create a Group</Text></TouchableOpacity>}
                 </View>}
                 {!!canRefund && !!onToggleRefund && !draft.isIgnored && <View style={styles.actionsSecond}>
                   {action(draft.isRefund ? 'Refund — Reduces Your Spend' : 'Mark as Refund / Cashback', 'return-down-back-outline', draft.isRefund ? theme.income : theme.textSecondary, draft.isRefund, () => patch({ isRefund: !draft.isRefund }))}
                 </View>}
+                {/* Last: optional, so it never pushes Category/Actions down. Saved with Done. */}
+                <View style={styles.noteField}>
+                  <FormValueCard>
+                    <FormNoteField value={draft.note} onChangeText={(note) => patch({ note })}
+                      maxLength={INPUT_LIMITS.NOTE_MAX} accentColor={theme.primary} />
+                  </FormValueCard>
+                </View>
               </>}
               {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
             </ScrollView>
-            {panel !== 'category' && <View style={styles.footer}><GradientButton flat title="Done" onPress={done} disabled={saveDisabled} /></View>}
-          </>}
+            {!fullPanel && <View style={styles.footer}><GradientButton flat title="Done" onPress={done} disabled={saveDisabled} /></View>}
+          </>
         </View>
       </KeyboardAvoidingView>
+      <CenterModal
+        visible={confirmation === 'delete'}
+        title="Delete Transaction?"
+        message="It will be deleted permanently and your balances and totals will update. This can't be undone."
+        primaryText="Delete"
+        destructive
+        secondaryText="Cancel"
+        onClose={() => setConfirmation(null)}
+        onPrimary={() => { useEPurseStore.getState().deleteTransaction(txn.id); onClose(); }}
+      />
     </Modal>
   );
 }
@@ -348,8 +394,10 @@ const makeStyles = (t) => StyleSheet.create({
   sheet: { maxHeight: '75%', backgroundColor: t.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg, paddingBottom: spacing.lg },
   handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: t.divider, alignSelf: 'center', marginBottom: spacing.md },
   heading: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
-  backButton: { paddingVertical: 6, paddingRight: spacing.sm },
+  backButton: { width: 36, paddingVertical: 6 },
+  backSpacer: { width: 36 },
   title: { ...typography.h3, fontWeight: '700', color: t.textPrimary, flex: 1 },
+  titleCentered: { textAlign: 'center' },
   context: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: DIVIDER_W, borderBottomColor: t.divider },
   avatar: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: t.primary + '12', alignItems: 'center', justifyContent: 'center' },
   grow: { flex: 1 },
@@ -359,18 +407,14 @@ const makeStyles = (t) => StyleSheet.create({
   body: { flexShrink: 1 },
   bodyContent: { paddingTop: spacing.sm, paddingBottom: spacing.sm },
   sectionLabel: { ...typography.small, fontWeight: '700', color: t.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: t.background, paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2, borderRadius: radius.md, borderWidth: 1, borderColor: 'transparent', marginBottom: spacing.xs },
-  selectedRow: { borderColor: t.primary, backgroundColor: t.primary + '0D' },
-  rowTitle: { ...typography.bodyBold, color: t.textPrimary },
-  emoji: { fontSize: 22 },
   actions: { flexDirection: 'row', gap: spacing.sm },
   actionsSecond: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   action: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.sm + 4, paddingHorizontal: spacing.sm, borderWidth: 1, borderRadius: radius.md },
   actionTitle: { ...typography.small, fontWeight: '700', flexShrink: 1 },
-  deleteIcon: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm + 4, borderRadius: radius.md, backgroundColor: t.danger },
-  deleteText: { ...typography.small, fontWeight: '700', color: '#FFFFFF' },
+  // Same tinted outline as the other actions; the confirm modal carries the warning.
+  deleteIcon: { flexBasis: '25%', flexGrow: 0, flexShrink: 0, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm + 4, borderWidth: 1, borderRadius: radius.md },
   explanation: { ...typography.small, color: t.textSecondary, lineHeight: 18, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: t.background, borderRadius: radius.md, marginTop: spacing.sm },
-  note: { ...typography.small, color: t.textSecondary, padding: spacing.sm, backgroundColor: t.background, borderRadius: radius.md },
+  noteField: { marginTop: spacing.md },
   notice: { flexDirection: 'row', gap: spacing.sm, backgroundColor: t.primary + '0D', padding: spacing.md, borderRadius: radius.md },
   noticeText: { ...typography.small, color: t.textSecondary, flex: 1 },
   link: { paddingVertical: spacing.sm },
@@ -386,7 +430,4 @@ const makeStyles = (t) => StyleSheet.create({
   chipLabelOn: { color: '#FFFFFF' },
   allChip: { gap: 2, borderColor: t.primary + '55', backgroundColor: t.primary + '0D' },
   error: { ...typography.small, color: t.danger, marginTop: spacing.sm },
-  confirmBody: { ...typography.body, color: t.textSecondary, lineHeight: 23, marginVertical: spacing.lg },
-  confirmActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  cancel: { flex: 1, alignItems: 'center', padding: spacing.md, backgroundColor: t.background, borderRadius: radius.md },
 });

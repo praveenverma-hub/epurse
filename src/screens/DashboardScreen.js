@@ -1128,14 +1128,14 @@ const DashboardScreen = ({ navigation }) => {
 
       {/* Tapping a shared-group transaction card opens this first — who paid,
           per-member shares, your position — with an Edit pill into the same
-          split editor (AddGroupExpense, edit mode) used everywhere else. */}
+          Add/Edit Transaction form every other txn uses (it edits group splits too). */}
       <GroupTxnDetailSheet
         txn={groupDetailTxn?.txn || null}
         onClose={() => setGroupDetailTxn(null)}
         onEdit={() => {
-          const { txn, group } = groupDetailTxn;
+          const { txn } = groupDetailTxn;
           setGroupDetailTxn(null);
-          navigation.navigate('AddGroupExpense', { groupId: group.id, editTxnId: txn.id });
+          navigation.navigate('AddTransaction', { editTxnId: txn.id });
         }}
       />
 

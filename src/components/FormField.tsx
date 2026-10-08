@@ -236,6 +236,8 @@ interface FormValueRowProps {
   accentColor?: string;
   /** Extra content under the row, inside the same card (e.g. the split breakdown). */
   children?: React.ReactNode;
+  /** Trailing affordance; defaults to a forward chevron. `null` = none (the row has already opened in place). */
+  trailingIcon?: React.ComponentProps<typeof Ionicons>['name'] | null;
 }
 
 /** A one-line "Label ........ value ›" row. The OPTIONAL fields of an entry form
@@ -252,6 +254,7 @@ export const FormValueRow: React.FC<FormValueRowProps> = ({
   disabled,
   accentColor = colors.primary,
   children,
+  trailingIcon = 'chevron-forward',
 }) => (
   <View>
     <TouchableOpacity
@@ -278,7 +281,7 @@ export const FormValueRow: React.FC<FormValueRowProps> = ({
           {value}
         </Text>
       </View>
-      {disabled ? null : <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />}
+      {disabled || !trailingIcon ? null : <Ionicons name={trailingIcon} size={16} color={colors.textMuted} />}
     </TouchableOpacity>
     {children}
   </View>
@@ -319,7 +322,10 @@ export const FormNoteField: React.FC<FormNoteFieldProps> = ({
       value={value && !expanded ? value : expanded ? '' : 'Add'}
       isPlaceholder={!value}
       accentColor={accentColor}
-      onPress={() => setOpen((v) => !v)}
+      // Once a note exists the box stays open, so the row is just its label: no
+      // chevron, no tap. While open and still empty, it collapses again (chevron-up).
+      onPress={value ? undefined : () => setOpen((v) => !v)}
+      trailingIcon={value ? null : expanded ? 'chevron-up' : 'chevron-forward'}
     >
       {expanded ? (
         <View style={styles.noteBody}>

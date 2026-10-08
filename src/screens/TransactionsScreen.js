@@ -90,7 +90,7 @@ const SHEET_H = SCREEN_H * 0.84;
 
 // overshootClamping: the default spring overshoots past 0, lifting the sheet off
 // the bottom edge for a frame.
-const SPRING_CFG   = { damping: 22, stiffness: 220, overshootClamping: true };
+const SPRING_CFG   = { damping: 22, stiffness: 220, mass: 1, overshootClamping: true };
 const DISMISS_VEL  = 600;
 const DISMISS_DIST = 130;
 
@@ -1317,14 +1317,14 @@ const TransactionsScreen = ({ navigation, route }) => {
 
       {/* Tapping a shared-group transaction card opens this first — who paid,
           per-member shares, your position — with an Edit pill into the same
-          split editor (AddGroupExpense, edit mode) used everywhere else. */}
+          Add/Edit Transaction form every other txn uses (it edits group splits too). */}
       <GroupTxnDetailSheet
         txn={groupDetailTxn?.txn || null}
         onClose={() => setGroupDetailTxn(null)}
         onEdit={() => {
-          const { txn, group } = groupDetailTxn;
+          const { txn } = groupDetailTxn;
           setGroupDetailTxn(null);
-          navigation.navigate('AddGroupExpense', { groupId: group.id, editTxnId: txn.id });
+          navigation.navigate('AddTransaction', { editTxnId: txn.id });
         }}
       />
 

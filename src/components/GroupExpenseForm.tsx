@@ -55,6 +55,8 @@ interface GroupExpenseFormProps {
   onAdd: (expenseData: GroupExpenseData) => void;
   /** When tagging an EXISTING transaction, its amount — prefilled and locked here. */
   presetAmount?: number;
+  /** Tagging an existing txn: show its merchant (read-only — tagging never renames it). */
+  presetMerchant?: string;
   /**
    * Sheet shells pass their `visible` flag so the form resets each time it opens.
    * Screen shells omit it (defaults to visible) — the form resets once on mount.
@@ -86,9 +88,11 @@ interface GroupExpenseFormProps {
   lockPayerToMe?: boolean;
   /** Fires when the mandatory fields (amount + merchant) become filled/empty — shells use it to show their Add button. */
   onReadyChange?: (ready: boolean) => void;
+  /** Review queue uses the same group editor while keeping its back stack intact. */
+  reviewFlow?: boolean;
 }
 
-export default function GroupExpenseForm({ group, onAdd, presetAmount, visible = true, hideCategory = false, editTxn, hideSubmit = false, submitRef, lockPayerToMe = false, onReadyChange }: GroupExpenseFormProps) {
+export default function GroupExpenseForm({ group, onAdd, presetAmount, presetMerchant, visible = true, hideCategory = false, editTxn, hideSubmit = false, submitRef, lockPayerToMe = false, onReadyChange, reviewFlow = false }: GroupExpenseFormProps) {
   const theme = useTheme();
   const toast = useToast();
   const accounts = useEPurseStore((s: any) => s.accounts) as AccountLike[];
@@ -107,7 +111,19 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
   const { isShared, payerIsMe } = split;
   // The split editor is a stack route; the state stays in useGroupSplit here.
   const splitRoute = useSplitEditorRoute(
-    isShared ? { page: { ...split.pageProps, accentColor: theme.primary } } : null,
+    isShared ? {
+      page: { ...split.pageProps, accentColor: theme.primary },
+      ...(reviewFlow ? {
+        onDone: () => {
+          const result = split.resolveShares();
+          if (!result.ok) {
+            toast.warning(result.title, result.message);
+            return false;
+          }
+          return true;
+        },
+      } : {}),
+    } : null,
   );
   // Category follows the merchant as it's typed, until picked by hand. Off for
   // edits and the tagging flow (category already decided there).
@@ -144,12 +160,12 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
 
     setAmountRaw(amountLocked ? String(presetAmount) : '');
     setDate(new Date());
-    setMerchant('');
+    setMerchant(presetMerchant && presetMerchant !== 'Group Expense' ? presetMerchant : '');
     setNote('');
     setAccountId(defaultAccountId(accounts));
     setParentCat(null);
     setChildCat(null);
-  }, [visible, group, accounts, amountLocked, presetAmount, editTxn]);
+  }, [visible, group, accounts, amountLocked, presetAmount, presetMerchant, editTxn]);
 
   const handleAdd = () => {
     if (amount <= 0) {
@@ -219,8 +235,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, visible =
       </FormField>
 
       {/* Merchant */}
-      <FormField label="Merchant / Description">
+      <FormField label="Merchant / Description" hint={!editTxn && !!presetMerchant ? 'From the transaction — not editable' : undefined}>
         <FormTextInput
+          editable={!(!editTxn && !!presetMerchant)}
           placeholder="e.g. Dinner, Groceries, Cab"
           value={merchant}
           onChangeText={setMerchant}

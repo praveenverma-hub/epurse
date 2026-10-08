@@ -3,11 +3,10 @@
 // Supports manual entries with a two-tier (Parent › Child) category picker.
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   Dimensions,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -46,7 +46,7 @@ import {
   FormValueCard,
 } from '../components/FormField';
 import { useSplitEditorRoute } from '../store/useSplitEditorRoute';
-import { SPLIT_MODE_LABEL, type SplitMode, type SplitPageRow } from '../components/SplitPage';
+import SplitPage, { SPLIT_MODE_LABEL, type SplitMode, type SplitPageRow } from '../components/SplitPage';
 import { evenPercents, fullOwedShares } from '../utils/splitShares';
 import SplitBreakdownLines from '../components/SplitBreakdownLines';
 import FormFooterActions from '../components/FormFooterActions';
@@ -78,7 +78,7 @@ import LinkContactModal from '../components/LinkContactModal';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
-import { SPLIT_BLOCKED_CATEGORY_IDS } from '../utils/split';
+import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 import {
   ParentCat,
@@ -89,6 +89,8 @@ import {
 } from '../constants/twoTierCategories';
 import { requestAndGetLocation } from '../services/locationService';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { useRewardStore } from '../store/useRewardStore';
+import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
 
 // Two-tier → legacy category conversion is centralised in twoTierCategories.ts
 // (twoTierToLegacyCatId / LB_ALL_CATS / SPLIT_BLOCKED_CHILD_LABELS).
@@ -123,7 +125,7 @@ const AddTxnParentRow: React.FC<AddTxnParentRowProps> = ({
 
   useEffect(() => {
     if (isExpanded) {
-      maxH.value = withSpring(280, { damping: 24, stiffness: 200 });
+      maxH.value = withSpring(280, { damping: 24, stiffness: 200, mass: 1 });
       opacity.value = withTiming(1, { duration: 200 });
     } else {
       maxH.value = withTiming(0, { duration: 200 });
@@ -231,7 +233,7 @@ interface NavigationProp {
 }
 
 interface RouteProp {
-  params?: { editTxnId?: string };
+  params?: { editTxnId?: string; openSplit?: boolean; fromQueue?: boolean };
 }
 
 const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationProp; route?: RouteProp }) => {
@@ -247,14 +249,20 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const ingestMessage  = useEPurseStore((s: any) => s.ingestMessage);
   const groups         = useEPurseStore((s: any) => s.groups);
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense);
+  const updateGroupExpense = useEPurseStore((s: any) => s.updateGroupExpense);
+  const tagTransactionToGroup = useEPurseStore((s: any) => s.tagTransactionToGroup);
+  const untagTransactionFromGroup = useEPurseStore((s: any) => s.untagTransactionFromGroup);
   const budget         = useEPurseStore((s: any) => s.budget);
   const transactions   = useEPurseStore((s: any) => s.transactions);
   const getBudgetUsage = useEPurseStore((s: any) => s.getBudgetUsage);
+  const markReviewed = useEPurseStore((s: any) => s.markReviewed);
   const toast          = useToast();
+  const recordReview = useRewardStore((s: any) => s.recordReview);
   const { submit, submitting } = useSubmitGuard();
 
   // ── Edit mode ────────────────────────────────────────────────────────────────
   const editTxnId = route?.params?.editTxnId;
+  const fromQueue = !!route?.params?.fromQueue;
   const isEdit = !!editTxnId;
   const editTxn = useEPurseStore((s: any) =>
     (editTxnId ? s.transactions.find((t: any) => t.id === editTxnId) : null) || null,
@@ -296,6 +304,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   // Generic confirm dialog — currently just "remove split?" (see the clear-X below),
   // same one-slot pattern BudgetScreen/LentBorrowedScreen use for their own confirms.
   const [confirm, setConfirm] = useState<any>(null);
+  const splitOpenedRef = useRef(false);
 
   // ── Edit-mode prefill (once the txn loads) ──────────────────────────────────
   useEffect(() => {
@@ -308,6 +317,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     setParentCategory(editTxn.parentCategory || '');
     setChildCategory(editTxn.childCategory || '');
     setNote(editTxn.note || '');
+    setGroupId(editTxn.groupId || null);
 
     // Restore the split too. Without this the toggle read OFF on a split transaction,
     // so the user couldn't see it — and couldn't tell that changing the amount was
@@ -318,6 +328,25 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     // what lets the split be preserved pro-rata instead of destroyed. It's also what
     // SplitConfigModal itself does when it restores an existing split.
     const amt = Number(editTxn.amount) || 0;
+    // Review queue: an unsaved split from Manage wins over the stored (unsplit) txn,
+    // otherwise Edit Split would reopen empty.
+    const drafted = fromQueue && route?.params?.openSplit ? peekReviewFlowDraft(editTxn.id)?.split : null;
+    if (drafted?.others?.length && amt > 0) {
+      const amountMode = drafted.meta?.mode === 'amount';
+      setIsSplit(true);
+      setSplitMode(amountMode ? 'amount' : 'percent');
+      setSplitMethod(amountMode ? 'amount' : 'percent');
+      setMySplitPercent(amountMode ? Math.round(((Number(drafted.meta.myAmount) || 0) / amt) * 100) : Number(drafted.meta?.myPercent) || 0);
+      setMySplitAmount(amountMode ? Number(drafted.meta.myAmount) || 0 : (amt * (Number(drafted.meta?.myPercent) || 0)) / 100);
+      setSplitPicks(drafted.others.map((o: any) => ({
+        contactId:   o.contactId ?? null,
+        name:        o.name || 'Friend',
+        percent:     amountMode ? Math.round(((Number(o.shareAmount) || 0) / amt) * 100) : Number(o.percent) || 0,
+        shareAmount: amountMode ? Number(o.shareAmount) || 0 : (amt * (Number(o.percent) || 0)) / 100,
+      })));
+      setSplitPaidBy(drafted.meta?.paidBy ?? null);
+      return;
+    }
     const others = Array.isArray(editTxn.splitWith) ? editTxn.splitWith : [];
     if (editTxn.isSplit && others.length > 0 && amt > 0) {
       const myAmt = Number(editTxn.myShareAmount) || 0;
@@ -382,11 +411,19 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 
   const splitAmountNum = parseFloat(amount) || 0;
 
-  // A group applies to a NEW expense that could be split — not income, not
-  // Lent/Borrowed, not an edit (group txns have their own edit flow).
+  // A group applies to an expense that could be split — not income, not
+  // Lent/Borrowed. Edits included: the form is the one editor for plain AND group txns.
   const group = (groups as Group[]).find((g) => g.id === groupId) ?? null;
-  const activeGroup = !isEdit && canSplitHere ? group : null;
-  const groupSplit = useGroupSplit({ group: activeGroup, amount: splitAmountNum });
+  const groupAllowed = canSplitHere && !editTxn?.lbLocked;
+  const activeGroup = groupAllowed ? group : null;
+  const groupSplit = useGroupSplit({
+    group: activeGroup,
+    amount: splitAmountNum,
+    // Still in its original group → restore that split; a newly picked group starts fresh.
+    editTxn: editTxn && editTxn.groupId === activeGroup?.id ? editTxn : undefined,
+    // A real account debit can't be re-booked as someone else paying.
+    lockPayerToMe: isEdit && isPayerLockedToMe(editTxn),
+  });
 
   /**
    * Who paid — the plain-split mirror of a shared group's payer, chosen from
@@ -617,6 +654,9 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       setMySplitAmount(null);
       setSplitMethod('equal');
     }
+    if (fromQueue && route?.params?.openSplit) {
+      navigation.goBack();
+    }
   };
 
   const handleSplitDone = () => {
@@ -629,6 +669,21 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       );
       return false;
     }
+    if (fromQueue && route?.params?.openSplit && editTxnId) {
+      const others = splitMode === 'amount'
+        ? splitPicks.map((p) => ({ contactId: p.contactId ?? null, name: p.name, shareAmount: Number(p.shareAmount) || 0 }))
+        : splitPicks.map((p) => ({ contactId: p.contactId ?? null, name: p.name, percent: Number(p.percent) || 0 }));
+      setReviewFlowDraft(editTxnId, {
+        ...peekReviewFlowDraft(editTxnId),
+        split: {
+          others,
+          meta: splitMode === 'amount'
+            ? { mode: 'amount', myAmount: mySplitAmount ?? 0, paidBy: effectivePayer }
+            : { mode: 'percent', myPercent: mySplitPercent ?? 0, paidBy: effectivePayer },
+        },
+      });
+    }
+    return true;
   };
 
   // Category follows the merchant as it's typed, until picked by hand.
@@ -784,8 +839,44 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
    * `setTransactionSplit` is the same action the Activity/Dashboard split flow uses,
    * so both doors now go through one code path.
    */
-  const commitEdit = () => {
+  const commitEdit = (groupRes?: { paidByMemberId: string; paidByName: string; shares: any[] }) => {
     if (!editTxnId) return;
+    const oldGroupId = editTxn?.groupId || null;
+    const createdAt = amountLocked ? editTxn.createdAt : date.toISOString();
+
+    // Into / within a group. Order matters: a group never sits on a direct split, so
+    // drop that first (restores a plain memo's parked account); move the tag; then
+    // updateGroupExpense rewrites amount/payer/shares/account and rebuilds Lent rows.
+    if (activeGroup && groupRes) {
+      if (!oldGroupId && editTxn?.isSplit) setTransactionSplit(editTxnId, [], {});
+      if (oldGroupId !== activeGroup.id) tagTransactionToGroup(editTxnId, activeGroup.id, null);
+      updateGroupExpense(editTxnId, {
+        amount:  amountLocked ? editTxn.amount : parseFloat(amount),
+        merchant: merchant.trim(),
+        categoryId: legacyCategoryId,
+        parentCategory,
+        childCategory,
+        paidByMemberId: groupRes.paidByMemberId,
+        paidByName: groupRes.paidByName,
+        shares: groupRes.shares,
+        // Someone else paid → a memo, no account touched.
+        accountId: groupRes.paidByMemberId === 'me' ? resolvedAccountId : null,
+        note: note.trim(),
+        date: createdAt,
+      });
+      toast.success('Changes saved');
+      if (fromQueue) {
+        recordReview();
+        markReviewed(editTxnId);
+      }
+      navigation.goBack();
+      return;
+    }
+
+    // Out of a group: the store keeps its split as a plain one (who owes whom is
+    // unchanged); the Split row below then saves whatever the form shows — kept,
+    // edited, or removed.
+    if (oldGroupId) untagTransactionFromGroup(editTxnId);
     updateTransaction(editTxnId, {
       amount:  amountLocked ? editTxn.amount : parseFloat(amount),
       type,
@@ -795,7 +886,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       parentCategory,
       childCategory,
       note: note.trim(),
-      createdAt: amountLocked ? editTxn.createdAt : date.toISOString(),
+      createdAt,
     });
 
     const wantSplit = isSplit && canSplitHere && splitPicks.length > 0;
@@ -826,18 +917,58 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           paidBy: effectivePayer,
         },
       );
-    } else if (editTxn?.isSplit) {
+    } else if (useEPurseStore.getState().transactions.find((t: any) => t.id === editTxnId)?.isSplit) {
       // Toggled off during the edit → clear the split and its LB rows explicitly.
-      // (An empty `others` list is how setTransactionSplit spells "no split".)
+      // (An empty `others` list is how setTransactionSplit spells "no split".) Read
+      // fresh: an untag above may have just turned a group split into a plain one.
       setTransactionSplit(editTxnId, [], {});
     }
     toast.success('Changes saved');
+    if (fromQueue && editTxnId) {
+      recordReview();
+      markReviewed(editTxnId);
+    }
     navigation.goBack();
+  };
+
+  /**
+   * Leaving a SHARED group keeps who owes whom (user rule, Oct-9-26): its split
+   * becomes a plain split, so show it in the Split row right away — what the form
+   * shows is what saves, and removing the debt is the Split row's own remove.
+   * In ₹ (not %), so a 3-way 33/33/33 can't round to an invalid 99%.
+   */
+  const splitFromOriginalGroup = () => {
+    const gs = editTxn?.groupSplit;
+    const g = (groups as Group[]).find((x) => x.id === editTxn?.groupId);
+    const amt = Number(editTxn?.amount) || 0;
+    if (!gs?.shares?.length || g?.type !== 'shared' || amt <= 0) return false;
+    const member = (id: string): any => (g.members || []).find((m) => m.memberId === id) || {};
+    const memo = !!editTxn.isGroupMemo;
+    const owing = gs.shares.filter((sh: any) => sh.memberId !== 'me' && (memo || (Number(sh.shareAmount) || 0) > 0));
+    if (!owing.length) return false;
+    const myAmt = Number(gs.shares.find((sh: any) => sh.memberId === 'me')?.shareAmount) || 0;
+    const pct = (v: number) => Math.round((v / amt) * 100);
+    setIsSplit(true);
+    setSplitMode('amount');
+    setSplitMethod('amount');
+    setMySplitAmount(myAmt);
+    setMySplitPercent(pct(myAmt));
+    setSplitPicks(owing.map((sh: any) => ({
+      contactId:   member(sh.memberId).contactId ?? null,
+      name:        member(sh.memberId).name || sh.name || 'Friend',
+      shareAmount: Number(sh.shareAmount) || 0,
+      percent:     pct(Number(sh.shareAmount) || 0),
+    })));
+    setSplitPaidBy(memo
+      ? { contactId: member(gs.paidByMemberId).contactId ?? null, name: member(gs.paidByMemberId).name || gs.paidByName || 'Friend' }
+      : null);
+    return true;
   };
 
   /** Picking a group replaces any people added by hand with the group's members. */
   const applyGroup = (id: string | null) => {
     setGroupId(id);
+    if (!id && isEdit && splitFromOriginalGroup()) return;
     setIsSplit(false);
     setSplitPicks([]);
     setMySplitPercent(null);
@@ -918,7 +1049,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         toast.warning(res.title, res.message);
         return;
       }
-      submit(() => commitGroupExpense(res));
+      submit(() => (isEdit ? commitEdit(res) : commitGroupExpense(res)));
       return;
     }
 
@@ -1025,9 +1156,9 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 onPress={() => setCatPickerOpen(true)}
               />
 
-              {/* Group — optional, new expenses only. Picking one turns the Split row
-                  into the group's member split and books through the group path. */}
-              {!isEdit && canSplitHere ? (
+              {/* Group — optional. Picking one turns the Split row into the group's
+                  member split and books through the group path (add or edit). */}
+              {groupAllowed ? (
                 <FormValueRow
                   icon="people-outline"
                   label="Group"
@@ -1221,8 +1352,76 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         : null,
   );
 
+  // Review-queue Split uses this form only as the state owner for the shared
+  // SplitEditor route. The form itself stays hidden so Manage transitions
+  // directly to the split UI instead of flashing the edit screen.
+  useEffect(() => {
+    if (!isEdit || !route?.params?.openSplit || !editTxn || splitOpenedRef.current) return;
+    // Review entries render SplitPage inline below; normal edit entries still
+    // use the shared stack route.
+    if (fromQueue) return;
+    splitOpenedRef.current = true;
+    const id = setTimeout(() => splitRoute.open(), 0);
+    return () => clearTimeout(id);
+  }, [isEdit, route?.params?.openSplit, editTxn?.id, fromQueue]);
+
   const canSubmit = (parseFloat(amount) || 0) > 0 && merchant.trim().length > 0;
   const typeIndex = type === TRANSACTION_TYPES.CREDIT ? 1 : 0;
+
+  if (fromQueue && route?.params?.openSplit) {
+    return (
+      <View style={styles.root}>
+        <StatusBar style="dark" />
+        <SplitPage
+          {...plainSplitPage}
+          onBack={closeSplitPage}
+          onDone={() => {
+            if (handleSplitDone() === false) return;
+            navigation.goBack();
+          }}
+          // Same trash-to-remove as the regular SplitEditor route.
+          headerRight={splitPicks.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setConfirm({
+                title: 'Remove split?',
+                message: removeSplitMessage,
+                primaryText: 'Remove',
+                secondaryText: 'Cancel',
+                destructive: true,
+                onConfirm: () => {
+                  setConfirm(null);
+                  // A saved split is cleared on Manage's Done; an unsaved one is just dropped.
+                  if (editTxnId) {
+                    setReviewFlowDraft(editTxnId, {
+                      ...peekReviewFlowDraft(editTxnId),
+                      split: editTxn?.isSplit ? { others: [], meta: {} } : null,
+                    });
+                  }
+                  navigation.goBack();
+                },
+              })}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Remove split"
+            >
+              <Ionicons name="trash-outline" size={22} color={colors.danger} />
+            </TouchableOpacity>
+          ) : undefined}
+        />
+        <CenterModal
+          visible={!!confirm}
+          title={confirm?.title}
+          message={confirm?.message}
+          primaryText={confirm?.primaryText || 'OK'}
+          secondaryText={confirm?.secondaryText}
+          destructive={!!confirm?.destructive}
+          onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
+          onSecondary={() => setConfirm(null)}
+          onClose={() => setConfirm(null)}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
