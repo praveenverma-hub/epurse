@@ -15,6 +15,7 @@ initSentry();
 
 import AppNavigator from './src/navigation/AppNavigator';
 import AppKeyboardAvoidingView from './src/components/AppKeyboardAvoidingView';
+import MockDataBoundary from './src/dev/MockDataBoundary';
 import AwareRunBoot from './src/components/AwareRunBoot';
 import { usePresentationSession } from './src/store/usePresentationSession';
 import { useStoreHydrated } from './src/hooks/useStoreHydrated';
@@ -256,6 +257,7 @@ function App() {
         <AndroidSafeViewport fillBackground>
           <AppKeyboardAvoidingView style={{ flex: 1 }}>
           <ToastProvider>
+            <MockDataBoundary>
             <StatusBar style="light" />
             <NotificationBoot />
             <NotificationTapBoot />
@@ -270,6 +272,7 @@ function App() {
             <AppLockGate />
             <LoginGate />
             <UpdateRequiredGate />
+            </MockDataBoundary>
           </ToastProvider>
           </AppKeyboardAvoidingView>
         </AndroidSafeViewport>

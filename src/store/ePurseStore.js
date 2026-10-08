@@ -31,7 +31,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '../dev/mockStorage';
 
 import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES, NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import {

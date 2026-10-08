@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { Platform, PermissionsAndroid, NativeModules, DeviceEventEmitter } from 'react-native';
+import { MOCK_DATA_ENABLED } from '../config/mockData';
 
 const SMS_RECEIVED_EVENT = 'ePurse:smsReceived';
 
@@ -25,7 +26,7 @@ if (Platform.OS === 'android' && !EPurseSms) {
   console.warn('[smsService] native module EPurseSms is not linked');
 }
 
-export const smsSupported = Platform.OS === 'android' && !!EPurseSms;
+export const smsSupported = !MOCK_DATA_ENABLED && Platform.OS === 'android' && !!EPurseSms;
 
 // =============================================================================
 // Permissions

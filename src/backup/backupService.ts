@@ -10,6 +10,11 @@
 //   • a failed restore leaves the device exactly as it was
 // =============================================================================
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MOCK_DATA_ENABLED } from '../config/mockData';
+
+function assertRealData() {
+  if (MOCK_DATA_ENABLED) throw new Error('Cloud backup and restore are disabled in mock data mode.');
+}
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useRewardStore } from '../store/useRewardStore';
@@ -37,7 +42,7 @@ const STORE_VERSION = 40;
 /** Local rollback copy, written immediately before a restore replaces state. */
 const SNAPSHOT_KEY = '@ePurse:preRestoreSnapshot';
 
-const deps = (): DriveDeps => ({ fetch: globalThis.fetch, getAccessToken });
+const deps = (): DriveDeps => { assertRealData(); return { fetch: globalThis.fetch, getAccessToken }; };
 
 const deviceLabel = (): string => {
   // Deliberately coarse. This lands in Drive's appProperties IN THE CLEAR, so it
@@ -52,6 +57,7 @@ export type BackupProgress = (step: string) => void;
 
 // ── Backup ───────────────────────────────────────────────────────────────────
 export async function runBackup(password: string, onProgress?: BackupProgress): Promise<DriveBackupFile> {
+  assertRealData();
   onProgress?.('Collecting your data');
   const payload = buildBackupPayload(
     useEPurseStore.getState() as unknown as Record<string, unknown>,
@@ -122,7 +128,7 @@ export async function fetchAndDecrypt(fileId: string, password: string, onProgre
 export async function applyRestore(
   decrypted: { epurse: Record<string, unknown>; rewards: Record<string, unknown> },
 ): Promise<void> {
-
+  assertRealData();
   const snapshot = buildBackupPayload(
     useEPurseStore.getState() as unknown as Record<string, unknown>,
     useRewardStore.getState() as unknown as Record<string, unknown>,
@@ -138,6 +144,7 @@ export async function applyRestore(
 }
 
 export async function getPreRestoreSnapshot(): Promise<{ at: number } | null> {
+  if (MOCK_DATA_ENABLED) return null;
   const raw = await AsyncStorage.getItem(SNAPSHOT_KEY);
   if (!raw) return null;
   try { const { at } = JSON.parse(raw); return { at }; } catch { return null; }
@@ -145,6 +152,7 @@ export async function getPreRestoreSnapshot(): Promise<{ at: number } | null> {
 
 /** Undo the last restore. */
 export async function undoRestore(): Promise<boolean> {
+  assertRealData();
   const raw = await AsyncStorage.getItem(SNAPSHOT_KEY);
   if (!raw) return false;
   try {

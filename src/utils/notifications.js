@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { MOCK_DATA_ENABLED } from '../config/mockData';
 
 // Bumped from `payment_reminders` — Android channels are immutable once created,
 // so changing channel settings (sound, importance, vibration) requires a new id.
@@ -26,6 +27,7 @@ export function configureNotificationHandler() {
 // custom sound FILENAME and expo-notifications logs an error when no such file
 // is bundled.
 export async function setupAndroidChannel() {
+  if (MOCK_DATA_ENABLED) return;
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'Payment Reminders',
@@ -42,6 +44,7 @@ export async function setupAndroidChannel() {
 
 // Lazily request permission (call before scheduling, not at startup)
 export async function requestNotificationPermissions() {
+  if (MOCK_DATA_ENABLED) return true;
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === 'granted') return true;
   const { status } = await Notifications.requestPermissionsAsync();
@@ -63,6 +66,7 @@ export async function requestNotificationPermissions() {
  * not granted — callers treat null as "not scheduled" rather than an error.
  */
 export async function scheduleReminderAt({ title, body, fireAt }) {
+  if (MOCK_DATA_ENABLED) return `mock-reminder-${fireAt}`;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
 
@@ -104,6 +108,7 @@ export { parseDueDate, daysUntilDue, ccReminderFireAt };
  * unparseable / already in the past / permission not granted.
  */
 export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, dueDate }) {
+  if (MOCK_DATA_ENABLED) return `mock-cc-${cardLast4}`;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
 
@@ -130,6 +135,7 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
 }
 
 export async function cancelScheduledNotification(notificationId) {
+  if (MOCK_DATA_ENABLED) return;
   if (!notificationId) return;
   try {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
@@ -139,6 +145,7 @@ export async function cancelScheduledNotification(notificationId) {
 // ─── Budget alerts ────────────────────────────────────────────────────────────
 
 export async function setupBudgetAlertChannel() {
+  if (MOCK_DATA_ENABLED) return;
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(BUDGET_CHANNEL_ID, {
     name: 'Budget Alerts',
@@ -161,6 +168,7 @@ export async function setupBudgetAlertChannel() {
  * borrow reminder flow already asks, and the budget breach is a follow-up).
  */
 export async function fireBudgetBreachNotification({ scope, categoryName, actual, cap }) {
+  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
 
@@ -193,6 +201,7 @@ export async function fireBudgetBreachNotification({ scope, categoryName, actual
  * Silently no-ops if permission isn't granted.
  */
 export async function fireCCPaymentNotification({ amount, accountMask, bankName }) {
+  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
 
@@ -216,6 +225,7 @@ export async function fireCCPaymentNotification({ amount, accountMask, bankName 
  * to have increased. No-ops without notification permission.
  */
 export async function fireSubscriptionHikeNotification({ merchant, oldAmount, newAmount }) {
+  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
   const oldFmt = `₹${Math.round(Number(oldAmount) || 0).toLocaleString('en-IN')}`;
@@ -240,6 +250,7 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
  * subscription-hike alerts — none of those are urgent either.
  */
 export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
+  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
   return Notifications.scheduleNotificationAsync({
@@ -259,6 +270,7 @@ export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
  * tapping it (handled by the listener in App.js) re-opens that month's recap.
  */
 export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
+  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
   return Notifications.scheduleNotificationAsync({
@@ -279,6 +291,7 @@ export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
  * No-ops without notification permission.
  */
 export async function fireMidmonthNudgeNotification({ title, body }) {
+  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
   return Notifications.scheduleNotificationAsync({
