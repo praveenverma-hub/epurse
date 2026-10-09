@@ -32,6 +32,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `GroupExpenseForm`). Plain category now optional (saves as `other`, review-later). Expense/Income is the swipeable `TabView` + `UnderlineTabBar`. New
   `FormNoteField`, `AccountField`, `utils/defaultAccount.ts`. **Not built (open)**: merchant→category
   auto-suggest, tags/recurring/exclude-from-totals (don't exist yet), per-group default split people.
+- **Edit form type switch (Oct-9-2026)**: Expense/Income is no longer swipeable in EDIT (a stray swipe flipped a saved
+  txn). Manual txn → tap bar; bank-parsed txn → no switch, read-only "Expense from your bank SMS" in the Amount hint (type is
+  bank-verified like the amount). Add keeps the swipeable TabView. Flipping to Income hides split + group (state is KEPT, so flipping back restores them; they are skipped/cleared only on Save); flipping
+  to Expense clears a stale refund flag (`setTransactionRefund` now clears on debits). "More Options" block re-sized to
+  the form's type scale + Title Case.
 - **Split amount edits (Oct-9-2026)**: changing the amount of a split txn now RESCALES the split (same
   proportions, same payer) instead of dropping it — BUG fixed: on a "someone else paid" split it debited the
   whole new amount from your account and deleted your debt to them. **Removing a txn from a group never changes

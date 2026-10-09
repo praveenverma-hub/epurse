@@ -5114,13 +5114,16 @@ export const useEPurseStore = create(
       /**
        * Mark/unmark a CREDIT as a refund/return/cashback. A refund nets DOWN spend
        * (and its own category) instead of counting as income. Balance is unchanged
-       * (the money did arrive). No-op on debits. Keep the txn's category so the
+       * (the money did arrive). On a debit it only CLEARS a stale flag. Keep the txn's category so the
        * refund reduces the matching expense category in breakdowns.
        */
       setTransactionRefund: (id, isRefund) =>
         set((s) => ({
           transactions: s.transactions.map((t) =>
-            t.id === id && t.type === TRANSACTION_TYPES.CREDIT ? { ...t, isRefund: !!isRefund } : t
+            t.id !== id ? t
+              // A debit can't be a refund; clearing lets a credit→debit edit drop a stale flag.
+              : t.type === TRANSACTION_TYPES.CREDIT ? { ...t, isRefund: !!isRefund }
+              : t.isRefund ? { ...t, isRefund: false } : t
           ),
         })),
 
