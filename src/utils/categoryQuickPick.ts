@@ -3,7 +3,7 @@
 //
 //   quickPicks()        current category → what THIS merchant was tagged before
 //                       (categorySuggest) → most used in the last 45 days →
-//                       most used all-time (only to fill what's left)
+//                       most used all-time → common defaults to fill empty slots
 //   searchCategories()  sub-categories matching typed text (child label first,
 //                       then parent label), for the inline results list
 //
@@ -25,6 +25,18 @@ interface TxnLike {
 
 /** "Most used" favours recent habits: this window ranks first. */
 export const RECENT_USE_DAYS = 45;
+
+// Resolve stable IDs against the live tree so renamed labels stay up to date
+// and removed categories never reappear as shortcuts.
+const COMMON_PICKS = [
+  ['food', 'groceries'],
+  ['food', 'food_delivery'],
+  ['travel', 'daily_commute'],
+  ['bills', 'mobile_internet'],
+  ['shopping', 'online'],
+  ['food', 'restaurants'],
+  ['fuel', 'petrol'],
+] as const;
 
 const pickKey = (parentLabel: string, childLabel: string) => `${parentLabel}›${childLabel}`;
 
@@ -81,6 +93,11 @@ export function quickPicks({ tree, transactions, current, suggestion, allow = ()
       const [p, c] = key.split('›');
       push(findPick(tree, p, c));
     }
+  }
+  for (const [parentId, childId] of COMMON_PICKS) {
+    const parent = tree.find((p) => p.id === parentId);
+    const child = parent?.children.find((c) => c.id === childId);
+    push(parent && child ? { parent, child } : null);
   }
   return out;
 }

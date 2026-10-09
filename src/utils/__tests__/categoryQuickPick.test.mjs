@@ -70,10 +70,20 @@ const dated = [
 ];
 r = quickPicks({ tree, transactions: dated, now: NOW, allow: noIncome });
 check('recent (45 days) outranks a bigger old habit', labels(r).slice(0, 2).join(',') === 'Groceries,Coffee & Snacks', labels(r).join(','));
-check('…all-time fills the remaining slots after', labels(r).slice(2).join(',') === 'Fuel,Cab & Auto', labels(r).join(','));
+check('…all-time ranks before fallback defaults', labels(r).slice(2, 4).join(',') === 'Fuel,Cab & Auto', labels(r).join(','));
 check('…day 44 counts as recent, day 46 does not', labels(r).indexOf('Coffee & Snacks') < labels(r).indexOf('Fuel') && labels(r).indexOf('Cab & Auto') > labels(r).indexOf('Fuel'));
 r = quickPicks({ tree, transactions: [txn('Travel', 'Fuel')], now: NOW });
-check('undated txns still count all-time', labels(r).join(',') === 'Fuel');
+check('undated txns still rank before defaults', labels(r)[0] === 'Fuel');
+
+const { PARENT_CATEGORIES } = await import(`${PROJECT_ROOT}/src/constants/twoTierCategories.ts`);
+r = quickPicks({ tree: PARENT_CATEGORIES, transactions: [] });
+check('no history shows five common categories', labels(r).join(',') === 'Groceries,Food Delivery,Daily Commute,Mobile & Internet,Online Shopping');
+r = quickPicks({ tree: PARENT_CATEGORIES, transactions: [],
+  current: { parentCategory: 'Food & Dining', childCategory: 'Groceries' },
+  allow: (p) => p.id !== 'travel', limit: 4 });
+check('defaults respect filters, limit and deduplication', r.length === 4 && new Set(labels(r)).size === 4 && !labels(r).includes('Daily Commute'));
+r = quickPicks({ tree: [], transactions: [] });
+check('defaults never invent missing categories', r.length === 0);
 
 check('search: child label prefix ranks first', labels(searchCategories(tree, 'gro'))[0] === 'Groceries');
 check('search: matches a word inside the label', labels(searchCategories(tree, 'auto')).includes('Cab & Auto'));
