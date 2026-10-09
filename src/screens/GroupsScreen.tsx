@@ -85,7 +85,8 @@ function GroupListCardRow({
                 {formatCurrency(Math.abs(net))}
               </Text>
               <Text style={[styles.groupCardBalanceLabel, { color: net > 0 ? colors.lent : colors.borrowed }]}>
-                {net > 0 ? 'lent' : 'borrowed'}
+                {/* Outstanding, so "owe" words (ui-consistency §3e-1) — same as the chips above. */}
+                {net > 0 ? 'owed to you' : 'you owe'}
               </Text>
             </>
           )
@@ -236,7 +237,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         )}
         contentContainerStyle={isEmpty
           ? styles.emptyContainer
-          : [styles.list, { paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 96 }]}
+          : [styles.list, filteredGroups.length === 0 && styles.listFill, { paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 96 }]}
         onScroll={onScroll}
       >
         {isEmpty ? (
@@ -275,11 +276,14 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
             /> */}
 
             {filteredGroups.length === 0 ? (
+              // Full size + a stretched list (listFill), so it centres in the space
+              // below the chips like every other empty screen.
               <EmptyState
-                compact
-                icon="funnel-outline"
-                title="No groups match this filter"
-                subtitle="Try a different filter, or create a new group."
+                icon={filter === 'owed' ? 'arrow-down-circle-outline' : 'arrow-up-circle-outline'}
+                title={filter === 'owed' ? 'No one owes you' : "You don't owe anyone"}
+                subtitle={filter === 'owed'
+                  ? 'Groups where someone owes you will show here.'
+                  : 'Groups where you owe someone will show here.'}
               />
             ) : (
               filteredGroups.map((g) => (
@@ -319,6 +323,7 @@ const styles = StyleSheet.create({
   infoBtn: { marginLeft: spacing.xs, padding: 2 },
   subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 0, marginBottom: spacing.sm },
   list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
+  listFill: { flexGrow: 1 },
 
   // Root-screen bar row (no back chevron) — mirrors CollapsingHeaderScreen's
   // own StandardBar layout, since a custom renderBar/renderCollapsedBar pair

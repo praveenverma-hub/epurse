@@ -11,33 +11,24 @@
 // quick chips follow. Without it, a user who sorted by amount and scrolled away
 // has no way to tell why the order looks wrong.
 //
-// The menu is a `Modal`, not an absolutely-positioned sibling: it has to escape
-// the horizontally-scrolling row it lives in (which would clip it) and paint over
-// the list. Position comes from `measureInWindow` on the trigger and is CLAMPED to
-// the screen, so a trigger near the right edge or near the bottom still opens a
-// fully visible menu.
+// The menu itself (Modal, clamped position, rows) is the shared AnchoredMenu —
+// same one OverflowMenu's ⋮ actions use.
 // =============================================================================
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  Dimensions,
   Pressable,
   StyleSheet,
   Text,
   View,
   type ViewStyle,
 } from 'react-native';
-import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, radius, shadows, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, radius, spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import type { TextStyle } from 'react-native';
-
-const typography = typographyBase as unknown as Record<string, TextStyle>;
+import AnchoredMenu, { MenuRow, type MenuAnchor } from './AnchoredMenu';
 
 const MENU_MIN_W = 184;
-const EDGE = spacing.sm;          // keep-away from the screen edges
-const GAP = 6;                    // trigger → menu
 
 export interface DropdownOption {
   id: string;
@@ -71,7 +62,7 @@ const InlineDropdown: React.FC<InlineDropdownProps> = ({
 }) => {
   const theme = useTheme();
   const triggerRef = useRef<View>(null);
-  const [anchor, setAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
 
   const current = options.find((o) => o.id === value) ?? options[0];
   const touched = defaultValue !== undefined && value !== defaultValue;
@@ -83,12 +74,7 @@ const InlineDropdown: React.FC<InlineDropdownProps> = ({
     triggerRef.current?.measureInWindow((x, y, w, h) => setAnchor({ x, y, w, h }));
   }, []);
 
-  const screen = Dimensions.get('window');
   const menuW = Math.max(MENU_MIN_W, anchor?.w ?? 0);
-  // Rows are ~44 tall; enough to decide whether the menu fits below the trigger.
-  const menuH = options.length * 44 + spacing.xs * 2;
-  const below = (anchor?.y ?? 0) + (anchor?.h ?? 0) + GAP;
-  const opensDown = below + menuH + EDGE <= screen.height;
 
   const ink = touched ? '#fff' : colors.textSecondary;
 
@@ -114,48 +100,20 @@ const InlineDropdown: React.FC<InlineDropdownProps> = ({
         <Ionicons name="chevron-down" size={12} color={ink} style={styles.triggerChevron} />
       </Pressable>
 
-      <Modal
-        visible={anchor !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAnchor(null)}
-      >
-        {/* Full-screen catcher: a tap anywhere outside closes, which is the only
-            dismissal a menu this small needs. */}
-        <Pressable style={styles.backdrop} onPress={() => setAnchor(null)} accessibilityLabel="Close menu" />
-        {anchor ? (
-          <View
-            style={[
-              styles.menu,
-              {
-                width: menuW,
-                left: Math.min(Math.max(anchor.x, EDGE), Math.max(EDGE, screen.width - menuW - EDGE)),
-                ...(opensDown
-                  ? { top: below }
-                  : { top: Math.max(EDGE, anchor.y - menuH - GAP) }),
-              },
-            ]}
-          >
-            {options.map((o) => {
-              const selected = o.id === current?.id;
-              return (
-                <Pressable
-                  key={o.id}
-                  onPress={() => { setAnchor(null); if (!selected) onChange(o.id); }}
-                  accessibilityRole="menuitem"
-                  accessibilityState={{ selected }}
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                >
-                  <Text style={[styles.rowText, selected && { color: theme.primary, fontWeight: '700' }]}>
-                    {o.label}
-                  </Text>
-                  {selected ? <Ionicons name="checkmark" size={16} color={theme.primary} /> : null}
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-      </Modal>
+      <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} rowCount={options.length} width={menuW}>
+        {options.map((o) => {
+          const selected = o.id === current?.id;
+          return (
+            <MenuRow
+              key={o.id}
+              label={o.label}
+              selected={selected}
+              accentColor={theme.primary}
+              onPress={() => { setAnchor(null); if (!selected) onChange(o.id); }}
+            />
+          );
+        })}
+      </AnchoredMenu>
     </>
   );
 };
@@ -181,25 +139,4 @@ const styles = StyleSheet.create({
   triggerChevron: { marginLeft: 4 },
   triggerText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   triggerValue: { fontWeight: '800' },
-  backdrop: { ...StyleSheet.absoluteFill },
-  menu: {
-    position: 'absolute',
-    paddingVertical: spacing.xs,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    // A popover floating over the content -> `elevated`.
-    ...shadows.elevated,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-  },
-  rowPressed: { backgroundColor: colors.background },
-  rowText: { ...typography.body, color: colors.textPrimary, flexShrink: 1 },
 });

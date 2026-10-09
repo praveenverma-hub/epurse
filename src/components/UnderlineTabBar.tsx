@@ -5,11 +5,16 @@
 // unrelated screens, and not a segmented pill (that's InlineDropdown's job for
 // a 2-5 option CHOICE). Lives on the screen's own white/card surface, unlike
 // the gradient-header underline variant in DashboardScreen's period selector.
+//
+// variant 'folder' (Add/Edit Transaction's Expense/Income): the active tab is an
+// open-bottomed outline whose sides run into one baseline across the bar, all in
+// the accent — the form below reads as the section that tab opens. Its inside is
+// `colors.background`, the same as the form area, so tab and section are one shape.
 // =============================================================================
 import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { colors, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 
@@ -26,10 +31,42 @@ interface Props {
   accentColor?: string;
   /** Hairline above the bar. Turn off when the bar sits directly under a header that already has a bottom border (else the two stack into a thick rule). */
   topBorder?: boolean;
+  /** 'underline' (default) or 'folder' — see the header. */
+  variant?: 'underline' | 'folder';
   style?: StyleProp<ViewStyle>;
 }
 
-export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor = colors.primary, topBorder = true, style }: Props) {
+export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor = colors.primary, topBorder = true, variant = 'underline', style }: Props) {
+  if (variant === 'folder') {
+    const edge = { borderBottomWidth: FOLDER_W, borderBottomColor: accentColor };
+    return (
+      <View style={[styles.folderRow, style]} accessibilityRole="tablist">
+        <View style={[styles.folderEdge, edge]} />
+        {tabs.map((t) => {
+          const active = t.key === activeKey;
+          return (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.folderTab, active ? [styles.folderTabActive, { borderColor: accentColor }] : edge]}
+              onPress={() => onChange(t.key)}
+              activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={t.label}
+            >
+              <Text
+                style={[styles.label, { color: active ? readableOn(colors.background, accentColor) : colors.textSecondary }]}
+                numberOfLines={1}
+              >
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+        <View style={[styles.folderEdge, edge]} />
+      </View>
+    );
+  }
   return (
     <View style={[styles.row, !topBorder && styles.noTopBorder, style]} accessibilityRole="tablist">
       {tabs.map((t) => {
@@ -58,6 +95,9 @@ export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor
   );
 }
 
+// Heavier than a hairline: this line IS the section's top edge, not a divider.
+const FOLDER_W = 1.5;
+
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
@@ -82,5 +122,30 @@ const styles = StyleSheet.create({
     borderRadius: 1,
     marginTop: spacing.xs,
     backgroundColor: 'transparent',
+  },
+  folderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: colors.card,
+    paddingTop: spacing.sm,
+  },
+  // Baseline beyond the tabs, inset to the form's side padding.
+  folderEdge: { width: spacing.lg, alignSelf: 'stretch' },
+  folderTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  // Top + sides only; the open bottom is where the baseline breaks. borderTop
+  // matches the inactive tabs' borderBottom, so both are the same height.
+  folderTabActive: {
+    backgroundColor: colors.background,
+    borderTopWidth: FOLDER_W,
+    borderLeftWidth: FOLDER_W,
+    borderRightWidth: FOLDER_W,
+    // Same radius as the form's cards below.
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
   },
 });

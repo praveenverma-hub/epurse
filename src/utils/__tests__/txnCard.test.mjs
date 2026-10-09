@@ -2,7 +2,7 @@
 // Transaction card model — what every list card says (Oct-9-26)
 //     npm run test:txnCard
 // Pins buildTxnCard's rules: amount = MY cost (+ "of ₹bill" when they differ),
-// one muted rule for "not my money", chip priority + "+N", and the per-context
+// muted only when ignored, chip priority + "+N", and the per-context
 // tier-2 line (account / payer / manual entry).
 // =============================================================================
 import { buildTxnCard, txnAccountLabel, txnPayerName, CARD_CONTEXT, MAX_CHIPS } from '../txnCardModel.ts';
@@ -44,14 +44,15 @@ console.log('\n— splits —');
 m = buildTxnCard({ ...base, isSplit: true, myShareAmount: 300,
   splitWith: [{ name: 'Rohit', shareAmount: 300 }, { name: 'Aman', shareAmount: 300 }] });
 check('I paid, kept a share: my share + "of ₹900", 3 people', m.amount.value === 300 && m.totalHint === 900 && m.splitCount === 3);
-check('…primarily my spend → no LENT chip', m.chips.length === 0, labels(m));
+check('…paid + kept a share → "LENT ₹600" (the part the card shows nowhere else)',
+  labels(m) === 'LENT' && m.chips[0].amount === 600, JSON.stringify(m.chips));
 m = buildTxnCard({ ...base, isSplit: true, myShareAmount: 0, splitWith: [{ name: 'Rohit', shareAmount: 900 }] });
-check('I fronted it all: LENT', labels(m) === 'LENT');
+check('I fronted it all: bare LENT (the amount already is the loan)', labels(m) === 'LENT' && m.chips[0].amount === undefined);
 m = buildTxnCard({ ...base, accountId: undefined, accountType: undefined, isSplit: true, isSplitMemo: true, myShareAmount: 450,
   splitPaidBy: { name: 'Rohit Sharma' }, splitWith: [{ name: 'Rohit Sharma', shareAmount: 450 }] });
 check('Rohit paid (plain): payer replaces the account', m.meta === 'Restaurants · Rohit paid', m.meta);
-check('…muted, my share of the bill, BORROWED (no MEMO jargon)',
-  m.amount.tone === 'muted' && m.amount.value === 450 && m.totalHint === 900 && labels(m) === 'BORROWED', `${m.amount.tone} ${labels(m)}`);
+check('…full ink (BORROWED + "Rohit paid" say whose money), my share of the bill, bare BORROWED',
+  m.amount.tone === 'expense' && m.amount.value === 450 && m.totalHint === 900 && labels(m) === 'BORROWED' && !m.chips[0].amount, `${m.amount.tone} ${labels(m)}`);
 
 console.log('\n— groups —');
 const gTxn = { ...base, groupId: 'g1', groupSplit: { paidByMemberId: 'm1', paidByName: 'Rohit',
@@ -59,14 +60,21 @@ const gTxn = { ...base, groupId: 'g1', groupSplit: { paidByMemberId: 'm1', paidB
   isGroupMemo: true };
 m = buildTxnCard(gTxn, { group: shared });
 check('group memo: payer from the group\'s members, first name', m.meta === 'Restaurants · Rohit paid', m.meta);
-check('…muted share of the bill, BORROWED, ribbon, no split pill',
-  m.amount.tone === 'muted' && m.totalHint === 900 && labels(m) === 'BORROWED' && m.showGroupRibbon && m.splitCount === 0);
+check('…full-ink share of the bill, BORROWED, ribbon, no split pill',
+  m.amount.tone === 'expense' && m.totalHint === 900 && labels(m) === 'BORROWED' && m.showGroupRibbon && m.splitCount === 0);
 m = buildTxnCard({ ...gTxn, groupSplit: { ...gTxn.groupSplit, shares: [{ memberId: 'me', shareAmount: 0 }, { memberId: 'm2', shareAmount: 900 }] } }, { group: shared });
 check('0 share, not my bill: "Not involved", still says what the bill was', m.amount.notInvolved && m.totalHint === 900);
 m = buildTxnCard({ ...base, groupId: 'g1', groupSplit: { paidByMemberId: 'me',
   shares: [{ memberId: 'me', shareAmount: 0 }, { memberId: 'm1', shareAmount: 900 }] } }, { group: shared });
 check('I fronted a group bill, 0 share: full amount, no hint, LENT',
   !m.amount.notInvolved && m.amount.value === 900 && m.totalHint === null && labels(m) === 'LENT', `${m.amount.value} ${m.totalHint} ${labels(m)}`);
+
+m = buildTxnCard({ ...base, groupId: 'g1', groupSplit: { paidByMemberId: 'me',
+  shares: [{ memberId: 'me', shareAmount: 300 }, { memberId: 'm1', shareAmount: 300 }, { memberId: 'm2', shareAmount: 300 }] } }, { group: shared });
+check('group, I paid ₹900 and kept ₹300: −₹300 of ₹900 · LENT ₹600',
+  m.amount.value === 300 && m.totalHint === 900 && labels(m) === 'LENT' && m.chips[0].amount === 600, JSON.stringify(m.chips));
+m = buildTxnCard({ ...base, type: 'credit', isSplit: true, myShareAmount: 300, splitWith: [{ name: 'R', shareAmount: 600 }] });
+check('a credit never gets a LENT amount', !m.chips.some((c) => c.kind === 'lent'));
 
 console.log('\n— chip priority —');
 m = buildTxnCard({ ...base, isIgnored: true, isHidden: true });

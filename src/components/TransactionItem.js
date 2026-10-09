@@ -83,7 +83,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
           ) : null}
           {card.chips.map((c) => (
             <View key={c.kind} style={[styles.chip, { backgroundColor: CHIP_TONE[c.tone].bg }]}>
-              <Text style={[styles.chipText, { color: CHIP_TONE[c.tone].ink }]}>{c.label}</Text>
+              <Text style={[styles.chipText, { color: CHIP_TONE[c.tone].ink }]}>{c.amount ? `${c.label} ${formatCurrency(c.amount)}` : c.label}</Text>
             </View>
           ))}
           {card.overflow > 0 ? (

@@ -3,19 +3,22 @@
 // list). Top card is the pre-revamp GroupsScreen's own "expense summary card"
 // shell — icon/name strip + a 1px group-colour border (the card's own gradient
 // tint is currently commented out, see `expenseCard` below) — a Total
-// Expense/Your Balance stat row, Add Expense + Settle Up actions, a Group Zone
+// Expense/Your Balance stat row (⋮ menu: Add Expense / Edit / Delete), a Group Zone
 // toggle, then three text tabs (Transactions / Members / Summary — Members is
 // skipped for a personal group, which has no split).
 // =============================================================================
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
-  FlatList,
+  Dimensions,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
+import { TabView } from 'react-native-tab-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,6 +43,9 @@ import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
 import EditIcon from '../components/EditIcon';
+import OverflowMenu from '../components/OverflowMenu';
+import ReminderBell from '../components/ReminderBell';
+import { groupBalanceLine, groupHeroFigures } from '../utils/groupHero';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import MonthDivider from '../components/MonthDivider';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -75,6 +81,13 @@ function lightenHex(hex: string, amt = 0.4): string {
   return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
 }
 
+const SHARED_TABS = [
+  { key: 'transactions', label: 'Transactions' },
+  { key: 'members', label: 'Members' },
+  { key: 'summary', label: 'Summary' },
+];
+const PERSONAL_TABS = SHARED_TABS.filter((t) => t.key !== 'members');
+
 export default function GroupDetailScreen({ navigation, route }: { navigation: any; route: any }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -97,6 +110,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const isShared = group?.type === 'shared';
 
   const [activeTab, setActiveTab] = useState<'transactions' | 'members' | 'summary'>('transactions');
+  // Page scroll + pager (see renderScene): the pager's height follows the active
+  // tab's measured content, floored at whatever space is left on screen.
+  const [sceneH, setSceneH] = useState<Record<string, number>>({});
+  const [viewportH, setViewportH] = useState(0);
+  const [tabBarH, setTabBarH] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY = useRef(0);
+  const [headerH, setHeaderH] = useState(0);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
@@ -154,8 +175,13 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     return rows.sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
   }, [getPersonBalances, isShared, groupId, lentBorrowed]);
 
-  const netBalance = groupBalances.reduce((acc, pb) => acc + pb.net, 0);
-  const netColor = netBalance > 0 ? theme.lent : netBalance < 0 ? theme.borrowed : theme.success;
+  // Top card (utils/groupHero.ts): totals from the same live list as the rows
+  // below, plus the outstanding balance in one line.
+  const heroFigures = useMemo(() => groupHeroFigures(groupTxns), [groupTxns]);
+  const balanceLine = useMemo(
+    () => (isShared ? groupBalanceLine(groupBalances.map((b) => ({ person: titleCaseName(b.person), net: b.net })), groupTxns.length > 0) : null),
+    [isShared, groupBalances, groupTxns.length],
+  );
 
   const memberNamesLabel = useMemo(() => {
     if (!isShared || !group) return '';
@@ -164,23 +190,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
   }, [group, isShared]);
 
-  // Last 6 calendar months' totals — "your share" of this group's spend, same
-  // basis as the current-month figure above (consistent within this screen).
+  // Last 6 calendar months, your share (same basis as the card and the month dividers).
   const monthlySeries = useMemo(() => {
     const now = new Date();
-    const months = Array.from({ length: 6 }, (_, i) => {
+    return Array.from({ length: 6 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-      return { key: monthKey(d), label: MONTH_LABEL(d), total: 0 };
+      return { key: monthKey(d), label: MONTH_LABEL(d), total: Math.max(0, groupMonthTotals[monthKey(d)] || 0) };
     });
-    const byKey: Record<string, typeof months[number]> = Object.fromEntries(months.map((m) => [m.key, m]));
-    for (const t of groupTxns) {
-      if (!countsForSpend(t)) continue;
-      const mk = monthKey(t.createdAt);
-      if (byKey[mk]) byKey[mk].total += spendContribution(t);
-    }
-    months.forEach((m) => { if (m.total < 0) m.total = 0; });
-    return months;
-  }, [groupTxns]);
+  }, [groupMonthTotals]);
 
   const topCategories = useMemo(() => buildCategoryBreakdown(groupTxns, categories), [groupTxns, categories]);
 
@@ -193,31 +210,16 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       const gs = t.groupSplit;
       if (!gs) continue;
       const id = gs.paidByMemberId;
-      const name = id === 'me' ? 'You' : (gs.paidByName || 'Member');
+      // The group's CURRENT member name (renames show), not the one stamped on the txn.
+      const member = (group?.members || []).find((m) => m.memberId === id);
+      const name = id === 'me' ? 'You' : titleCaseName(member?.name || gs.paidByName || 'Member');
       if (!totals[id]) totals[id] = { memberId: id, name, total: 0 };
       totals[id].total += Number(t.amount) || 0;
     }
     const rows = Object.values(totals).filter((r) => r.total > 0);
     const grand = rows.reduce((s, r) => s + r.total, 0) || 1;
     return rows.map((r) => ({ ...r, percent: r.total / grand })).sort((a, b) => b.total - a.total);
-  }, [groupTxns, isShared]);
-
-  // Everything scrolls in ONE FlatList — the tab bar row (`__row: 'tabbar'`)
-  // pins via `stickyHeaderIndices` instead of nesting a second, independently
-  // scrolling list/ScrollView per tab. Members/Summary flatten to a single
-  // block item since their content isn't itself a long list.
-  const listData = useMemo(() => {
-    const out: any[] = [{ __row: 'tabbar' }];
-    if (activeTab === 'transactions') {
-      if (groupListData.length === 0) out.push({ __row: 'emptyTxns' });
-      else out.push(...groupListData);
-    } else if (activeTab === 'members') {
-      out.push({ __row: 'members' });
-    } else {
-      out.push({ __row: 'summary' });
-    }
-    return out;
-  }, [activeTab, groupListData]);
+  }, [groupTxns, isShared, group]);
 
   if (!group) {
     return (
@@ -232,6 +234,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   }
 
   const accent = group.color || theme.primary;
+  const zoneOn = activeGroupZoneId === group.id;
 
   const handleDeleteGroup = () => {
     setConfirm({
@@ -277,38 +280,9 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     );
   };
 
-  const TABS = isShared
-    ? [{ key: 'transactions', label: 'Transactions' }, { key: 'members', label: 'Members' }, { key: 'summary', label: 'Summary' }]
-    : [{ key: 'transactions', label: 'Transactions' }, { key: 'summary', label: 'Summary' }];
+  const TABS = isShared ? SHARED_TABS : PERSONAL_TABS;
 
-  const renderListItem = ({ item, index }: { item: any; index: number }) => {
-    // The row right after the (sticky) tab bar carries the top gap the old
-    // per-tab contentContainerStyle used to add; every later row is edge-only.
-    const wrap = index === 1 ? styles.txnList : styles.txnRowWrap;
-
-    if (item.__row === 'tabbar') {
-      return (
-        <UnderlineTabBar
-          tabs={TABS}
-          activeKey={activeTab}
-          onChange={(k) => setActiveTab(k as any)}
-          accentColor={theme.primary}
-        />
-      );
-    }
-
-    if (item.__row === 'emptyTxns') {
-      return (
-        <EmptyState
-          icon="receipt-outline"
-          title="No transactions yet"
-          subtitle="Tap Add Expense to add one, or tag existing transactions from the Activity tab."
-        />
-      );
-    }
-
-    if (item.__row === 'members') {
-      return (
+  const renderMembers = () => (
         <View style={styles.membersScroll}>
           <View style={styles.cardShell}>
           <View style={styles.memberListCard}>
@@ -380,6 +354,10 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                         <WhatsAppIcon />
                       </TouchableOpacity>
                     )}
+                    {/* You owe: a nudge to yourself (same bell as Lent/Borrowed). */}
+                    {!owesYou && (
+                      <ReminderBell personKey={pb.personKey} person={titleCaseName(pb.person)} amount={pb.net} style={styles.bellGap} />
+                    )}
                   </View>
                 );
               })}
@@ -387,10 +365,9 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             </View>
           )}
         </View>
-      );
-    }
+  );
 
-    if (item.__row === 'summary') {
+  const renderSummary = () => {
       if (groupTxns.length === 0) {
         return (
           <EmptyState
@@ -402,14 +379,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       }
       return (
         <View style={styles.summaryScroll}>
-          <SectionHeader icon="bar-chart-outline" title="Spending Overview" subtitle="Last 6 months" accentColor={theme.primary} />
+          <SectionHeader icon="bar-chart-outline" title={isShared ? 'Your Share by Month' : 'Spend by Month'} subtitle="Last 6 months" accentColor={theme.primary} />
           <View style={styles.chartCard}>
             <MonthlyBarChart data={monthlySeries} color={accent} />
           </View>
 
           {topCategories.length > 0 && (
             <>
-              <SectionHeader icon="pricetags-outline" title="Top Categories" accentColor={theme.primary} style={[styles.sectionSpacing, styles.sectionGapBelow]} />
+              <SectionHeader icon="pricetags-outline" title={isShared ? 'Where Your Share Went' : 'Top Categories'} accentColor={theme.primary} style={[styles.sectionSpacing, styles.sectionGapBelow]} />
               <View style={[styles.cardShell, styles.sectionBottomGap]}>
               <View style={styles.listCard}>
                 {(() => {
@@ -441,7 +418,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
           {isShared && contributionData.length > 0 && (
             <>
-              <SectionHeader icon="people-outline" title="Contributions" subtitle="Who's paid for the group" accentColor={theme.primary} style={styles.sectionSpacing} />
+              <SectionHeader icon="people-outline" title="Who Paid the Bills" subtitle={`${formatCurrency(heroFigures.totalBills)} in total`} accentColor={theme.primary} style={styles.sectionSpacing} />
               <View style={[styles.cardShell, styles.sectionBottomGap]}>
               <View style={styles.listCard}>
                 {contributionData.map((c, i) => (
@@ -477,7 +454,11 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           )}
         </View>
       );
-    }
+  };
+
+  const renderTxnRow = ({ item, index }: { item: any; index: number }) => {
+    // The first row carries the top gap; every later row is edge-only.
+    const wrap = index === 0 ? styles.txnList : styles.txnRowWrap;
 
     if (item._divider) {
       return <View style={wrap}><MonthDivider monthKey={item.monthKey} total={item.total} /></View>;
@@ -495,16 +476,45 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     );
   };
 
-  // FlatList's own cell wrapper doesn't inherit `flex:1` from the item it
-  // renders, so a centred `EmptyState` (which sets `flex:1` on itself) has no
-  // room to grow into — the cell around it still sizes to content. Only the
-  // empty-transactions row and an empty Summary tab need to fill the
-  // remaining height; every other row keeps its natural size.
-  const renderCell = ({ item, style, children, ...rest }: any) => {
-    const fill = item?.__row === 'emptyTxns' || (item?.__row === 'summary' && groupTxns.length === 0);
+  // Switching tabs while scrolled past the top block keeps the bar pinned and
+  // starts the new page at its top (its height differs, so the old offset is meaningless).
+  const goTab = (key: string) => {
+    setActiveTab(key as typeof activeTab);
+    if (scrollY.current > headerH) scrollRef.current?.scrollTo({ y: headerH, animated: false });
+  };
+
+  // ONE page scroll (top block scrolls away, tab bar sticks) with a real swipe
+  // pager inside it. The pages don't scroll themselves — each measures its
+  // content and the pager takes the active one's height. Rows aren't virtualized
+  // (a group's list is short; retention prunes it).
+  // Floor = the screen left below the top block + bar, so short content fills it
+  // without making the page scrollable; only longer content scrolls.
+  const bottomPad = insets.bottom + spacing.xl;
+  const minPageH = Math.max(0, viewportH - headerH - tabBarH - bottomPad);
+  const pageH = Math.max(sceneH[activeTab] || 0, minPageH);
+  const measureScene = (key: string) => (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height);
+    setSceneH((prev) => (Math.abs((prev[key] || 0) - h) < 1 ? prev : { ...prev, [key]: h }));
+  };
+  // An empty tab gets a DEFINITE height (the space left on screen) — a minHeight
+  // alone gives EmptyState's flex:1 nothing to fill, so it sat at the top.
+  const txnsEmpty = groupListData.length === 0;
+  const summaryEmpty = groupTxns.length === 0;
+  const renderScene = ({ route }: { route: { key: string } }) => {
+    const empty = (route.key === 'transactions' && txnsEmpty) || (route.key === 'summary' && summaryEmpty);
     return (
-      <View style={[style, fill && { flex: 1 }]} {...rest}>
-        {children}
+      <View style={empty ? { height: minPageH } : { minHeight: minPageH }} onLayout={measureScene(route.key)}>
+        {route.key === 'members' ? renderMembers()
+          : route.key === 'summary' ? renderSummary()
+          : txnsEmpty ? (
+            <EmptyState
+              icon="receipt-outline"
+              title="No transactions yet"
+              subtitle="Add one from the ⋮ menu above, or tag existing transactions from the Activity tab."
+            />
+          ) : (
+            groupListData.map((item: any, index: number) => <React.Fragment key={item.id}>{renderTxnRow({ item, index })}</React.Fragment>)
+          )}
       </View>
     );
   };
@@ -515,143 +525,137 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
       {/* No `right` any more — the edit action moved into the hero card itself,
           beside Delete (was a lone settings gear here). */}
-      <PlainScreenHeader
-        title=""
-        onBack={() => navigation.goBack()}
-        bordered
-      />
+      <PlainScreenHeader title="" onBack={() => navigation.goBack()} />
 
-      <View style={styles.body}>
-        <FlatList
-          data={listData}
-          keyExtractor={(item: any) => item.__row || item.id}
-          renderItem={renderListItem}
-          CellRendererComponent={renderCell}
-          // Everything above the tab row (top card, actions, zone) is the
-          // header; the tab row is `listData[0]`, which lands at overall
-          // index 1 once the header cell is counted — that's the index that
-          // needs to stick.
-          ListHeaderComponent={
-            <View style={styles.headerArea}>
-              {/* Top card — the pre-revamp GroupsScreen "expense summary card"
-                  shell. Its gradient tint is currently commented out (plain
-                  surface + a 1px group-colour border instead — see below).
-                  Emoji/name stay on the LEFT; Delete + Edit sit top-RIGHT of
-                  the strip (Edit was on the screen's own header as a settings
-                  gear; now it's the app's canonical pencil, moved in here
-                  beside Delete instead). No tappable balances footer — Total
-                  Expense/Your Balance are the two plain figures instead.
-                  Group Zone stays OUT of this card, as its own row below the
-                  actions. */}
-              <View style={[styles.expenseCard, { borderWidth: 1, borderColor: accent }]}>
-                {/* Gradient tint commented out for now — plain surface + a
-                    1px group-colour border instead:
-                <LinearGradient
-                  colors={[lightenHex(accent, 0.72), lightenHex(accent, 0.82), '#FFFFFF']}
-                  locations={[0, 0.55, 1]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                  style={styles.expenseCard}
-                >
-                */}
-                <View style={styles.cardHeaderGrad}>
-                  <Text style={styles.cardEmoji}>{group.emoji || (isShared ? '👥' : '📁')}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardName} numberOfLines={1}>{group.name}</Text>
-                    <Text style={styles.cardMeta} numberOfLines={1}>
-                      {isShared ? memberNamesLabel : 'Personal group'}
-                      {group.excludeFromTotals ? ' · excluded from totals' : ''}
-                    </Text>
-                  </View>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity
-                      onPress={handleDeleteGroup}
-                      hitSlop={8}
-                      style={[styles.cardActionBtn, { backgroundColor: withAlpha(colors.danger, 0.12) }]}
-                    >
-                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => navigation.navigate('GroupForm', { groupId: group.id })}
-                      hitSlop={8}
-                      style={[styles.cardActionBtn, { backgroundColor: withAlpha(colors.textSecondary, 0.12) }]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Edit group"
-                    >
-                      <EditIcon size={18} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={styles.cardSummary}>
-                  {isShared ? (
-                    <View style={styles.statsRow}>
-                      <View style={styles.statCell}>
-                        <Text style={styles.statLabel}>TOTAL EXPENSE</Text>
-                        <Text style={styles.statValue} numberOfLines={1}>{formatCurrency(group.totalSpend || 0)}</Text>
-                      </View>
-                      <View style={styles.statDivider} />
-                      <View style={styles.statCell}>
-                        <Text style={styles.statLabel}>
-                          {netBalance > 0.005 ? 'YOU LENT' : netBalance < -0.005 ? 'YOU BORROWED' : 'SETTLED'}
-                        </Text>
-                        <Text style={[styles.statValue, { color: netColor }]} numberOfLines={1}>
-                          {formatCurrency(Math.abs(netBalance))}
-                        </Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={styles.amountRow}>
-                      <Text style={styles.amountBig}>{formatCurrency(currentMonthTotal)}</Text>
-                      <Text style={styles.amountSub}>this month</Text>
-                    </View>
-                  )}
-                </View>
-                {/* </LinearGradient> */}
-              </View>
-
-              {/* Actions */}
-              <View style={styles.actionsRow}>
-                {isShared && (
-                  <TouchableOpacity
-                    style={[styles.secondaryBtn, { borderColor: theme.primary }]}
-                    onPress={() => setActiveTab('members')}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="swap-horizontal-outline" size={18} color={theme.primary} />
-                    <Text style={[styles.secondaryBtnTxt, { color: theme.primary }]}>Settle Up</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={[styles.primaryBtn, { backgroundColor: theme.primary }]}
-                  onPress={() => navigation.navigate('AddGroupExpense', { groupId: group.id })}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="add" size={18} color="#fff" />
-                  <Text style={styles.primaryBtnTxt}>Add Expense</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Group Zone — back below the actions row. */}
-              <View style={styles.zoneRow}>
+      <View style={styles.body} onLayout={(e) => setViewportH(e.nativeEvent.layout.height)}>
+        <ScrollView
+          ref={scrollRef}
+          stickyHeaderIndices={[1]}
+          onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+          scrollEventThrottle={16}
+          contentContainerStyle={{ paddingBottom: bottomPad }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.headerArea} onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}>
+            {/* Top card — the pre-revamp GroupsScreen "expense summary card"
+                shell. Its gradient tint is currently commented out (plain
+                surface + a 1px group-colour border instead — see below).
+                Emoji/name stay on the LEFT; Delete + Edit sit top-RIGHT of
+                the strip (Edit was on the screen's own header as a settings
+                gear; now it's the app's canonical pencil, moved in here
+                beside Delete instead). No tappable balances footer — Total
+                Expense/Your Balance are the two plain figures instead.
+                Group Zone stays OUT of this card, as its own row below the
+                actions. */}
+            <View style={[styles.expenseCard, { borderWidth: 1, borderColor: accent }]}>
+              {/* Gradient tint commented out for now — plain surface + a
+                  1px group-colour border instead:
+              <LinearGradient
+                colors={[lightenHex(accent, 0.72), lightenHex(accent, 0.82), '#FFFFFF']}
+                locations={[0, 0.55, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.expenseCard}
+              >
+              */}
+              <View style={[styles.cardHeaderGrad, { backgroundColor: withAlpha(accent, 0.08) }]}>
+                <Text style={styles.cardEmoji}>{group.emoji || (isShared ? '👥' : '📁')}</Text>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.zoneTitle}>🧭 Group Zone</Text>
-                  <Text style={styles.zoneSub}>Auto-add new transactions to this group</Text>
+                  <Text style={styles.cardName} numberOfLines={1}>{group.name}</Text>
+                  <Text style={styles.cardMeta} numberOfLines={1}>
+                    {isShared ? memberNamesLabel : 'Personal group'}
+                    {group.excludeFromTotals ? ' · excluded from totals' : ''}
+                  </Text>
                 </View>
-                <Switch
-                  value={activeGroupZoneId === group.id}
-                  onValueChange={handleToggleZone}
-                  trackColor={{ true: accent, false: '#D1D5DB' }}
-                  thumbColor="#fff"
-                  ios_backgroundColor="#D1D5DB"
+                {/* One ⋮ for the group's actions — Add Expense, Edit, Delete. Frees the
+                    row below the card for the Group Zone tile. */}
+                <OverflowMenu
+                  style={[styles.cardActionBtn, { backgroundColor: withAlpha(colors.textSecondary, 0.12) }]}
+                  actions={[
+                    { key: 'add', label: 'Add Expense', icon: 'add-circle-outline', onPress: () => navigation.navigate('AddGroupExpense', { groupId: group.id }) },
+                    { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
+                    { key: 'delete', label: 'Delete Group', icon: 'trash-outline', destructive: true, onPress: handleDeleteGroup },
+                  ]}
                 />
               </View>
+
+              <View style={[styles.cardSummary, balanceLine && styles.cardSummaryTight]}>
+                <View style={styles.statsRow}>
+                  <View style={styles.statCell}>
+                    <Text style={styles.statLabel}>TOTAL SPENT</Text>
+                    <Text style={styles.statValue} numberOfLines={1}>
+                      {formatCurrency(isShared ? heroFigures.totalBills : heroFigures.yourShare)}
+                    </Text>
+                  </View>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statCell}>
+                    <Text style={styles.statLabel}>{isShared ? 'YOUR SHARE' : 'THIS MONTH'}</Text>
+                    <Text style={styles.statValue} numberOfLines={1}>
+                      {formatCurrency(isShared ? heroFigures.yourShare : currentMonthTotal)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              {/* What's still outstanding, in "owe" words; the Members tab has it per person. */}
+              {balanceLine ? (
+                <TouchableOpacity
+                  style={styles.balanceLine}
+                  onPress={() => goTab('members')}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityHint="Opens Members"
+                >
+                  {balanceLine.kind === 'settled' ? <Ionicons name="checkmark-circle" size={16} color={theme.success} /> : null}
+                  <Text style={[styles.balanceText, balanceLine.kind === 'settled' && styles.balanceSettled, balanceLine.kind === 'settled' && { color: theme.success }]} numberOfLines={1}>
+                    {balanceLine.segments.map((seg, i) => ('text' in seg ? seg.text : (
+                      <Text key={i} style={[styles.balanceAmt, { color: seg.tone === 'lent' ? theme.lent : theme.borrowed }]}>
+                        {formatCurrency(seg.amount)}
+                      </Text>
+                    )))}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              ) : null}
+              {/* </LinearGradient> */}
             </View>
-          }
-          stickyHeaderIndices={[1]}
-          contentContainerStyle={{ flexGrow: 1, paddingBottom: insets.bottom + spacing.xl }}
-          showsVerticalScrollIndicator={false}
-        />
+
+            {/* Group Zone — full-width tile under the card (Add Expense lives in the ⋮). */}
+            <View style={styles.zoneRow}>
+              <View style={[styles.zoneIcon, { backgroundColor: withAlpha(accent, 0.12) }]}>
+                <Ionicons name="compass-outline" size={18} color={accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.zoneTitle}>Group Zone</Text>
+                <Text style={styles.zoneSub}>Auto-add new transactions to this group</Text>
+              </View>
+              <Switch
+                value={zoneOn}
+                onValueChange={handleToggleZone}
+                trackColor={{ true: accent, false: '#D1D5DB' }}
+                thumbColor="#fff"
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
+          </View>
+          <View onLayout={(e) => setTabBarH(e.nativeEvent.layout.height)}>
+            <UnderlineTabBar
+              tabs={TABS}
+              activeKey={activeTab}
+              onChange={goTab}
+              accentColor={theme.primary}
+              topBorder={false}
+            />
+          </View>
+          <TabView
+            navigationState={{ index: Math.max(0, TABS.findIndex((t) => t.key === activeTab)), routes: TABS }}
+            renderScene={renderScene}
+            renderTabBar={() => null}
+            onIndexChange={(i) => goTab(TABS[i].key)}
+            initialLayout={{ width: Dimensions.get('window').width }}
+            swipeEnabled
+            style={{ height: pageH }}
+          />
+        </ScrollView>
       </View>
 
       <TxnDetailSheet
@@ -746,13 +750,11 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.card },
+  // One page grey behind everything (header included, flat) — the white surfaces
+  // (group card, zone tile, tab bar, list cards) are what separate the sections.
+  root: { flex: 1, backgroundColor: colors.background },
   body: { flex: 1, backgroundColor: colors.background },
-  // Covers just the ListHeaderComponent (top card/actions/zone) in white — the
-  // FlatList itself only has ONE background (`body`, the page grey, for
-  // everything at/below the sticky tab bar), so the header needs its own
-  // opaque wrapper to read as a distinct white block above it.
-  headerArea: { backgroundColor: colors.card },
+  headerArea: { paddingTop: spacing.xs, paddingBottom: spacing.md },
 
   // Pre-revamp "expense summary card" shell — the bottom accent border it
   // used to carry was dropped on request, replaced by the `borderWidth`/
@@ -769,7 +771,10 @@ const styles = StyleSheet.create({
   // the LinearGradient itself (now commented out above the outer
   // `expenseCard`) — kept the name since the commented block still refers
   // to it, so a revert doesn't need a rename too.
+  // Tinted with the group colour at the call site; inner radius = card radius − its 1px border.
   cardHeaderGrad: {
+    borderTopLeftRadius: radius.lg - 1,
+    borderTopRightRadius: radius.lg - 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -778,8 +783,7 @@ const styles = StyleSheet.create({
   },
   cardEmoji: { fontSize: 26 },
   cardName: { ...typography.h3, color: colors.textPrimary },
-  cardMeta: { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  cardMeta: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   // Icon-in-tinted-circle, same idiom as AccountDetailsScreen's stat tiles —
   // the background colour itself (danger/neutral) is set per button at the
   // call site, not here (each icon carries its own tint).
@@ -787,37 +791,38 @@ const styles = StyleSheet.create({
     width: 28, height: 28, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
   },
-  cardSummary: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg },
-  amountRow: {},
-  amountBig: { ...typography.display, color: colors.textPrimary },
-  amountSub: { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
-  // Total Expense / Your Balance — the two plain figures a shared group shows
-  // instead of a single "your share" amount (no tappable footer any more; the
-  // Members tab and the Settle Up button below are the settle entry points).
+  cardSummary: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.lg },
+  cardSummaryTight: { paddingBottom: spacing.md },
+  balanceLine: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderTopWidth: DIVIDER_W, borderTopColor: colors.divider,
+  },
+  // Words quiet, amount loud: the sentence is context, the coloured figure is the
+  // point — same lent/borrowed ink as every other money figure in the app.
+  balanceText: { ...typography.body, color: colors.textSecondary, fontWeight: '500', flex: 1 },
+  balanceAmt: { fontWeight: '800' },
+  balanceSettled: { fontWeight: '700' },
+  // Total Spent │ Your Share (shared) or │ This Month (personal).
   statsRow: { flexDirection: 'row', alignItems: 'center' },
   statCell: { flex: 1 },
   statDivider: { width: DIVIDER_W, backgroundColor: colors.divider, marginHorizontal: spacing.md },
   statLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '800', letterSpacing: 0.6 },
-  statValue: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 3 },
+  // One figure size for the card — shared (2 stats) and personal (1) alike.
+  statValue: { ...typography.h2, color: colors.textPrimary, fontWeight: '700', marginTop: 3 },
 
-  actionsRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: spacing.md },
-  primaryBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    minHeight: BUTTON_H, paddingVertical: spacing.xs, borderRadius: radius.lg,
-  },
-  primaryBtnTxt: { ...typography.body, color: '#fff', fontWeight: '700' },
-  secondaryBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    minHeight: BUTTON_H, paddingVertical: spacing.xs, borderRadius: radius.lg, borderWidth: 1.5,
-  },
-  secondaryBtnTxt: { ...typography.body, fontWeight: '700' },
 
+  // Its own white tile on the page grey — a setting of the group.
   zoneRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginHorizontal: spacing.md, marginTop: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    backgroundColor: colors.card, borderRadius: radius.lg,
+    ...shadows.card,
   },
-  zoneTitle: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
-  zoneSub: { ...typography.tiny, color: colors.textMuted, marginTop: 1 },
+  zoneIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  zoneTitle: { ...typography.bodyBold, color: colors.textPrimary },
+  zoneSub: { ...typography.small, color: colors.textSecondary, marginTop: 1 },
 
   txnList: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
   txnRowWrap: { paddingHorizontal: spacing.md },
@@ -836,7 +841,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider,
   },
   memberRoleTagTxt: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
-  memberRowName: { ...typography.body, color: colors.textPrimary, flex: 1 },
+  memberRowName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },
   // Light fill, no border — an inline affordance, not an outlined CTA.
   addMemberBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -844,7 +849,7 @@ const styles = StyleSheet.create({
   },
   addMemberTxt: { ...typography.body, fontWeight: '700' },
 
-  settledAllTxt: { ...typography.body, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
+  settledAllTxt: { ...typography.small, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
   // Shared shadow shell for any card whose CONTENT needs `overflow:'hidden'`
   // (to clip row dividers to the rounded corner) — shadow and clip never share
   // a view (ui-consistency §6b). backgroundColor is required alongside
@@ -862,13 +867,14 @@ const styles = StyleSheet.create({
   avatarTxt: { fontWeight: '800', fontSize: 13 },
   // Amount leads (the headline figure); "{name} owes you"/"You owe {name}"
   // is the smaller descriptive line below it.
-  pendingAmount: { ...typography.h3, fontWeight: '800' },
+  pendingAmount: { ...typography.bodyBold, fontWeight: '700' },
   pendingNameSub: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
   settleOutlineBtn: {
     height: 28, paddingHorizontal: spacing.sm + 2, borderRadius: radius.pill, borderWidth: 1,
     marginLeft: spacing.sm, alignItems: 'center', justifyContent: 'center',
   },
   settleOutlineBtnTxt: { ...typography.small, fontWeight: '700' },
+  bellGap: { marginLeft: spacing.sm },
   waBtn: {
     width: 28, height: 28, borderRadius: 14, marginLeft: spacing.sm,
     backgroundColor: '#25D36618', borderWidth: 1, borderColor: '#25D36633',
@@ -886,7 +892,7 @@ const styles = StyleSheet.create({
   categoryRowLast: { paddingBottom: spacing.lg },
   categoryEmoji: { fontSize: 20 },
   categoryTopLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  categoryName: { ...typography.body, color: colors.textPrimary, flexShrink: 1, marginRight: spacing.sm },
+  categoryName: { ...typography.bodyBold, color: colors.textPrimary, flexShrink: 1, marginRight: spacing.sm },
   categoryAmt: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700' },
   categoryBar: { marginTop: 6 },
   // Contribution row: avatar leads, top line pairs name (left) with the
@@ -894,7 +900,7 @@ const styles = StyleSheet.create({
   // full column, and the full ₹ amount sits outside the column on the row's
   // own right (via `categoryRow`'s flexDirection) — the avatar/trailing-figure
   // shape Pending Settlements/Members rows already use.
-  contribPercent: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
+  contribPercent: { ...typography.small, color: colors.textSecondary, fontWeight: '600' },
 
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   missingTxt: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
