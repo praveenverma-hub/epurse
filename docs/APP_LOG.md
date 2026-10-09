@@ -2518,6 +2518,23 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## UI Consistency / Navigation
 
 **Done**
+- Oct-9-2026: **One detail sheet for every transaction** — `GroupTxnDetailSheet` deleted; group txns now open
+  `TxnDetailSheet` like plain/split ones, so they show the same Category · Group · Account · Location · Note rows
+  (the group sheet had only payer/total/split). New Group row (hidden on Group Detail); Account row hidden when
+  someone else paid (the split list names the payer). Dashboard/Activity no longer branch on shared groups.
+- Oct-9-2026: **Split/group money picture** — new `utils/splitPosition.ts` (tested) + shared `SplitPositionView` in
+  BOTH detail sheets: a net banner ("You lent ₹600" / "You borrowed ₹300") over a "Split N Ways" people list
+  (Share column, sub-label "Paid ₹900" / "Owes you" / "You owe Rohit"). A You-paid/Your-share stat pair + owe-lines
+  were dropped the same day as duplicates of the list. Split editor rows say "Paid ₹900" / "Owes you" / "You owe Rohit" in every method
+  (was "✓ Paid" beside a share — read as "paid only that much"). Form summary marks the payer "paid ₹<bill>" and no
+  longer drops a 0-share payer. Wording rule (lent/borrowed = what happened, owe = what's outstanding) in
+  ui-consistency §3e-1. Fixed: plain sheet said "Split 1 way" for a 2-person split; group ribbon overlapped the
+  card amount (amount column now drops below it). Group detail sheet's total now carries the same "−"/"+" sign as the plain sheet.
+- Oct-9-2026: **Transaction card rework** — one anatomy for every list, decided in pure `utils/txnCardModel.ts`
+  (`test:txnCard`, 30 checks): amount = my cost + "of ₹bill" when they differ; tier-2 = sub-category · short
+  account ("HDFC ··4521") or "Rohit paid"; ≤2 prioritised chips + "+N"; REFUND chip (refunds used to look like
+  income); note mark; `Split · N` icon pill (was 👥 emoji); MEMO jargon dropped. `context` prop ('account' /
+  'group') replaces `hideGroupChip`. Review queue keeps its card; its emoji chrome → icons, "edit" → "manage".
 - Oct-9-2026: Manage sheet gets a Note row (last item, saved with Done) — new store
   `setTransactionNote` works on any txn incl. group/LB-linked; trims, caps at 140, blank clears.
 - Oct-9-2026: review-queue card wobbled on snap-back after the Expo 57 / Reanimated 4 upgrade —

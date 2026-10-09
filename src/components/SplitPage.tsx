@@ -18,9 +18,10 @@ import {
 import KeyboardAvoidingView from './AppKeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import { INPUT_LIMITS } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
+import { splitRelationLabel } from '../utils/splitPosition';
 import GradientButtonBase from './GradientButton';
 import SplitTotalHint from './SplitTotalHint';
 import { FormField, FormChipRow, FormChip, useFocusBorder } from './FormField';
@@ -126,6 +127,8 @@ export default function SplitPage({
   const sum = rows.reduce((t, r) => t + (valueUnit === 'percent' ? r.percent : r.amount), 0);
   const anyEditable = rows.some((r) => r.editable);
   const hasTicks = rows.some((r) => r.onToggle);
+  const payerRow = rows.find((r) => r.isPayer);
+  const payerName = !payerRow || payerRow.isMe ? 'You' : (payerRow.name || '').trim().split(/\s+/)[0] || 'them';
 
   return (
     <View style={styles.page}>
@@ -202,12 +205,23 @@ export default function SplitPage({
                 </View>
 
                 <View style={styles.card}>
+                  {/* The number on every row is that person's SHARE — the payer's row says
+                      what they paid separately ("Paid ₹900"), so it can't be misread. */}
+                  <View style={[styles.row, styles.colHead]}>
+                    <Text style={[styles.colHeadText, { flex: 1 }]}>Person</Text>
+                    <Text style={[styles.colHeadText, styles.colHeadValue, valueUnit === 'percent' && styles.valueColPct,
+                      rows.some((x) => x.onRemove) && styles.colHeadBesideRemove]}>
+                      {valueUnit === 'percent' ? 'Share %' : 'Share'}
+                    </Text>
+                  </View>
                   {rows.map((r, idx) => {
-                    const payerIsMe = rows.some((x) => x.isPayer && x.isMe);
-                    // Everyone else owes the payer; the payer's own row says so.
-                    const oweLabel = r.isPayer ? '✓ Paid' : r.isMe ? 'You owe' : payerIsMe ? 'Owes you' : 'Owes';
+                    const relation = r.isPayer ? 'payer'
+                      : r.amount <= 0 && r.percent <= 0 ? 'not_involved'
+                      : payerRow?.isMe ? 'owes_you'
+                      : r.isMe ? 'you_owe' : 'owes_payer';
+                    const oweLabel = splitRelationLabel({ relation }, { billLabel: formatCurrency(total), payerName });
                     return (
-                      <View key={r.id} style={[styles.row, idx > 0 && styles.rowDivider]}>
+                      <View key={r.id} style={[styles.row, styles.rowDivider]}>
                         {r.onToggle ? (
                           <TouchableOpacity style={styles.tickWrap} onPress={r.onToggle}>
                             <View
@@ -223,9 +237,7 @@ export default function SplitPage({
 
                         <View style={styles.nameWrap}>
                           <Text style={styles.name} numberOfLines={1}>{r.isMe ? 'You' : r.name}</Text>
-                          {mode !== 'equal' ? (
-                            <Text style={[styles.owe, r.isPayer && styles.paid]} numberOfLines={1}>{oweLabel}</Text>
-                          ) : null}
+                          <Text style={[styles.owe, r.isPayer && styles.paid]} numberOfLines={1}>{oweLabel}</Text>
                         </View>
 
                         {/* Percent mode shows the ₹ each % comes to. */}
@@ -314,11 +326,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center',
   },
   tickHint: { fontSize: 11, fontWeight: '500', color: colors.textMuted, marginTop: spacing.xs },
-  // Name fills the space so the owe-label right-aligns into a clean column.
-  nameWrap: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  name: { ...typography.body, color: colors.textPrimary, flex: 1 },
-  owe: { ...typography.tiny, color: colors.textMuted, fontWeight: '600', marginLeft: spacing.xs, flexShrink: 0, textAlign: 'right' },
-  paid: { color: colors.success },
+  // Name, then who-owes-whom under it — same two lines as the detail sheet's people list.
+  nameWrap: { flex: 1 },
+  name: { ...typography.body, color: colors.textPrimary },
+  owe: { ...typography.tiny, color: colors.textSecondary, fontWeight: '500', marginTop: 1 },
+  paid: { color: readableOn(colors.card, colors.success), fontWeight: '600' },
+  colHead: { paddingVertical: spacing.xs },
+  colHeadText: { fontSize: 11, fontWeight: '700', color: colors.textMuted },
+  // Same width as valueCol so the header sits over the values, not the − button.
+  colHeadValue: { width: 116, textAlign: 'right' },
+  colHeadBesideRemove: { marginRight: 24 + spacing.sm },
   rs: { width: 78, textAlign: 'right', ...typography.small, color: colors.textMuted },
   // Fixed width so every row's value block lines up whether it's an input or text.
   valueCol: { width: 116, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },

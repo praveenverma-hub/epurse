@@ -20,8 +20,8 @@
 // third being deleteAllUserData — see its own doc comment in ePurseStore.js
 // for why hasOnboarded is left untouched and this is the overlay it relies on).
 // =============================================================================
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { Platform, ScrollView, StatusBar as RNStatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,6 +40,19 @@ const LoginGate: React.FC = () => {
   const isLoggedIn = useEPurseStore((s: any) => s.isLoggedIn) as boolean;
   const sessionExpired = useEPurseStore((s: any) => s.sessionExpired) as boolean;
   const justDeletedAccount = useEPurseStore((s: any) => s.justDeletedAccount) as boolean;
+  const showing = hydrated && hasOnboarded && !isLoggedIn;
+
+  // IMPERATIVE on purpose: the screens underneath (Dashboard, Accounts) set their
+  // glyphs with RN's setBarStyle, which beats the declarative <StatusBar> below — so
+  // the clock/battery stayed white on this light screen. Restore the app default
+  // (light, for the gradient screens beneath) when the gate goes away.
+  useEffect(() => {
+    if (!showing) return;
+    RNStatusBar.setBarStyle(theme.darkMode ? 'light-content' : 'dark-content');
+    if (Platform.OS === 'android') RNStatusBar.setBackgroundColor?.('transparent');
+    return () => RNStatusBar.setBarStyle('light-content');
+  }, [showing, theme.darkMode]);
+
 
   // Not hydrated yet: we don't know hasOnboarded/isLoggedIn — cover with a
   // blank surface rather than flash the gate for users who won't see it.
