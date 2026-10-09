@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore, selectMonthlyReport } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography, shadows } from '../constants/theme';
+import { radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { formatCurrency, formatCompact } from '../utils/format';
 import { useToast } from './Toast';
 import { exportMonthlyRecap } from '../services/recapExport';
@@ -257,8 +257,8 @@ const makeStyles = (theme: Palette) => StyleSheet.create({
   ribbon: { flexDirection: 'row', height: 8, borderRadius: 5, overflow: 'hidden', marginTop: 12, backgroundColor: theme.divider },
 
   actions: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  viewBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.lg, paddingHorizontal: 12 },
-  exportBtn: { width: 48, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: 1 },
+  viewBtn: { flex: 1, minHeight: BUTTON_H, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.lg, paddingHorizontal: 12 },
+  exportBtn: { width: BUTTON_H, minHeight: BUTTON_H, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: 1 },
   dlText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   foot: { fontSize: 10.5, color: theme.textMuted, textAlign: 'center', marginTop: 9 },
 });

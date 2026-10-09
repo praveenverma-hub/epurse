@@ -38,7 +38,7 @@ import {
 } from '../store/useRewardStore';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
 import { useTheme } from '../hooks/useTheme';
-import { readableOn } from '../constants/theme';
+import { readableOn, BUTTON_H } from '../constants/theme';
 import LiveFlame from './LiveFlame';
 import SheetCloseButton from './SheetCloseButton';
 import type { AutoModalId } from '../constants/autoModals';
@@ -256,13 +256,15 @@ const styles = StyleSheet.create({
   cta: {
     alignSelf:        'stretch',
     alignItems:       'center',
+    justifyContent:   'center',
     marginTop:        22,
-    paddingVertical:   14,
+    minHeight:        BUTTON_H,
+    paddingVertical:   4,
     borderRadius:      16,   // radius.lg — pill is for chips only
   },
   ctaText: {
-    fontSize:      14,
-    fontWeight:    '800',
+    fontSize:      15,
+    fontWeight:    '700',
     letterSpacing: 0.3,
   },
 });

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import Modal from "./AppModal";
 
-import { radius, searchFill, spacing, typography } from '../constants/theme';
+import { radius, searchFill, spacing, typography, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
@@ -730,8 +730,9 @@ const makeStyles = (theme) => StyleSheet.create({
   // flexShrink lets the body yield height to the pinned footer when content is tall.
   body: { flexShrink: 1 },
   footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  // Same height as the PrimaryButton beside it.
   cancelBtn: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg, minHeight: BUTTON_H, justifyContent: 'center',
     borderRadius: radius.lg, borderWidth: 1, borderColor: theme.divider,
   },
   cancelText: { color: theme.textSecondary, ...typography.bodyBold, fontWeight: '700' },

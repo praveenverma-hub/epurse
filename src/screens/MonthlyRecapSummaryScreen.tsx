@@ -19,7 +19,7 @@ import type { MonthlyReport } from '../utils/monthlyReportHtml';
 import { useTheme } from '../hooks/useTheme';
 import { exportMonthlyRecap } from '../services/recapExport';
 import { formatCompact, formatCurrency } from '../utils/format';
-import { radius, shadows, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
+import { radius, shadows, spacing, typography as typographyBase, DIVIDER_W, BUTTON_H } from '../constants/theme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
@@ -493,7 +493,7 @@ const styles = StyleSheet.create({
   simpleName: { ...typography.small, fontWeight: '700', flex: 1 },
   plan: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg },
   planValue: { fontSize: 20, fontWeight: '900' },
-  download: { minHeight: 48, borderRadius: radius.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  download: { minHeight: BUTTON_H, borderRadius: radius.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   downloadText: { color: '#fff', ...typography.bodyBold, fontWeight: '800' },
   privacy: { ...typography.tiny, textAlign: 'center', lineHeight: 16 },
 });

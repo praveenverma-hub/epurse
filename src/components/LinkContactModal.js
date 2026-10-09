@@ -22,7 +22,7 @@ import {
 import Modal from "./AppModal";
 
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, searchFill, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, searchFill, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
@@ -450,8 +450,9 @@ const styles = StyleSheet.create({
 
   // Pinned action footer — Skip (ghost) + primary side by side.
   footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  // Same height as the PrimaryButton beside it.
   skipBtn: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg, minHeight: BUTTON_H, justifyContent: 'center',
     borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
   },
   skipText: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },

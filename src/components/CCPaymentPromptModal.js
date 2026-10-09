@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import Modal from "./AppModal";
 
-import { radius, spacing, shadows } from '../constants/theme';
+import { radius, spacing, shadows, BUTTON_H } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';
 import { ACCOUNT_TYPES } from '../constants/categories';
 import { formatCurrency } from '../utils/format';
@@ -623,8 +623,10 @@ const makeStyles = (t) => {
       width: '100%',
       backgroundColor: ACCENT,
       borderRadius: radius.lg,
-      paddingVertical: 15,
+      minHeight: BUTTON_H,
+      paddingVertical: spacing.xs,
       alignItems: 'center',
+      justifyContent: 'center',
     },
     primaryBtnMuted: {
       backgroundColor: t.cardAlt,
@@ -634,9 +636,8 @@ const makeStyles = (t) => {
     primaryBtnBusy: { opacity: 0.85 },
     primaryBtnText: {
       color: '#FFFFFF',
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '700',
-      letterSpacing: 0.3,
     },
     primaryBtnTextMuted: {
       color: t.textSecondary,

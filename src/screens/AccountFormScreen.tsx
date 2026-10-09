@@ -529,12 +529,12 @@ const AccountFormScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: (isEdit ? nameValid : true) ? theme.primary : theme.divider }]}
+              style={[styles.saveBtn, { backgroundColor: (isEdit ? nameValid : true) ? theme.primary : theme.disabledBackground }]}
               onPress={handleSave}
               disabled={submitting}
               activeOpacity={0.85}
             >
-              <Text style={[styles.saveTxt, { color: (isEdit ? nameValid : true) ? '#fff' : theme.textMuted }]}>
+              <Text style={[styles.saveTxt, { color: (isEdit ? nameValid : true) ? '#fff' : theme.disabledText }]}>
                 {isEdit ? 'Save changes' : isCC ? 'Next' : 'Add Account'}
               </Text>
             </TouchableOpacity>

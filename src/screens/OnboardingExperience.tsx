@@ -103,6 +103,8 @@ interface Theme {
   danger: string;
   warning: string;
   info: string;
+  disabledBackground: string;
+  disabledText: string;
   darkMode?: boolean;
 }
 
@@ -1447,14 +1449,12 @@ export function BalanceAnchorModal({
               <Text style={[styles.btnText, { color: theme.textSecondary }]}>Cancel</Text>
             </Pressable>
             <Pressable
-              style={[styles.btn, { backgroundColor: valid ? theme.primary : theme.divider }]}
+              style={[styles.btn, { backgroundColor: valid ? theme.primary : theme.disabledBackground }]}
               disabled={!valid}
               onPress={() => valid && onSave(amount)}
             >
-              {/* Mute text when disabled — white on the light `divider` fill is
-                  unreadable; textSecondary keeps the disabled state legible in
-                  both light and dark themes. */}
-              <Text style={[styles.btnText, { color: valid ? '#FFFFFF' : theme.textSecondary }]}>
+              {/* Disabled = the shared grey tokens (ui-consistency §3d-i). */}
+              <Text style={[styles.btnText, { color: valid ? '#FFFFFF' : theme.disabledText }]}>
                 {isCreditCard ? 'Update' : 'Anchor'}
               </Text>
             </Pressable>
@@ -1870,7 +1870,7 @@ const modalStyles = (t: Theme) =>
     currency: { fontSize: 22, fontWeight: '700', color: t.textPrimary, marginRight: spacing.sm },
     amountInput: { flex: 1, fontSize: 22, fontWeight: '700', color: t.textPrimary, paddingVertical: spacing.md },
     actions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.xl },
-    btn: { borderRadius: radius.md, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, marginLeft: spacing.md, minWidth: 96, alignItems: 'center' },
+    btn: { borderRadius: radius.lg, minHeight: BUTTON_H, paddingVertical: spacing.xs, paddingHorizontal: spacing.xl, marginLeft: spacing.md, minWidth: 96, alignItems: 'center', justifyContent: 'center' },
     btnGhost: { backgroundColor: 'transparent' },
     btnText: { fontSize: 15, fontWeight: '700' },
   });

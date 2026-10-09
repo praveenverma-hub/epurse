@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import Modal from "./AppModal";
 
-import { radius, searchFill, spacing, shadows, typography as typographyBase, DIVIDER_W } from '../constants/theme';
+import { radius, searchFill, spacing, shadows, typography as typographyBase, DIVIDER_W, BUTTON_H } from '../constants/theme';
 import type { TextStyle } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 import SheetCloseButton from './SheetCloseButton';
@@ -201,6 +201,6 @@ const styles = StyleSheet.create({
   deniedWrap: { alignItems: 'center', paddingVertical: spacing.lg, paddingHorizontal: spacing.md },
   deniedTitle: { ...typography.bodyBold, fontWeight: '700', marginBottom: spacing.xs },
   deniedSubtitle: { ...typography.small, textAlign: 'center', lineHeight: 18, marginBottom: spacing.lg },
-  deniedBtn: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.lg },
-  deniedBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800' },
+  deniedBtn: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xs, minHeight: BUTTON_H, justifyContent: 'center', borderRadius: radius.lg },
+  deniedBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '700' },
 });

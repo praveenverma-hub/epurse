@@ -34,7 +34,7 @@ import Svg, {
   Line,
 } from 'react-native-svg';
 
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, radius, spacing, typography, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { formatCurrency } from '../utils/format';
@@ -789,7 +789,7 @@ const styles = StyleSheet.create({
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: spacing.sm, backgroundColor: '#25D366',
-    borderRadius: radius.lg, paddingVertical: spacing.md, marginTop: spacing.sm,
+    borderRadius: radius.lg, minHeight: BUTTON_H, paddingVertical: spacing.xs, marginTop: spacing.sm,
   },
   sendBtnText: { color: '#fff', ...typography.bodyBold, fontWeight: '700' },
 });
