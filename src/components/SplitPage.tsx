@@ -22,12 +22,12 @@ import { colors, radius, readableOn, spacing, typography as typographyBase, DIVI
 import { INPUT_LIMITS } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
 import { splitRelationLabel } from '../utils/splitPosition';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 import SplitTotalHint from './SplitTotalHint';
 import { FormField, FormChipRow, FormChip, useFocusBorder } from './FormField';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
-const GradientButton = GradientButtonBase as React.FC<{
+const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string; onPress: () => void; flat?: boolean; style?: object;
 }>;
 
@@ -290,7 +290,7 @@ export default function SplitPage({
 
         {empty ? null : (
           <View style={[styles.footer, { paddingBottom: spacing.md + insets.bottom }]}>
-            <GradientButton flat title="Done" onPress={onDone} style={{ width: '100%' }} />
+            <PrimaryButton title="Done" onPress={onDone} style={{ width: '100%' }} />
           </View>
         )}
       </KeyboardAvoidingView>

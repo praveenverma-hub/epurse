@@ -58,6 +58,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
   const SMS_DIAGNOSTIC_ENABLED = useFeatureFlag('smsDiagnostic');
   const RATING_ENABLED = useFeatureFlag('rating');
+  const THEME_PICKER_ENABLED = useFeatureFlag('themePicker');
 
   const themeId = useEPurseStore((s: any) => s.themeId);
   const setThemeId = useEPurseStore((s: any) => s.setThemeId);
@@ -122,13 +123,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             hint={appLockEnabled ? 'App Lock on' : 'App Lock off'}
             onPress={() => navigation.navigate('Security')}
           />
-          <NavListRow
-            icon="color-palette-outline"
-            label="Appearance"
-            hint={activeThemeLabel}
-            divided
-            onPress={() => setThemeSheetOpen(true)}
-          />
+          {THEME_PICKER_ENABLED ? (
+            <NavListRow
+              icon="color-palette-outline"
+              label="Appearance"
+              hint={activeThemeLabel}
+              divided
+              onPress={() => setThemeSheetOpen(true)}
+            />
+          ) : null}
           <NavListRow
             icon="document-text-outline"
             label="Monthly Recap"
@@ -212,7 +215,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
       </ScrollView>
 
       <ThemePickerSheet
-        visible={themeSheetOpen}
+        visible={THEME_PICKER_ENABLED && themeSheetOpen}
         currentThemeId={themeId}
         onSelect={(id) => setThemeId(id)}
         onClose={() => setThemeSheetOpen(false)}

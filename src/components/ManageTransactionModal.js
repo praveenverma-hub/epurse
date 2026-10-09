@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Modal from './AppModal';
 import CenterModal from './CenterModal';
-import GradientButton from './GradientButton';
+import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
 import { GroupPickerList } from './GroupPickerSheet';
 import SplitConfigModal from './SplitConfigModal';
@@ -378,7 +378,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
               </>}
               {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
             </ScrollView>
-            {!fullPanel && <View style={styles.footer}><GradientButton flat title="Done" onPress={done} disabled={saveDisabled} /></View>}
+            {!fullPanel && <View style={styles.footer}><PrimaryButton title="Done" onPress={done} disabled={saveDisabled} /></View>}
           </>
         </View>
       </View>

@@ -42,7 +42,7 @@ import {
   sanitizeAmount,
 } from '../utils/validation';
 import { formatCompact } from '../utils/format';
-import GradientButton from './GradientButton';
+import PrimaryButton from './PrimaryButton';
 import ContactPickerSheet from './ContactPickerSheet';
 import DateField from './DateField';
 import { FormChipRow, FormChip } from './FormField';
@@ -80,7 +80,6 @@ const LbEntryForm = ({
   lockedPerson = null,
   onSubmit,
   theme,
-  submitColors,
   submitLabel = 'Add',
   submitOutlined = false,
   hideHeading = false,
@@ -321,11 +320,11 @@ const LbEntryForm = ({
           )}
         </TouchableOpacity>
       ) : (
-        <GradientButton
+        <PrimaryButton
           title={submitLabel}
           onPress={handleSubmit}
           loading={submitting}
-          colors={submitColors}
+          color={theme[kind]}
           style={{ marginTop: spacing.sm }}
         />
       )}
@@ -451,7 +450,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   // Secondary treatment of the submit button (ui-consistency §button-hierarchy):
-  // border + tinted text, no fill — same height/radius/padding as GradientButton's
+  // border + tinted text, no fill — same height/radius/padding as PrimaryButton's
   // `btn` so swapping variants never shifts the row it sits in.
   outlinedSubmit: {
     flexDirection: 'row',

@@ -26,7 +26,7 @@ import { BUTTON_H, colors, radius, searchFill, shadows, spacing, typography as t
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
-import GradientButtonBase from '../components/GradientButton';
+import PrimaryButtonBase from '../components/PrimaryButton';
 import { FormTextInput } from '../components/FormField';
 import AppSwitch from '../components/AppSwitch';
 import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
@@ -38,7 +38,7 @@ import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember, GroupType } from '../types/group';
 
-const GradientButton = GradientButtonBase as React.FC<{
+const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string;
   onPress: () => void;
   disabled?: boolean;
@@ -401,7 +401,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
                 <Text style={styles.cancelBtnTxt}>Cancel</Text>
               </TouchableOpacity>
             )}
-            <GradientButton
+            <PrimaryButton
               title={isEdit ? 'Save Changes' : 'Create Group'}
               onPress={handleSave}
               disabled={!nameValid}
@@ -527,7 +527,7 @@ const styles = StyleSheet.create({
   },
   footerRow: { flexDirection: 'row', gap: spacing.sm },
   // Same outlined-secondary shape CenterModal's own secondary button uses —
-  // BUTTON_H so it lines up exactly with GradientButton beside it.
+  // BUTTON_H so it lines up exactly with PrimaryButton beside it.
   cancelBtn: {
     flex: 1,
     minHeight: BUTTON_H,

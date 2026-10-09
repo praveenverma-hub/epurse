@@ -17,15 +17,15 @@ import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import { APP_NAME } from '../constants/appMeta';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
-import GradientButtonBase from '../components/GradientButton';
+import PrimaryButtonBase from '../components/PrimaryButton';
 import FaqAccordion, { type FaqItem } from '../components/FaqAccordion';
 import { hapticLight } from '../utils/haptics';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
-// GradientButton.js has no TS declarations, so its inferred prop type demands
+// PrimaryButton.js has no TS declarations, so its inferred prop type demands
 // every prop. Same local cast the other TS callers use (GoalsScreen, etc).
-const GradientButton: React.FC<{ title: string; onPress: () => void }> = GradientButtonBase as any;
+const PrimaryButton: React.FC<{ title: string; onPress: () => void }> = PrimaryButtonBase as any;
 
 
 const INVITE_FAQ: FaqItem[] = [
@@ -69,7 +69,7 @@ const InviteEarnScreen: React.FC<Props> = ({ navigation }) => {
               ? `Share ${APP_NAME} with a friend and earn EPC once they get started.`
               : `Share ${APP_NAME} with people who'd find it useful. EPC rewards for inviting are coming soon.`}
           </Text>
-          <GradientButton title="Invite a Friend" onPress={invite} />
+          <PrimaryButton title="Invite a Friend" onPress={invite} />
         </View>
 
         <FaqAccordion title="FAQs" items={INVITE_FAQ} />

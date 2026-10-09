@@ -4,7 +4,7 @@
 // Two presentations, one component (pick with `variant`):
 //   • 'sheet'  (default) — slides up from the bottom, drag-handle on top.
 //   • 'center'           — fades + scales into the middle of the screen.
-// Everything else (content, gradient CTA, dismiss-on-backdrop) is shared, so a
+// Everything else (content, CTA, dismiss-on-backdrop) is shared, so a
 // caller can flip between the two by changing a single prop. The whole animation
 // graph runs on the UI thread off one `progress` shared value.
 //
@@ -32,11 +32,11 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
+import PrimaryButton from './PrimaryButton';
 import { Ionicons } from '@expo/vector-icons';
 
 import { readableOn } from '../constants/theme';
-import { useGradient, useTheme } from '../hooks/useTheme';
+import { useTheme } from '../hooks/useTheme';
 import SheetCloseButton from './SheetCloseButton';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -110,10 +110,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   // Single 0→1 progress drives both presentations (0 = hidden, 1 = shown).
   const progress = useSharedValue<number>(0);
 
-  // CTA follows the active accent (gradient pill), so the sheet matches the
-  // theme the user picked instead of a hardcoded orange.
-  const gradient = useGradient();
-  const { textOnGradient, primary } = useTheme() as any;
+  const { primary } = useTheme() as any;
   // The badge tile is a fixed light grey, so a raw accent can be far too pale on
   // it (Gold measures ~1.5:1). An icon is a graphical element, so 3:1 is the bar,
   // and `readableOn` darkens only as far as it must.
@@ -196,16 +193,7 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
             ) : null}
           </ScrollView>
 
-          <Pressable style={styles.ctaWrap} onPress={handleDismiss}>
-            <LinearGradient
-              colors={gradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.cta}
-            >
-              <Text style={[styles.ctaText, { color: textOnGradient }]}>{ctaText}</Text>
-            </LinearGradient>
-          </Pressable>
+          <PrimaryButton title={ctaText} onPress={handleDismiss} style={styles.cta} />
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -332,27 +320,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop:  1,
   },
-  // Wrapper owns position + clip so the gradient respects the pill radius on Android.
-  // radius 16 (`radius.lg`), like every other button — the pill tier is for chips
-  // only. paddingVertical is 13 (not 10) so the button clears ~43px tall; at 37px a
-  // 16 radius is still half the height and would render as a capsule.
-  ctaWrap: {
-    alignSelf:    'flex-end',
-    marginTop:    22,
-    borderRadius: 16,
-    overflow:     'hidden',
-  },
-  cta: {
-    paddingHorizontal: 24,
-    paddingVertical:   13,
-    borderRadius:      16,
-    alignItems:        'center',
-    justifyContent:    'center',
-  },
-  ctaText: {
-    color:         '#FFFFFF',
-    fontSize:      13,
-    fontWeight:    '800',
-    letterSpacing: 0.3,
-  },
+  // The shared solid button, auto-width at the end of the sheet.
+  cta: { alignSelf: 'flex-end', marginTop: 22 },
 });

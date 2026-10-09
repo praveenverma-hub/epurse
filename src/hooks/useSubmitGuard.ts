@@ -12,7 +12,7 @@ import { useCallback, useRef, useState } from 'react';
  * React re-renders the now-`disabled` button, but the ref updates
  * synchronously with no render in between, so the second call sees the lock
  * immediately. `submitting` is purely for the UI: wire it into
- * `GradientButton`'s existing `loading` prop, or swap a hand-rolled button's
+ * `PrimaryButton`'s existing `loading` prop, or swap a hand-rolled button's
  * label/spinner the same way.
  *
  * Works whether the handler is sync (`addTransaction` is a plain `set()`) or
@@ -24,7 +24,7 @@ import { useCallback, useRef, useState } from 'react';
  *   await commitTransaction();
  *   navigation.goBack();
  * });
- * <GradientButton onPress={handleSave} loading={submitting} disabled={!isValid} />
+ * <PrimaryButton onPress={handleSave} loading={submitting} disabled={!isValid} />
  */
 export function useSubmitGuard() {
   const lockRef = useRef(false);

@@ -33,7 +33,7 @@ import { BUDGETABLE_PARENT_IDS as BUDGETABLE_IDS } from '../constants/twoTierCat
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import SheetCloseButton from '../components/SheetCloseButton';
-import GradientButton from '../components/GradientButton';
+import PrimaryButton from '../components/PrimaryButton';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 // Categories pre-added when creating the very first plan (no history to seed from).
@@ -288,7 +288,7 @@ const BudgetPlanScreen = ({ navigation }) => {
             >
               <Text style={[styles.resetBtnText, { color: colors.danger }]}>Reset</Text>
             </TouchableOpacity>
-            <GradientButton title="Save Plan" onPress={requestSavePlan} loading={submitting} style={styles.saveBtn} />
+            <PrimaryButton title="Save Plan" onPress={requestSavePlan} loading={submitting} style={styles.saveBtn} />
           </View>
         </View>
       </SafeAreaView>
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
   //
   // …and on HEIGHT, via `BUTTON_H`. This used to set `paddingVertical:
   // spacing.md + 4`, which with its 1.5pt border either side came out ~7pt
-  // TALLER than the GradientButton beside it. Matching paddings would not have
+  // TALLER than the PrimaryButton beside it. Matching paddings would not have
   // fixed it: the border and the font size move the total independently, which
   // is why the height itself is the shared number.
   resetBtn: {

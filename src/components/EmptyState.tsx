@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, radius, spacing, typography, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 
 interface EmptyStateProps {
@@ -119,15 +119,18 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     maxWidth: 300,
   },
+  // Same height + type as PrimaryButton (auto-width here).
   btn: {
     marginTop: spacing.lg,
     paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.xs,
+    minHeight: BUTTON_H,
+    justifyContent: 'center',
     borderRadius: radius.lg,
   },
   btnText: {
     ...typography.bodyBold,
     color: '#fff',
-    fontWeight: '800' as const,
+    fontWeight: '700' as const,
   },
 });

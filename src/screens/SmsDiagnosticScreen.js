@@ -18,7 +18,8 @@ import {
   ActivityIndicator, Platform, Linking,
 } from 'react-native';
 import { PermissionsAndroid } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import PrimaryButton from '../components/PrimaryButton';
 import { StatusBar } from 'expo-status-bar';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -26,7 +27,7 @@ import {
   smsSupported, hasSmsPermission, requestSmsPermission, readInbox,
 } from '../services/smsService';
 import { parseMessageDetailed } from '../utils/messageParser';
-import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
 import { formatCurrency } from '../utils/format';
 import CenterModal from '../components/CenterModal';
@@ -211,25 +212,12 @@ export default function SmsDiagnosticScreen({ navigation }) {
         </View>
 
         {/* Run button */}
-        <TouchableOpacity
-          style={[styles.runBtn, status === STATUS.running && styles.runBtnDisabled]}
-          activeOpacity={0.85}
+        <PrimaryButton
+          title={status === STATUS.idle ? 'Run Diagnostic' : 'Run Again'}
+          icon={<Ionicons name={status === STATUS.idle ? 'play' : 'refresh'} size={16} color="#fff" />}
           onPress={runDiagnostic}
-          disabled={status === STATUS.running}
-        >
-          <LinearGradient
-            colors={gradient}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={styles.runBtnGradient}
-          >
-            {status === STATUS.running
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.runBtnText}>
-                  {status === STATUS.idle ? '▶  Run Diagnostic' : '↻  Run Again'}
-                </Text>
-            }
-          </LinearGradient>
-        </TouchableOpacity>
+          loading={status === STATUS.running}
+        />
 
         {/* Log output */}
         {log.length > 0 && (
@@ -351,18 +339,6 @@ const styles = StyleSheet.create({
   // `overflow: 'hidden'` moved to `runBtnGradient` — on the SAME view as
   // `shadows.card` it clipped the shadow to nothing (iOS) / a hard box
   // (Android elevation).
-  runBtn: { borderRadius: radius.lg, ...shadows.card },
-  runBtnDisabled: { opacity: 0.6 },
-  runBtnGradient: {
-    // Was its own `minHeight: 52` — one of three button heights in the app.
-    paddingVertical: spacing.xs,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: BUTTON_H,
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-  },
-  runBtnText: { color: '#fff', ...typography.body, fontWeight: '800', fontSize: 16 },
 
   card: {
     backgroundColor: colors.card,

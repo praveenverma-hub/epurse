@@ -32,14 +32,14 @@ import { radius, spacing, shadows, typography as typographyBase } from '../const
 import { useTheme } from '../hooks/useTheme';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { APP_STORE_URL, PLAY_STORE_URL } from '../constants/appMeta';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
-// GradientButton.js has no TS declarations — same local cast its other TS
+// PrimaryButton.js has no TS declarations — same local cast its other TS
 // callers use (GoogleSignInPanel, GoalsScreen).
-const GradientButton: React.FC<{ title: string; onPress: () => void; style?: object }> =
-  GradientButtonBase as any;
+const PrimaryButton: React.FC<{ title: string; onPress: () => void; style?: object }> =
+  PrimaryButtonBase as any;
 
 const DEFAULT_MESSAGE =
   'This version of ePurse is no longer supported. Update to carry on — everything on this device stays exactly where it is.';
@@ -78,7 +78,7 @@ const UpdateRequiredGate: React.FC = () => {
             </View>
             <Text style={[styles.title, { color: theme.textPrimary }]}>Update Required</Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>{message ?? DEFAULT_MESSAGE}</Text>
-            <GradientButton title="Update ePurse" onPress={openStoreListing} style={styles.button} />
+            <PrimaryButton title="Update ePurse" onPress={openStoreListing} style={styles.button} />
           </View>
         </SafeAreaView>
       </View>

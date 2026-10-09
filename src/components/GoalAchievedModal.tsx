@@ -29,11 +29,11 @@ import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase, shadows, withAlpha, readableOn, DIVIDER_W } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import Confetti from './Confetti';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
-const GradientButton: React.FC<{
+const PrimaryButton: React.FC<{
   title: string;
   onPress: () => void;
   style?: object;
@@ -42,7 +42,7 @@ const GradientButton: React.FC<{
   colors?: string[];
   textStyle?: any;
   icon?: React.ReactNode;
-}> = GradientButtonBase as any;
+}> = PrimaryButtonBase as any;
 
 export interface GoalAchievement {
   goalId: string;
@@ -155,7 +155,7 @@ const GoalAchievedModal: React.FC<Props> = ({ visible, achievement, reward, onCl
             {noteText}
           </Text>
 
-          <GradientButton title="Yay!" onPress={onClose} style={styles.cta} />
+          <PrimaryButton title="Yay!" onPress={onClose} style={styles.cta} />
         </View>
         </View>
 

@@ -22,7 +22,6 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Pressable,
   Dimensions,
   ViewStyle,
@@ -37,7 +36,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
+import PrimaryButton from './PrimaryButton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { radius, spacing, shadows } from '../constants/theme';
@@ -52,6 +51,8 @@ const { height: SCREEN_H } = Dimensions.get('window');
 
 const ENTER_TIMING = { duration: 320, easing: Easing.out(Easing.cubic) };
 const EXIT_TIMING  = { duration: 320, easing: Easing.in(Easing.cubic) };
+// Reward gold — was the claim button's gradient mid-stop. PrimaryButton darkens it for white text.
+const EPC_GOLD = '#B9781E';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,23 +207,9 @@ const EpcClaimBottomSheet: React.FC<Props> = ({ visible, epcAmount, rpAmount, on
               </View>
             </View>
 
-            {/* Primary claim CTA — gold gradient pill */}
-            <TouchableOpacity
-              activeOpacity={0.88}
-              onPress={handleClaim}
-              style={styles.claimBtnWrap}
-            >
-              <LinearGradient
-                colors={['#8C5A14', '#B9781E', '#D9AA4E']}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.claimBtn}
-              >
-                <Text style={styles.claimBtnText}>
-                  Claim Bonus
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
+            {/* Primary claim CTA — the shared solid button, in the reward gold
+                (a meaning-carrying colour, like lent/borrowed). */}
+            <PrimaryButton title="Claim Bonus" onPress={handleClaim} color={EPC_GOLD} style={styles.claimBtn} />
           </View>
         </SafeAreaView>
       </Animated.View>
@@ -250,9 +237,7 @@ const styles = StyleSheet.create<{
   rewardPill: ViewStyle;
   rewardPillValue: TextStyle;
   rewardPillLabel: TextStyle;
-  claimBtnWrap: ViewStyle;
   claimBtn: ViewStyle;
-  claimBtnText: TextStyle;
   confettiOverlay: ViewStyle;
   confetti: ViewStyle;
 }>({
@@ -330,29 +315,7 @@ const styles = StyleSheet.create<{
     marginBottom: spacing.xl,
   },
 
-  // Primary CTA — full-width, so `radius.lg` like every other full-width button
-  // (GradientButton et al). A pill radius stretched edge-to-edge reads as a
-  // stadium/capsule, not a button; the pill tier is for auto-width buttons only.
-  // `overflow: 'hidden'` moved to `claimBtn` — on the SAME view as
-  // `shadows.elevated` it clipped the shadow to nothing.
-  claimBtnWrap: {
-    width: '100%',
-    borderRadius: radius.lg,
-    ...shadows.elevated,
-  },
-  claimBtn: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-  },
-  claimBtnText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-  },
+  claimBtn: { width: '100%' },
   confettiOverlay: {
     ...StyleSheet.absoluteFill,
     zIndex: 999,

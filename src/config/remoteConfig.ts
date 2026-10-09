@@ -125,7 +125,7 @@ export const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
  * them. Listing one here would produce a switch that silently does nothing —
  * which is worse than not having it.
  */
-export const REMOTE_FLAG_KEYS = ['shop', 'inviteEarn', 'rating', 'smsDiagnostic'] as const;
+export const REMOTE_FLAG_KEYS = ['shop', 'inviteEarn', 'rating', 'smsDiagnostic', 'themePicker'] as const;
 
 export type RemoteFlagKey = (typeof REMOTE_FLAG_KEYS)[number];
 
