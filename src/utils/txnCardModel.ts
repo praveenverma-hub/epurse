@@ -12,7 +12,7 @@
 //   tier 3  date [note]  CHIP CHIP +N .................. Split · 3
 // =============================================================================
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABEL, TRANSACTION_TYPES } from '../constants/categories';
-import { debitDisplayAmount, groupLbChipKind, isMemoTxn, splitLbChipKind } from './split';
+import { debitDisplayAmount, groupLbChipKind, splitLbChipKind } from './split';
 import type { GroupMember, GroupSplit } from '../types/group';
 
 /** The fields a card / split view reads (the store txn is a superset). */
@@ -47,7 +47,13 @@ export interface CardAccount { name?: string; mask?: string; type?: string; bank
 
 export type CardContext = (typeof CARD_CONTEXT)[keyof typeof CARD_CONTEXT];
 type ChipTone = 'warning' | 'income' | 'neutral' | 'lent' | 'borrowed';
-export interface CardChip { kind: string; label: string; tone: ChipTone }
+export interface CardChip {
+  kind: string;
+  label: string;
+  tone: ChipTone;
+  /** Printed after the label — only when it's a number the card doesn't already show. */
+  amount?: number;
+}
 
 export interface TxnCard {
   title: string;
@@ -121,6 +127,28 @@ function firstName(name: string | null | undefined): string {
   return s ? s.split(/\s+/)[0] : '';
 }
 
+/**
+ * What I fronted for the others on a bill I paid AND kept a share of — the one
+ * number such a card can't otherwise show (it shows my share "of ₹bill").
+ * 0 when I didn't pay, kept no share (then the card's amount IS the loan), or no
+ * one else is on it.
+ */
+function lentOnBill(txn: CardTxn): number {
+  if (txn.type !== TRANSACTION_TYPES.DEBIT) return 0;
+  const sum = (xs: { shareAmount?: number }[]) => xs.reduce((t, x) => t + (Number(x.shareAmount) || 0), 0);
+  let mine = 0;
+  let others = 0;
+  if (txn.groupSplit?.shares?.length) {
+    if (txn.groupSplit.paidByMemberId !== 'me') return 0;
+    mine = Number(txn.groupSplit.shares.find((x) => x.memberId === 'me')?.shareAmount) || 0;
+    others = sum(txn.groupSplit.shares.filter((x) => x.memberId !== 'me'));
+  } else if (txn.isSplit && !txn.isSplitMemo) {
+    mine = Number(txn.myShareAmount) || 0;
+    others = sum(txn.splitWith || []);
+  }
+  return mine > 0 && others > 0.005 ? Math.round(others * 100) / 100 : 0;
+}
+
 function statusChip(txn: CardTxn): CardChip | null {
   const c = txn.categoryId;
   if (c === 'self' || txn.childCategory === 'Self') return CHIP.self;
@@ -143,7 +171,6 @@ export function buildTxnCard(
   } = {},
 ): TxnCard {
   const isCredit = txn.type === TRANSACTION_TYPES.CREDIT;
-  const isMemo = isMemoTxn(txn);
   const bill = Number(txn.amount) || 0;
 
   // ── amount: what this costs ME ───────────────────────────────────────────
@@ -152,9 +179,10 @@ export function buildTxnCard(
   // In a shared group with a 0 share I owe nothing — unless I fronted the bill.
   const notInvolved = !!txn.groupId && !isCredit && !iPaidGroup && share === 0;
   const value = !!txn.groupId && iPaidGroup && share === 0 ? bill : share;
-  // One rule for "not really mine": muted when no money of mine moved (memo) or it's
-  // been ignored. EXCLUDED keeps full ink — that money did leave the account.
-  const tone: TxnCard['amount']['tone'] = isCredit ? 'income' : isMemo || txn.isIgnored ? 'muted' : 'expense';
+  // Muted only when IGNORED. A borrowed (someone-else-paid) bill keeps full ink —
+  // "Rohit paid" + BORROWED already say whose money it was, and the share is still a
+  // real cost to me. EXCLUDED keeps full ink too (that money did leave).
+  const tone: TxnCard['amount']['tone'] = isCredit ? 'income' : txn.isIgnored ? 'muted' : 'expense';
   const totalHint = !isCredit && bill > 0 && (notInvolved || Math.abs(value - bill) > 0.009) ? bill : null;
 
   // ── tier 2: what + whose money ───────────────────────────────────────────
@@ -169,12 +197,15 @@ export function buildTxnCard(
 
   // ── tier 3: chips, highest priority first ────────────────────────────────
   const lbKind: string | null = groupLbChipKind(txn) || splitLbChipKind(txn);
+  // Borrowed / fully-lent: the card's amount already IS that money → bare chip.
+  // Paid + kept a share: the lent part is shown nowhere else → "LENT ₹600".
+  const lent = lbKind ? 0 : lentOnBill(txn);
   const candidates = [
     txn.isIgnored && CHIP.ignored,
     isCredit && txn.isRefund && CHIP.refund,
     !isCredit && isExcluded && CHIP.excluded,
     statusChip(txn),
-    lbKind && CHIP[lbKind],
+    lbKind ? CHIP[lbKind] : lent > 0 ? { ...CHIP.lent, amount: lent } : null,
     !txn.isIgnored && txn.isHidden && CHIP.private,
   ].filter((c): c is CardChip => !!c);
   // A category LENT and a split's LENT framing are the same fact — show it once.

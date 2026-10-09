@@ -25,6 +25,7 @@ import LbEntryForm from '../components/LbEntryForm';
 import InfoIcon from '../components/InfoIcon';
 import InfoSheet from '../components/InfoSheet';
 import Svg, { Path } from 'react-native-svg';
+import ReminderBell from '../components/ReminderBell';
 import WhatsAppIcon from '../components/WhatsAppIcon';
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
@@ -63,14 +64,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     [accounts],
   );
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
-  // "Does this person already have a reminder?" now comes from the reminder
-  // REGISTRY (keyed by personKey in `sourceKey`), which is also what the
-  // Reminders screen lists — one source, so the bell and that list can't disagree.
-  const reminders = useEPurseStore((s) => s.reminders);
-  const remindedKeys = useMemo(
-    () => new Set((reminders || []).map((r) => r.sourceKey).filter(Boolean)),
-    [reminders],
-  );
   /**
    * The person's signed net (> 0 = they owe you) as it stands NOW — call after the
    * store write so a toast can report the resulting position. Matches on the
@@ -279,31 +272,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
                 else's task, so the action is to message them (the WhatsApp
                 button above), not to set your own alarm. */}
             {!isFullySettled && pb.net < 0 ? (
-              <TouchableOpacity
-                style={[styles.bellBtn, remindedKeys.has(pb.personKey) && styles.bellBtnActive]}
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  // Amount + person go over STRUCTURED so the form can emphasise
-                  // them in its "Remind yourself to pay ₹X to Y" line and compose
-                  // the notification body from the same values.
-                  navigation.navigate('ReminderForm', {
-                    kind: 'lb_borrow',
-                    sourceKey: pb.personKey,
-                    presetTitle: `Pay ${pb.person}`,
-                    presetAmount: Math.abs(pb.net),
-                    presetPerson: pb.person,
-                  });
-                }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel={`Set a reminder to pay ${pb.person}`}
-              >
-                <Ionicons
-                  name={remindedKeys.has(pb.personKey) ? 'notifications' : 'notifications-outline'}
-                  size={16}
-                  color={remindedKeys.has(pb.personKey) ? theme.primary : colors.textMuted}
-                />
-              </TouchableOpacity>
+              <ReminderBell personKey={pb.personKey} person={pb.person} amount={pb.net} style={styles.bellGap} />
             ) : null}
             {/* No edit affordance here on purpose: the whole card already opens this
                 person's ledger, and editing happens per-entry there. A pencil implied
@@ -312,7 +281,7 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         </View>
       );
     },
-    [navigation, remindedKeys, theme]
+    [navigation, theme]
   );
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
@@ -553,7 +522,7 @@ const styles = StyleSheet.create({
   },
   netAmount: { ...typography.bodyBold, fontWeight: '800' },
   netLabel: { ...typography.tiny, fontWeight: '600', marginTop: 1 },
-  // waBtn / bellBtn are a matched pair of 28×28 tinted circles — the trailing
+  // waBtn / ReminderBell are a matched pair of 28×28 tinted circles — the trailing
   // affordances on a person card must read as one set.
   //
   // Glyph sizes are 16 (bell) / 17 (WhatsApp) — NOT identical on purpose. The
@@ -570,21 +539,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: spacing.xs,
   },
-  bellBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#6366F112',
-    borderWidth: 1,
-    borderColor: '#6366F130',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.xs,
-  },
-  bellBtnActive: {
-    backgroundColor: '#6366F128',
-    borderColor: '#6366F166',
-  },
+  bellGap: { marginLeft: spacing.xs },
   settledBadge: {
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 4,

@@ -2518,6 +2518,10 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## UI Consistency / Navigation
 
 **Done**
+- Oct-10-2026: **Reminder bell in group settlements** — you-owe rows in Group Detail → Members get the same bell as Lent/Borrowed (new shared `ReminderBell`; LentBorrowed switched to it).
+- Oct-10-2026: **LENT amount on cards** — paid + kept a share (group or split) now reads `− ₹300 of ₹900 · LENT ₹600`; borrowed/fully-lent chips stay bare (the amount already says it).
+- Oct-10-2026: **Group card figures** — shared: Total Spent │ Your Share + tappable balance line ("Rohit owes you ₹600", mixed, "All settled up") → Members; personal: Total Spent │ This Month; all from the live list (was the drifting totalSpend counter + "YOU LENT"). Summary labels say whose money (Your Share by Month / Where Your Share Went / Who Paid the Bills), payer names from current members. Groups list card: "owed to you"/"you owe" (was lent/borrowed). New `utils/groupHero.ts` + `test:groupHero`.
+- Oct-10-2026: **Group Detail surfaces + swipe** — page grey with white tiles (group card w/ group-tinted name strip; ⋮ menu (Add Expense / Edit / Delete) in the card, full-width Group Zone tile, Settle Up button removed), flat header w/o border, page scroll (top block scrolls away, tab bar sticks) + swipeable tab pages; short tabs don't scroll.
 - Oct-9-2026: **One detail sheet for every transaction** — `GroupTxnDetailSheet` deleted; group txns now open
   `TxnDetailSheet` like plain/split ones, so they show the same Category · Group · Account · Location · Note rows
   (the group sheet had only payer/total/split). New Group row (hidden on Group Detail); Account row hidden when

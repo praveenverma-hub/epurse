@@ -492,11 +492,11 @@ export default function AccountsScreen({ navigation }) {
         </View>
         {sortedAccounts.length === 0 ? (
           <EmptyState
-            compact
             icon="card-outline"
             title="No accounts yet"
-            subtitle="Tap + above to add your first account."
-            style={styles.accountsEmpty}
+            subtitle="Add your bank, card or cash to see your balances and where your money moves."
+            actionLabel="Add Account"
+            onAction={() => navigation.navigate('AccountForm')}
           />
         ) : (
           sortedAccounts.map((a) => {
@@ -825,5 +825,4 @@ const styles = StyleSheet.create({
 
   // Fill the space between the header/list title and the bottom tab clearance.
   emptyBodyContent: { flexGrow: 1 },
-  accountsEmpty: { flex: 1, justifyContent: 'center' },
 });

@@ -5,7 +5,7 @@
   "scripts": {
     "start:mock": "EXPO_PUBLIC_MOCK_DATA=1 expo start --clear",
     "test:mock": "node --no-warnings src/utils/__tests__/mockData.test.mjs",
-    "test": "npm run test:parse && npm run test:parser && npm run test:splitShares && npm run test:categorySuggest && npm run test:categoryQuickPick && npm run test:accountMatch && npm run test:self && npm run test:group && npm run test:txnCard && npm run test:store && npm run test:e2e && npm run test:bulk && npm run test:smsSync && npm run test:homeCards && npm run test:carousel && npm run test:headerLayout && npm run test:dateRange && npm run test:reminders && npm run test:dueDate && npm run test:ccStatement && npm run test:accountFlow && npm run test:accountGradient && npm run test:arrange && npm run test:goals && npm run test:rewards && npm run test:profile && npm run test:contrast && npm run test:elevation && npm run test:modals && npm run test:backup && npm run test:payload && npm run test:drive && npm run test:remoteConfig && npm run test:buildVariant",
+    "test": "npm run test:parse && npm run test:parser && npm run test:splitShares && npm run test:categorySuggest && npm run test:categoryQuickPick && npm run test:accountMatch && npm run test:self && npm run test:group && npm run test:txnCard && npm run test:groupHero && npm run test:store && npm run test:e2e && npm run test:bulk && npm run test:smsSync && npm run test:homeCards && npm run test:carousel && npm run test:headerLayout && npm run test:dateRange && npm run test:reminders && npm run test:dueDate && npm run test:ccStatement && npm run test:accountFlow && npm run test:accountGradient && npm run test:arrange && npm run test:goals && npm run test:rewards && npm run test:profile && npm run test:contrast && npm run test:elevation && npm run test:modals && npm run test:backup && npm run test:payload && npm run test:drive && npm run test:remoteConfig && npm run test:buildVariant",
     "setup": "bash setup.sh",
     "setup:clean": "bash setup.sh --clean",
     "setup:ios": "bash setup.sh --ios",
@@ -34,6 +34,7 @@
     "test:splitShares": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/splitShares.test.mjs",
     "test:accountMatch": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/accountMatch.test.mjs",
     "test:self": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/selfTransfer.test.mjs",
+    "test:groupHero": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/groupHero.test.mjs",
     "test:txnCard": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/txnCard.test.mjs",
     "test:group": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/groupExpense.test.mjs",
     "test:store": "node --no-warnings src/utils/__tests__/storeIntegration.test.mjs",

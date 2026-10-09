@@ -277,6 +277,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const amountLocked = isEdit && editTxn?.source !== 'manual';
   // Same bank-verified rule as the amount: the bank said debit/credit.
   const typeLocked = amountLocked;
+  // Add: swipeable tabs; manual edit: tap-only; bank-parsed edit: no switch.
+  const showTypeTabs = !isEdit || !typeLocked;
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [amount,         setAmount]         = useState('');
@@ -1568,7 +1570,9 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     <View style={styles.root}>
       <StatusBar style="dark" />
 
-      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+      {/* With the folder tabs below, header + tab strip are one white surface — the
+          tabs' coloured baseline is the only edge, so the header drops its hairline. */}
+      <SafeAreaView edges={['top']} style={[styles.headerSafe, showTypeTabs && styles.headerSafeOpen]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
@@ -1588,12 +1592,12 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
             the type. Edit: no swipe (one stray swipe would flip a saved txn's type) — a
             plain tap bar for a manual txn, and no switch at all for a bank-parsed one,
             whose debit/credit is what the bank said. */}
-        {!isEdit || !typeLocked ? (
+        {showTypeTabs ? (
           <UnderlineTabBar
+            variant="folder"
             tabs={TYPE_ROUTES}
             activeKey={type}
             onChange={handleTypeChange}
-            topBorder={false}
             accentColor={type === TRANSACTION_TYPES.CREDIT ? colors.income : colors.expense}
           />
         ) : null}
@@ -1745,6 +1749,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
+  headerSafeOpen: { borderBottomWidth: 0 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
