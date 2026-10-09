@@ -21,7 +21,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, readableOn, spacing, typography } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { STATIC_CONFIG } from '../config/staticConfig';
@@ -933,9 +933,10 @@ const styles = StyleSheet.create({
   groupActionFill: { flex: 4 },
   deleteIconBtn: {
     flex: 1,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     backgroundColor: colors.danger,
-    paddingVertical: spacing.md,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
   },

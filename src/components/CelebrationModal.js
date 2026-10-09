@@ -12,7 +12,7 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Modal from "./AppModal";
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useEPurseStore } from '../store/ePurseStore';
 import { formatCompact } from '../utils/format';
@@ -236,11 +236,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   primaryBtn: {
-    paddingVertical: spacing.md + 2,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     borderRadius: radius.lg,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '800', fontSize: 16 },
+  primaryBtnText: { ...typography.bodyBold, color: '#fff', fontWeight: '700' },
   secondaryBtn: {
     paddingVertical: spacing.md,
     alignItems: 'center',

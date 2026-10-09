@@ -126,7 +126,7 @@ const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
 
         <View style={[styles.footer, { backgroundColor: theme.card, borderTopColor: theme.divider }]}>
           <Pressable
-            style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.divider }]}
+            style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.disabledBackground }]}
             disabled={!canSave}
             onPress={handleSave}
             accessibilityRole="button"
@@ -134,7 +134,7 @@ const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
           >
             <Text style={[
               styles.saveBtnText,
-              { color: canSave ? theme.textOnGradient : theme.textSecondary },
+              { color: canSave ? '#FFFFFF' : theme.disabledText },
             ]}>
               Save
             </Text>

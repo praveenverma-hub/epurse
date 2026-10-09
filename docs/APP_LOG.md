@@ -2518,6 +2518,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## UI Consistency / Navigation
 
 **Done**
+- Oct-10-2026: **Button height sweep** — every remaining full-width CTA on 48px (`BUTTON_H`) + 15/700: short ones raised (Unlock, WhatsApp send, Date/Time Done, Contacts, Delete transaction, recap card, welcome streak), tall ones lowered (card-bill sheets, category Save); Cancel/Skip partners matched; invalid-state fills use the disabled grey tokens. Removed shadow-only padding in Lent/Borrowed person sheets.
 - Oct-10-2026: **Solid, shadowless buttons** — `GradientButton` replaced by `PrimaryButton` (solid primary, no shadow, `tone="danger"`, `color`); 24 call sites + 5 hand-made gradient buttons (Diagnostic, EPC Claim, Info sheet, Export Share, Shop) + Smart Rule's hardcoded purple; CenterModal/EmptyState on BUTTON_H. Theme picker hidden behind new remote flag `themePicker` (off).
 - Oct-10-2026: **Reminder bell in group settlements** — you-owe rows in Group Detail → Members get the same bell as Lent/Borrowed (new shared `ReminderBell`; LentBorrowed switched to it).
 - Oct-10-2026: **LENT amount on cards** — paid + kept a share (group or split) now reads `− ₹300 of ₹900 · LENT ₹600`; borrowed/fully-lent chips stay bare (the amount already says it).

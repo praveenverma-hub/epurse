@@ -13,7 +13,7 @@ import { EPurseInlineWordmark } from './EPurseBrandLockup';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { useAppLockSession } from '../store/useAppLockSession';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, typography as typographyBase } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
 import { isAppLockSuppressed, consumeAppLockSuppress } from '../utils/appLockSuppress';
 
 // Plain RN bridge module (android/.../ScreenSecurityModule.kt), not an Expo
@@ -148,6 +148,6 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
   title: { ...typography.h2 },
   hint: { ...typography.small, marginBottom: spacing.xl, textAlign: 'center' },
-  btn: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.lg },
+  btn: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xs, minHeight: BUTTON_H, justifyContent: 'center', borderRadius: radius.lg },
   btnText: { color: '#fff', ...typography.body, fontWeight: '700' },
 });

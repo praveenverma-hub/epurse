@@ -749,12 +749,12 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: nameOk ? theme.primary : theme.divider }]}
+              style={[styles.saveBtn, { backgroundColor: nameOk ? theme.primary : theme.disabledBackground }]}
               onPress={handleSave}
               disabled={submitting}
               activeOpacity={0.85}
             >
-              <Text style={[styles.saveTxt, { color: nameOk ? '#fff' : theme.textMuted }]}>
+              <Text style={[styles.saveTxt, { color: nameOk ? '#fff' : theme.disabledText }]}>
                 {isEdit ? 'Save' : 'Add Goal'}
               </Text>
             </TouchableOpacity>

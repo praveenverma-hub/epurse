@@ -26,7 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { radius, shadows } from '../constants/theme';
+import { radius, shadows, BUTTON_H, spacing } from '../constants/theme';
 import SheetCloseButton from './SheetCloseButton';
 import {
   ParentCat,
@@ -384,8 +384,10 @@ const styles = StyleSheet.create({
   },
   saveBtn: {
     borderRadius: radius.lg,
-    paddingVertical: 16,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   saveBtnText: {
     fontSize: 15,

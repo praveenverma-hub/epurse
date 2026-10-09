@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { FormSelectRow } from './FormField';
 import SheetCloseButton from './SheetCloseButton';
-import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 
@@ -137,8 +137,10 @@ const styles = StyleSheet.create({
   doneBtn: {
     marginTop: spacing.md,
     borderRadius: radius.lg,
-    paddingVertical: spacing.md,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   doneTxt: { ...typography.bodyBold, color: '#fff', fontWeight: '700' },
 });

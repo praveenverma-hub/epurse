@@ -444,12 +444,12 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.divider }]}
+              style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.disabledBackground }]}
               onPress={handleSave}
               disabled={!canSave}
               activeOpacity={0.85}
             >
-              <Text style={[styles.saveTxt, { color: canSave ? '#fff' : theme.textMuted }]}>
+              <Text style={[styles.saveTxt, { color: canSave ? '#fff' : theme.disabledText }]}>
                 {saving ? 'Setting…' : isEdit ? 'Save changes' : 'Set reminder'}
               </Text>
             </TouchableOpacity>

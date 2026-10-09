@@ -36,7 +36,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { spacing, radius, shadows, withAlpha, typography as typographyBase, DIVIDER_W } from '../constants/theme';
+import { spacing, radius, shadows, withAlpha, typography as typographyBase, DIVIDER_W, BUTTON_H } from '../constants/theme';
 // The JS theme widens fontWeight to `string`; re-type for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { ACCOUNT_TYPES } from '../constants/categories';
@@ -1238,8 +1238,10 @@ const styles = StyleSheet.create({
     flexDirection:     'row',
     alignItems:        'center',
     gap:               8,
+    justifyContent:    'center',
     paddingHorizontal: spacing.xl,
-    paddingVertical:   spacing.md,
+    paddingVertical:   spacing.xs,
+    minHeight:         BUTTON_H,
     borderRadius:      radius.lg,
   },
   unlockText: { fontSize: 15, fontWeight: '700' },
