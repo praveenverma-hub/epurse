@@ -4709,6 +4709,9 @@ export const useEPurseStore = create(
         const updatedTxn = {
           ...old,
           type: newType,
+          // Refunds are credits only; switching to an expense must not leave a
+          // hidden refund flag that later reduces spending incorrectly.
+          isRefund: newType === TRANSACTION_TYPES.CREDIT ? !!old.isRefund : false,
           amount: newAmount,
           merchant: (merchant || old.merchant || 'Transaction').trim(),
           categoryId: categoryId || old.categoryId,

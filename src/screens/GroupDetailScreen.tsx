@@ -35,7 +35,8 @@ import ProgressBar from '../components/ProgressBar';
 import UnderlineTabBar from '../components/UnderlineTabBar';
 import TransactionItemRaw from '../components/TransactionItem';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
-import CategoryPickerModal from '../components/ManageTransactionModal';
+import CategoryPickerModal from '../components/CategoryPickerModal';
+import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
 import EditIcon from '../components/EditIcon';
@@ -89,12 +90,6 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => any[];
   const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
   const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
-  const updateTwoTierCategory = useEPurseStore((s: any) => s.updateTwoTierCategory) as (id: string, parent: string, child: string) => void;
-  const setTransactionHidden = useEPurseStore((s: any) => s.setTransactionHidden) as (id: string, hidden: boolean) => void;
-  const ignoreTransaction = useEPurseStore((s: any) => s.ignoreTransaction) as (id: string) => void;
-  const unignoreTransaction = useEPurseStore((s: any) => s.unignoreTransaction) as (id: string) => void;
-  const deleteTransaction = useEPurseStore((s: any) => s.deleteTransaction) as (id: string) => void;
-  const untagTransactionFromGroup = useEPurseStore((s: any) => s.untagTransactionFromGroup) as (id: string) => void;
   const activeGroupZoneId = useEPurseStore((s: any) => s.activeGroupZoneId) as string | null;
   const setGroupZone = useEPurseStore((s: any) => s.setGroupZone) as (id: string | null) => void;
 
@@ -669,18 +664,19 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       />
 
       <CategoryPickerModal
-        transaction={categoryTxn}
         visible={!!categoryTxn}
+        categoryOnly
         categories={categories}
         selectedCategoryId={categoryTxn?.categoryId}
         selectedParent={categoryTxn?.parentCategory}
         selectedChild={categoryTxn?.childCategory}
         isHidden={!!categoryTxn?.isHidden}
         isIgnored={!!categoryTxn?.isIgnored}
+        canRefund={categoryTxn?.type === 'credit'}
+        isRefund={!!categoryTxn?.isRefund}
         canSplit={false}
-        isSplitTxn={false}
+        isSplitTxn={!!(categoryTxn?.isSplit || categoryTxn?.isSplitMemo)}
         categoryLocked={!!categoryTxn?.lbLocked}
-        currentGroupId={categoryTxn?.groupId || null}
         onSelectCategory={(categoryId: string) => {
           if (categoryId === 'cc_bill') {
             const t = categoryTxn;
@@ -691,49 +687,17 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           if (categoryTxn) updateTransactionCategory(categoryTxn.id, categoryId);
           setCategoryTxn(null);
         }}
-        onSelectTwoTier={(parent: string, child: string) => {
-          if (categoryTxn) updateTwoTierCategory(categoryTxn.id, parent, child);
-          setCategoryTxn(null);
+        onDone={(draft) => {
+          if (!categoryTxn) return;
+          try {
+            applyCategoryPickerDraft(useEPurseStore, categoryTxn, draft);
+            setCategoryTxn(null);
+          } catch (error: any) {
+            toast.error('Could not save', error?.message || 'Please try again.');
+          }
         }}
-        onToggleHidden={(hidden: boolean) => {
-          if (categoryTxn) setTransactionHidden(categoryTxn.id, hidden);
-          setCategoryTxn(null);
-        }}
-        onIgnore={() => {
-          const t = categoryTxn;
-          setCategoryTxn(null);
-          if (!t) return;
-          setConfirm({
-            title: 'Ignore transaction?',
-            message: 'It will be removed from balances, totals and charts — as if it never happened.',
-            primaryText: 'Ignore',
-            secondaryText: 'Cancel',
-            destructive: true,
-            onPrimary: () => { ignoreTransaction(t.id); setConfirm(null); },
-            onSecondary: () => setConfirm(null),
-          });
-        }}
-        onRestore={() => {
-          if (categoryTxn) unignoreTransaction(categoryTxn.id);
-          setCategoryTxn(null);
-        }}
-        onPressRemoveFromGroup={() => {
-          if (categoryTxn) untagTransactionFromGroup(categoryTxn.id);
-          setCategoryTxn(null);
-        }}
-        onDelete={() => {
-          const t = categoryTxn;
-          setCategoryTxn(null);
-          if (!t) return;
-          setConfirm({
-            title: 'Delete transaction?',
-            message: 'This action cannot be undone.',
-            primaryText: 'Delete',
-            secondaryText: 'Cancel',
-            destructive: true,
-            onPrimary: () => { deleteTransaction(t.id); setConfirm(null); },
-            onSecondary: () => setConfirm(null),
-          });
+        onSelectLentBorrow={() => {
+          toast.warning('Use a separate entry', 'Lending and repayments need a person and cannot be assigned to a group expense.');
         }}
         onClose={() => setCategoryTxn(null)}
       />

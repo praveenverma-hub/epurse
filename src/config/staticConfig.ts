@@ -124,6 +124,15 @@ export const STATIC_CONFIG = {
     periodSelector: 'segmented' as 'segmented' | 'original' | 'underline',
   },
 
+  /** Quick controls below the category list opened from a transaction card. */
+  categoryPicker: {
+    quickActions: {
+      privacy: true,
+      ignore: true,
+      refund: true,
+    },
+  },
+
   /** `SmsDiagnosticScreen` — a debug tool, not a user feature. */
   smsDiagnostic: {
     /**

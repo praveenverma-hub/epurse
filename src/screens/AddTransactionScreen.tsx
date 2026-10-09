@@ -76,6 +76,7 @@ import { useAutoCategory } from '../hooks/useAutoCategory';
 import type { Group } from '../types/group';
 import LinkContactModal from '../components/LinkContactModal';
 import CenterModal from '../components/CenterModal';
+import AppSwitch from '../components/AppSwitch';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe } from '../utils/split';
@@ -246,6 +247,11 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const addTransaction  = useEPurseStore((s: any) => s.addTransaction);
   const updateTransaction = useEPurseStore((s: any) => s.updateTransaction);
   const setTransactionSplit = useEPurseStore((s: any) => s.setTransactionSplit);
+  const setTransactionHidden = useEPurseStore((s: any) => s.setTransactionHidden);
+  const setTransactionRefund = useEPurseStore((s: any) => s.setTransactionRefund);
+  const ignoreTransaction = useEPurseStore((s: any) => s.ignoreTransaction);
+  const unignoreTransaction = useEPurseStore((s: any) => s.unignoreTransaction);
+  const deleteTransaction = useEPurseStore((s: any) => s.deleteTransaction);
   const ingestMessage  = useEPurseStore((s: any) => s.ingestMessage);
   const groups         = useEPurseStore((s: any) => s.groups);
   const addGroupExpense = useEPurseStore((s: any) => s.addGroupExpense);
@@ -298,6 +304,9 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   // null = I paid. Otherwise the split participant whose money paid the bill.
   const [splitPaidBy,    setSplitPaidBy]    = useState<{ contactId: string | null; name: string } | null>(null);
   const [note,           setNote]           = useState('');
+  const [privateDraft,   setPrivateDraft]   = useState(false);
+  const [refundDraft,    setRefundDraft]    = useState(false);
+  const [ignoreDraft,    setIgnoreDraft]    = useState(false);
   const [smsBody,        setSmsBody]        = useState('');
   // LB contact-picker state — opened mid-save when an LB category is chosen.
   const [lbPickerOpen,   setLbPickerOpen]   = useState(false);
@@ -317,6 +326,9 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     setParentCategory(editTxn.parentCategory || '');
     setChildCategory(editTxn.childCategory || '');
     setNote(editTxn.note || '');
+    setPrivateDraft(!!editTxn.isHidden);
+    setRefundDraft(!!editTxn.isRefund);
+    setIgnoreDraft(false);
     setGroupId(editTxn.groupId || null);
 
     // Restore the split too. Without this the toggle read OFF on a split transaction,
@@ -841,6 +853,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
    */
   const commitEdit = (groupRes?: { paidByMemberId: string; paidByName: string; shares: any[] }) => {
     if (!editTxnId) return;
+    if (editTxn?.isIgnored) {
+      toast.warning('Restore first', 'Restore this transaction before editing its details.');
+      return;
+    }
     const oldGroupId = editTxn?.groupId || null;
     const createdAt = amountLocked ? editTxn.createdAt : date.toISOString();
 
@@ -850,7 +866,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     if (activeGroup && groupRes) {
       if (!oldGroupId && editTxn?.isSplit) setTransactionSplit(editTxnId, [], {});
       if (oldGroupId !== activeGroup.id) tagTransactionToGroup(editTxnId, activeGroup.id, null);
-      updateGroupExpense(editTxnId, {
+      const saved = updateGroupExpense(editTxnId, {
         amount:  amountLocked ? editTxn.amount : parseFloat(amount),
         merchant: merchant.trim(),
         categoryId: legacyCategoryId,
@@ -864,7 +880,13 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         note: note.trim(),
         date: createdAt,
       });
-      toast.success('Changes saved');
+      if (!saved) {
+        toast.error('Could not save', 'Please try again.');
+        return;
+      }
+      setTransactionHidden(editTxnId, privateDraft);
+      if (ignoreDraft) ignoreTransaction(editTxnId);
+      toast.success(ignoreDraft ? 'Transaction ignored' : 'Changes saved');
       if (fromQueue) {
         recordReview();
         markReviewed(editTxnId);
@@ -877,7 +899,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     // unchanged); the Split row below then saves whatever the form shows — kept,
     // edited, or removed.
     if (oldGroupId) untagTransactionFromGroup(editTxnId);
-    updateTransaction(editTxnId, {
+    const saved = updateTransaction(editTxnId, {
       amount:  amountLocked ? editTxn.amount : parseFloat(amount),
       type,
       accountId: resolvedAccountId,
@@ -888,6 +910,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       note: note.trim(),
       createdAt,
     });
+    if (!saved) {
+      toast.error('Could not save', 'This transaction may need its linked record edited first.');
+      return;
+    }
 
     const wantSplit = isSplit && canSplitHere && splitPicks.length > 0;
     if (wantSplit) {
@@ -923,7 +949,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       // fresh: an untag above may have just turned a group split into a plain one.
       setTransactionSplit(editTxnId, [], {});
     }
-    toast.success('Changes saved');
+    setTransactionHidden(editTxnId, privateDraft);
+    if (type === TRANSACTION_TYPES.CREDIT) setTransactionRefund(editTxnId, refundDraft);
+    if (ignoreDraft) ignoreTransaction(editTxnId);
+    toast.success(ignoreDraft ? 'Transaction ignored' : 'Changes saved');
     if (fromQueue && editTxnId) {
       recordReview();
       markReviewed(editTxnId);
@@ -1020,6 +1049,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   };
 
   const handleSave = () => {
+    if (isEdit && editTxn?.isIgnored) {
+      toast.warning('Restore first', 'Restore this transaction before editing its details.');
+      return;
+    }
     const num = parseFloat(amount);
     if (!num || num <= 0) {
       toast.warning('Invalid amount', 'Please enter an amount greater than zero.');
@@ -1086,6 +1119,35 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     }
 
     submit(() => commitTransaction());
+  };
+
+  const confirmEditAction = (action: 'restore' | 'delete') => {
+    if (!editTxnId) return;
+    const details = {
+      restore: {
+        title: 'Restore transaction?',
+        message: 'This adds it back to balances, totals, and charts. Any unsaved edits will be discarded.',
+        primaryText: 'Restore',
+        destructive: false,
+        run: unignoreTransaction,
+      },
+      delete: {
+        title: 'Delete transaction?',
+        message: 'This permanently removes the transaction. Any unsaved edits will be discarded.',
+        primaryText: 'Delete',
+        destructive: true,
+        run: deleteTransaction,
+      },
+    }[action];
+    setConfirm({
+      ...details,
+      secondaryText: 'Cancel',
+      onConfirm: () => {
+        details.run(editTxnId);
+        setConfirm(null);
+        navigation.goBack();
+      },
+    });
   };
 
   const handleParseSMS = () => {
@@ -1243,12 +1305,13 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
               />
             </FormValueCard>
 
-            {/* Budget breach preview */}
+            {/* Keep the budget warning close to the amount/category fields so it is
+                visible while reviewing the edit, before the destructive actions. */}
             {breachPreview ? (
               <View
                 style={[
                   styles.breachChip,
-                  styles.breachBelowCard,
+                  styles.breachNearFields,
                   breachPreview.over ? styles.breachChipOver : styles.breachChipWarn,
                 ]}
               >
@@ -1265,6 +1328,85 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 </Text>
               </View>
             ) : null}
+
+            {isEdit && (
+              <View style={styles.editActions}>
+                <Text style={styles.editActionsTitle}>More options</Text>
+                {editTxn?.isIgnored ? (
+                  <Text style={styles.editActionsHint}>Restore this transaction before changing its details.</Text>
+                ) : (
+                  <View style={styles.editActionsCard}>
+                    {!ignoreDraft && <View style={styles.editOptionRow}>
+                      <View style={styles.editOptionCopy}>
+                        <Text style={styles.editOptionTitle}>Private</Text>
+                        <Text style={styles.editOptionHint}>Hide from default lists; still count in totals.</Text>
+                      </View>
+                      <AppSwitch
+                        value={privateDraft}
+                        onValueChange={setPrivateDraft}
+                        trackColor={{ true: theme.primary, false: colors.divider }}
+                        thumbColor="#fff"
+                        ios_backgroundColor={colors.divider}
+                      />
+                    </View>}
+                    {!ignoreDraft && type === TRANSACTION_TYPES.CREDIT && (
+                      <View style={[styles.editOptionRow, styles.editOptionDivider]}>
+                        <View style={styles.editOptionCopy}>
+                          <Text style={styles.editOptionTitle}>Refund or cashback</Text>
+                          <Text style={styles.editOptionHint}>Reduce spending instead of counting this as income.</Text>
+                        </View>
+                        <AppSwitch
+                          value={refundDraft}
+                          onValueChange={setRefundDraft}
+                          trackColor={{ true: theme.primary, false: colors.divider }}
+                          thumbColor="#fff"
+                          ios_backgroundColor={colors.divider}
+                        />
+                      </View>
+                    )}
+                    <View style={[styles.editOptionRow, !ignoreDraft && styles.editOptionDivider]}>
+                      <View style={styles.editOptionCopy}>
+                        <Text style={styles.editOptionTitle}>Ignore transaction</Text>
+                      </View>
+                      <AppSwitch
+                        value={ignoreDraft}
+                        onValueChange={setIgnoreDraft}
+                        trackColor={{ true: theme.primary, false: colors.divider }}
+                        thumbColor="#fff"
+                        ios_backgroundColor={colors.divider}
+                      />
+                    </View>
+                    {ignoreDraft && (
+                      <View style={[styles.editIgnoreInfo, { backgroundColor: theme.warning + '12' }]}>
+                        <Ionicons name="information-circle-outline" size={18} color={theme.warning} />
+                        <Text style={[styles.editIgnoreInfoText, { color: theme.textPrimary }]}>
+                          Saving will exclude this transaction from balances, totals and charts. Any split will be removed. Turn Ignore off to keep it active.
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+                {editTxn?.isIgnored && (
+                  <TouchableOpacity
+                    style={styles.editSecondaryAction}
+                    onPress={() => confirmEditAction('restore')}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="arrow-undo-outline" size={19} color={theme.primary} />
+                    <Text style={[styles.editSecondaryActionText, { color: theme.primary }]}>Restore transaction</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.editDeleteAction}
+                  onPress={() => confirmEditAction('delete')}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="trash-outline" size={19} color={colors.danger} />
+                  <Text style={styles.editDeleteActionText}>Delete transaction</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
     </>
   );
 
@@ -1365,7 +1507,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     return () => clearTimeout(id);
   }, [isEdit, route?.params?.openSplit, editTxn?.id, fromQueue]);
 
-  const canSubmit = (parseFloat(amount) || 0) > 0 && merchant.trim().length > 0;
+  const canSubmit = !editTxn?.isIgnored && (parseFloat(amount) || 0) > 0 && merchant.trim().length > 0;
   const typeIndex = type === TRANSACTION_TYPES.CREDIT ? 1 : 0;
 
   if (fromQueue && route?.params?.openSplit) {
@@ -1534,7 +1676,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           <View style={styles.catModalSheet}>
             <SheetCloseButton onPress={() => setCatPickerOpen(false)} variant="absolute" />
             <View style={styles.catModalHandle} />
-            <Text style={styles.catModalTitle}>Choose category</Text>
+            <Text style={styles.catModalTitle}>Choose Category</Text>
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -1608,6 +1750,36 @@ const styles = StyleSheet.create({
   },
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
+  editActions: { marginTop: spacing.xl },
+  editActionsTitle: { ...typography.h3, fontWeight: '700' as const, color: colors.textPrimary, marginBottom: spacing.sm },
+  editActionsHint: { ...typography.small, fontWeight: '400' as const, color: colors.textSecondary, marginBottom: spacing.md },
+  editActionsCard: {
+    borderColor: colors.inputBorder,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+  },
+  editOptionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, gap: spacing.md },
+  editOptionDivider: { borderTopWidth: 1, borderTopColor: colors.divider },
+  editOptionCopy: { flex: 1 },
+  editOptionTitle: { ...typography.bodyBold, fontWeight: '700' as const, color: colors.textPrimary },
+  editOptionHint: { ...typography.small, fontWeight: '400' as const, color: colors.textSecondary, marginTop: 2 },
+  editIgnoreInfo: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, marginBottom: spacing.md },
+  editIgnoreInfoText: { ...typography.small, fontWeight: '400' as const, flex: 1, lineHeight: 19 },
+  editSecondaryAction: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    padding: spacing.md, marginTop: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.inputBorder,
+  },
+  editSecondaryActionText: { ...typography.bodyBold, fontWeight: '700' as const },
+  editDeleteAction: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    padding: spacing.md, marginTop: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.inputBorder,
+  },
+  editDeleteActionText: { ...typography.bodyBold, fontWeight: '700' as const, color: colors.danger },
   // Covers the whole screen (header included).
   // Hairline + gap so the contact search reads as its own block, not part of the shares card.
   contactSearchBlock: { marginTop: spacing.lg, paddingTop: spacing.lg, borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
@@ -1731,8 +1903,7 @@ const styles = StyleSheet.create({
   },
   breachChipWarn: { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' },
   breachChipOver: { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' },
-  // Sits under the value card, whose own bottom margin already spaces it.
-  breachBelowCard: { marginTop: -spacing.sm, marginBottom: spacing.lg },
+  breachNearFields: { marginTop: -spacing.sm, marginBottom: spacing.md },
   breachIcon: { fontSize: 14, lineHeight: 18 },
   breachText: {
     fontSize: 13,

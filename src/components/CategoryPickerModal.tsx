@@ -21,9 +21,11 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
+import { STATIC_CONFIG } from '../config/staticConfig';
+import GradientButtonBase from './GradientButton';
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
 import {
@@ -31,6 +33,7 @@ import {
   ChildCat,
   LB_CHILD_LABEL_TO_ID,
   LB_SETTLEMENT_IDS,
+  twoTierToLegacyCatId,
 } from '../constants/twoTierCategories';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -41,8 +44,23 @@ interface LegacyCat {
   emoji: string;
 }
 
+export interface CategoryPickerDraft {
+  categoryId?: string;
+  parentCategory?: string;
+  childCategory?: string;
+  isHidden: boolean;
+  isIgnored: boolean;
+  isRefund: boolean;
+}
+
+const GradientButton = GradientButtonBase as React.FC<{
+  title: string; onPress: () => void; flat?: boolean; disabled?: boolean;
+}>;
+
 interface Props {
   visible: boolean;
+  /** Quick category tap: keep this sheet focused on choosing a category. */
+  categoryOnly?: boolean;
   /** Full legacy categories list — only used to render settlement rows. */
   categories: LegacyCat[];
   /** Pre-selected legacy categoryId — used for settlement row highlight. */
@@ -74,6 +92,8 @@ interface Props {
   onToggleRefund?: (isRefund: boolean) => void;
   onIgnore?: () => void;
   onRestore?: () => void;
+  /** Commits staged category/quick-action changes in the category-only flow. */
+  onDone?: (draft: CategoryPickerDraft) => void;
   onDelete?: () => void;
   onClose: () => void;
   /** groupId the transaction currently belongs to (if any). */
@@ -358,6 +378,7 @@ export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
 
 const CategoryPickerModal: React.FC<Props> = ({
   visible,
+  categoryOnly = false,
   categories,
   selectedCategoryId,
   selectedParent,
@@ -379,6 +400,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   onToggleRefund,
   onIgnore,
   onRestore,
+  onDone,
   onDelete,
   onClose,
   currentGroupId,
@@ -388,20 +410,84 @@ const CategoryPickerModal: React.FC<Props> = ({
   groupHasSplit,
 }) => {
   const theme = useTheme();
+  const [draft, setDraft] = useState<CategoryPickerDraft>({
+    categoryId: selectedCategoryId,
+    parentCategory: selectedParent,
+    childCategory: selectedChild,
+    isHidden,
+    isIgnored,
+    isRefund: !!isRefund,
+  });
+  const [quickInfo, setQuickInfo] = useState<'private' | 'ignore' | 'refund' | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    setDraft({
+      categoryId: selectedCategoryId,
+      parentCategory: selectedParent,
+      childCategory: selectedChild,
+      isHidden,
+      isIgnored,
+      isRefund: !!isRefund,
+    });
+    setQuickInfo(null);
+  }, [visible, selectedCategoryId, selectedParent, selectedChild, isHidden, isIgnored, isRefund]);
+  const showPrivacy = categoryOnly && !draft.isIgnored && STATIC_CONFIG.categoryPicker.quickActions.privacy;
+  const showIgnore = categoryOnly && STATIC_CONFIG.categoryPicker.quickActions.ignore;
+  const showRefund = categoryOnly && !draft.isIgnored && canRefund && STATIC_CONFIG.categoryPicker.quickActions.refund;
+  const hasChanges = draft.categoryId !== selectedCategoryId
+    || draft.parentCategory !== selectedParent
+    || draft.childCategory !== selectedChild
+    || draft.isHidden !== isHidden
+    || draft.isIgnored !== isIgnored
+    || draft.isRefund !== !!isRefund;
+  const quickInfoText = quickInfo === 'private' && draft.isHidden
+    ? 'Hidden from default views, but still counted in totals. Find it using the Private filter in Activity.'
+    : quickInfo === 'ignore' && draft.isIgnored
+      ? `Excluded from balances, totals and charts.${isSplitTxn ? ' Its split is removed too.' : ''} Find it using the Ignored filter in Activity.`
+      : quickInfo === 'refund' && draft.isRefund
+        ? 'This credit reduces your spending instead of counting as income.'
+        : null;
+  const quickAction = (
+    label: string,
+    icon: React.ComponentProps<typeof Ionicons>['name'],
+    tone: string,
+    selected: boolean,
+    onPress: () => void,
+    accessibilityLabel: string,
+  ) => {
+    const fill = selected ? readableOn('#FFFFFF', tone) : null;
+    const ink = selected ? '#FFFFFF' : tone;
+    return (
+      <TouchableOpacity
+        key={label}
+        style={[styles.quickAction, { flex: 1, backgroundColor: fill || tone + '14', borderColor: fill || tone + '55' }]}
+        onPress={onPress}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ selected }}
+      >
+        <Ionicons name={selected ? 'checkmark-circle' : icon} size={20} color={ink} />
+        <Text style={[styles.quickActionText, { color: ink }]} numberOfLines={1}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
         <SheetCloseButton onPress={onClose} />
 
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, categoryOnly && !categoryLocked && styles.categoryOnlySheet]}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Manage transaction</Text>
+            <Text style={styles.title}>{categoryOnly ? 'Choose Category' : 'Manage transaction'}</Text>
             {/* Changes apply on tap — Save just confirms + closes the sheet. Plain text button. */}
-            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.6}>
-              <Text style={[styles.saveBtnTxt, { color: theme.primary }]}>Save</Text>
-            </TouchableOpacity>
+            {!categoryOnly && (
+              <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.6}>
+                <Text style={[styles.saveBtnTxt, { color: theme.primary }]}>Save</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {categoryLocked ? (
@@ -429,18 +515,24 @@ const CategoryPickerModal: React.FC<Props> = ({
           ) : (
             <ScrollView
               showsVerticalScrollIndicator={false}
-              style={styles.list}
+              style={[styles.list, categoryOnly && styles.categoryOnlyList]}
               keyboardShouldPersistTaps="handled"
             >
               <CategoryTreeList
                 categories={categories}
-                selectedCategoryId={selectedCategoryId}
-                selectedParent={selectedParent}
-                selectedChild={selectedChild}
+                selectedCategoryId={categoryOnly ? draft.categoryId : selectedCategoryId}
+                selectedParent={categoryOnly ? draft.parentCategory : selectedParent}
+                selectedChild={categoryOnly ? draft.childCategory : selectedChild}
                 resetKey={visible}
                 onSelectTwoTier={(parent, child) => {
                   const lbId = LB_CHILD_LABEL_TO_ID[child.label];
                   if (lbId && onSelectLentBorrow) onSelectLentBorrow(lbId);
+                  else if (categoryOnly) setDraft((current) => ({
+                    ...current,
+                    categoryId: child.legacyId || parent.legacyId || twoTierToLegacyCatId(parent.label, child.label) || undefined,
+                    parentCategory: parent.label,
+                    childCategory: child.label,
+                  }));
                   else if (onSelectTwoTier) onSelectTwoTier(parent.label, child.label);
                   else onSelectCategory(parent.id);
                 }}
@@ -450,6 +542,39 @@ const CategoryPickerModal: React.FC<Props> = ({
             </ScrollView>
           )}
 
+          {(showPrivacy || showIgnore || showRefund) && (
+            <View style={[styles.quickActions, { borderTopColor: theme.divider }]}>
+              {showPrivacy && quickAction(draft.isHidden ? 'Public' : 'Private', 'eye-off-outline', theme.success, !!draft.isHidden,
+                () => { setDraft((current) => ({ ...current, isHidden: !current.isHidden })); setQuickInfo(draft.isHidden ? null : 'private'); },
+                draft.isHidden ? 'Make transaction public' : 'Make transaction private')}
+              {showIgnore && quickAction(draft.isIgnored ? 'Restore' : 'Ignore', draft.isIgnored ? 'refresh-outline' : 'ban-outline',
+                draft.isIgnored ? theme.success : theme.warning, draft.isIgnored !== !!isIgnored,
+                () => {
+                  setDraft((current) => current.isIgnored
+                    ? { ...current, isIgnored: false, isHidden: !!isHidden && !isIgnored }
+                    : { ...current, isIgnored: true, isHidden: false });
+                  setQuickInfo(draft.isIgnored ? null : 'ignore');
+                }, draft.isIgnored ? 'Restore transaction' : 'Ignore transaction')}
+              {showRefund && quickAction(draft.isRefund ? 'Undo refund' : 'Refund', 'return-down-back-outline',
+                draft.isRefund ? theme.income : theme.textSecondary, !!draft.isRefund,
+                () => { setDraft((current) => ({ ...current, isRefund: !current.isRefund })); setQuickInfo(draft.isRefund ? null : 'refund'); },
+                draft.isRefund ? 'Remove refund status' : 'Mark as refund')}
+            </View>
+          )}
+
+          {categoryOnly && quickInfoText && (
+            <Text style={[styles.quickInfo, { color: theme.textSecondary, backgroundColor: theme.background }]}>{quickInfoText}</Text>
+          )}
+
+          {categoryOnly && (
+            <View style={styles.quickFooter}>
+              <GradientButton flat title="Done" disabled={!hasChanges} onPress={() => {
+                if (hasChanges) (onDone ? onDone(draft) : onClose());
+              }} />
+            </View>
+          )}
+
+          {!categoryOnly && <>
           {/* Manage actions — Private · Ignore · Split share one row. */}
           {(onToggleHidden || onIgnore || onRestore || (canSplit && !isIgnored && onPressSplit)) ? (
             <View style={styles.actionRow}>
@@ -572,6 +697,7 @@ const CategoryPickerModal: React.FC<Props> = ({
               </>
             );
           })()}
+          </>}
         </View>
       </View>
     </Modal>
@@ -597,6 +723,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     maxHeight: '82%',
   },
+  categoryOnlySheet: { height: '70%' },
   handle: {
     width: 40,
     height: 4,
@@ -623,6 +750,12 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   list: { maxHeight: 380 },
+  categoryOnlyList: { flex: 1, maxHeight: '100%' },
+  quickActions: { flexDirection: 'row', gap: spacing.sm, borderTopWidth: 1, paddingTop: spacing.md, marginTop: spacing.sm },
+  quickAction: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.sm + 4, paddingHorizontal: spacing.sm, borderWidth: 1, borderRadius: radius.md },
+  quickActionText: { ...typography.small, fontWeight: '700' as const, flexShrink: 1 },
+  quickInfo: { ...typography.small, fontWeight: '400' as const, lineHeight: 18, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md, marginTop: spacing.sm },
+  quickFooter: { marginTop: spacing.md },
 
   // ── Parent row ─────────────────────────────────────────────────────────────
   parentRow: {

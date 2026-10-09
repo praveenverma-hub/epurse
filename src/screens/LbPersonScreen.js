@@ -17,9 +17,8 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Platform, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
-import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -546,22 +545,17 @@ const LbPersonScreen = ({ route, navigation }) => {
           copy that drifts. `lockedPerson` hides the name/phone/contact fields, and
           passing onKindChange is what surfaces the Lent/Borrowed selector, since
           there's no panel here to imply the direction. */}
-      {/* NO `statusBarTranslucent` — it sets FLAG_LAYOUT_NO_LIMITS on the modal's own
-          window, which disables Android's adjustResize. The window then never shrinks
-          for the keyboard, and since KeyboardAvoidingView passes `undefined` on Android
-          (it RELIES on that resize), a bottom-anchored sheet stays pinned behind the
-          keyboard. Every other input-bearing sheet (e.g. LinkContactModal)
-          omits it for the same reason. Only add it to sheets with no text input. */}
+      {/* NO `statusBarTranslucent` — it disables Android's adjustResize on this
+          modal window. AppModal's keyboard boundary relies on the resized window
+          to keep this bottom sheet above the keyboard. Only use it on sheets with
+          no text input. */}
       <Modal
         visible={addOpen}
         transparent
         animationType="slide"
         onRequestClose={() => setAddOpen(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.sheetBackdrop}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
+        <View style={styles.sheetBackdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setAddOpen(false)} />
           <SheetCloseButton onPress={() => setAddOpen(false)} />
           <View style={styles.sheet}>
@@ -595,7 +589,7 @@ const LbPersonScreen = ({ route, navigation }) => {
               />
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       <AccountPickerSheet
@@ -674,10 +668,7 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
   // avoidance for any sheet with a text input.
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.sheetBackdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.sheetBackdrop}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <SheetCloseButton onPress={onClose} />
         <View style={styles.sheet}>
@@ -757,7 +748,7 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
             </View>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 };
