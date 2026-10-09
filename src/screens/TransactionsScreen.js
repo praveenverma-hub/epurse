@@ -44,7 +44,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, searchFill, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import GradientButton from '../components/GradientButton';
+import PrimaryButton from '../components/PrimaryButton';
 import SheetCloseButton from '../components/SheetCloseButton';
 import EmptyState from '../components/EmptyState';
 import TransactionItem from '../components/TransactionItem';
@@ -1101,7 +1101,7 @@ const TransactionsScreen = ({ navigation, route }) => {
                     <Text style={styles.clearAllText}>Clear All</Text>
                   </Pressable>
                   <View style={styles.applyBtnWrap}>
-                    <GradientButton title="Apply" onPress={applyFilters} />
+                    <PrimaryButton title="Apply" onPress={applyFilters} />
                   </View>
                 </View>
               </View>

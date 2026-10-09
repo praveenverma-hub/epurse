@@ -2,7 +2,7 @@ import React from 'react';
 import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Modal from "./AppModal";
 
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
@@ -111,22 +111,27 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.lg,
   },
+  // Both buttons on the app's ONE button height + PrimaryButton's type (15/700).
   secondaryBtn: {
     flex: 1,
     borderRadius: radius.lg,
-    paddingVertical: spacing.md,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.divider,
   },
-  secondaryText: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '800' },
+  secondaryText: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '700' },
   primaryBtn: {
     flex: 1,
     borderRadius: radius.lg,
-    paddingVertical: spacing.md,
+    minHeight: BUTTON_H,
+    paddingVertical: spacing.xs,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryBtnBusy: { opacity: 0.85 },
-  primaryText: { ...typography.bodyBold, color: '#fff', fontWeight: '900' },
+  primaryText: { ...typography.bodyBold, color: '#fff', fontWeight: '700' },
 });

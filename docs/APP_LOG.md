@@ -2518,6 +2518,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## UI Consistency / Navigation
 
 **Done**
+- Oct-10-2026: **Solid, shadowless buttons** — `GradientButton` replaced by `PrimaryButton` (solid primary, no shadow, `tone="danger"`, `color`); 24 call sites + 5 hand-made gradient buttons (Diagnostic, EPC Claim, Info sheet, Export Share, Shop) + Smart Rule's hardcoded purple; CenterModal/EmptyState on BUTTON_H. Theme picker hidden behind new remote flag `themePicker` (off).
 - Oct-10-2026: **Reminder bell in group settlements** — you-owe rows in Group Detail → Members get the same bell as Lent/Borrowed (new shared `ReminderBell`; LentBorrowed switched to it).
 - Oct-10-2026: **LENT amount on cards** — paid + kept a share (group or split) now reads `− ₹300 of ₹900 · LENT ₹600`; borrowed/fully-lent chips stay bare (the amount already says it).
 - Oct-10-2026: **Group card figures** — shared: Total Spent │ Your Share + tappable balance line ("Rohit owes you ₹600", mixed, "All settled up") → Members; personal: Total Spent │ This Month; all from the live list (was the drifting totalSpend counter + "YOU LENT"). Summary labels say whose money (Your Share by Month / Where Your Share Went / Who Paid the Bills), payer names from current members. Groups list card: "owed to you"/"you owe" (was lent/borrowed). New `utils/groupHero.ts` + `test:groupHero`.

@@ -17,7 +17,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
-import GradientButton from '../components/GradientButton';
+import PrimaryButton from '../components/PrimaryButton';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
@@ -324,7 +324,7 @@ const CategoriesScreen = ({ navigation }) => {
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
               <View style={{ flex: 1 }}>
-                <GradientButton title="Add" onPress={saveAdd} loading={submitting} />
+                <PrimaryButton title="Add" onPress={saveAdd} loading={submitting} />
               </View>
             </View>
           </View>

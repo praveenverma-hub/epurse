@@ -292,7 +292,6 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       kind={k}
       onSubmit={handleAdd}
       theme={theme}
-      submitColors={gradFor(k)}
       submitOutlined
     />
   );

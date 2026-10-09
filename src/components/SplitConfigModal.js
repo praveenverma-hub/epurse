@@ -14,7 +14,7 @@ import Modal from "./AppModal";
 
 import { radius, searchFill, spacing, typography } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import GradientButton from './GradientButton';
+import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
 import { formatCurrency } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
@@ -546,7 +546,7 @@ const SplitConfigModal = ({ visible, transaction, onClose, onApply, embedded = f
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
             {!blocked && (
-              <GradientButton
+              <PrimaryButton
                 title={selected.size === 0 ? 'Select people' : 'Apply split'}
                 onPress={handleApply}
                 disabled={selected.size === 0 || loading || !valid}

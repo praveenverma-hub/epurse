@@ -25,7 +25,7 @@ import { colors, radius, readableOn, spacing, typography } from '../constants/th
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { STATIC_CONFIG } from '../config/staticConfig';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
 import {
@@ -53,7 +53,7 @@ export interface CategoryPickerDraft {
   isRefund: boolean;
 }
 
-const GradientButton = GradientButtonBase as React.FC<{
+const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string; onPress: () => void; flat?: boolean; disabled?: boolean;
 }>;
 
@@ -568,7 +568,7 @@ const CategoryPickerModal: React.FC<Props> = ({
 
           {categoryOnly && (
             <View style={styles.quickFooter}>
-              <GradientButton flat title="Done" disabled={!hasChanges} onPress={() => {
+              <PrimaryButton title="Done" disabled={!hasChanges} onPress={() => {
                 if (hasChanges) (onDone ? onDone(draft) : onClose());
               }} />
             </View>

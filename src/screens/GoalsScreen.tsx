@@ -68,7 +68,7 @@ import { GOAL_TEMPLATES, MAX_ACTIVE_GOALS, TEMPLATE_DURATION, type GoalTemplate 
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
-import GradientButtonBase from '../components/GradientButton';
+import PrimaryButtonBase from '../components/PrimaryButton';
 import EmptyState from '../components/EmptyState';
 import AllocationBar, { type AllocationSegment } from '../components/AllocationBar';
 import GoalCard from '../components/GoalCard';
@@ -85,10 +85,10 @@ import { hapticLight } from '../utils/haptics';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
-// GradientButton.js has no TS declarations, so its inferred prop type demands
+// PrimaryButton.js has no TS declarations, so its inferred prop type demands
 // every prop. Same local cast the other TS callers use (AddTransactionScreen,
 // GroupFormScreen).
-const GradientButton: React.FC<{
+const PrimaryButton: React.FC<{
   title: string;
   onPress: () => void;
   style?: object;
@@ -97,7 +97,7 @@ const GradientButton: React.FC<{
   colors?: string[];
   textStyle?: any;
   icon?: React.ReactNode;
-}> = GradientButtonBase as any;
+}> = PrimaryButtonBase as any;
 
 const FREE_ID = '__free__';
 const SPEND_ID = '__spend__';
@@ -532,7 +532,7 @@ const GoalsScreen = ({ navigation }: any) => {
                     until you confirm.
                   </Text>
                   <View style={styles.heroBtns}>
-                    <GradientButton title="Keep Last Month's Plan" onPress={keepLastPlan} loading={submitting} />
+                    <PrimaryButton title="Keep Last Month's Plan" onPress={keepLastPlan} loading={submitting} />
                   </View>
                 </View>
               ) : null}
@@ -915,7 +915,7 @@ const GoalsScreen = ({ navigation }: any) => {
               >
                 <Text style={[styles.cancelTxt, { color: theme.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
-              <GradientButton
+              <PrimaryButton
                 title={planIsCurrent ? 'Save Changes' : `Save ${MONTH_LABEL(thisMonth).split(' ')[0]} Plan`}
                 onPress={savePlan}
                 loading={submitting}

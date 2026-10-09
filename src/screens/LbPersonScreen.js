@@ -26,13 +26,13 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
-import { useTheme, useLbGradients } from '../hooks/useTheme';
+import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
 import { FormField, FormTextInput, FormAmountInput } from '../components/FormField';
 import DateField from '../components/DateField';
-import GradientButton from '../components/GradientButton';
+import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
 import SheetCloseButton from '../components/SheetCloseButton';
 import CenterModal from '../components/CenterModal';
@@ -66,7 +66,6 @@ const rowIconName = (entry) =>
 
 const LbPersonScreen = ({ route, navigation }) => {
   const theme = useTheme();
-  const lbGradients = useLbGradients();
   const toast = useToast();
   // The SafeAreaView below only claims the TOP edge (its white fill has to match
   // the header bar — see the styles comment), so the pinned Settle footer pays
@@ -519,7 +518,7 @@ const LbPersonScreen = ({ route, navigation }) => {
               {formatCurrency(netAbs)}
             </Text>
           </View>
-          <GradientButton title="Settle" onPress={handleSettlePress} style={styles.settleBtn} />
+          <PrimaryButton title="Settle" onPress={handleSettlePress} style={styles.settleBtn} />
         </View>
       ) : null}
 
@@ -563,13 +562,9 @@ const LbPersonScreen = ({ route, navigation }) => {
             <Text style={[styles.sheetTitle, styles.addSheetTitle]} numberOfLines={1}>
               New entry with {firstName(person.person) || 'this person'}
             </Text>
-            {/* paddingBottom gives the submit button's OWN elevated shadow (shadows.elevated
-                spills ~22px below it) room to render before the ScrollView's scrollable
-                bounds clip it — without it, the shadow was cut flat at the button's edge. */}
             <ScrollView
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.addSheetScrollContent}
             >
               <LbEntryForm
                 kind={addKind}
@@ -581,7 +576,6 @@ const LbPersonScreen = ({ route, navigation }) => {
                 }}
                 onSubmit={handleAddEntry}
                 theme={theme}
-                submitColors={addKind === 'lent' ? lbGradients.lent : lbGradients.borrowed}
                 submitLabel="Add Entry"
                 hideHeading
                 // The sheet already provides the card surface + padding.
@@ -678,11 +672,10 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
           </Text>
 
           {/* Same shadow-clipping fix as the add sheet — "Save changes" is a
-              GradientButton too. */}
+              PrimaryButton too. */}
           <ScrollView
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.addSheetScrollContent}
           >
             {/* Amount + date share a row, matching the LB add form's layout. */}
             <FormField label="Amount">
@@ -734,7 +727,7 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
                 <Ionicons name="trash-outline" size={16} color={colors.danger} />
                 <Text style={styles.deleteBtnText}>Delete</Text>
               </TouchableOpacity>
-              <GradientButton
+              <PrimaryButton
                 title="Save changes"
                 disabled={!canSave}
                 onPress={() => onSave({
@@ -939,9 +932,6 @@ const styles = StyleSheet.create({
   // into a hole above the direction chips. The edit sheet starts with a field and
   // keeps the full gap.
   addSheetTitle: { marginBottom: spacing.sm },
-  // Room for the submit button's elevated shadow — see the comment at its
-  // ScrollView. Shared by both sheets (add + edit); both end on one.
-  addSheetScrollContent: { paddingBottom: spacing.lg + spacing.sm },
   // Matches LbEntryForm's amountRow — the amount and the date button must not read
   // as one merged field (see the note there).
   amountRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

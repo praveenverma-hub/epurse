@@ -14,20 +14,20 @@ import { radius, spacing, typography as typographyBase, BUTTON_H } from '../cons
 import { useTheme } from '../hooks/useTheme';
 import { useGoogleSession } from '../hooks/useGoogleSession';
 import { IS_DEV_BUILD } from '../constants/buildVariant';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 import type { GoogleProfile } from '../backup/googleAuth';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
-// GradientButton.js has no TS declarations, so its inferred prop type demands
+// PrimaryButton.js has no TS declarations, so its inferred prop type demands
 // every prop — same local cast the other TS callers use (GoalsScreen, AddTransactionScreen).
-const GradientButton: React.FC<{
+const PrimaryButton: React.FC<{
   title: string;
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
   style?: object;
-}> = GradientButtonBase as any;
+}> = PrimaryButtonBase as any;
 
 type Props = {
   /** Required in full mode (LoginGate); ignored in compact mode. */
@@ -100,7 +100,7 @@ const GoogleSignInPanel: React.FC<Props> = ({ title, subtitle, onSuccess, compac
   // blocking work on everything else. IS_DEV_BUILD is false in preview/store
   // builds, where the real button always renders as normal.
   const action = googleAccount ? connected : IS_DEV_BUILD ? null : compact ? outlineButton : (
-    <GradientButton
+    <PrimaryButton
       title="Sign In With Google"
       onPress={handlePress}
       loading={pending}

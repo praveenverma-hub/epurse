@@ -207,7 +207,7 @@ export const spacing = {
  * Height of a full-width ACTION button — the one number every primary/secondary
  * button in the app is built from.
  *
- * There were three: `GradientButton` came out ~46 (padding 14 + a 15pt line),
+ * There were three: `PrimaryButton` came out ~46 (padding 14 + a 15pt line),
  * BudgetPlan's Reset ~53 (padding 16 + a 1.5pt border either side), and
  * SmsDiagnostic pinned `minHeight: 52`. A footer pair with a 7pt height
  * difference reads as a rendering fault, not as a hierarchy — and no amount of
@@ -215,7 +215,7 @@ export const spacing = {
  * the total independently.
  *
  * 48, not 52: it is the standard control height, comfortably over the 44pt tap
- * minimum, and closest to what the most-used button (`GradientButton`) already
+ * minimum, and closest to what the most-used button (`PrimaryButton`) already
  * measured — so adopting it moves the fewest pixels.
  *
  * Applied as **`minHeight`**, never `height`: at a large OS font-scale setting a

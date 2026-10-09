@@ -24,7 +24,7 @@ import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, searchFill, spacing, typography, shadows } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import GradientButton from './GradientButton';
+import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
 import { fetchContactsForPicker } from '../services/contactsService';
 import { formatCurrency } from '../utils/format';
@@ -306,13 +306,13 @@ const LinkContactModal = ({
               <Text style={styles.skipText}>Skip</Text>
             </TouchableOpacity>
             {selected ? (
-              <GradientButton
+              <PrimaryButton
                 title="Confirm"
                 onPress={handleConfirmContact}
                 style={styles.submitBtn}
               />
             ) : (!hasContactMatch && !loading && (manualPhone.trim() || (isPhoneQuery && query.trim()))) ? (
-              <GradientButton
+              <PrimaryButton
                 title="Save & link"
                 onPress={() => {
                   const phone = manualPhone.trim() || query.trim();

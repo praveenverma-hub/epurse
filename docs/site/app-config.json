@@ -6,6 +6,7 @@
     "shop": false,
     "inviteEarn": false,
     "rating": false,
-    "smsDiagnostic": false
+    "smsDiagnostic": false,
+    "themePicker": false
   }
 }

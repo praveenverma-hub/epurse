@@ -352,12 +352,8 @@ const BuyButton: React.FC<{
     accessibilityRole="button"
     accessibilityLabel={`Unlock for ${cost} EPC`}
   >
-    <LinearGradient
-      colors={canAfford ? [D.primary, D.primaryDark] : [D.cardElevated, D.card]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 0, y: 1 }}
-      style={StyleSheet.absoluteFill}
-    />
+    {/* Solid, like every button (Oct-10-26) — no gradient. */}
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: canAfford ? D.primary : D.cardElevated }]} />
     <Text style={[styles.buyBtnText, !canAfford && styles.buyBtnTextDisabled]}>Unlock</Text>
     <View style={styles.buyBtnPriceRow}>
       <Ionicons

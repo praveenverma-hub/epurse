@@ -10,7 +10,7 @@ import React, { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { useEPurseStore } from '../store/ePurseStore';
@@ -34,7 +34,7 @@ import { useSplitEditorRoute } from '../store/useSplitEditorRoute';
 import { defaultAccountId } from '../utils/defaultAccount';
 import type { Group, GroupExpenseData } from '../types/group';
 
-const GradientButton = GradientButtonBase as React.FC<{
+const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string;
   onPress: () => void;
   disabled?: boolean;
@@ -308,8 +308,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, presetMer
       </FormValueCard>
 
       {!hideSubmit && (
-        <GradientButton
-          flat
+        <PrimaryButton
           title={editTxn ? 'Save Changes' : 'Add Expense'}
           onPress={handleAdd}
           disabled={amount <= 0}

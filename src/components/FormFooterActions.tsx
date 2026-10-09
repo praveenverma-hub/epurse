@@ -8,9 +8,9 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BUTTON_H, radius, spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import GradientButtonBase from './GradientButton';
+import PrimaryButtonBase from './PrimaryButton';
 
-const GradientButton = GradientButtonBase as React.FC<{
+const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string; onPress: () => void; flat?: boolean; loading?: boolean; style?: object;
 }>;
 
@@ -35,7 +35,7 @@ export default function FormFooterActions({ onCancel, submit }: Props) {
         <Text style={[styles.cancelText, { color: theme.primary }]}>Cancel</Text>
       </TouchableOpacity>
       {submit ? (
-        <GradientButton flat title={submit.title} onPress={submit.onPress} loading={submit.loading} style={styles.submit} />
+        <PrimaryButton title={submit.title} onPress={submit.onPress} loading={submit.loading} style={styles.submit} />
       ) : null}
     </View>
   );
@@ -43,7 +43,7 @@ export default function FormFooterActions({ onCancel, submit }: Props) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  // Same height + radius as GradientButton so the two read as one row.
+  // Same height + radius as PrimaryButton so the two read as one row.
   cancel: {
     minHeight: BUTTON_H,
     paddingHorizontal: spacing.xl,

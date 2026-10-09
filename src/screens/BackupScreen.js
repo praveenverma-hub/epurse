@@ -31,7 +31,7 @@ import CenterModal from '../components/CenterModal';
 import SectionHeader from '../components/SectionHeader';
 import EmptyState from '../components/EmptyState';
 import InfoIcon from '../components/InfoIcon';
-import GradientButton from '../components/GradientButton';
+import PrimaryButton from '../components/PrimaryButton';
 import FaqAccordion from '../components/FaqAccordion';
 import { formatDateLabel } from '../utils/format';
 
@@ -302,7 +302,7 @@ const BackupScreen = ({ navigation, route }) => {
                   </View>
                 </View>
               ) : (
-                <GradientButton title="Connect Google Drive" onPress={handleSignIn} />
+                <PrimaryButton title="Connect Google Drive" onPress={handleSignIn} />
               )}
             </View>
 
@@ -323,7 +323,7 @@ const BackupScreen = ({ navigation, route }) => {
                   </Text>
                 </View>
 
-                <GradientButton title="Back up now" onPress={() => openPassword('backup')} />
+                <PrimaryButton title="Back up now" onPress={() => openPassword('backup')} />
               </View>
             ) : null}
 
@@ -487,7 +487,7 @@ const BackupScreen = ({ navigation, route }) => {
             )}
             {pwErr ? <Text style={styles.errText}>{pwErr}</Text> : null}
 
-            <GradientButton
+            <PrimaryButton
               title={pwSheet?.mode === 'backup' ? 'Encrypt & upload' : 'Unlock & restore'}
               disabled={submittingPassword || (!!recoveryKey && !keySaved)}
               loading={submittingPassword}

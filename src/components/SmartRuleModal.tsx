@@ -15,7 +15,9 @@ import {
 import Modal from "./AppModal";
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import SheetCloseButton from './SheetCloseButton';
-import { shadows } from '../constants/theme';
+import { shadows, BUTTON_H } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import PrimaryButton from './PrimaryButton';
 import { useTheme } from '../hooks/useTheme';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -99,15 +101,13 @@ export const SmartRuleModal: React.FC<Props> = ({ rule, onAutomate, onDismiss })
             <Text style={styles.btnSecondaryText}>No, Ask Every Time</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.btn, styles.btnPrimary]}
-            onPress={() =>
-              onAutomate(rule.rawMerchantKey, rule.parentCategory, rule.childCategory)
-            }
-            activeOpacity={0.85}
-          >
-            <Text style={styles.btnPrimaryText}>✓  Yes, Automate It</Text>
-          </TouchableOpacity>
+          <PrimaryButton
+            title="Yes, Automate It"
+            icon={<Ionicons name="checkmark" size={16} color="#fff" />}
+            onPress={() => onAutomate(rule.rawMerchantKey, rule.parentCategory, rule.childCategory)}
+            style={styles.btnPrimary}
+            textStyle={styles.btnPrimaryText}
+          />
         </View>
       </Animated.View>
     </Modal>
@@ -194,8 +194,9 @@ const styles = StyleSheet.create({
   },
   btn: {
     flex: 1,
-    borderRadius: 16,   // radius.lg — this file has no theme import
-    paddingVertical: 14,
+    borderRadius: 16,   // radius.lg
+    minHeight: BUTTON_H,
+    paddingVertical: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -209,12 +210,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#6B7280',
   },
-  btnPrimary: {
-    backgroundColor: '#6D28D9',
-  },
-  btnPrimaryText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
+  // The shared solid button, narrowed to share a row with the secondary.
+  btnPrimary: { flex: 1, paddingHorizontal: 8, gap: 6 },
+  btnPrimaryText: { fontSize: 13 },
 });

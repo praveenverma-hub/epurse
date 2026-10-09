@@ -34,7 +34,7 @@ import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation'
 import { colors, radius, spacing, typography, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree, useCategoryMaps } from '../hooks/useCategoryTree';
-import GradientButtonBase from '../components/GradientButton';
+import PrimaryButtonBase from '../components/PrimaryButton';
 import SheetCloseButton from '../components/SheetCloseButton';
 import DateField from '../components/DateField';
 import {
@@ -57,8 +57,8 @@ import UnderlineTabBar from '../components/UnderlineTabBar';
 import { TabView } from 'react-native-tab-view';
 import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
 
-// Cast to typed interface — GradientButton.js has no TS declarations
-const GradientButton: React.FC<{
+// Cast to typed interface — PrimaryButton.js has no TS declarations
+const PrimaryButton: React.FC<{
   title: string;
   onPress: () => void;
   style?: object;
@@ -68,7 +68,7 @@ const GradientButton: React.FC<{
   colors?: string[];
   textStyle?: any;
   icon?: React.ReactNode;
-}> = GradientButtonBase as any;
+}> = PrimaryButtonBase as any;
 import InlineContactPicker from '../components/InlineContactPicker';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import { useGroupSplit } from '../hooks/useGroupSplit';

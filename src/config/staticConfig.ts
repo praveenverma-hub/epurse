@@ -145,6 +145,17 @@ export const STATIC_CONFIG = {
     enabled: false,
   },
 
+  /** Settings → Appearance (the theme picker). */
+  themePicker: {
+    /**
+     * false (Oct-10-26): only Violet is designed for — primary buttons are a SOLID
+     * `theme.primary` fill now, and white on some themes' primary fails (Carbon's
+     * mint ≈ 1.3:1, Orange/Blue ≈ 3:1). Remotely re-enable via `REMOTE_FLAG_KEYS`
+     * once the other themes are reviewed.
+     */
+    enabled: false,
+  },
+
   /** `ShopScreen` — the EPC widget catalogue. */
   shop: {
     /** false (MVP): catalogue shows "coming soon"; RP/EPC/level earn as normal. */

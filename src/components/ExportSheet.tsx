@@ -18,13 +18,13 @@ import {
 } from 'react-native';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import PrimaryButton from './PrimaryButton';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from './Toast';
 import SheetCloseButton from './SheetCloseButton';
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, radius, spacing, typography, BUTTON_H } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import {
   compileAndExport,
@@ -345,32 +345,14 @@ const ExportSheet: React.FC<Props> = ({
             </TouchableOpacity>
 
             {/* Share — hands the file to the OS share sheet */}
-            <TouchableOpacity
+            <PrimaryButton
+              title="Share"
+              icon={<Ionicons name="share-outline" size={18} color={canExport ? '#fff' : theme.disabledText} />}
               onPress={() => handleExport('share')}
               disabled={!canExport}
-              activeOpacity={0.85}
-              style={styles.gradientBtnWrap}
-            >
-              <LinearGradient
-                colors={
-                  canExport
-                    ? (theme.gradientStops as unknown as [string, string])
-                    : (['#C8C8C8', '#ADADAD'] as [string, string])
-                }
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.gradientBtn}
-              >
-                {busyMethod === 'share' ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="share-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-                    <Text style={styles.gradientBtnText}>Share</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+              loading={busyMethod === 'share'}
+              style={styles.shareBtn}
+            />
           </View>
 
           <Text style={styles.actionHint}>
@@ -503,9 +485,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.xs,
   },
+  // Outlined partner of the Share PrimaryButton — same height + type, one row.
   outlineBtn: {
     flex: 1,
-    height: 54,
+    minHeight: BUTTON_H,
     borderRadius: radius.lg,
     borderWidth: 1.5,
     backgroundColor: colors.card,
@@ -514,22 +497,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   outlineBtnText: {
-    fontSize: 16,
-    fontWeight: '800' as const,
+    fontSize: 15,
+    fontWeight: '700' as const,
   },
-  gradientBtnWrap: { flex: 1 },
-  gradientBtn: {
-    height: 54,
-    borderRadius: radius.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gradientBtnText: {
-    fontSize: 16,
-    fontWeight: '800' as const,
-    color: '#fff',
-  },
+  shareBtn: { flex: 1 },
 
   actionHint: {
     fontSize: 12, fontWeight: '400' as const,

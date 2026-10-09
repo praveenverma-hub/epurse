@@ -24,7 +24,7 @@ const { mix, luminance, contrastRatio, readableOn, colors, LB_BASE, gradientText
   await import(`${PROJECT_ROOT}/src/constants/theme.js`);
 const { THEMES, DEFAULT_THEME_ID, buildPalette } =
   await import(`${PROJECT_ROOT}/src/constants/themes.js`);
-const { readFileSync } = await import('node:fs');
+const { readFileSync, existsSync } = await import('node:fs');
 const { BANNER_STYLES } =
   await import(`${PROJECT_ROOT}/src/constants/bannerStyles.js`);
 
@@ -934,7 +934,7 @@ console.log('\n── gradients stay dark enough for white ──');
     'heroH is 0 on the first frame when no estimate is given');
 
   // ── One button height, applied as a minimum ───────────────────────────────
-  // The app had three in the full-width action tier: GradientButton came out ~46
+  // The app had three in the full-width action tier: PrimaryButton came out ~46
   // (14pt padding + a 15pt line), BudgetPlan's Reset ~53 (16pt padding + a 1.5pt
   // border either side) and SmsDiagnostic pinned 52. Reported as "the height of
   // reset is more than the other" — a footer pair 7pt apart reads as a rendering
@@ -954,9 +954,11 @@ console.log('\n── gradients stay dark enough for white ──');
     // different font size moves the total independently, which is the whole
     // reason the height itself is what is shared.
     const TIER = [
-      ['components/GradientButton.js', 'btn'],
+      ['components/PrimaryButton.tsx', 'btn'],
       ['screens/BudgetPlanScreen.js', 'resetBtn'],
-      ['screens/SmsDiagnosticScreen.js', 'runBtnGradient'],
+      ['components/CenterModal.js', 'primaryBtn'],
+      ['components/CenterModal.js', 'secondaryBtn'],
+      ['components/EmptyState.tsx', 'btn'],
     ];
     for (const [rel, name] of TIER) {
       const src = readFileSync(`${ROOT}/${rel}`, 'utf8');
@@ -968,11 +970,19 @@ console.log('\n── gradients stay dark enough for white ──');
         'a literal here is how the tier drifted into three heights');
     }
 
+    // Oct-10-26: buttons are SOLID and shadowless (user: a gradient button "is not
+    // at all looks good"; a shadow claims the button floats). FAB is left as is.
+    const pb = readFileSync(`${ROOT}/components/PrimaryButton.tsx`, 'utf8');
+    check('PrimaryButton is a solid fill — no LinearGradient', !/LinearGradient/.test(pb));
+    check('PrimaryButton has no shadow', !/shadows\.|elevation:|shadowOpacity/.test(pb));
+    check('the old GradientButton is gone (one primary button)',
+      !existsSync(`${ROOT}/components/GradientButton.js`));
+
     // The pair the user was looking at must agree, and it is the pair a lint can
     // actually check: they sit in one row.
     const plan = readFileSync(`${ROOT}/screens/BudgetPlanScreen.js`, 'utf8');
     check('BudgetPlan\'s Reset and Save are in one row and share the height',
-      /<View style=\{styles\.actionRow\}>[\s\S]*?styles\.resetBtn[\s\S]*?<GradientButton/.test(plan)
+      /<View style=\{styles\.actionRow\}>[\s\S]*?styles\.resetBtn[\s\S]*?<PrimaryButton/.test(plan)
       && /resetBtn: \{\s*\n\s*minHeight: BUTTON_H,/.test(plan));
 
     // And the footer that row lives in must be OUTSIDE the scroll view — Save is
