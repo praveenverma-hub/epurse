@@ -4891,5 +4891,23 @@ console.log('\n— edit form: group transitions —');
     JSON.stringify(lbFor(id)));
 }
 
+// ── Edit: flipping a manual txn's type (Oct-9-26) ─────────────────────────────
+console.log('\n— edit form: type flip —');
+{
+  reset();
+  const G = () => useStore.getState();
+  useStore.setState({ accounts: [{ id: 'aT', type: 'bank', name: 'HDFC ••4444', balance: 1000, primary: true }] });
+  G().addTransaction({ amount: 200, type: 'debit', merchant: 'Oops', categoryId: 'food', accountId: 'aT', source: 'manual' });
+  const id = G().transactions[0].id;
+  G().updateTransaction(id, { amount: 200, type: 'credit', accountId: 'aT', merchant: 'Oops', categoryId: 'income' });
+  check('debit→credit: balance swings by 2× (−200 undone, +200 applied)', G().accounts[0].balance === 1200, `${G().accounts[0].balance}`);
+  G().setTransactionRefund(id, true);
+  check('credit can be flagged refund', G().transactions[0].isRefund === true);
+  G().updateTransaction(id, { amount: 200, type: 'debit', accountId: 'aT', merchant: 'Oops', categoryId: 'food' });
+  G().setTransactionRefund(id, false);
+  check('credit→debit: balance back to 800 and the stale refund flag is cleared',
+    G().accounts[0].balance === 800 && G().transactions[0].isRefund === false, `${G().accounts[0].balance} ${G().transactions[0].isRefund}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

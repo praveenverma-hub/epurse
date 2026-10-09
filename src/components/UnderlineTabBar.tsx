@@ -24,12 +24,14 @@ interface Props {
   onChange: (key: string) => void;
   /** Indicator + active-label colour. Defaults to the static primary. */
   accentColor?: string;
+  /** Hairline above the bar. Turn off when the bar sits directly under a header that already has a bottom border (else the two stack into a thick rule). */
+  topBorder?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
-export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor = colors.primary, style }: Props) {
+export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor = colors.primary, topBorder = true, style }: Props) {
   return (
-    <View style={[styles.row, style]} accessibilityRole="tablist">
+    <View style={[styles.row, !topBorder && styles.noTopBorder, style]} accessibilityRole="tablist">
       {tabs.map((t) => {
         const active = t.key === activeKey;
         return (
@@ -65,6 +67,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
+  noTopBorder: { borderTopWidth: 0 },
   tab: {
     flex: 1,
     alignItems: 'center',

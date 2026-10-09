@@ -275,6 +275,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   );
   // A tagged SMS amount is bank-verified — lock it, same rule the group edit form uses.
   const amountLocked = isEdit && editTxn?.source !== 'manual';
+  // Same bank-verified rule as the amount: the bank said debit/credit.
+  const typeLocked = amountLocked;
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [amount,         setAmount]         = useState('');
@@ -770,13 +772,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     setCatPickerOpen(false);
   };
 
-  const handleTypeChange = (newType: string) => {
-    setType(newType);
-    if (newType === TRANSACTION_TYPES.CREDIT) {
-      setIsSplit(false);
-      setSplitPicks([]);
-    }
-  };
+  // Only flips the type. Split / group state is KEPT: both are gated on `canSplitHere`
+  // (debit only), so they hide and are skipped on save while Income is showing, and
+  // come back intact if the user switches back — nothing is lost until Save.
+  const handleTypeChange = (newType: string) => setType(newType);
 
   /**
    * Commit the transaction to the store. Pulled out of `handleSave` so the
@@ -950,7 +949,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       setTransactionSplit(editTxnId, [], {});
     }
     setTransactionHidden(editTxnId, privateDraft);
-    if (type === TRANSACTION_TYPES.CREDIT) setTransactionRefund(editTxnId, refundDraft);
+    setTransactionRefund(editTxnId, type === TRANSACTION_TYPES.CREDIT ? refundDraft : false);
     if (ignoreDraft) ignoreTransaction(editTxnId);
     toast.success(ignoreDraft ? 'Transaction ignored' : 'Changes saved');
     if (fromQueue && editTxnId) {
@@ -1125,14 +1124,14 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     if (!editTxnId) return;
     const details = {
       restore: {
-        title: 'Restore transaction?',
+        title: 'Restore Transaction?',
         message: 'This adds it back to balances, totals, and charts. Any unsaved edits will be discarded.',
         primaryText: 'Restore',
         destructive: false,
         run: unignoreTransaction,
       },
       delete: {
-        title: 'Delete transaction?',
+        title: 'Delete Transaction?',
         message: 'This permanently removes the transaction. Any unsaved edits will be discarded.',
         primaryText: 'Delete',
         destructive: true,
@@ -1185,7 +1184,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     <>
             <FormField
               label="Amount (₹)"
-              hint={amountLocked ? 'From your bank SMS — not editable' : undefined}
+              hint={amountLocked ? `${type === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'} from your bank SMS — not editable` : undefined}
             >
               <FormAmountInput
                 value={amount}
@@ -1331,7 +1330,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 
             {isEdit && (
               <View style={styles.editActions}>
-                <Text style={styles.editActionsTitle}>More options</Text>
+                <Text style={styles.editActionsTitle}>More Options</Text>
                 {editTxn?.isIgnored ? (
                   <Text style={styles.editActionsHint}>Restore this transaction before changing its details.</Text>
                 ) : (
@@ -1352,7 +1351,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                     {!ignoreDraft && type === TRANSACTION_TYPES.CREDIT && (
                       <View style={[styles.editOptionRow, styles.editOptionDivider]}>
                         <View style={styles.editOptionCopy}>
-                          <Text style={styles.editOptionTitle}>Refund or cashback</Text>
+                          <Text style={styles.editOptionTitle}>Refund or Cashback</Text>
                           <Text style={styles.editOptionHint}>Reduce spending instead of counting this as income.</Text>
                         </View>
                         <AppSwitch
@@ -1366,7 +1365,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                     )}
                     <View style={[styles.editOptionRow, !ignoreDraft && styles.editOptionDivider]}>
                       <View style={styles.editOptionCopy}>
-                        <Text style={styles.editOptionTitle}>Ignore transaction</Text>
+                        <Text style={styles.editOptionTitle}>Ignore Transaction</Text>
                       </View>
                       <AppSwitch
                         value={ignoreDraft}
@@ -1393,7 +1392,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                     accessibilityRole="button"
                   >
                     <Ionicons name="arrow-undo-outline" size={19} color={theme.primary} />
-                    <Text style={[styles.editSecondaryActionText, { color: theme.primary }]}>Restore transaction</Text>
+                    <Text style={[styles.editSecondaryActionText, { color: theme.primary }]}>Restore Transaction</Text>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
@@ -1402,7 +1401,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                   accessibilityRole="button"
                 >
                   <Ionicons name="trash-outline" size={19} color={colors.danger} />
-                  <Text style={styles.editDeleteActionText}>Delete transaction</Text>
+                  <Text style={styles.editDeleteActionText}>Delete Transaction</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1584,15 +1583,30 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
-        {/* Expense / Income — the app's swipeable TabView (same one Lent/Borrowed
-            uses). Both scenes render the SAME form off shared state, so a swipe
-            only flips the type; nothing is typed into a page that then vanishes. */}
-        <UnderlineTabBar
-          tabs={TYPE_ROUTES}
-          activeKey={type}
-          onChange={handleTypeChange}
-          accentColor={type === TRANSACTION_TYPES.CREDIT ? colors.income : colors.expense}
-        />
+        {/* Add: Expense / Income as the app's swipeable TabView (same one Lent/Borrowed
+            uses). Both scenes render the SAME form off shared state, so a swipe only flips
+            the type. Edit: no swipe (one stray swipe would flip a saved txn's type) — a
+            plain tap bar for a manual txn, and no switch at all for a bank-parsed one,
+            whose debit/credit is what the bank said. */}
+        {!isEdit || !typeLocked ? (
+          <UnderlineTabBar
+            tabs={TYPE_ROUTES}
+            activeKey={type}
+            onChange={handleTypeChange}
+            topBorder={false}
+            accentColor={type === TRANSACTION_TYPES.CREDIT ? colors.income : colors.expense}
+          />
+        ) : null}
+        {isEdit ? (
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.scroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {renderFormBody(true)}
+          </ScrollView>
+        ) : (
         <TabView
           navigationState={{ index: typeIndex, routes: TYPE_ROUTES }}
           renderScene={({ route: r }) => (
@@ -1611,6 +1625,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
           swipeEnabled
           style={{ flex: 1 }}
         />
+        )}
 
         {/* Pinned bottom bar — Cancel always; the submit appears once the mandatory
             fields (amount + merchant) are filled. Category is optional. */}
@@ -1727,7 +1742,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   headerSafe: {
     backgroundColor: colors.card,
-    borderBottomWidth: 1,
+    borderBottomWidth: DIVIDER_W,
     borderBottomColor: colors.divider,
   },
   header: {
@@ -1751,8 +1766,9 @@ const styles = StyleSheet.create({
 
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
   editActions: { marginTop: spacing.xl },
-  editActionsTitle: { ...typography.h3, fontWeight: '700' as const, color: colors.textPrimary, marginBottom: spacing.sm },
-  editActionsHint: { ...typography.small, fontWeight: '400' as const, color: colors.textSecondary, marginBottom: spacing.md },
+  // Same ink as FormField's field labels (13 / 700 / textSecondary) — a section label, not a heading.
+  editActionsTitle: { fontSize: 13, fontWeight: '700' as const, color: colors.textSecondary, marginBottom: spacing.xs },
+  editActionsHint: { fontSize: 12, fontWeight: '400' as const, color: colors.textSecondary, marginBottom: spacing.md },
   editActionsCard: {
     borderColor: colors.inputBorder,
     borderWidth: 1,
@@ -1762,24 +1778,25 @@ const styles = StyleSheet.create({
   editOptionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, gap: spacing.md },
   editOptionDivider: { borderTopWidth: 1, borderTopColor: colors.divider },
   editOptionCopy: { flex: 1 },
-  editOptionTitle: { ...typography.bodyBold, fontWeight: '700' as const, color: colors.textPrimary },
-  editOptionHint: { ...typography.small, fontWeight: '400' as const, color: colors.textSecondary, marginTop: 2 },
+  // Row text matches FormValueRow's value text (14 / 600).
+  editOptionTitle: { fontSize: 14, fontWeight: '600' as const, color: colors.textPrimary },
+  editOptionHint: { fontSize: 12, fontWeight: '400' as const, color: colors.textSecondary, marginTop: 2 },
   editIgnoreInfo: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, marginBottom: spacing.md },
-  editIgnoreInfoText: { ...typography.small, fontWeight: '400' as const, flex: 1, lineHeight: 19 },
+  editIgnoreInfoText: { fontSize: 12, fontWeight: '400' as const, flex: 1, lineHeight: 18 },
   editSecondaryAction: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     padding: spacing.md, marginTop: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.inputBorder,
   },
-  editSecondaryActionText: { ...typography.bodyBold, fontWeight: '700' as const },
+  editSecondaryActionText: { fontSize: 14, fontWeight: '600' as const },
   editDeleteAction: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     padding: spacing.md, marginTop: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.inputBorder,
   },
-  editDeleteActionText: { ...typography.bodyBold, fontWeight: '700' as const, color: colors.danger },
+  editDeleteActionText: { fontSize: 14, fontWeight: '600' as const, color: colors.danger },
   // Covers the whole screen (header included).
   // Hairline + gap so the contact search reads as its own block, not part of the shares card.
   contactSearchBlock: { marginTop: spacing.lg, paddingTop: spacing.lg, borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
