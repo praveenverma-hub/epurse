@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import KeyboardAvoidingView from './AppKeyboardAvoidingView';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Modal from './AppModal';
@@ -15,7 +14,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { DIVIDER_W, radius, readableOn, spacing, typography } from '../constants/theme';
 import { LB_CHILD_LABEL_TO_ID, LB_ALL_CATS, LB_SETTLEMENT_IDS, twoTierToLegacyCatId } from '../constants/twoTierCategories';
 import { CategoryTreeList } from './CategoryPickerModal';
-import { FormNoteField, FormValueCard, useFocusBorder } from './FormField';
+import { useFocusBorder } from './FormField';
 import { INPUT_LIMITS } from '../utils/validation';
 import { buildCategoryHistory, suggestCategory } from '../utils/categorySuggest';
 import { quickPicks, searchCategories } from '../utils/categoryQuickPick';
@@ -50,6 +49,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const searchFocus = useFocusBorder();
+  const noteFocus = useFocusBorder();
   const transactions = useEPurseStore((s) => s.transactions);
   const userRules = useEPurseStore((s) => s.userCustomRules);
   const committing = useRef(false);
@@ -277,7 +277,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={() => fullPanel ? back() : close()}>
-      <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={close} accessibilityLabel="Close Manage transaction" />
         <SheetCloseButton onPress={close} />
         <View style={styles.sheet}>
@@ -289,13 +289,30 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
             {fullPanel && <View style={styles.backSpacer} />}
           </View>
           <>
-            {!fullPanel && <View style={styles.context}>
-              <View style={styles.avatar}><Ionicons name="receipt-outline" size={23} color={theme.primary} /></View>
-              <View style={styles.grow}>
-                <Text style={styles.merchant} numberOfLines={1}>{txn.merchant || 'Transaction'}</Text>
-                {!!contextMeta && <Text style={styles.meta} numberOfLines={1}>{contextMeta}</Text>}
+            {!fullPanel && <View style={styles.contextBlock}>
+              <View style={styles.context}>
+                <View style={styles.avatar}><Ionicons name="receipt-outline" size={23} color={theme.primary} /></View>
+                <View style={styles.grow}>
+                  <Text style={styles.merchant} numberOfLines={1}>{txn.merchant || 'Transaction'}</Text>
+                  {!!contextMeta && <Text style={styles.meta} numberOfLines={1}>{contextMeta}</Text>}
+                </View>
+                <Text style={styles.amount}>{formatCurrency(txn.amount)}</Text>
               </View>
-              <Text style={styles.amount}>{formatCurrency(txn.amount)}</Text>
+              <View style={[styles.noteRow, noteFocus.focusStyle]}>
+                <Ionicons name="create-outline" size={18} color={theme.textSecondary} />
+                <TextInput
+                  value={draft.note || ''}
+                  onChangeText={(note) => patch({ note })}
+                  placeholder="Add a note"
+                  placeholderTextColor={theme.textMuted}
+                  style={styles.noteInput}
+                  maxLength={INPUT_LIMITS.NOTE_MAX}
+                  returnKeyType="done"
+                  onFocus={noteFocus.onFocus}
+                  onBlur={noteFocus.onBlur}
+                  accessibilityLabel="Transaction note"
+                />
+              </View>
             </View>}
             <ScrollView style={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.bodyContent}>
               {panel === 'category' ? <>
@@ -360,20 +377,13 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
                 {!!canRefund && !!onToggleRefund && !draft.isIgnored && <View style={styles.actionsSecond}>
                   {action(draft.isRefund ? 'Refund — Reduces Your Spend' : 'Mark as Refund / Cashback', 'return-down-back-outline', draft.isRefund ? theme.income : theme.textSecondary, draft.isRefund, () => patch({ isRefund: !draft.isRefund }))}
                 </View>}
-                {/* Last: optional, so it never pushes Category/Actions down. Saved with Done. */}
-                <View style={styles.noteField}>
-                  <FormValueCard>
-                    <FormNoteField value={draft.note} onChangeText={(note) => patch({ note })}
-                      maxLength={INPUT_LIMITS.NOTE_MAX} accentColor={theme.primary} />
-                  </FormValueCard>
-                </View>
               </>}
               {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
             </ScrollView>
             {!fullPanel && <View style={styles.footer}><GradientButton flat title="Done" onPress={done} disabled={saveDisabled} /></View>}
           </>
         </View>
-      </KeyboardAvoidingView>
+      </View>
       <CenterModal
         visible={confirmation === 'delete'}
         title="Delete Transaction?"
@@ -398,12 +408,15 @@ const makeStyles = (t) => StyleSheet.create({
   backSpacer: { width: 36 },
   title: { ...typography.h3, fontWeight: '700', color: t.textPrimary, flex: 1 },
   titleCentered: { textAlign: 'center' },
-  context: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: DIVIDER_W, borderBottomColor: t.divider },
+  contextBlock: { borderBottomWidth: DIVIDER_W, borderBottomColor: t.divider, paddingBottom: spacing.md },
+  context: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   avatar: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: t.primary + '12', alignItems: 'center', justifyContent: 'center' },
   grow: { flex: 1 },
   merchant: { ...typography.bodyBold, color: t.textPrimary },
   amount: { ...typography.bodyBold, color: t.textPrimary, maxWidth: '38%' },
   meta: { ...typography.tiny, color: t.textSecondary, marginTop: 3 },
+  noteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44, marginTop: spacing.sm, paddingLeft: spacing.md, paddingRight: spacing.xs, borderWidth: 1, borderColor: t.divider, borderRadius: radius.md, backgroundColor: t.background },
+  noteInput: { ...typography.body, flex: 1, minWidth: 0, paddingVertical: spacing.sm + 2, color: t.textPrimary },
   body: { flexShrink: 1 },
   bodyContent: { paddingTop: spacing.sm, paddingBottom: spacing.sm },
   sectionLabel: { ...typography.small, fontWeight: '700', color: t.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
@@ -414,7 +427,6 @@ const makeStyles = (t) => StyleSheet.create({
   // Same tinted outline as the other actions; the confirm modal carries the warning.
   deleteIcon: { flexBasis: '25%', flexGrow: 0, flexShrink: 0, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm + 4, borderWidth: 1, borderRadius: radius.md },
   explanation: { ...typography.small, color: t.textSecondary, lineHeight: 18, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: t.background, borderRadius: radius.md, marginTop: spacing.sm },
-  noteField: { marginTop: spacing.md },
   notice: { flexDirection: 'row', gap: spacing.sm, backgroundColor: t.primary + '0D', padding: spacing.md, borderRadius: radius.md },
   noticeText: { ...typography.small, color: t.textSecondary, flex: 1 },
   link: { paddingVertical: spacing.sm },

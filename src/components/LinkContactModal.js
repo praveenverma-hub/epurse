@@ -18,9 +18,7 @@ import {
   TextInput,
   FlatList,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
-import KeyboardAvoidingView from './AppKeyboardAvoidingView';
 import Modal from "./AppModal";
 
 import { Ionicons } from '@expo/vector-icons';
@@ -142,10 +140,7 @@ const LinkContactModal = ({
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.backdrop}
-      >
+      <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
         <SheetCloseButton onPress={onClose} />
 
@@ -332,7 +327,7 @@ const LinkContactModal = ({
             ) : null}
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 };

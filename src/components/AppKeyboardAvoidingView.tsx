@@ -8,9 +8,9 @@ type Props = KeyboardAvoidingViewProps & {
   independentWindow?: boolean;
 };
 
-/** One keyboard adjustment per native window. Android bounds the available
- * height; iOS reserves keyboard padding. Nested form wrappers retain their layout
- * without applying a second keyboard offset.
+/** One keyboard adjustment per native window. Android uses the native
+ * adjustResize window mode; iOS reserves keyboard padding. Nested form wrappers
+ * retain their layout without applying a second keyboard offset.
  */
 export default function AppKeyboardAvoidingView({
   independentWindow = false, children, behavior, enabled,
@@ -18,11 +18,17 @@ export default function AppKeyboardAvoidingView({
 }: Props) {
   const hasBoundary = useContext(KeyboardBoundary);
   if (hasBoundary && !independentWindow) return <View {...props}>{children}</View>;
+  // Android's adjustResize already changes the window height. With no behavior,
+  // KeyboardAvoidingView still subscribes to keyboard events and schedules a
+  // layout animation, which can make an entire modal jump on input focus.
+  if (Platform.OS === 'android' && behavior == null) {
+    return <KeyboardBoundary.Provider value={true}><View {...props}>{children}</View></KeyboardBoundary.Provider>;
+  }
   return (
     <KeyboardBoundary.Provider value={true}>
       <KeyboardAvoidingView
         {...props}
-        behavior={behavior ?? (Platform.OS === 'ios' ? 'padding' : 'height')}
+        behavior={behavior ?? (Platform.OS === 'ios' ? 'padding' : undefined)}
         enabled={enabled ?? true}
         keyboardVerticalOffset={keyboardVerticalOffset}
         contentContainerStyle={contentContainerStyle}

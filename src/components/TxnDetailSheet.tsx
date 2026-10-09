@@ -2,8 +2,8 @@
 // TxnDetailSheet — plain-transaction detail view (view-first, then edit).
 // Mirrors GroupTxnDetailSheet / SplitDetailsModal so EVERY transaction card,
 // whatever kind it is, shows details before editing — not just group/split
-// ones. Pure presentation, no store writes; the Edit pill hands off to
-// CategoryPickerModal (the actual manage sheet) just like the other two.
+// ones. Pure presentation, no store writes; the Edit pill hands off to the
+// full transaction form, except linked lend/borrow entries keep Manage.
 // =============================================================================
 import React, { useMemo } from 'react';
 import {

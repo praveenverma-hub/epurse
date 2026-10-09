@@ -10,8 +10,7 @@
 //        Right 65% — checkbox / radio options for the active panel
 //   5. FlatList of transactions
 //
-// All interactive modals (CategoryPicker, Split, LB linking, CenterModal) are
-// preserved unchanged from the previous implementation.
+// Category taps use a focused picker; linked lend/borrow edits keep Manage.
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -57,18 +56,17 @@ import {
 } from '../utils/txnArrange';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
-import CategoryPickerModal from '../components/ManageTransactionModal';
+import CategoryPickerModal from '../components/CategoryPickerModal';
+import ManageTransactionModal from '../components/ManageTransactionModal';
+import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
+import { useToast } from '../components/Toast';
 import LinkContactModal from '../components/LinkContactModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
-import SplitConfigModal from '../components/SplitConfigModal';
-import CenterModal from '../components/CenterModal';
 import DateField from '../components/DateField';
-import { useToast } from '../components/Toast';
-import GroupPickerSheet from '../components/GroupPickerSheet';
 import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
-import { canSplitTransaction, isPayerLockedToMe } from '../utils/split';
+import { isPayerLockedToMe } from '../utils/split';
 import { computeLedgerTotals } from '../utils/ledgerTotals';
 import { spendExcluded, firstDataMonthKey } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
@@ -186,8 +184,8 @@ function matchesStatus(t, statusSet, isNotCounted) {
 
 const TransactionsScreen = ({ navigation, route }) => {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const toast = useToast();
+  const insets = useSafeAreaInsets();
 
   // ── Store ──────────────────────────────────────────────────────────────────
   const transactions = useEPurseStore((s) => s.transactions);
@@ -212,16 +210,11 @@ const TransactionsScreen = ({ navigation, route }) => {
   const lentBorrowed = useEPurseStore((s) => s.lentBorrowed);
 
   const updateTransactionCategory            = useEPurseStore((s) => s.updateTransactionCategory);
-  const updateTwoTierCategory                = useEPurseStore((s) => s.updateTwoTierCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
   const setTransactionHidden                 = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction                    = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction                    = useEPurseStore((s) => s.ignoreTransaction);
   const unignoreTransaction                  = useEPurseStore((s) => s.unignoreTransaction);
-  const setTransactionSplit                  = useEPurseStore((s) => s.setTransactionSplit);
-  const tagTransactionToGroup    = useEPurseStore((s) => s.tagTransactionToGroup);
-  const updateGroupExpense       = useEPurseStore((s) => s.updateGroupExpense);
-  const untagTransactionFromGroup = useEPurseStore((s) => s.untagTransactionFromGroup);
 
   // ── Route params ───────────────────────────────────────────────────────────
   const routePeriod     = route?.params?.initialPeriod;
@@ -269,11 +262,9 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   // Transaction interaction modals
   const [activeTxn,       setActiveTxn]       = useState(null);
+  const [lbManageTxn,     setLbManageTxn]     = useState(null);
   const [lbLinkTxn,       setLbLinkTxn]       = useState(null);
-  const [splitTxn,        setSplitTxn]        = useState(null);
-  const [confirm,         setConfirm]         = useState(null);
   const [debugTxn,        setDebugTxn]        = useState(null);
-  const [groupPickerTxn,  setGroupPickerTxn]  = useState(null);
   const [groupDetailTxn,  setGroupDetailTxn]  = useState(null); // { txn, group } — tap a shared-group row → view detail
   const [detailTxn,       setDetailTxn]       = useState(null); // plain txn — tap a row → view detail before edit
   const [ccBillTxn,       setCcBillTxn]       = useState(null); // txn being reclassified as a CC bill payment
@@ -739,12 +730,6 @@ const TransactionsScreen = ({ navigation, route }) => {
   }, []);
 
   // ── Transaction interaction handlers ──────────────────────────────────────
-  const handleSelectTwoTier = (parentCategory, childCategory) => {
-    if (!activeTxn) return;
-    updateTwoTierCategory(activeTxn.id, parentCategory, childCategory);
-    setActiveTxn(null);
-  };
-
   const handleSelectCategory = (categoryId) => {
     if (!activeTxn) return;
     // "Credit Card Bill" opens the card-picker + reconcile sheet (which sets the
@@ -775,67 +760,6 @@ const TransactionsScreen = ({ navigation, route }) => {
         .map((p) => ({ ...p, net: Math.abs(p.net) }));
     }
     setLbLinkTxn({ txn: t, categoryId, suggestedPersons });
-  };
-
-  const handleToggleHidden = (hidden) => {
-    if (!activeTxn) return;
-    const t = activeTxn;
-    setActiveTxn(null);
-    setConfirm({
-      title:       hidden ? 'Mark as Private?' : 'Make Public?',
-      message:     hidden
-        ? 'Hidden from default views but still counted in totals.'
-        : 'This transaction will be visible again in all default views.',
-      primaryText: hidden ? 'Mark Private' : 'Make Public',
-      secondaryText: 'Cancel',
-      onSecondary: () => setConfirm(null),
-      onConfirm:   () => { setTransactionHidden(t.id, hidden); setConfirm(null); },
-    });
-  };
-
-  const handleDelete = () => {
-    if (!activeTxn) return;
-    const t = activeTxn;
-    setActiveTxn(null);
-    setConfirm({
-      title:       'Delete transaction?',
-      message:     'This action cannot be undone.',
-      primaryText: 'Delete',
-      destructive: true,
-      secondaryText: 'Cancel',
-      onSecondary: () => setConfirm(null),
-      onConfirm:   () => { deleteTransaction(t.id); setConfirm(null); },
-    });
-  };
-
-  const handleIgnore = () => {
-    if (!activeTxn) return;
-    const t = activeTxn;
-    setActiveTxn(null);
-    setConfirm({
-      title:       'Ignore transaction?',
-      message:     'Removes it from all balances, totals, and charts.',
-      primaryText: 'Ignore',
-      destructive: true,
-      secondaryText: 'Cancel',
-      onSecondary: () => setConfirm(null),
-      onConfirm:   () => { ignoreTransaction(t.id); setConfirm(null); },
-    });
-  };
-
-  const handleRestore = () => {
-    if (!activeTxn) return;
-    const t = activeTxn;
-    setActiveTxn(null);
-    setConfirm({
-      title:       'Restore transaction?',
-      message:     'Adds it back to balances, totals, and charts.',
-      primaryText: 'Restore',
-      destructive: false,
-      secondaryText: 'Cancel',
-      onSecondary: () => setConfirm(null),
-      onConfirm:   () => { unignoreTransaction(t.id); setConfirm(null); },
-    });
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -944,7 +868,7 @@ const TransactionsScreen = ({ navigation, route }) => {
                 // the full form with the shares editable inline — split used to
                 // be reachable ONLY via SplitDetailsModal → SplitConfigModal from
                 // this exact tap, with no way to touch anything else about the
-                // transaction. Icon tap still skips to the manage sheet.
+                // transaction. Icon tap opens the focused category picker.
                 const group = item.groupId ? groups.find((g) => g.id === item.groupId) : null;
                 if (group && group.type === 'shared') { setGroupDetailTxn({ txn: item, group }); return; }
                 setDetailTxn(item);
@@ -1199,43 +1123,44 @@ const TransactionsScreen = ({ navigation, route }) => {
 
       {/* ── Transaction interaction modals ───────────────────────────────── */}
       <CategoryPickerModal
-        transaction={activeTxn}
         visible={!!activeTxn}
+        categoryOnly
         categories={categories}
         selectedCategoryId={activeTxn?.categoryId}
         selectedParent={activeTxn?.parentCategory}
         selectedChild={activeTxn?.childCategory}
         isHidden={!!activeTxn?.isHidden}
         isIgnored={!!activeTxn?.isIgnored}
-        canSplit={!!activeTxn && canSplitTransaction(activeTxn)}
-        isSplitTxn={!!activeTxn?.isSplit}
+        canRefund={activeTxn?.type === 'credit'}
+        isRefund={!!activeTxn?.isRefund}
+        canSplit={false}
+        isSplitTxn={!!(activeTxn?.isSplit || activeTxn?.isSplitMemo)}
         categoryLocked={!!activeTxn?.lbLocked}
         linkedPerson={linkedLbEntry?.person || null}
-        currentGroupId={activeTxn?.groupId || null}
-        onPressAddToGroup={activeTxn?.lbLocked ? undefined : () => {
-          const t = activeTxn;
-          setActiveTxn(null);
-          setGroupPickerTxn(t);
-        }}
-        onPressRemoveFromGroup={() => {
-          if (!activeTxn) return;
-          untagTransactionFromGroup(activeTxn.id);
-          toast.success('Removed from group');
-          setActiveTxn(null);
-        }}
-        onPressSplit={() => {
-          const t = activeTxn;
-          setActiveTxn(null);
-          setSplitTxn(t);
-        }}
         onClose={() => setActiveTxn(null)}
-        onSelectTwoTier={handleSelectTwoTier}
+        onDone={(draft) => {
+          if (!activeTxn) return;
+          try {
+            applyCategoryPickerDraft(useEPurseStore, activeTxn, draft);
+            setActiveTxn(null);
+          } catch (error) {
+            toast.error('Could not save', error?.message || 'Please try again.');
+          }
+        }}
         onSelectCategory={handleSelectCategory}
         onSelectLentBorrow={handleSelectLentBorrow}
-        onToggleHidden={handleToggleHidden}
-        onDelete={handleDelete}
-        onIgnore={handleIgnore}
-        onRestore={handleRestore}
+      />
+
+      <ManageTransactionModal
+        visible={!!lbManageTxn}
+        transaction={lbManageTxn}
+        categories={categories}
+        categoryLocked
+        onClose={() => setLbManageTxn(null)}
+        onToggleHidden={(hidden) => lbManageTxn && setTransactionHidden(lbManageTxn.id, hidden)}
+        onIgnore={() => lbManageTxn && ignoreTransaction(lbManageTxn.id)}
+        onRestore={() => lbManageTxn && unignoreTransaction(lbManageTxn.id)}
+        onDelete={() => lbManageTxn && deleteTransaction(lbManageTxn.id)}
       />
 
       <CCBillPaymentSheet
@@ -1260,31 +1185,6 @@ const TransactionsScreen = ({ navigation, route }) => {
         onClose={() => setLbLinkTxn(null)}
       />
 
-      <SplitConfigModal
-        visible={!!splitTxn}
-        transaction={splitTxn}
-        onClose={() => setSplitTxn(null)}
-        onApply={(others, meta) => {
-          if (splitTxn) {
-            setTransactionSplit(splitTxn.id, others, meta);
-            toast.success(others.length ? 'Split saved' : 'Split removed');
-          }
-          setSplitTxn(null);
-        }}
-      />
-
-      <CenterModal
-        visible={!!confirm}
-        title={confirm?.title}
-        message={confirm?.message}
-        primaryText={confirm?.primaryText || 'OK'}
-        destructive={!!confirm?.destructive}
-        secondaryText={confirm?.secondaryText}
-        onSecondary={confirm?.onSecondary}
-        onClose={() => setConfirm(null)}
-        onPrimary={confirm?.onConfirm || (() => setConfirm(null))}
-      />
-
       <ExportSheet
         visible={exportVisible}
         onClose={() => setExportVisible(false)}
@@ -1295,25 +1195,6 @@ const TransactionsScreen = ({ navigation, route }) => {
       {IS_STAGE_BUILD && (
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
-
-      <GroupPickerSheet
-        visible={!!groupPickerTxn}
-        txn={groupPickerTxn}
-        onClose={() => setGroupPickerTxn(null)}
-        onCreateNew={() => setGroupPickerTxn(null)}
-        onPick={(groupId, group) => {
-          const txn = groupPickerTxn;
-          setGroupPickerTxn(null);
-          if (group?.type === 'shared') {
-            navigation.navigate('AddGroupExpense', { groupId: group.id, tagTxnId: txn.id });
-          } else {
-            tagTransactionToGroup(txn.id, groupId);
-            toast.success('Added to group');
-          }
-        }}
-      />
-
-
 
       {/* Tapping a shared-group transaction card opens this first — who paid,
           per-member shares, your position — with an Edit pill into the same
@@ -1328,11 +1209,8 @@ const TransactionsScreen = ({ navigation, route }) => {
         }}
       />
 
-      {/* Plain-transaction detail — view first, Edit opens the full edit form
-          (amount/merchant/account/category/note), mirroring the group edit
-          flow. LB-linked transactions keep their own dedicated edit path
-          (the manage sheet's "Edit person"), since a lend/borrow link isn't
-          editable from this form. */}
+      {/* Plain transactions edit in the full form. Linked lend/borrow entries
+          retain Manage because their ledger link is locked in that form. */}
       <TxnDetailSheet
         txn={detailTxn}
         myName={userName ? `You (${userName})` : 'You'}
@@ -1341,7 +1219,7 @@ const TransactionsScreen = ({ navigation, route }) => {
           const t = detailTxn;
           setDetailTxn(null);
           if (t.lbLocked) {
-            setActiveTxn(t);
+            setLbManageTxn(t);
           } else {
             navigation.navigate('AddTransaction', { editTxnId: t.id });
           }

@@ -16,6 +16,21 @@ export function createManageDraft(txn) {
   };
 }
 
+/** Category card picker edits only category and quick flags; everything else
+ * stays exactly as it was when the sheet opened. Commit through Manage's
+ * existing ledger-safe action sequence. */
+export function applyCategoryPickerDraft(store, txn, quickDraft) {
+  applyManageDraft(store, txn, {
+    ...createManageDraft(txn),
+    categoryId: quickDraft.categoryId,
+    parentCategory: quickDraft.parentCategory,
+    childCategory: quickDraft.childCategory,
+    isHidden: quickDraft.isHidden,
+    isIgnored: quickDraft.isIgnored,
+    isRefund: quickDraft.isRefund,
+  });
+}
+
 export function manageDraftChanged(txn, draft) {
   const original = createManageDraft(txn);
   // Whitespace-only note edits aren't a change (the store trims on save).
