@@ -33,7 +33,7 @@ import {
   selectTotalRP,
   selectAwareStreak,
 } from '../store/useRewardStore';
-import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import { canSplitTransaction } from '../utils/split';
@@ -219,27 +219,33 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
           <View style={styles.cardInner}>
           {/* ── Approve overlay ── */}
           <Animated.View style={[styles.overlay, styles.overlayApprove, approveOverlayStyle]}>
-            <Text style={styles.overlayLabel}>✓  Looks good</Text>
+            <View style={styles.overlayRow}>
+              <Ionicons name="checkmark-circle" size={22} color={colors.textPrimary} />
+              <Text style={styles.overlayLabel}>Looks Good</Text>
+            </View>
           </Animated.View>
 
           {/* ── Reject overlay ── */}
           <Animated.View style={[styles.overlay, styles.overlayReject, rejectOverlayStyle]}>
-            <Text style={styles.overlayLabel}>✎  Edit category</Text>
+            <View style={styles.overlayRow}>
+              <Ionicons name="options-outline" size={22} color={colors.textPrimary} />
+              <Text style={styles.overlayLabel}>Manage</Text>
+            </View>
           </Animated.View>
 
           {/* ── Card content ── */}
           {txn.__welcome ? (
             <View style={styles.welcomeInner}>
-              <Text style={styles.welcomeEmoji}>👋</Text>
+              <Ionicons name="sparkles-outline" size={26} color={colors.primary} />
               <View style={styles.welcomeTitleRow} accessibilityLabel="Welcome to ePurse">
                 <Text style={styles.welcomeTitle}>Welcome to </Text>
                 <EPurseInlineWordmark size={17} weight="700" color={colors.textPrimary} />
               </View>
               <Text style={styles.welcomeBody} numberOfLines={2}>
-                New transactions land here to review. Swipe right to approve, left to fix the category.
+                New transactions land here to review. Swipe right to approve, left to manage.
               </Text>
               <View style={styles.swipeHints}>
-                <Text style={styles.hintLeft}>← edit</Text>
+                <Text style={styles.hintLeft}>← manage</Text>
                 <Text style={styles.hintRight}>got it →</Text>
               </View>
             </View>
@@ -247,11 +253,13 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
             <>
               <View style={styles.cardTop}>
                 <View style={styles.cardCatBadge}>
-                  <Text style={styles.cardEmoji}>{cat?.emoji ?? '📌'}</Text>
+                  {cat?.emoji
+                    ? <Text style={styles.cardEmoji}>{cat.emoji}</Text>
+                    : <Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} />}
                 </View>
                 <View style={styles.cardMeta}>
                   <Text style={styles.cardMerchant} numberOfLines={1}>{txn.merchant || 'Unknown'}</Text>
-                  <Text style={styles.cardCatName} numberOfLines={1}>{cat?.name ?? 'Uncategorised'}</Text>
+                  <Text style={styles.cardCatName} numberOfLines={1}>{txn.childCategory || cat?.name || 'Uncategorised'}</Text>
                 </View>
                 <Text style={[styles.cardAmount, { color: amountColor }]}>
                   {isDebit ? '−' : '+'}{formatCurrency(txn.amount)}
@@ -265,12 +273,13 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
                   <Text style={styles.cardDate}>{formatDateTime(txn.createdAt)}</Text>
                   {groupName ? (
                     <View style={styles.groupChip}>
-                      <Text style={styles.groupChipTxt} numberOfLines={1}>🗂 {groupName}</Text>
+                      <Ionicons name="people-outline" size={11} color={colors.primary} />
+                      <Text style={styles.groupChipTxt} numberOfLines={1}>{groupName}</Text>
                     </View>
                   ) : null}
                 </View>
                 <View style={styles.swipeHints}>
-                  <Text style={styles.hintLeft}>← edit</Text>
+                  <Text style={styles.hintLeft}>← manage</Text>
                   <Text style={styles.hintRight}>approve →</Text>
                 </View>
               </View>
@@ -766,6 +775,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.warning,
   },
+  overlayRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   overlayLabel: {
     ...typography.h3,
     color: colors.textPrimary,
@@ -805,20 +815,23 @@ const styles = StyleSheet.create({
   cardDate: { ...typography.tiny, color: colors.textMuted },
   cardBottomLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 1 },
   groupChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
     backgroundColor: colors.primary + '14',
     borderRadius: radius.pill,
     paddingHorizontal: 8,
     paddingVertical: 2,
     maxWidth: 130,
   },
-  groupChipTxt: { ...typography.tiny, color: colors.primary, fontWeight: '700' },
+  groupChipTxt: { ...typography.tiny, color: colors.primary, fontWeight: '700', flexShrink: 1 },
   swipeHints: { flexDirection: 'row', gap: spacing.sm },
-  hintLeft:  { ...typography.tiny, color: colors.warning, fontWeight: '600' },
-  hintRight: { ...typography.tiny, color: colors.success, fontWeight: '600' },
+  // Measured: raw amber/green are ~2–3:1 on the white card.
+  hintLeft:  { ...typography.tiny, color: readableOn(colors.card, colors.warning), fontWeight: '600' },
+  hintRight: { ...typography.tiny, color: readableOn(colors.card, colors.success), fontWeight: '600' },
 
   // ── Welcome tutorial card ──
   welcomeInner: { flex: 1, justifyContent: 'center', gap: 4 },
-  welcomeEmoji: { fontSize: 26 },
   welcomeTitleRow: { flexDirection: 'row', alignItems: 'center' },
   welcomeTitle: { ...typography.bodyBold, color: colors.textPrimary },
   welcomeBody:  { ...typography.small, color: colors.textSecondary, lineHeight: 18 },

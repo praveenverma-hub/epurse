@@ -640,11 +640,11 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
 
   // Per-person rupee amounts, shown read-only under the Split row.
   const splitBreakdownRows = [
-    { name: 'You', amount: rsOf(splitMode === 'percent' ? mySplitPercent ?? 0 : mySplitAmount ?? 0), tag: !effectivePayer ? 'Paid' : undefined },
+    { name: 'You', amount: rsOf(splitMode === 'percent' ? mySplitPercent ?? 0 : mySplitAmount ?? 0), isPayer: !effectivePayer },
     ...splitPicks.map((p) => ({
       name: p.name as string,
       amount: rsOf(splitMode === 'percent' ? p.percent : p.shareAmount),
-      tag: samePick(p, effectivePayer) ? 'Paid' : undefined,
+      isPayer: samePick(p, effectivePayer),
     })),
   ];
 

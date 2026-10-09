@@ -64,7 +64,6 @@ import LinkContactModal from '../components/LinkContactModal';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
 import DateField from '../components/DateField';
-import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import { isPayerLockedToMe } from '../utils/split';
 import { computeLedgerTotals } from '../utils/ledgerTotals';
@@ -265,7 +264,6 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [lbManageTxn,     setLbManageTxn]     = useState(null);
   const [lbLinkTxn,       setLbLinkTxn]       = useState(null);
   const [debugTxn,        setDebugTxn]        = useState(null);
-  const [groupDetailTxn,  setGroupDetailTxn]  = useState(null); // { txn, group } — tap a shared-group row → view detail
   const [detailTxn,       setDetailTxn]       = useState(null); // plain txn — tap a row → view detail before edit
   const [ccBillTxn,       setCcBillTxn]       = useState(null); // txn being reclassified as a CC bill payment
 
@@ -861,16 +859,8 @@ const TransactionsScreen = ({ navigation, route }) => {
             <TransactionItem
               txn={item}
               onPress={() => {
-                // Same routing as Dashboard. A shared-group expense keeps its own
-                // detail sheet (its own ledger — see the groups skill). A direct
-                // split now goes through TxnDetailSheet, same as a plain txn: it
-                // renders the split breakdown as a section there, and Edit opens
-                // the full form with the shares editable inline — split used to
-                // be reachable ONLY via SplitDetailsModal → SplitConfigModal from
-                // this exact tap, with no way to touch anything else about the
-                // transaction. Icon tap opens the focused category picker.
-                const group = item.groupId ? groups.find((g) => g.id === item.groupId) : null;
-                if (group && group.type === 'shared') { setGroupDetailTxn({ txn: item, group }); return; }
+                // View-first, then edit — ONE TxnDetailSheet for plain, split and group
+                // transactions alike. The category-icon tap opens the focused picker.
                 setDetailTxn(item);
               }}
               onPressCategory={() => setActiveTxn(item)}
@@ -1196,21 +1186,8 @@ const TransactionsScreen = ({ navigation, route }) => {
         <TxnDebugSheet txn={debugTxn} onClose={() => setDebugTxn(null)} />
       )}
 
-      {/* Tapping a shared-group transaction card opens this first — who paid,
-          per-member shares, your position — with an Edit pill into the same
-          Add/Edit Transaction form every other txn uses (it edits group splits too). */}
-      <GroupTxnDetailSheet
-        txn={groupDetailTxn?.txn || null}
-        onClose={() => setGroupDetailTxn(null)}
-        onEdit={() => {
-          const { txn } = groupDetailTxn;
-          setGroupDetailTxn(null);
-          navigation.navigate('AddTransaction', { editTxnId: txn.id });
-        }}
-      />
-
-      {/* Plain transactions edit in the full form. Linked lend/borrow entries
-          retain Manage because their ledger link is locked in that form. */}
+      {/* Every transaction (plain, split, group) views here first, then edits in the
+          full form. Linked lend/borrow entries retain Manage (ledger link is locked there). */}
       <TxnDetailSheet
         txn={detailTxn}
         myName={userName ? `You (${userName})` : 'You'}

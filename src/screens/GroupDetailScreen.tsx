@@ -34,7 +34,7 @@ import SectionHeader from '../components/SectionHeader';
 import ProgressBar from '../components/ProgressBar';
 import UnderlineTabBar from '../components/UnderlineTabBar';
 import TransactionItemRaw from '../components/TransactionItem';
-import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
+import TxnDetailSheet from '../components/TxnDetailSheet';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
@@ -49,7 +49,7 @@ import type { Group } from '../types/group';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any;
-  hideGroupChip?: boolean;
+  context?: 'default' | 'account' | 'group';
   onPress?: () => void;
   onPressCategory?: () => void;
 }>;
@@ -487,7 +487,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       <View style={wrap}>
         <TransactionItem
           txn={item}
-          hideGroupChip
+          context="group"
           onPress={() => setDetailTxn(item)}
           onPressCategory={() => setCategoryTxn(item)}
         />
@@ -654,8 +654,9 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         />
       </View>
 
-      <GroupTxnDetailSheet
+      <TxnDetailSheet
         txn={detailTxn}
+        context="group"
         onClose={() => setDetailTxn(null)}
         onEdit={(t: any) => {
           setDetailTxn(null);

@@ -201,9 +201,10 @@ export function useGroupSplit({ group, amount, active = true, editTxn, lockPayer
     .map((x) => ({
       name: x.memberId === 'me' ? 'You' : x.name || 'Member',
       amount: splitMode === 'percent' ? (amount * (Number(x.percent) || 0)) / 100 : Number(x.shareAmount) || 0,
-      tag: x.memberId === payerMemberId ? 'Paid' : undefined,
+      isPayer: x.memberId === payerMemberId,
     }))
-    .filter((r) => r.amount > 0);
+    // Keep the payer even at a 0 share (full owed) — otherwise who paid disappears.
+    .filter((r) => r.amount > 0 || r.isPayer);
 
   const pageRows: SplitPageRow[] = shares.map((s, idx) => {
     const isPayer = s.memberId === payerMemberId;

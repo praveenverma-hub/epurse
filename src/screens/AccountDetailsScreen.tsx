@@ -43,7 +43,7 @@ import { ACCOUNT_TYPES } from '../constants/categories';
 import { resolveAccountGradient } from '../utils/accountGradient';
 import TransactionItemRaw from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
-import GroupTxnDetailSheet from '../components/GroupTxnDetailSheet';
+import TxnDetailSheet from '../components/TxnDetailSheet';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
@@ -69,6 +69,7 @@ import MonthlyLineChart from '../components/MonthlyLineChart';
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: Txn; onPress?: () => void; onLongPress?: () => void; muted?: boolean;
+  context?: 'default' | 'account' | 'group';
 }>;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -843,6 +844,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={styles.txnRow}>
                 <TransactionItem
                   txn={item}
+                  context="account"
                   muted={!!(item as any).preOnboarding}
                   onPress={itemGroup && itemGroup.type === 'shared' ? () => setGroupDetailTxn(item) : undefined}
                   onLongPress={IS_STAGE_BUILD ? () => setDebugTxn(item) : undefined}
@@ -871,7 +873,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* View-only — no onEdit, so the sheet's Edit pill doesn't render. These
           rows are archived/onboarding-swept reference data, not editable here. */}
-      <GroupTxnDetailSheet txn={groupDetailTxn as any} onClose={() => setGroupDetailTxn(null)} />
+      <TxnDetailSheet txn={groupDetailTxn as any} onClose={() => setGroupDetailTxn(null)} />
 
       {/* Tweak / anchor the balance (opened by tapping the balance box). */}
       <BalanceAnchorModal

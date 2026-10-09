@@ -22,6 +22,7 @@ import { canSplitTransaction } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 import { applyManageDraft, createManageDraft, manageDraftChanged } from '../utils/manageTransactionDraft';
 import { setReviewFlowDraft } from '../utils/reviewFlowDraft';
+import { txnAccountLabel } from '../utils/txnCardModel';
 
 // A fresh draft per opening. Closing never writes to the ledger.
 const GROUP_TONE = '#A8409F';
@@ -55,11 +56,8 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
   const committing = useRef(false);
   const changed = manageDraftChanged(txn, draft);
   const patch = (values) => { setError(''); setDraft((old) => ({ ...old, ...values })); };
-  const account = accounts.find((item) => item.id === txn.accountId);
-  // Account names are usually already "HDFC ··4521" — only add the mask when missing.
-  const accountName = account?.name || txn.bankName || txn.accountType || '';
-  const accountLabel = txn.accountMask && !accountName.includes(txn.accountMask)
-    ? `${accountName}${accountName ? ' ' : ''}··${txn.accountMask}` : accountName;
+  // Same label the list card shows ("HDFC ··4521") — one rule, txnCardModel.
+  const accountLabel = txnAccountLabel(txn, accounts.find((item) => item.id === txn.accountId));
   const date = txn.createdAt ? new Date(txn.createdAt) : null;
   const dateLabel = date && !Number.isNaN(date.getTime())
     ? `${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`

@@ -1,18 +1,20 @@
 // =============================================================================
 // SplitBreakdownLines — each person's ₹ share + a Total, rendered INSIDE the
 // Split row of the entry forms' value card (never as a card of its own), so the
-// division is visible without opening the split page.
+// division is visible without opening the split page. Amounts are SHARES; the
+// payer is marked "paid ₹<bill>" (wording rule: utils/splitPosition.ts).
 // =============================================================================
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, DIVIDER_W } from '../constants/theme';
+import { colors, readableOn, spacing, DIVIDER_W } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 
 export interface SplitBreakdownRow {
   name: string;
+  /** This person's SHARE. */
   amount: number;
-  /** Small tag after the name, e.g. "Paid". */
-  tag?: string;
+  /** Fronted the bill — labelled "paid ₹<bill>" so their share can't be misread as what they paid. */
+  isPayer?: boolean;
 }
 
 export default function SplitBreakdownLines({ rows }: { rows: SplitBreakdownRow[] }) {
@@ -24,7 +26,7 @@ export default function SplitBreakdownLines({ rows }: { rows: SplitBreakdownRow[
         <View key={`${r.name}_${i}`} style={styles.row}>
           <Text style={styles.name} numberOfLines={1}>
             {r.name}
-            {r.tag ? <Text style={styles.tag}>{`  ${r.tag}`}</Text> : null}
+            {r.isPayer ? <Text style={styles.tag}>{`  paid ${formatCurrency(total)}`}</Text> : null}
           </Text>
           <Text style={styles.amt}>{formatCurrency(r.amount)}</Text>
         </View>
@@ -41,7 +43,7 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, paddingLeft: spacing.md + 28 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4, gap: spacing.sm },
   name: { flex: 1, fontSize: 13, fontWeight: '500', color: colors.textPrimary },
-  tag: { fontSize: 11, fontWeight: '600', color: colors.success },
+  tag: { fontSize: 11, fontWeight: '600', color: readableOn(colors.card, colors.success) },
   amt: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
   totalRow: { borderTopWidth: DIVIDER_W, borderTopColor: colors.divider, marginTop: 2 },
   totalLabel: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },

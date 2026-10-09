@@ -1,93 +1,64 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
-import { colors, radius, spacing, typography, shadows } from '../constants/theme';
+import { colors, radius, readableOn, spacing, typography, shadows } from '../constants/theme';
 import { formatCurrency, formatDateTime } from '../utils/format';
-import {
-  debitDisplayAmount,
-  splitParticipantsLabel,
-  groupLbChipKind,
-  splitLbChipKind,
-  isMemoTxn,
-} from '../utils/split';
+import { buildTxnCard, CARD_CONTEXT } from '../utils/txnCardModel';
 import CategoryIcon from './CategoryIcon';
 
-const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip, hideGroupChip = false, muted = false }) => {
+/**
+ * The ONE transaction card for every list. WHAT it says (meta line, amount tone,
+ * chips, "of ₹X") is decided by `buildTxnCard` (utils/txnCardModel.ts, tested);
+ * this file only lays it out.
+ *
+ * `context` drops what the host screen already says: 'account' (Account Details)
+ * omits the account, 'group' (Group Detail) omits the ribbon and names the payer.
+ */
+const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSplitChip, context = CARD_CONTEXT.DEFAULT, muted = false }) => {
   const categories = useEPurseStore((s) => s.categories);
   const groups = useEPurseStore((s) => s.groups);
+  const accounts = useEPurseStore((s) => s.accounts);
   const category = useMemo(
     () => categories.find((c) => c.id === txn.categoryId) || categories[categories.length - 1],
     [categories, txn.categoryId]
   );
-  // Group membership is orthogonal to the status chip — a lent/borrow txn can also
-  // sit in a group, so this renders as its OWN chip (group emoji + colour), not in
-  // place of the SELF/LENT/BORROWED chip.
-  const group = useMemo(
-    () => (txn.groupId ? groups.find((g) => g.id === txn.groupId) : null),
-    [groups, txn.groupId]
-  );
 
-  // "Counts as expense" rule (SpendRulesScreen). The row must SAY so: an exclusion that
-  // only shows up as a smaller Spent figure is undiscoverable — you'd have no way to tell
-  // a missing transaction from an uncounted one. Debits only; the rule is about spending.
+  // "Counts as expense" rule (SpendRulesScreen). The card must SAY so: an exclusion that
+  // only shows up as a smaller Spent figure is undiscoverable. Debits only.
   const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
   const catMaps = useCategoryMaps();
-  const notCounted = useMemo(() => {
+  const isExcluded = useMemo(() => {
     if (!excludedExpenseParents?.length || txn.type !== 'debit') return false;
     return excludedExpenseParents.includes(parentCatIdForTxn(txn, catMaps));
   }, [excludedExpenseParents, catMaps, txn.type, txn.parentCategory, txn.categoryId]);
 
-  const isCredit = txn.type === 'credit';
-  const sign = isCredit ? '+' : '−';
-  // Memo = someone else paid; no money left your account (it's a debt, not spend),
-  // so de-emphasise its amount so it doesn't read as a real outflow. Covers both a
-  // group memo and a plain split whose payer isn't me (isSplitMemo).
-  const isMemo = isMemoTxn(txn);
-  const amountColor = isCredit ? colors.income : (isMemo ? colors.textMuted : colors.textPrimary);
-  const displayAmount = isCredit ? txn.amount : debitDisplayAmount(txn);
-  // In a group, a 0 personal share means I owe nothing → "Not involved".
-  // Exception: if I'm the payer (fronted the bill, e.g. Full-owed split), I AM
-  // involved — show what I actually paid instead.
-  const isGroupTxn = !!txn.groupId;
-  const iPaidGroup = txn.groupSplit?.paidByMemberId === 'me';
-  const notInvolved = isGroupTxn && !isCredit && !iPaidGroup && (Number(displayAmount) || 0) === 0;
-  const shownAmount = isGroupTxn && iPaidGroup && (Number(displayAmount) || 0) === 0
-    ? (Number(txn.amount) || 0)
-    : displayAmount;
-  const splitLabel = txn.isSplit ? splitParticipantsLabel(txn.splitWith) : '';
-  const statusChip = getStatusChip(txn);
-  // A shared-group expense surfaces its lent/borrow framing as its OWN chip (the txn's
-  // categoryId is the real spend category, so getStatusChip wouldn't catch it). Replaces
-  // the old "Paid by X" text — borrow = I owe a share, lent = I fronted the whole bill.
-  // A plain split carries the same framing via splitLbChipKind, so "Rahul paid, I owe
-  // my share" reads as BORROWED on the card exactly like its group equivalent.
-  const groupLbChip = GROUP_LB_CHIP[groupLbChipKind(txn) || splitLbChipKind(txn)] || null;
-  // Group badge floats on the top-right corner (half in / half out of the card edge)
-  // instead of sitting inline — keeps the meta row uncluttered when several chips
-  // (status / lent-borrow / private) are present. Name capped to ~10 chars.
-  const showGroupChip = !hideGroupChip && !!group;
-  const groupLabel = showGroupChip ? truncateGroupName(group.name) : '';
+  const group = useMemo(() => (txn.groupId ? groups.find((g) => g.id === txn.groupId) : null), [groups, txn.groupId]);
+  const account = useMemo(() => (txn.accountId ? accounts.find((a) => a.id === txn.accountId) : null), [accounts, txn.accountId]);
+
+  const card = useMemo(
+    () => buildTxnCard(txn, { group, account, categoryName: category?.name, isExcluded, context }),
+    [txn, group, account, category?.name, isExcluded, context]
+  );
   const cardPressable = typeof onPress === 'function';
+  const amountColor = AMOUNT_INK[card.amount.tone];
 
   return (
     <TouchableOpacity
       activeOpacity={cardPressable ? 0.8 : 1}
       onPress={cardPressable ? onPress : undefined}
       disabled={!cardPressable}
-      style={[styles.card, muted && styles.cardMuted, showGroupChip && styles.cardWithBadge]}
+      style={[styles.card, muted && styles.cardMuted]}
     >
-      {/* Group watermark — the group emoji, oversized and faint, bleeding ~40% off
-          the right edge (clipped to the card shape) so the card reads as "belongs
-          to this group". Sits BEHIND the content (first child), behind the amount. */}
-      {showGroupChip ? (
+      {/* Group watermark — the group's own emoji (data), oversized and faint, bleeding
+          off the right edge behind the amount, so the card reads as "in this group". */}
+      {card.showGroupRibbon && group.emoji ? (
         <View style={styles.groupWatermarkClip} pointerEvents="none">
-          <Text style={styles.groupWatermark} allowFontScaling={false}>
-            {group.emoji || '🗂'}
-          </Text>
+          <Text style={styles.groupWatermark} allowFontScaling={false}>{group.emoji}</Text>
         </View>
       ) : null}
 
@@ -100,72 +71,57 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         <CategoryIcon category={category} />
       </TouchableOpacity>
 
+      {/* tier 1 merchant · tier 2 what + whose money · tier 3 when + status */}
       <View style={styles.middle}>
-        <Text style={styles.title} numberOfLines={1}>
-          {txn.merchant}
-        </Text>
-        <View style={styles.metaRow}>
-          <Text style={styles.meta} numberOfLines={1}>
-            {category?.name} · {txn.accountType}
-            {txn.accountMask ? ` ··${txn.accountMask}` : ''}
-          </Text>
-          {statusChip ? (
-            <View style={[styles.statusChip, { backgroundColor: statusChip.bg, borderColor: statusChip.border }]}>
-              <Text style={[styles.statusChipText, { color: statusChip.text }]}>{statusChip.label}</Text>
+        <Text style={styles.title} numberOfLines={1}>{card.title}</Text>
+        {card.meta ? <Text style={styles.meta} numberOfLines={1}>{card.meta}</Text> : null}
+        <View style={styles.footerRow}>
+          <Text style={styles.time} numberOfLines={1}>{formatDateTime(txn.createdAt)}</Text>
+          {card.hasNote ? (
+            <Ionicons name="document-text-outline" size={12} color={colors.textMuted} style={styles.noteMark}
+              accessibilityLabel="Has a note" />
+          ) : null}
+          {card.chips.map((c) => (
+            <View key={c.kind} style={[styles.chip, { backgroundColor: CHIP_TONE[c.tone].bg }]}>
+              <Text style={[styles.chipText, { color: CHIP_TONE[c.tone].ink }]}>{c.label}</Text>
+            </View>
+          ))}
+          {card.overflow > 0 ? (
+            <View style={[styles.chip, { backgroundColor: CHIP_TONE.neutral.bg }]}>
+              <Text style={[styles.chipText, { color: CHIP_TONE.neutral.ink }]}>+{card.overflow}</Text>
             </View>
           ) : null}
-          {groupLbChip ? (
-            <View style={[styles.statusChip, { backgroundColor: groupLbChip.bg, borderColor: groupLbChip.border }]}>
-              <Text style={[styles.statusChipText, { color: groupLbChip.text }]}>{groupLbChip.label}</Text>
-            </View>
-          ) : null}
-          {txn.isIgnored ? <Text style={styles.ignoredTag}>IGNORED</Text> : null}
-          {!txn.isIgnored && txn.isHidden ? <Text style={styles.hiddenTag}>PRIVATE</Text> : null}
-          {isMemo ? <Text style={styles.memoTag}>MEMO</Text> : null}
-          {/* Deliberately does NOT mute the amount the way a memo does: this money really
-              did leave the account, it just isn't counted as spending. */}
-          {notCounted ? <Text style={styles.notCountedTag}>EXCLUDED</Text> : null}
         </View>
-        <Text style={styles.time}>{formatDateTime(txn.createdAt)}</Text>
       </View>
 
-      <View style={styles.right}>
-        <TouchableOpacity
-          onLongPress={onLongPress}
-          activeOpacity={onLongPress ? 0.6 : 1}
-          disabled={!onLongPress}
-        >
-          {notInvolved ? (
+      <View style={[styles.right, card.showGroupRibbon && styles.rightBelowRibbon]}>
+        <TouchableOpacity onLongPress={onLongPress} activeOpacity={onLongPress ? 0.6 : 1} disabled={!onLongPress}>
+          {card.amount.notInvolved ? (
             <Text style={styles.notInvolved}>Not involved</Text>
           ) : (
             <Text style={[styles.amount, { color: amountColor }]}>
-              {sign} {formatCurrency(shownAmount)}
+              {card.amount.sign} {formatCurrency(card.amount.value)}
             </Text>
           )}
         </TouchableOpacity>
-        {txn.isSplit ? (
+        {card.totalHint ? <Text style={styles.totalHint}>of {formatCurrency(card.totalHint)}</Text> : null}
+        {card.splitCount ? (
           <TouchableOpacity
-            style={styles.splitTag}
+            style={styles.splitPill}
             activeOpacity={onPressSplitChip ? 0.8 : 1}
             onPress={onPressSplitChip ? () => onPressSplitChip(txn) : undefined}
             disabled={!onPressSplitChip}
+            accessibilityLabel={`Split ${card.splitCount} ways`}
           >
-            <View style={styles.splitRow}>
-              <Text style={styles.splitIcon}>👥</Text>
-              {splitLabel ? (
-                <Text style={styles.splitNames} numberOfLines={1}>
-                  {splitLabel}
-                </Text>
-              ) : null}
-            </View>
+            <Ionicons name="pie-chart-outline" size={12} color={SPLIT_INK} />
+            <Text style={[styles.splitText, { color: SPLIT_INK }]}>Split · {card.splitCount}</Text>
           </TouchableOpacity>
         ) : null}
       </View>
 
-      {/* Group ribbon — gradient tag hanging from the card's top-right edge: group
-          colour at the top (folded-behind look), turning to solid white where the
-          name sits, then fading out at the bottom edge so it melts into the card. */}
-      {showGroupChip ? (
+      {/* Group ribbon — hangs from the card's top-right edge: group colour folding
+          behind at the top, fading into the card where the name sits. */}
+      {card.showGroupRibbon ? (
         <LinearGradient
           colors={[group.color || colors.info, '#FFFFFF00', '#FFFFFF00', '#FFFFFF00']}
           locations={[0, 0.3, 0.85, 1]}
@@ -175,10 +131,9 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
           pointerEvents="none"
         >
           <View style={styles.groupBannerRow}>
-            {/* Emoji now shown as the card watermark; hidden in the ribbon for now. */}
-            {/* <Text style={styles.groupBannerEmoji}>{group.emoji || '🗂'}</Text> */}
-            <Text style={[styles.groupBannerText, { color: group.color || colors.info }]} numberOfLines={1}>
-              {groupLabel}
+            {/* Name sits on the faded (≈ card) end — measure it, raw amber/cyan are ~2:1 there. */}
+            <Text style={[styles.groupBannerText, { color: readableOn(colors.card, group.color || colors.info) }]} numberOfLines={1}>
+              {truncateGroupName(group.name)}
             </Text>
           </View>
         </LinearGradient>
@@ -186,6 +141,21 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
     </TouchableOpacity>
   );
 };
+
+// Amount ink by meaning. Muted = no money of mine moved (memo) or ignored.
+const AMOUNT_INK = { income: colors.income, expense: colors.textPrimary, muted: colors.textMuted };
+
+// One tinted-fill chip style; the ink is MEASURED against the card so amber/green stay
+// legible (raw warning amber is ~2:1 on white).
+const tone = (hue, bg) => ({ bg: bg || hue + '1F', ink: readableOn(colors.card, hue) });
+const CHIP_TONE = {
+  warning:  tone(colors.warning),
+  income:   tone(colors.income),
+  lent:     tone(colors.lent, colors.lentSoft),
+  borrowed: tone(colors.borrowed, colors.borrowedSoft),
+  neutral:  { bg: colors.textMuted + '1F', ink: colors.textSecondary },
+};
+const SPLIT_INK = readableOn(colors.card, colors.info);
 
 const styles = StyleSheet.create({
   card: {
@@ -214,84 +184,28 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   categoryTap: { borderRadius: radius.md },
-  middle: { flex: 1, marginLeft: spacing.md },
-  title: { ...typography.h3, color: colors.textPrimary },
-  metaRow: { marginTop: 2, flexDirection: 'row', alignItems: 'center' },
-  meta: { ...typography.small, color: colors.textSecondary, flexShrink: 1 },
-  statusChip: {
-    marginLeft: spacing.xs,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-  },
-  statusChipText: {
-    ...typography.tiny,
-    fontWeight: '700',
-  },
-  hiddenTag: {
-    marginLeft: spacing.xs,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.textMuted + '26',
-    color: colors.textSecondary,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
-  ignoredTag: {
-    marginLeft: spacing.xs,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.warning + '22',
-    color: colors.warning,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
-  // Memo = someone else paid; tracked as a debt, not counted in your spend totals
-  // (kept quiet/neutral so it reads as "placeholder, not an actual transaction yet").
-  notCountedTag: {
-    marginLeft: spacing.xs,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.warning + '1F',
-    color: colors.warning,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
-  memoTag: {
-    marginLeft: spacing.xs,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.textMuted + '1F',
-    color: colors.textMuted,
-    ...typography.tiny,
-    fontWeight: '700',
-  },
-  time: { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
-  right: { alignItems: 'flex-end' },
-  amount: { ...typography.bodyBold, fontWeight: '700' },
+  middle: { flex: 1, marginLeft: spacing.md, marginRight: spacing.sm },
+  // Merchant leads but doesn't out-shout the amount beside it.
+  title: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  meta: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
+  footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: spacing.xs },
+  time: { ...typography.tiny, color: colors.textMuted, flexShrink: 1 },
+  noteMark: { marginLeft: -2 },
+  chip: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm, flexShrink: 0 },
+  chipText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  right: { alignItems: 'flex-end', maxWidth: '42%' },
+  // The ribbon hangs 26px from the top-right edge; a centred amount ran into it.
+  // Drop the column to the bottom instead, so the amount lines up with the date line.
+  rightBelowRibbon: { alignSelf: 'stretch', justifyContent: 'flex-end', paddingTop: 18 },
+  amount: { fontSize: 15, fontWeight: '700' },
+  totalHint: { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   notInvolved: { ...typography.small, color: colors.textMuted, fontStyle: 'italic', fontWeight: '600' },
-  splitTag: {
-    marginTop: 4,
-    alignItems: 'flex-end',
-    backgroundColor: colors.info + '22',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    maxWidth: 120,
+  splitPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.sm,
+    backgroundColor: colors.info + '1A',
   },
-  splitRow: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 112 },
-  splitIcon: { fontSize: 12 },
-  splitNames: {
-    ...typography.tiny,
-    color: colors.textSecondary,
-    fontWeight: '600',
-    maxWidth: 112,
-  },
+  splitText: { fontSize: 10, fontWeight: '700' },
   // Group watermark — clip layer fills the card and matches its rounded shape so the
   // oversized emoji is cut cleanly at the card's edges (only ~60% shows).
   groupWatermarkClip: {
@@ -330,7 +244,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 3,
   },
-  groupBannerEmoji: { fontSize: 10 },
   groupBannerText: {
     ...typography.tiny,
     fontWeight: '800',
@@ -345,30 +258,6 @@ const styles = StyleSheet.create({
 function truncateGroupName(name) {
   const s = (name || '').trim();
   return s.length > 10 ? `${s.slice(0, 9).trimEnd()}…` : s;
-}
-
-// Chip styling for a group expense's lent/borrow framing — same palette as the
-// LENT/BORROWED status chips below so a group debt reads identically to a direct one.
-const GROUP_LB_CHIP = {
-  lent:     { label: 'LENT',     bg: colors.lentSoft,     border: colors.lent + '55',     text: colors.lent },
-  borrowed: { label: 'BORROWED', bg: colors.borrowedSoft, border: colors.borrowed + '55', text: colors.borrowed },
-};
-
-function getStatusChip(txn) {
-  const categoryId = txn?.categoryId;
-  // Self shows for either the legacy categoryId or the two-tier child label, so
-  // both auto-detected and manually-tagged self transfers display the chip.
-  if (categoryId === 'self' || txn?.childCategory === 'Self') {
-    return { label: 'SELF', bg: '#6B72801A', border: '#6B728055', text: '#6B7280' };
-  }
-  // Settled/repaid keep their side's colour — the label carries the state.
-  if (categoryId === 'lent' || categoryId === 'lent_settled') {
-    return { label: categoryId === 'lent' ? 'LENT' : 'SETTLED', bg: colors.lentSoft, border: colors.lent + '55', text: colors.lent };
-  }
-  if (categoryId === 'borrowed' || categoryId === 'borrow_repaid') {
-    return { label: categoryId === 'borrowed' ? 'BORROWED' : 'REPAID', bg: colors.borrowedSoft, border: colors.borrowed + '55', text: colors.borrowed };
-  }
-  return null;
 }
 
 export default TransactionItem;
