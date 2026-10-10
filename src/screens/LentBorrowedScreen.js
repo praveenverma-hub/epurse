@@ -363,24 +363,23 @@ const LentBorrowedScreen = ({ route, navigation }) => {
         swipeEnabled
       />
 
-        {/* Explains the FOUR categories an entry can land in, because the form
-            only surfaces two ("Lend to someone" / "Borrow from someone") — the
-            settled pair is reachable via the "already settled" toggle, which
-            isn't self-explanatory. */}
+        {/* Explains the FOUR kinds an entry can be (the form shows two, plus the
+            "Already Received / Repaid" chip) and that entries move an account. */}
         <InfoSheet
           visible={infoVisible}
           onClose={() => setInfoVisible(false)}
           title="Lent & Borrowed"
           eyebrow="Four kinds of entry"
-          body="Every IOU is one of four kinds. Add the two open ones from the form below, or tick “already settled” to log one that's already closed."
+          body="Pick I Lent or I Borrowed in the form below. Tap “Already Received” or “Already Repaid” to add one that’s already settled."
           icon={<Ionicons name="swap-horizontal" size={28} color={theme.primary} />}
           bullets={[
-            { emoji: '📤', label: 'Lent',          value: 'You gave money out — they owe you. Shows under “You Lent”.' },
-            { emoji: '📥', label: 'Borrowed',      value: 'You took money — you owe them. Shows under “You Borrowed”.' },
-            { emoji: '✅', label: 'Lent settled',  value: 'They paid you back. Tick “as Lent settled” to log a loan that is already closed.' },
-            { emoji: '🤝', label: 'Borrow repaid', value: 'You paid them back. Tick “as Borrow repaid”; you can also book it as a real Repayment expense on an account.' },
-            { emoji: '📱', label: 'From an SMS',   value: 'You can also re-tag any bank transaction into one of these four from its category picker.' },
-            { emoji: '🧮', label: 'Not spending',  value: 'None of these count towards your monthly spend — only a Repayment expense does. Balances still move.' },
+            { icon: 'arrow-up-circle-outline',   label: 'Lent',          value: 'You gave money — they owe you.' },
+            { icon: 'arrow-down-circle-outline', label: 'Borrowed',      value: 'You took money — you owe them.' },
+            { icon: 'checkmark-circle-outline',  label: 'Received Back', value: 'They paid you back.' },
+            { icon: 'repeat-outline',            label: 'Repaid',        value: 'You paid them back.' },
+            { icon: 'wallet-outline',            label: 'Account',       value: 'Each entry moves the account the money went through (your primary is picked first). A matching bank transfer already there is linked instead, so nothing counts twice. Pick “Not From an Account” for cash or old loans.' },
+            { icon: 'chatbubble-outline',        label: 'From an SMS',   value: 'You can also re-tag any bank transaction as one of these from its category picker.' },
+            { icon: 'pie-chart-outline',         label: 'Spending',      value: 'Lent, Borrowed and Received Back never count as spending. A Repaid entry on an account is a Borrow Repaid expense.' },
           ]}
         />
 
