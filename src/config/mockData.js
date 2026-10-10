@@ -34,8 +34,14 @@ export const MOCK_SCENARIO = {
   refund: 200,
   ignored: 400,
   private: 300,
+  // Spend on a debit card that gets linked into the bank (so it moves the bank balance).
+  debitCardSpend: 250,
+  // Card 1: bill due in 3 days + bank-reported available limit. Card 2: part-paid, due date passed, shares card 1's limit.
+  card: { statement: 6000, minimum: 300, reportedAvailable: 60000 },
+  partlyPaidCard: { statement: 4000, remaining: 1500 },
   goals: [
-    { name: 'Demo Emergency fund', emoji: '🛟', target: 30000, allocation: 6000, contribution: 3500 },
-    { name: 'Demo Holiday', emoji: '🏖️', target: 15000, allocation: 3000, contribution: 1500 },
+    // `history`: closed months, newest first — planned vs actually funded (a hit, a miss).
+    { name: 'Demo Emergency fund', emoji: '🛟', target: 30000, allocation: 6000, contribution: 3500, history: [{ planned: 6000, funded: 6000 }, { planned: 6000, funded: 3500 }] },
+    { name: 'Demo Holiday', emoji: '🏖️', target: 15000, allocation: 3000, contribution: 1500, history: [{ planned: 3000, funded: 1800 }] },
   ],
 };

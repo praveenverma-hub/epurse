@@ -477,6 +477,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   (personal groups show total + this month — no longer "resets each month").
 - Oct-10-2026: **Activity totals notes → ⓘ.** The "₹X excluded · reasons" and "includes ₹X refunded" lines under "out · in" are gone; an ⓘ beside the totals (only when there's something to explain) opens an "About These Totals" sheet with them. No tooltip component exists, so it uses the app's InfoIcon + InfoSheet.
 - Oct-10-2026: **Export sheet footer copy.** Removed the "Select a format above to enable export" and "Download saves the PDF to your device · Share opens the share sheet" lines (the buttons and format cards already say it). Only the empty case remains: "No transactions in the current view."
+- Oct-10-2026: **Mock data: goal history + more account cases.** Goals get two closed months of planned vs funded (a hit and a miss; Emergency fund 2 months, Holiday 1). Accounts: card 1 with a bill due in 3 days + the bank's available-limit figure + a Home bill card; card 2 part-paid with the due date passed, sharing card 1's combined limit; a debit card linked into the bank; an archived wallet. `test:mock` asserts each.
 
 ---
 

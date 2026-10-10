@@ -21,12 +21,12 @@ for (const scale of [1, 2]) {
   const ids = await seedMockData(store, c, now);
   const s = store.getState();
   const bankExpenses = c.expenses.filter((x) => x.account === 'bank').reduce((sum, x) => sum + x.amount, 0);
-  const expectedBank = (c.openingBank + c.months * (c.salary - bankExpenses) + c.refund - c.private - c.splitAmount - c.groupAmount - c.repaid - c.lentFromBank) * scale;
+  const expectedBank = (c.openingBank + c.months * (c.salary - bankExpenses) + c.refund - c.private - c.splitAmount - c.groupAmount - c.repaid - c.lentFromBank - c.debitCardSpend) * scale;
   assert.equal(s.accounts.find((a) => a.id === ids.accounts.bank).balance, expectedBank, 'bank balance reflects full paid amounts, refund and ignore reversal');
   assert.equal(s.accounts.find((a) => a.id === ids.accounts.card).balance, -c.months * c.expenses.filter((x) => x.account === 'card').reduce((sum, x) => sum + x.amount, 0) * scale, 'card balance is negative for outstanding purchases');
   assert.equal(s.getMonthlyIncome(now), c.salary * scale);
   const expenseTotal = c.expenses.reduce((sum, x) => sum + x.amount, 0);
-  assert.equal(s.getMonthlySpend(now), (expenseTotal + c.private + c.splitAmount / 2 + c.groupAmount / 2 - c.refund + c.repaid) * scale, 'spend uses own shares, includes private + the repaid borrow, excludes ignored + lent');
+  assert.equal(s.getMonthlySpend(now), (expenseTotal + c.private + c.splitAmount / 2 + c.groupAmount / 2 - c.refund + c.repaid + c.debitCardSpend) * scale, 'spend uses own shares, includes private + the repaid borrow, excludes ignored + lent');
   assert.equal(s.budget.totalCap, Object.values(c.budget).reduce((a, b) => a + b, 0) * scale);
   assert.equal(s.goalContributions.reduce((sum, x) => sum + x.amount, 0), c.goals.reduce((sum, x) => sum + x.contribution, 0) * scale);
   assert.equal(s.transactions.filter((t) => t.source === 'sms' && !t.isReviewed).length, 3);
@@ -41,6 +41,23 @@ for (const scale of [1, 2]) {
   assert.equal(s.getPersonBalances().find((p) => p.contactId === 'demo-taylor').net, (c.lent + c.lentFromBank) * scale);
   assert.equal(s.getPersonBalances().find((p) => p.contactId === 'demo-morgan').net, -(c.borrowed - c.repaid) * scale);
   assert.equal(s.reminders.length, 1);
+  // Accounts: bill states, combined limit, linked debit card, archived account; goal history.
+  const { ccPaymentStatus } = await import('../ccStatement.js');
+  const { cardLimitPosition } = await import('../cardLimit.ts');
+  const card1 = s.accounts.find((a) => a.id === ids.accounts.card);
+  const card2 = s.accounts.find((a) => a.id === 'demo-card-2');
+  assert.equal(ccPaymentStatus(card1, now), 'due_soon');
+  assert.equal(ccPaymentStatus(card2, now), 'due_date_passed');
+  assert.ok(card1.limitGroupId && card1.limitGroupId === card2.limitGroupId, 'cards share a limit');
+  assert.equal(cardLimitPosition(card1, s.accounts, s.transactions).source, 'bank');
+  assert.ok(s.ccBills['2002'], 'home bill card source');
+  assert.ok(!s.accounts.some((a) => a.id === 'demo-debit') && s.accounts.find((a) => a.id === ids.accounts.bank).aliasMasks.includes('4004'), 'debit card linked into the bank');
+  assert.equal(s.accounts.find((a) => a.id === 'demo-old-wallet').archived, true);
+  const goalIds = s.goals.map((g) => g.id);
+  const hist = Object.values(s.goalHistory);
+  assert.equal(hist.length, 2, 'two closed months');
+  assert.ok(hist.every((h) => goalIds.some((id) => h.perGoal[id])), 'history keyed by goal id');
+  assert.ok(hist.some((h) => Object.values(h.perGoal).some((x) => x.funded < x.planned)), 'includes a missed month');
   await assert.rejects(seedMockData(store, c), /empty store/);
 }
 assert.equal(await mockStorage.getItem('real-ledger'), null);
