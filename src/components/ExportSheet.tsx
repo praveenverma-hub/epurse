@@ -355,13 +355,9 @@ const ExportSheet: React.FC<Props> = ({
             />
           </View>
 
-          <Text style={styles.actionHint}>
-            {filteredTransactions.length === 0
-              ? 'No transactions match the current filters — nothing to export.'
-              : !selectedFormat
-              ? 'Select a format above to enable export.'
-              : `Download saves the ${selectedFormat.toUpperCase()} to your device · Share opens the share sheet.`}
-          </Text>
+          {filteredTransactions.length === 0 ? (
+            <Text style={styles.actionHint}>No transactions in the current view.</Text>
+          ) : null}
         </View>
       </View>
     </Modal>

@@ -475,6 +475,8 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   icons instead of emoji), Account Details (credit card: Outstanding & Anchoring incl. the
   bill, Bill & Available Credit; LB entries move a balance; debit link/unlink), Groups
   (personal groups show total + this month — no longer "resets each month").
+- Oct-10-2026: **Activity totals notes → ⓘ.** The "₹X excluded · reasons" and "includes ₹X refunded" lines under "out · in" are gone; an ⓘ beside the totals (only when there's something to explain) opens an "About These Totals" sheet with them. No tooltip component exists, so it uses the app's InfoIcon + InfoSheet.
+- Oct-10-2026: **Export sheet footer copy.** Removed the "Select a format above to enable export" and "Download saves the PDF to your device · Share opens the share sheet" lines (the buttons and format cards already say it). Only the empty case remains: "No transactions in the current view."
 
 ---
 
