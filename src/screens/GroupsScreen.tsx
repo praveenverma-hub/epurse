@@ -310,7 +310,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         body="Group shared and personal expenses together. Shared-group splits flow into your Lent/Borrowed balances, so a friend across several groups nets to one total you can settle in one place."
         bullets={[
           { label: 'Shared', value: 'Split expenses; balances appear in Lent/Borrowed and in the summary above.' },
-          { label: 'Personal', value: 'Track a theme (house, trip); optionally exclude from totals. The total resets each month.' },
+          { label: 'Personal', value: 'Track a theme (house, trip) — its total and this month’s spend; optionally exclude it from your totals.' },
           { label: 'Auto-cleanup', value: 'Groups you haven’t touched in 6 months are removed once everyone is settled.' },
         ]}
       />

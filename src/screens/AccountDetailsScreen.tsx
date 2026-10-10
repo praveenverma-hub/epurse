@@ -1118,20 +1118,28 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         icon={<Ionicons name="information-circle-outline" size={28} color={theme.primary} />}
         title="About this account"
         bullets={[
-          {
+          isCreditCard ? {
             icon: 'create-outline',
-            label: 'Balance & anchoring',
+            label: 'Outstanding & Anchoring',
+            value: 'Synced from your bank SMS. If it ever drifts, tap Outstanding to set what you owe — only newer transactions adjust it. Setting it below the unpaid bill lowers what’s left on the bill; ₹0 marks it paid.',
+          } : {
+            icon: 'create-outline',
+            label: 'Balance & Anchoring',
             value: 'Synced from your bank SMS. If it ever drifts, tap the balance to set the right amount — it already includes everything before that moment, so only newer transactions adjust it.',
           },
           {
             icon: 'swap-vertical-outline',
             label: 'What Moves It',
-            value: 'Every transaction, whatever its category. Ignoring or deleting one reverses it. A split someone else paid for doesn’t touch it.',
+            value: 'Every transaction, whatever its category, and Lent/Borrowed entries added on this account. Ignoring or deleting one reverses it. A split someone else paid for doesn’t touch it.',
           },
-          {
+          isCreditCard ? {
+            icon: 'card-outline',
+            label: 'Bill & Available Credit',
+            value: 'Bill status and due date come from your bank’s bill SMS. Available Credit uses the bank’s own figure from your card SMS when there is one. Cards on one combined limit share it.',
+          } : {
             icon: 'git-merge-outline',
-            label: 'Linked cards',
-            value: 'A linked debit card’s money is folded into this balance and ledger, not tracked separately — unlink it here any time. Credit cards on one combined limit share Available Credit and Utilization.',
+            label: 'Linked Cards',
+            value: 'A debit card linked to its bank is folded into the bank’s balance and ledger, so the money isn’t counted twice. Link it from the card’s page; unlink it from the bank’s.',
           },
         ]}
       />

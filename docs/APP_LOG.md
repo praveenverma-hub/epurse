@@ -469,6 +469,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   (`setAccountAnchor`) below its unpaid bill now lowers what's left on the bill — ₹0 =
   paid, and the Home bill card + due reminder clear. Before, the carousel said FULLY PAID
   while the Accounts row and Home still said the bill was due.
+- Oct-10-2026: **Info sheets brought up to date.** Lent & Borrowed (form wording "I Lent /
+  I Borrowed" + "Already Received / Repaid"; entries move an account, matching transfer
+  linked, "Not From an Account"; a Repaid entry on an account is a Borrow Repaid expense;
+  icons instead of emoji), Account Details (credit card: Outstanding & Anchoring incl. the
+  bill, Bill & Available Credit; LB entries move a balance; debit link/unlink), Groups
+  (personal groups show total + this month — no longer "resets each month").
 
 ---
 
