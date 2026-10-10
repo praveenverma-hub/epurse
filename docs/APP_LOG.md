@@ -487,6 +487,8 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   Settings also has no row separators now (spacing only).
 - Oct-10-2026: **Manage Transaction: tighter gap above Category.** The "Category" label had its own top margin on top of the body padding, so the space under the header divider was about double the other gaps; the first label now relies on the body padding alone.
   The header divider also moved: it now sits between the merchant row and the note field (none below the note).
+- Oct-10-2026: **Welcome review card title.** "Welcome to" and the ePurse wordmark use the same colour, but the text was 15/600 beside a 17/700 wordmark, so it looked lighter. The text now matches the wordmark's size and weight.
+  The "← manage · got it →" hints on the welcome card are right-aligned.
 
 ---
 
