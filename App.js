@@ -185,11 +185,16 @@ function CompactionBoot() {
 function AuthSessionBoot() {
   const setGoogleAccount = useEPurseStore((s) => s.setGoogleAccount);
   const setSessionExpired = useEPurseStore((s) => s.setSessionExpired);
+  const setAuthChecked = useEPurseStore((s) => s.setAuthChecked);
 
   useEffect(() => {
     (async () => {
-      const signedIn = await googleAuth.isSignedIn();
-      setGoogleAccount(signedIn ? await googleAuth.getSignedInProfile() : null);
+      try {
+        const signedIn = await googleAuth.isSignedIn();
+        setGoogleAccount(signedIn ? await googleAuth.getSignedInProfile() : null);
+      } finally {
+        setAuthChecked();
+      }
     })();
 
     return googleAuth.onSessionChange((signedIn) => {
@@ -198,7 +203,7 @@ function AuthSessionBoot() {
       setGoogleAccount(null);
       if (wasLoggedIn) setSessionExpired(true);
     });
-  }, [setGoogleAccount, setSessionExpired]);
+  }, [setGoogleAccount, setSessionExpired, setAuthChecked]);
 
   return null;
 }

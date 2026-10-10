@@ -8,11 +8,11 @@
 //   • per-entry EDIT + DELETE for manual rows (the reason for the change)
 //   • one obvious home for the net Settle action
 //
-// Editability is not uniform, and that's deliberate — see
-// `isLentBorrowedEditable` in the store. Rows materialised from a group expense
-// (`groupId`) or backed by a real transaction (`sourceTxnId`) are shown read-only
-// with the reason, because changing them here would contradict the group expense
-// or the account balance that transaction already moved.
+// Every row opens ONE sheet (LbEntryDetailSheet), whatever its source; only the
+// sheet's button differs. Rows materialised from a group expense (`groupId`) or
+// backed by a real transaction (`sourceTxnId`) aren't edited here — changing them
+// would contradict the group expense or the balance that transaction moved — so
+// their sheet points to the group / transaction instead (see `isLentBorrowedEditable`).
 // =============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
@@ -25,29 +25,25 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, DIVIDER_W, readableOn } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
-import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidAmount } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
-import { FormField, FormTextInput, FormAmountInput } from '../components/FormField';
+import { FormField, FormTextInput, FormAmountInput, FormChip, FormChipRow } from '../components/FormField';
 import DateField from '../components/DateField';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
 import SheetCloseButton from '../components/SheetCloseButton';
 import CenterModal from '../components/CenterModal';
 import EmptyState from '../components/EmptyState';
-import EditIcon from '../components/EditIcon';
 import LbEntryForm from '../components/LbEntryForm';
 import AccountPickerSheet from '../components/AccountPickerSheet';
+import LbEntryDetailSheet, { lbToneInk } from '../components/LbEntryDetailSheet';
+import TxnDetailSheet from '../components/TxnDetailSheet';
+import { lbEntryMeta, lbEntryTitle, lbEntryTone, lbEntrySign, lbNoteText } from '../utils/lbEntryDisplay';
+import { txnAccountLabel } from '../utils/txnCardModel';
 import { useToast } from '../components/Toast';
-
-// Why a row can't be edited here — shown inline so the restriction explains itself
-// rather than looking like a broken tap.
-const LOCK_REASON = {
-  group: 'From a group expense — edit it in the group',
-  txn:   'From a bank transaction — edit the transaction',
-};
 
 // Row icon NAME only — same direction language as the LB tab's toggle/empty-state
 // icons (arrow-up = lent, arrow-down = borrowed, checkmark = settled/repaid).
@@ -77,13 +73,18 @@ const LbPersonScreen = ({ route, navigation }) => {
   const lentBorrowed          = useEPurseStore((s) => s.lentBorrowed);
   const groups                = useEPurseStore((s) => s.groups);
   const accounts              = useEPurseStore((s) => s.accounts);
+  const transactions          = useEPurseStore((s) => s.transactions);
   const settlePersonBalance   = useEPurseStore((s) => s.settlePersonBalance);
   const addLentBorrowed       = useEPurseStore((s) => s.addLentBorrowed);
   const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
   const updateLentBorrowedEntry = useEPurseStore((s) => s.updateLentBorrowedEntry);
   const deleteLentBorrowedEntry = useEPurseStore((s) => s.deleteLentBorrowedEntry);
+  const isLentBorrowedEditable  = useEPurseStore((s) => s.isLentBorrowedEditable);
+  const lentBorrowedAccountId   = useEPurseStore((s) => s.lentBorrowedAccountId);
 
+  const [detailEntry,  setDetailEntry]  = useState(null);  // the row whose sheet is open
   const [editEntry,    setEditEntry]    = useState(null);  // the row being edited
+  const [viewTxn,      setViewTxn]      = useState(null);  // the transaction behind a row
   const [addOpen,      setAddOpen]      = useState(false);  // new entry for this person
   const [addKind,      setAddKind]      = useState('lent');  // direction of that new entry
   const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
@@ -126,6 +127,7 @@ const LbPersonScreen = ({ route, navigation }) => {
       .map((g) => ({
         id: `grp_${g.groupId}`,
         isGroupLine: true,
+        groupId: g.groupId,
         groupName: groupNameById[g.groupId] || 'Group',
         kind: g.net > 0 ? 'lent' : 'borrowed',
         amount: Math.abs(g.net),
@@ -151,14 +153,17 @@ const LbPersonScreen = ({ route, navigation }) => {
   const netColor = net > 0 ? theme.lent : net < 0 ? theme.borrowed : theme.success;
   const netLabel = net > 0 ? 'owes you' : net < 0 ? 'you owe' : 'All Settled';
 
-  // Sum of every 'lent' + 'borrowed' entry, once each — the actual loans, not the
-  // settle/repaid rows that just clear them. Counting those too would double an
-  // amount that's settled (the origin AND its counterpart both add it in), so
-  // this is deliberately the simpler, smaller number: "how much have you lent or
-  // borrowed with this person, ever" rather than every ledger row summed blind.
-  const totalDealt = (person.entries || [])
-    .filter((e) => e.kind === 'lent' || e.kind === 'borrowed')
-    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  // The history behind the hero's net — "how did we get here". One direction
+  // shows its round trip (Lent │ Got Back, Borrowed │ Repaid); both directions
+  // show the two sides. Null when there's nothing but settle rows.
+  const summaryCells = useMemo(() => {
+    const sum = { lent: 0, lent_settled: 0, borrowed: 0, borrow_repaid: 0 };
+    (person?.entries || []).forEach((e) => { if (e.kind in sum) sum[e.kind] += Number(e.amount) || 0; });
+    if (sum.lent && sum.borrowed) return [['YOU LENT', sum.lent], ['YOU BORROWED', sum.borrowed]];
+    if (sum.lent) return [['YOU LENT', sum.lent], ['GOT BACK', sum.lent_settled]];
+    if (sum.borrowed) return [['YOU BORROWED', sum.borrowed], ['YOU REPAID', sum.borrow_repaid]];
+    return null;
+  }, [person]);
   // displayEntries is sorted most-recent-first (see above), so its head IS the
   // last activity — no second pass over the raw entries needed.
   const lastActivityDate = displayEntries[0]?.date || null;
@@ -267,11 +272,14 @@ const LbPersonScreen = ({ route, navigation }) => {
 
   // ── Delete a manual row ─────────────────────────────────────────────────────
   const handleDelete = useCallback((entry) => {
+    const paidFrom = accounts.find((a) => a.id === lentBorrowedAccountId(entry));
     setConfirm({
       title: 'Delete this entry?',
       message:
         `${ENTRY_LABEL[entry.kind] || entry.kind} · ${formatCurrency(entry.amount)}\n\n` +
-        'Removes it from the ledger and re-nets the balance. This cannot be undone.',
+        (paidFrom
+          ? `Also deletes its Repayment expense and puts ${formatCurrency(entry.amount)} back in ${paidFrom.name}. This cannot be undone.`
+          : 'Removes it from the ledger and re-nets the balance. This cannot be undone.'),
       primaryText: 'Delete',
       destructive: true,
       secondaryText: 'Cancel',
@@ -289,87 +297,41 @@ const LbPersonScreen = ({ route, navigation }) => {
         } else toast.info('Could not delete', 'This entry comes from a group or a transaction.');
       },
     });
-  }, [deleteLentBorrowedEntry, toast, person, freshNet]);
+  }, [deleteLentBorrowedEntry, toast, person, freshNet, accounts, lentBorrowedAccountId]);
 
   // ── Rows ────────────────────────────────────────────────────────────────────
+  // A ledger row is coloured from the user's OWN money (see lbEntryTone): Lent and
+  // Repaid are your money leaving → LB's coral; Borrowed and Received back stay
+  // plain; a group line is a running net, so it keeps the lent/borrowed framing.
+  // Every row taps into the same detail sheet; the chevron says so and keeps
+  // the amounts in one column.
   const renderEntry = useCallback((entry) => {
-    // A ledger row here is a TRANSACTION CARD, coloured from the perspective of
-    // the user's OWN money, not the balance it helps or the literal direction
-    // alone. LB money is mostly temporary — Borrowed money isn't really yours
-    // (you owe it back) and Received-back money is just your own money
-    // returning (never a gain) — so both stay PLAIN. Lent and Repaid are the
-    // two moments your own real money actually leaves your account, so those
-    // are the ones that read as a loss — but the app's generic expense red is
-    // the wrong red for it (that's reserved for real spending); this is still
-    // an LB row, so it takes LB's OWN "money leaving" colour, `theme.borrowed`
-    // (the coral the brand palette picked specifically to avoid danger red).
-    // `isPositiveEntry` answers the net-worth question ("is this good for my
-    // balance") and stays exactly that for the actual balance math (see the
-    // group total above); it's the wrong question here, so this is deliberately
-    // its own, separate call. The SIGN still follows literal cash direction
-    // (+ arriving, − leaving) regardless.
-    //
-    // A group line is a running NET for that group, not one movement, so it
-    // keeps the balance framing (lent/borrowed colours) instead.
-    const isOutflow = entry.kind === 'lent' || entry.kind === 'borrow_repaid'; // your own money leaving
-    const entryColor = entry.isGroupLine
-      ? (entry.kind === 'lent' ? theme.lent : theme.borrowed)
-      : (isOutflow ? theme.borrowed : colors.textPrimary);
-    const sign = entry.isGroupLine
-      ? (entry.kind === 'lent' ? '+' : '−')
-      : (isOutflow ? '−' : '+');
-    const editable   = !entry.isGroupLine && !entry.groupId && !entry.sourceTxnId;
-    const lockReason = entry.isGroupLine || entry.groupId
-      ? LOCK_REASON.group
-      : entry.sourceTxnId ? LOCK_REASON.txn : null;
-    const iconName = rowIconName(entry);
-
-    const primaryText = entry.isGroupLine
-      ? `Group · ${entry.groupName}`
-      : (entry.note && entry.note !== 'Manual settlement'
-          ? entry.note
-          : ENTRY_LABEL[entry.kind] || entry.kind);
-    const subText = entry.isGroupLine
-      ? 'Group total'
-      : `${ENTRY_LABEL[entry.kind]} · ${formatDate(entry.date)}`;
-
+    const entryColor = lbToneInk(lbEntryTone(entry), theme);
     return (
       <TouchableOpacity
         key={entry.id}
         style={[styles.entryCard, entry.settledAt && styles.entrySettled]}
-        activeOpacity={editable ? 0.75 : 1}
-        disabled={!editable}
-        onPress={() => setEditEntry(entry)}
+        activeOpacity={0.75}
+        onPress={() => setDetailEntry(entry)}
+        accessibilityRole="button"
+        accessibilityHint="Opens details"
       >
         <View style={[styles.entryIconTile, { backgroundColor: entryColor + '18' }]}>
-          <Ionicons name={iconName} size={18} color={entryColor} />
+          <Ionicons name={rowIconName(entry)} size={18} color={entryColor} />
         </View>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
-          <Text style={styles.entryTitle} numberOfLines={1}>{primaryText}</Text>
-          <Text style={styles.entrySub} numberOfLines={1}>{subText}</Text>
-          {lockReason ? (
-            <View style={styles.lockRow}>
-              <Ionicons name="lock-closed-outline" size={10} color={colors.textMuted} />
-              <Text style={styles.lockText} numberOfLines={1}>{lockReason}</Text>
-            </View>
-          ) : null}
+          <Text style={styles.entryTitle} numberOfLines={1}>{lbEntryTitle(entry)}</Text>
+          <Text style={styles.entrySub} numberOfLines={1}>{lbEntryMeta(entry)}</Text>
         </View>
         <Text style={[styles.entryAmt, { color: entryColor }]} numberOfLines={1}>
-          {sign} {formatCurrency(entry.amount)}
+          {lbEntrySign(entry)} {formatCurrency(entry.amount)}
         </Text>
-        {editable ? (
-          <View
-            style={[
-              styles.entryEdit,
-              { backgroundColor: theme.primary + '18', borderColor: theme.primary + '33' },
-            ]}
-          >
-            <EditIcon size={16} color={theme.primary} />
-          </View>
-        ) : null}
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={styles.entryChevron} />
       </TouchableOpacity>
     );
   }, [theme]);
+
+  const detailTxn = detailEntry?.sourceTxnId ? transactions.find((t) => t.id === detailEntry.sourceTxnId) || null : null;
 
   if (!person) {
     return (
@@ -442,54 +404,32 @@ const LbPersonScreen = ({ route, navigation }) => {
           <Text style={[styles.heroLabel, { color: netColor }]}>{netLabel}</Text>
           {person.phone ? <Text style={styles.heroPhone}>{person.phone}</Text> : null}
           {lastActivityDate ? (
-            <Text style={styles.heroHint}>
-              Last activity {formatDate(lastActivityDate)} · {displayEntries.length}{' '}
-              {displayEntries.length === 1 ? 'entry' : 'entries'}
-            </Text>
+            <Text style={styles.heroHint}>Last activity {formatDate(lastActivityDate)}</Text>
           ) : null}
         </View>
 
         {/* Same segmented-surface treatment as Home's Income/Refunds card, on a
             white surface here (this screen has no gradient header to sit on). */}
-        <View style={styles.summaryCardShadow}>
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>TOTAL INVOLVED</Text>
-            <Text style={styles.summaryValue} numberOfLines={1}>{formatCurrency(totalDealt)}</Text>
+        {summaryCells ? (
+          <View style={styles.summaryCardShadow}>
+          <View style={styles.summaryCard}>
+            {summaryCells.map(([label, value], i) => (
+              <React.Fragment key={label}>
+                {i > 0 ? <View style={styles.summaryDivider} /> : null}
+                <View style={styles.summaryCell}>
+                  <Text style={styles.summaryLabel}>{label}</Text>
+                  <Text style={styles.summaryValue} numberOfLines={1}>{formatCurrency(value)}</Text>
+                </View>
+              </React.Fragment>
+            ))}
           </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>
-              {net > 0 ? 'TOTAL LENT' : net < 0 ? 'TOTAL BORROWED' : 'SETTLED'}
-            </Text>
-            <Text style={[styles.summaryValue, { color: netColor }]} numberOfLines={1}>
-              {formatCurrency(netAbs)}
-            </Text>
           </View>
-        </View>
-        </View>
+        ) : null}
 
         <SectionHeader
           icon="time-outline"
           title="Transaction History"
           style={styles.historyHeader}
-          right={
-            <TouchableOpacity
-              onPress={() => {
-                // Pre-pick the likelier direction: if you already owe them, the
-                // next entry is usually another borrow. Still one tap to flip.
-                setAddKind(net < 0 ? 'borrowed' : 'lent');
-                setAddOpen(true);
-              }}
-              hitSlop={10}
-              style={[styles.historyAddBtn, { backgroundColor: theme.primary + '18' }]}
-              accessibilityRole="button"
-              accessibilityLabel={`Add an entry with ${person.person || 'this person'}`}
-            >
-              <Ionicons name="add" size={16} color={theme.primary} />
-              <Text style={[styles.historyAddBtnText, { color: theme.primary }]}>Add</Text>
-            </TouchableOpacity>
-          }
         />
 
         <View style={styles.entriesCardShadow}>
@@ -508,33 +448,67 @@ const LbPersonScreen = ({ route, navigation }) => {
         </View>
       </ScrollView>
 
-      {net !== 0 ? (
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-          <View style={{ flex: 1, marginRight: spacing.sm }}>
-            <Text style={styles.footerLabel} numberOfLines={1}>
-              {net > 0 ? 'Total owed to you' : 'Total you owe'}
-            </Text>
-            <Text style={[styles.footerAmt, { color: netColor }]} numberOfLines={1}>
-              {formatCurrency(netAbs)}
-            </Text>
-          </View>
-          <PrimaryButton title="Settle" onPress={handleSettlePress} style={styles.settleBtn} />
-        </View>
-      ) : null}
+      {/* Both person actions, pinned. With a balance, Settle is THE primary (filled)
+          and Add sits beside it outlined; settled, Add is the only action and fills. */}
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        <PrimaryButton
+          title="Add Entry"
+          variant={net !== 0 ? 'outline' : 'filled'}
+          icon={<Ionicons name="add" size={18} color={net !== 0 ? readableOn(colors.card, theme.primary) : '#FFFFFF'} />}
+          onPress={() => {
+            // Pre-pick the likelier direction: if you already owe them, the next
+            // entry is usually another borrow. Still one tap to flip.
+            setAddKind(net < 0 ? 'borrowed' : 'lent');
+            setAddOpen(true);
+          }}
+          accessibilityLabel={`Add an entry with ${person.person || 'this person'}`}
+          style={styles.footerBtn}
+        />
+        {net !== 0 ? (
+          <PrimaryButton
+            // Half-width: a lakh-scale figure won't fit beside Add, so it drops to plain "Settle".
+            title={formatCurrency(netAbs).length <= 9 ? `Settle ${formatCurrency(netAbs)}` : 'Settle'}
+            onPress={handleSettlePress}
+            style={styles.footerBtn}
+          />
+        ) : null}
+      </View>
+
+      <LbEntryDetailSheet
+        entry={detailEntry}
+        person={person.person}
+        sourceTxn={detailTxn}
+        editable={!!detailEntry && !detailEntry.isGroupLine && isLentBorrowedEditable(detailEntry)}
+        accountLabel={detailTxn ? txnAccountLabel(detailTxn, accounts.find((a) => a.id === detailTxn.accountId)) : ''}
+        onClose={() => setDetailEntry(null)}
+        onEdit={setEditEntry}
+        onViewTxn={setViewTxn}
+        onOpenGroup={(entry) => navigation.navigate('GroupDetail', { groupId: entry.groupId })}
+      />
+
+      {/* A manually-lent txn is lbLocked (its ledger link is fixed), so it's view-only here. */}
+      <TxnDetailSheet
+        txn={viewTxn}
+        onClose={() => setViewTxn(null)}
+        onEdit={viewTxn && !viewTxn.lbLocked ? (t) => {
+          setViewTxn(null);
+          navigation.navigate('AddTransaction', { editTxnId: t.id });
+        } : undefined}
+      />
 
       <EditEntrySheet
         entry={editEntry}
+        personName={person.person}
+        accounts={accounts}
+        accountId={editEntry ? lentBorrowedAccountId(editEntry) : null}
         theme={theme}
         onClose={() => setEditEntry(null)}
         onSave={(patch) => {
           const ok = updateLentBorrowedEntry(editEntry.id, patch);
           if (ok) {
             setEditEntry(null);
-            toast.success(
-              `Updated to ${formatCurrency(patch.amount)}`,
-              formatOutstanding(freshNet(), firstName(patch.person || person?.person)),
-            );
-          } else toast.info('Could not save', 'Check the amount and name, then try again.');
+            toast.success('Entry updated', formatOutstanding(freshNet(), firstName(person?.person)));
+          } else toast.info('Could not save', 'Check the amount, then try again.');
         }}
         onDelete={() => handleDelete(editEntry)}
       />
@@ -635,12 +609,15 @@ const LbPersonScreen = ({ route, navigation }) => {
 // Keyed on the entry id so switching rows remounts it with fresh state — a shared
 // instance would keep the previous row's draft in its inputs.
 /** Gate + remount: the `key` forces fresh useState seeds each time it opens. */
-const EditEntrySheet = ({ entry, theme, onClose, onSave, onDelete }) => {
+const EditEntrySheet = ({ entry, personName, accounts, accountId, theme, onClose, onSave, onDelete }) => {
   if (!entry) return null;
   return (
     <EntrySheetBody
       key={entry.id}
       entry={entry}
+      personName={personName}
+      accounts={accounts}
+      accountId={accountId}
       theme={theme}
       onClose={onClose}
       onSave={onSave}
@@ -649,14 +626,19 @@ const EditEntrySheet = ({ entry, theme, onClose, onSave, onDelete }) => {
   );
 };
 
-/** Edit an existing row. Adding is a different shape entirely — see LbEntryForm. */
-const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
-  const [person, setPerson] = useState(entry.person || '');
+/**
+ * Edit an existing row. Adding is a different shape entirely — see LbEntryForm.
+ * No Person field: this is one person's ledger (Add locks the person too), and a
+ * free-text name either respelt one entry or silently MOVED it to another person.
+ */
+const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccountId, theme, onClose, onSave, onDelete }) => {
   const [amount, setAmount] = useState(String(entry.amount ?? ''));
-  const [note,   setNote]   = useState(entry.note || '');
+  // Only a booked Repayment has one — its expense moves with this edit.
+  const [accountId, setAccountId] = useState(initialAccountId);
+  const [note,   setNote]   = useState(() => lbNoteText(entry.note));
   const [date,   setDate]   = useState(() => new Date(entry.date));
 
-  const canSave = isValidAmount(amount) && person.trim().length > 0;
+  const canSave = isValidAmount(amount);
 
   // No `statusBarTranslucent` — see the add sheet above; it breaks Android keyboard
   // avoidance for any sheet with a text input.
@@ -668,7 +650,7 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle} numberOfLines={1}>
-            Edit {ENTRY_LABEL[entry.kind] || 'entry'}
+            Edit {ENTRY_LABEL[entry.kind] || 'entry'} · {titleCaseName(personName)}
           </Text>
 
           {/* Same shadow-clipping fix as the add sheet — "Save changes" is a
@@ -704,14 +686,22 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
               </View>
             </FormField>
 
-            <FormField label="Person">
-              <FormTextInput
-                value={person}
-                onChangeText={(t) => setPerson(sanitizeName(t))}
-                placeholder="Name"
-                maxLength={INPUT_LIMITS.NAME_MAX}
-              />
-            </FormField>
+            {/* Inline chips, not AccountField: its picker is a second native Modal (§8b). */}
+            {initialAccountId ? (
+              <FormField label="Paid From">
+                <FormChipRow>
+                  {accounts.map((a) => (
+                    <FormChip
+                      key={a.id}
+                      label={a.name}
+                      active={a.id === accountId}
+                      onPress={() => setAccountId(a.id)}
+                      accentColor={theme.primary}
+                    />
+                  ))}
+                </FormChipRow>
+              </FormField>
+            ) : null}
 
             <FormField label="Note">
               <FormTextInput
@@ -732,8 +722,8 @@ const EntrySheetBody = ({ entry, theme, onClose, onSave, onDelete }) => {
                 disabled={!canSave}
                 onPress={() => onSave({
                   amount: Number(amount),
-                  person: person.trim(),
                   note: note.trim(),
+                  ...(initialAccountId ? { accountId } : {}),
                   date: date.toISOString(),
                 })}
                 style={{ flex: 1 }}
@@ -819,7 +809,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     overflow: 'hidden',
   },
-  summaryCell: { flex: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  // Centred like the hero above it — one centred profile block.
+  summaryCell: { flex: 1, alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   summaryDivider: {
     width: DIVIDER_W,
     backgroundColor: colors.divider,
@@ -831,18 +822,6 @@ const styles = StyleSheet.create({
   summaryValue: { ...typography.bodyBold, color: colors.textPrimary, fontWeight: '700', marginTop: 3 },
 
   historyHeader: { marginBottom: spacing.sm },
-  // Add-entry action, moved here from the top header bar. Icon + label (not an
-  // icon alone) — "Add" on its own reads as a stray glyph beside a heading in a
-  // way it wouldn't as a lone FAB, where the position already says what it does.
-  historyAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-  },
-  historyAddBtnText: { ...typography.tiny, fontWeight: '700' },
 
   // ── ONE card holding every entry, rows separated by a hairline instead of
   // each row being its own shadowed card — a ledger reads as one list, not as
@@ -883,23 +862,12 @@ const styles = StyleSheet.create({
   entryTitle: { ...typography.bodyBold, color: colors.textPrimary },
   entrySub:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
   entryAmt:   { ...typography.bodyBold, fontWeight: '800', flexShrink: 0 },
-  // Same 28×28 tinted circle as the pencil on LentBorrowedScreen's person cards
-  // (which matches waBtn / bellBtn there) — one edit affordance across both screens.
-  entryEdit: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.sm,
-  },
-  lockRow:    { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  lockText:   { ...typography.tiny, color: colors.textMuted, flexShrink: 1 },
+  entryChevron: { marginLeft: spacing.xs },
 
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     // paddingBottom is set inline — it's the larger of the home-indicator inset
@@ -908,9 +876,7 @@ const styles = StyleSheet.create({
     borderTopWidth: DIVIDER_W,
     borderTopColor: colors.divider,
   },
-  footerLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '600' },
-  footerAmt:   { ...typography.h3, fontWeight: '800', marginTop: 1 },
-  settleBtn:   { minWidth: 120 },
+  footerBtn:   { flex: 1, paddingHorizontal: spacing.sm },
 
   // ── Edit sheet ──
   sheetBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },

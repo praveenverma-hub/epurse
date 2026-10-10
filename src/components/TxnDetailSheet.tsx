@@ -7,12 +7,14 @@
 // =============================================================================
 import React, { useMemo } from 'react';
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Modal from "./AppModal";
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
@@ -90,6 +92,9 @@ interface TxnDetailSheetProps {
 
 export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CONTEXT.DEFAULT }: TxnDetailSheetProps) {
   const theme = useTheme();
+  // Android's AppModal already stops above the nav bar; iOS draws under the home indicator.
+  const insets = useSafeAreaInsets();
+  const bottomInset = Platform.OS === 'ios' ? insets.bottom : 0;
   const categories = useEPurseStore((s: any) => s.categories);
   const groups = useEPurseStore((s: any) => s.groups);
   const accounts = useEPurseStore((s: any) => s.accounts);
@@ -147,14 +152,17 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
   // district/region when the geocoder couldn't name a city, so this still shows
   // SOMETHING useful rather than nothing on the rare city-less fix.
   const place = locationKey(txn.location);
-  const isLastRow = !txn.note && !hasSplit;
+  // The last row drops its divider — unless the split list follows (then it's the separator).
+  const rowKeys = ['category', matchedGoals.length > 0 && 'goals', showGroup && 'group', accountLabel && 'account', place && 'place', txn.note && 'note'].filter(Boolean);
+  const lastRow = hasSplit ? null : rowKeys[rowKeys.length - 1];
+  const rowStyle = (key: string) => [styles.detailRow, key === lastRow && styles.detailRowLast];
 
   return (
     <Modal visible={!!txn} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismiss} activeOpacity={1} onPress={onClose} />
         <SheetCloseButton onPress={onClose} />
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: spacing.xl + bottomInset }]}>
           <View style={styles.handle} />
 
           <View style={styles.topRow}>
@@ -185,7 +193,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
           ) : null}
 
           <ScrollView style={styles.detailList} showsVerticalScrollIndicator={false}>
-            <View style={styles.detailRow}>
+            <View style={rowStyle('category')}>
               <Text style={styles.detailLabel}>Category</Text>
               <Text style={styles.detailValue} numberOfLines={1}>
                 {category ? `${category.emoji} ${category.name}` : 'Uncategorized'}
@@ -198,7 +206,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
                 goal's rule or this transaction's category changes what shows
                 here on the very next open, never a stale answer. */}
             {matchedGoals.length > 0 ? (
-              <View style={styles.detailRow}>
+              <View style={rowStyle('goals')}>
                 <Text style={styles.detailLabel}>Counts toward</Text>
                 <Text style={styles.detailValue} numberOfLines={2}>
                   {matchedGoals.map((g: any) => `${g.emoji} ${g.name}`).join('  ·  ')}
@@ -206,7 +214,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
               </View>
             ) : null}
             {showGroup ? (
-              <View style={styles.detailRow}>
+              <View style={rowStyle('group')}>
                 <Text style={styles.detailLabel}>Group</Text>
                 <Text style={styles.detailValue} numberOfLines={1}>
                   {group.emoji ? `${group.emoji} ${group.name}` : group.name}
@@ -214,13 +222,13 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
               </View>
             ) : null}
             {accountLabel ? (
-              <View style={styles.detailRow}>
+              <View style={rowStyle('account')}>
                 <Text style={styles.detailLabel}>Account</Text>
                 <Text style={styles.detailValue} numberOfLines={1}>{accountLabel}</Text>
               </View>
             ) : null}
             {place ? (
-              <View style={[styles.detailRow, isLastRow && styles.detailRowLast]}>
+              <View style={rowStyle('place')}>
                 <Text style={styles.detailLabel}>Location</Text>
                 <Text style={styles.detailValue} numberOfLines={1}>{place}</Text>
               </View>
@@ -229,7 +237,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
                 body) here — until Jul-31 the parser stored that in `note`, so this row
                 showed the whole SMS on every auto-imported transaction. */}
             {txn.note ? (
-              <View style={[styles.detailRow, !hasSplit && styles.detailRowLast]}>
+              <View style={rowStyle('note')}>
                 <Text style={styles.detailLabel}>Note</Text>
                 <Text style={styles.detailValue} numberOfLines={3}>{txn.note}</Text>
               </View>
@@ -261,7 +269,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    // A plain txn's few rows made a stubby sheet whose info started near the screen bottom.
+    minHeight: '30%',
     maxHeight: '85%',
   },
   handle: {
@@ -283,7 +292,8 @@ const styles = StyleSheet.create({
   badge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm },
   badgeText: { ...typography.tiny, fontWeight: '800' },
   // Shrinks to fit the sheet's maxHeight, so a long group member list scrolls with the rows.
-  detailList: { marginTop: spacing.lg, flexShrink: 1 },
+  // Top divider separates the amount block from the rows (and stays put while they scroll).
+  detailList: { marginTop: spacing.lg, flexShrink: 1, borderTopWidth: 1, borderTopColor: colors.divider },
   detailRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
     paddingVertical: spacing.sm + 1,

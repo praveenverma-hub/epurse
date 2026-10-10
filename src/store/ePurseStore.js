@@ -859,6 +859,28 @@ const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) => {
   };
 };
 
+/**
+ * The Repayment expense a 'borrow_repaid' LB row was booked with (settle / already-repaid
+ * borrow with an account — bookRepaymentExpense), or null. Such a row is edited AS ONE
+ * with its expense (amount/date/account move both), unlike an SMS-backed (lbLocked) or
+ * split row whose amount belongs to something else.
+ */
+// A booked Repayment's ledger row follows its expense: new amount/date, or gone once
+// the expense is recategorised away from a repayment (it no longer settles anything).
+const syncBookedRepayment = (lentBorrowed, old, updated) => {
+  if (old.isSplit || old.lbLocked || old.categoryId !== 'borrow_repaid') return lentBorrowed;
+  if (updated.categoryId !== 'borrow_repaid') return lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
+  return lentBorrowed.map((l) => (l.sourceTxnId === old.id && l.kind === 'borrow_repaid'
+    ? { ...l, amount: updated.amount, date: updated.createdAt }
+    : l));
+};
+
+const bookedRepaymentTxn = (state, entry) => {
+  if (!entry || entry.kind !== 'borrow_repaid' || !entry.sourceTxnId || entry.groupId) return null;
+  const txn = (state.transactions || []).find((t) => t.id === entry.sourceTxnId);
+  return txn && !txn.lbLocked && !txn.isSplit && !txn.groupId ? txn : null;
+};
+
 /** Stable key for a debit-card↔bank pairing (order-independent on the masks). */
 const linkKey = (cardMask, bankMask) => `${cardMask || ''}:${bankMask || ''}`;
 
@@ -1257,6 +1279,9 @@ export const useEPurseStore = create(
       // chose this. Cleared the moment they sign in again (mirrors sessionExpired's
       // own clear points in useGoogleSession's signIn/devBypass).
       justDeletedAccount: false,
+      // Transient: true once AuthSessionBoot's first SecureStore check lands. Until
+      // then isLoggedIn is just its false default, so LoginGate must not trust it.
+      authChecked: false,
 
       // Theme preferences
       themeId: DEFAULT_THEME_ID,   // THEMES keys: 'orange'|'blue'|'carbon'|'indigo'|'platinum'
@@ -1458,6 +1483,7 @@ export const useEPurseStore = create(
       setGoogleAccount: (account) => set({ googleAccount: account || null, isLoggedIn: !!account }),
       setSessionExpired: (v) => set({ sessionExpired: !!v }),
       setJustDeletedAccount: (v) => set({ justDeletedAccount: !!v }),
+      setAuthChecked: () => set({ authChecked: true }),
 
       /** Stamp the moment onboarding completes (defaults to now). */
       setUserOnboardedAt: (ts) => set({ userOnboardedAt: ts ?? Date.now() }),
@@ -4765,7 +4791,7 @@ export const useEPurseStore = create(
             accounts,
             lentBorrowed: mustClearSplit
               ? s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId)
-              : s.lentBorrowed,
+              : syncBookedRepayment(s.lentBorrowed, old, updatedTxn),
           };
         });
 
@@ -5210,24 +5236,46 @@ export const useEPurseStore = create(
        *                     to that transaction, so changing it here would contradict the
        *                     account balance the transaction already moved.
        * Everything else came from the LB add form and is the user's own bookkeeping, so it
-       * is safe to change. Exported so the UI can grey the row instead of failing on tap.
+       * is safe to change — as is a booked Repayment row, whose edits move its expense too
+       * (see bookedRepaymentTxn). Exported so the UI can grey the row instead of failing on tap.
        */
       isLentBorrowedEditable: (entry) =>
-        !!entry && !entry.groupId && !entry.sourceTxnId,
+        !!entry && !entry.groupId && (!entry.sourceTxnId || !!bookedRepaymentTxn(get(), entry)),
+
+      /** The account a booked Repayment row paid from (its expense's), else null. */
+      lentBorrowedAccountId: (entry) => bookedRepaymentTxn(get(), entry)?.accountId || null,
 
       /**
        * Edit a MANUAL lent/borrowed row in place. Returns true on success, false if the
        * row is missing, derived (see isLentBorrowedEditable) or the amount is invalid.
-       * patch may set: { amount, note, date, person, phone, contactId }.
+       * patch may set: { amount, note, date, person, phone, contactId, accountId }.
        *
-       * No balance reversal is needed (unlike updateTransaction): an LB row never moved an
-       * account — getPersonBalances re-derives every net from the rows on read, so writing
-       * the new values is the whole update.
+       * A plain row never moved an account — getPersonBalances re-derives every net from
+       * the rows on read, so writing the new values is the whole update. A BOOKED Repayment
+       * row (bookedRepaymentTxn) moves its expense too, via updateTransaction (which
+       * reverses + re-applies the balance and syncs this row's amount/date).
        */
       updateLentBorrowedEntry: (id, patch = {}) => {
         const s = get();
         const old = (s.lentBorrowed || []).find((l) => l.id === id);
-        if (!old || old.groupId || old.sourceTxnId) return false;
+        if (!old || old.groupId) return false;
+        const booked = old.sourceTxnId ? bookedRepaymentTxn(s, old) : null;
+        if (old.sourceTxnId && !booked) return false;
+        if (booked) {
+          const ok = get().updateTransaction(booked.id, {
+            amount: patch.amount ?? booked.amount,
+            createdAt: patch.date || booked.createdAt,
+            accountId: patch.accountId || booked.accountId,
+            merchant: booked.merchant,
+            categoryId: booked.categoryId,
+            note: booked.note,
+          });
+          if (!ok) return false;
+          if (patch.note !== undefined) {
+            set((st) => ({ lentBorrowed: st.lentBorrowed.map((l) => (l.id === id ? { ...l, note: patch.note || null } : l)) }));
+          }
+          return true;
+        }
 
         const next = { ...old };
         if (patch.amount !== undefined) {
@@ -5255,11 +5303,20 @@ export const useEPurseStore = create(
        * Delete a MANUAL lent/borrowed row. Returns true on success. Derived rows are
        * refused — a group row is removed by untagging/deleting its group expense, and a
        * txn-backed row by deleting its transaction, so that the two systems can't drift.
+       * Exception: a booked Repayment row is deleted together WITH its expense.
        */
       deleteLentBorrowedEntry: (id) => {
         const s = get();
         const old = (s.lentBorrowed || []).find((l) => l.id === id);
-        if (!old || old.groupId || old.sourceTxnId) return false;
+        if (!old || old.groupId) return false;
+        if (old.sourceTxnId) {
+          // A booked Repayment goes with its expense (deleteTransaction reverses the
+          // balance and drops this row); any other txn-backed row is refused.
+          const booked = bookedRepaymentTxn(s, old);
+          if (!booked) return false;
+          get().deleteTransaction(booked.id);
+          return true;
+        }
         set({ lentBorrowed: s.lentBorrowed.filter((l) => l.id !== id) });
         return true;
       },

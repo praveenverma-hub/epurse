@@ -194,9 +194,9 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm, flexShrink: 0 },
   chipText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
   right: { alignItems: 'flex-end', maxWidth: '42%' },
-  // The ribbon hangs 26px from the top-right edge; a centred amount ran into it.
-  // Drop the column to the bottom instead, so the amount lines up with the date line.
-  rightBelowRibbon: { alignSelf: 'stretch', justifyContent: 'flex-end', paddingTop: 18 },
+  // The ribbon hangs 26px from the top-right edge: start the column just below it, so a
+  // lone amount (personal group) sits exactly where a shared card's amount does.
+  rightBelowRibbon: { alignSelf: 'stretch', justifyContent: 'flex-start', paddingTop: 18 },
   amount: { fontSize: 15, fontWeight: '700' },
   totalHint: { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
   notInvolved: { ...typography.small, color: colors.textMuted, fontStyle: 'italic', fontWeight: '600' },

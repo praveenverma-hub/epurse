@@ -11,6 +11,9 @@
 // is darkened until WHITE text on it reads ≥4.5:1 — the theme's own primary
 // already does on Violet; this is what keeps a light accent legible.
 // Disabled = flat grey fill + grey ink (ui-consistency §3d-i).
+//
+// `variant="outline"` is the SECONDARY beside a filled one (button hierarchy: one
+// filled per group) — same height/radius/type, border + ink in the measured colour.
 // =============================================================================
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
@@ -27,6 +30,7 @@ export interface PrimaryButtonProps {
   loading?: boolean;
   disabled?: boolean;
   tone?: 'primary' | 'danger';
+  variant?: 'filled' | 'outline';
   /** Fill override for a button whose colour carries meaning (e.g. lent / borrowed). */
   color?: string;
   icon?: React.ReactNode;
@@ -36,12 +40,14 @@ export interface PrimaryButtonProps {
 }
 
 export default function PrimaryButton({
-  title, onPress, loading, disabled, tone = 'primary', color, icon, style, textStyle, accessibilityLabel,
+  title, onPress, loading, disabled, tone = 'primary', variant = 'filled', color, icon, style, textStyle, accessibilityLabel,
 }: PrimaryButtonProps) {
   const theme = useTheme();
   const base = color || (tone === 'danger' ? colors.danger : theme.primary);
-  const fill = disabled ? theme.disabledBackground : readableOn('#FFFFFF', base);
-  const ink = disabled ? theme.disabledText : '#FFFFFF';
+  const outline = variant === 'outline';
+  const fill = outline ? colors.card : disabled ? theme.disabledBackground : readableOn('#FFFFFF', base);
+  const ink = disabled ? theme.disabledText : outline ? readableOn(colors.card, base) : '#FFFFFF';
+  const frame = outline ? { borderWidth: 1.5, borderColor: disabled ? theme.disabledBackground : ink } : null;
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -50,7 +56,7 @@ export default function PrimaryButton({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
       accessibilityLabel={accessibilityLabel}
-      style={[styles.btn, { backgroundColor: fill }, style]}
+      style={[styles.btn, { backgroundColor: fill }, frame, style]}
     >
       {loading ? (
         <ActivityIndicator color={ink} />

@@ -4909,5 +4909,43 @@ console.log('\n— edit form: type flip —');
     G().accounts[0].balance === 800 && G().transactions[0].isRefund === false, `${G().accounts[0].balance} ${G().transactions[0].isRefund}`);
 }
 
+
+console.log('\n— LB booked Repayment: edits/deletes move its expense too (Oct-10-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  useStore.setState({ accounts: [
+    { id: 'a1', name: 'HDFC', bankName: 'HDFC', mask: '1111', type: 'Bank Account', balance: 10000 },
+    { id: 'a2', name: 'ICICI', bankName: 'ICICI', mask: '2222', type: 'Bank Account', balance: 5000 },
+  ] });
+  G().addLentBorrowed({ kind: 'borrowed', person: 'Rohit', phone: '9876543210', amount: 1000 });
+  G().addAlreadySettledLentBorrowed({ kind: 'borrowed', person: 'Rohit', phone: '9876543210', amount: 400 }, { accountId: 'a1' });
+  const row = () => G().lentBorrowed.find((l) => l.kind === 'borrow_repaid');
+  const txn = () => G().transactions.find((t) => t.id === row()?.sourceTxnId);
+  const bal = (id) => G().accounts.find((a) => a.id === id).balance;
+  const net = () => G().getPersonBalances()[0]?.net;
+  check('booked repaid row is editable', G().isLentBorrowedEditable(row()) === true);
+  check('…and reports its account', G().lentBorrowedAccountId(row()) === 'a1');
+  check('plain row has no account', G().lentBorrowedAccountId(G().lentBorrowed.find((l) => l.kind === 'borrowed')) === null);
+  check('setup: HDFC debited 400, net −600', bal('a1') === 9600 && net() === -600, `${bal('a1')} ${net()}`);
+
+  check('edit amount → ok', G().updateLentBorrowedEntry(row().id, { amount: 700, note: 'Cash' }) === true);
+  check('…row + expense both 700, HDFC re-debited', row().amount === 700 && txn().amount === 700 && bal('a1') === 9300, `${row().amount} ${txn().amount} ${bal('a1')}`);
+  check('…net follows (−300), note kept', net() === -300 && row().note === 'Cash', `${net()} ${row().note}`);
+
+  G().updateLentBorrowedEntry(row().id, { accountId: 'a2' });
+  check('move account → HDFC restored, ICICI debited', bal('a1') === 10000 && bal('a2') === 4300 && txn().accountId === 'a2', `${bal('a1')} ${bal('a2')}`);
+
+  G().updateTransaction(txn().id, { amount: 500, accountId: 'a2', categoryId: 'borrow_repaid' });
+  check('editing the EXPENSE (Activity) syncs the ledger row', row().amount === 500 && net() === -500, `${row().amount} ${net()}`);
+
+  check('delete → ok', G().deleteLentBorrowedEntry(row().id) === true);
+  check('…expense gone, ICICI restored, debt back to 1000', !G().transactions.length && bal('a2') === 5000 && net() === -1000 && !row(), `${G().transactions.length} ${bal('a2')} ${net()}`);
+
+  G().addAlreadySettledLentBorrowed({ kind: 'borrowed', person: 'Rohit', phone: '9876543210', amount: 200 }, { accountId: 'a1' });
+  G().updateTransaction(txn().id, { amount: 200, accountId: 'a1', categoryId: 'food' });
+  check('recategorising the expense off Repayment drops its ledger row', !row() && net() === -1000, `${net()}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);
