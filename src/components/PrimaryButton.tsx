@@ -13,7 +13,8 @@
 // Disabled = flat grey fill + grey ink (ui-consistency §3d-i).
 //
 // `variant="outline"` is the SECONDARY beside a filled one (button hierarchy: one
-// filled per group) — same height/radius/type, border + ink in the measured colour.
+// filled per group) — same height/radius/type, border + ink in the colour AS GIVEN
+// (not darkened: the LB tab's coral "Add" must stay the brand coral — user call).
 // =============================================================================
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
@@ -46,7 +47,7 @@ export default function PrimaryButton({
   const base = color || (tone === 'danger' ? colors.danger : theme.primary);
   const outline = variant === 'outline';
   const fill = outline ? colors.card : disabled ? theme.disabledBackground : readableOn('#FFFFFF', base);
-  const ink = disabled ? theme.disabledText : outline ? readableOn(colors.card, base) : '#FFFFFF';
+  const ink = disabled ? theme.disabledText : outline ? base : '#FFFFFF';
   const frame = outline ? { borderWidth: 1.5, borderColor: disabled ? theme.disabledBackground : ink } : null;
   return (
     <TouchableOpacity

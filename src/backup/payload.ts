@@ -50,6 +50,8 @@ export const TXN_FIELDS = [
   'accountId', 'accountType', 'accountMask', 'bankName', 'coAccountMask',
   // status flags
   'isRefund', 'isReviewed', 'isIgnored', 'isHidden', 'isSubscription', 'lbLocked',
+  // owned by its LB ledger row (bookLbTxn) — without it a restore leaves the entry read-only
+  'lbBooked',
   // direct split
   'isSplit', 'splitWith', 'myShareAmount', 'myPercent', 'isSplitMemo', 'splitPaidBy', 'memoAccountId',
   // groups
