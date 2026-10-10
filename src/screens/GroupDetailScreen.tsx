@@ -564,7 +564,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                   <Text style={styles.cardName} numberOfLines={1}>{group.name}</Text>
                   <Text style={styles.cardMeta} numberOfLines={1}>
                     {isShared ? memberNamesLabel : 'Personal group'}
-                    {group.excludeFromTotals ? ' · excluded from totals' : ''}
+                    {group.excludeFromTotals ? ' · Excluded from totals' : ''}
                   </Text>
                 </View>
                 {/* One ⋮ for the group's actions — Add Expense, Edit, Delete. Frees the

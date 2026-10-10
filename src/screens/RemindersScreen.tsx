@@ -126,7 +126,7 @@ const RemindersScreen: React.FC<Props> = ({ navigation }) => {
               accessibilityRole="button"
               accessibilityLabel="Reminder FAQs"
             >
-              <Ionicons name="help-circle-outline" size={26} color={theme.primary} />
+              <Ionicons name="help-circle-outline" size={26} color={theme.textSecondary} />
             </TouchableOpacity>
           }
         />

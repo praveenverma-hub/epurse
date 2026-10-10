@@ -40,7 +40,9 @@ const LoginGate: React.FC = () => {
   const isLoggedIn = useEPurseStore((s: any) => s.isLoggedIn) as boolean;
   const sessionExpired = useEPurseStore((s: any) => s.sessionExpired) as boolean;
   const justDeletedAccount = useEPurseStore((s: any) => s.justDeletedAccount) as boolean;
-  const showing = hydrated && hasOnboarded && !isLoggedIn;
+  const authChecked = useEPurseStore((s: any) => s.authChecked) as boolean;
+  const hadAccount = useEPurseStore((s: any) => !!s.googleAccount);
+  const showing = hydrated && authChecked && hasOnboarded && !isLoggedIn;
 
   // IMPERATIVE on purpose: the screens underneath (Dashboard, Accounts) set their
   // glyphs with RN's setBarStyle, which beats the declarative <StatusBar> below — so
@@ -59,6 +61,10 @@ const LoginGate: React.FC = () => {
   if (!hydrated) return <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background, zIndex: 1000 }]} />;
   if (!hasOnboarded) return null; // fresh installs: the onboarding slide owns this
   if (isLoggedIn) return null;
+  // isLoggedIn is still its default until the async SecureStore check lands — the gate
+  // flashed on every cold start. A persisted account ⇒ assume signed in (Home shows
+  // straight away; the gate still appears if the check says otherwise); none ⇒ stay blank.
+  if (!authChecked) return hadAccount ? null : <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background, zIndex: 1000 }]} />;
 
   // Three distinct reasons to be here, three distinct messages — a session that
   // "expired" and data that the user just chose to delete are not the same

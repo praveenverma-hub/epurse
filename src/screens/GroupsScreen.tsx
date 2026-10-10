@@ -72,7 +72,7 @@ function GroupListCardRow({
         <Text style={styles.groupCardName} numberOfLines={1}>{group.name}</Text>
         <Text style={styles.groupCardMeta} numberOfLines={1}>
           {isShared ? `${group.members?.length ?? 0} members` : 'Personal'}
-          {group.excludeFromTotals ? ' · excluded' : ''}
+          {group.excludeFromTotals ? ' · Excluded' : ''}
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
