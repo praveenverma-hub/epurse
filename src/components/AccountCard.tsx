@@ -272,7 +272,6 @@ const AccountCard: React.FC<Props> = ({
             displayHolder={displayHolder}
             balanceHidden={balanceHidden}
             isCreditCard={isCreditCard}
-            ccTrackingActive={ccTrackingActive}
             isFullyPaid={isFullyPaid}
             outstanding={outstanding}
             width={width}
@@ -333,7 +332,6 @@ type FrontFaceProps = {
   displayHolder: string;
   balanceHidden: boolean;
   isCreditCard: boolean;
-  ccTrackingActive: boolean;
   isFullyPaid: boolean;
   outstanding: number | null;
   width: number;
@@ -351,7 +349,6 @@ const FrontFace: React.FC<FrontFaceProps> = ({
   displayHolder,
   balanceHidden,
   isCreditCard,
-  ccTrackingActive,
   isFullyPaid,
   outstanding,
   width,
@@ -470,7 +467,7 @@ const FrontFace: React.FC<FrontFaceProps> = ({
             hitSlop={{ top: 8, bottom: 8, left: 8 }}
           >
             <Text style={styles.label}>
-              {ccTrackingActive ? 'OUTSTANDING' : 'BALANCE'}
+              {isCreditCard ? 'OUTSTANDING' : 'BALANCE'}
             </Text>
             {balanceHidden ? (
               <Text style={styles.balanceMasked}>••••••</Text>

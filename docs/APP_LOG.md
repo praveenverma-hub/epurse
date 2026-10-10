@@ -452,6 +452,23 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   detail screen — now the same size as all of them, using the app's one
   shared header component. Nothing else about the header changed (same
   colours, same back button, same info button).
+- Oct-10-2026: **Card bill status stuck on "Upcoming" — fixed.** A bill SMS that names
+  only a due date (no statement date) left `currentPaymentWindow` with nothing to anchor
+  on, so the status never counted down: no "Due soon"/"Due today"/"Due date passed", no
+  colour change, and the Accounts row read just "Payment due ". It now falls back to the
+  bill's own due date (confirmed or still pending), else the due day. Also a part-paid
+  bill near its due date now warns ("Due soon"/"Due today") instead of reading
+  "Partially paid" in the calm colour; Remaining Due still shows on the card page. The
+  OS reminder (10:00 the day before, from the bill SMS) was already correct. **Open:**
+  the statement balance can't be typed (only limit, billing/due day, minimum due), so a
+  card with no bill SMS has no due status, no due reminder and no Home bill card — only
+  the billing-day "cycle closed" heads-up.
+- Oct-10-2026: **Accounts carousel card vs card bill status.** The carousel labelled a
+  credit card's owed amount "BALANCE" until a payment had been logged (now always
+  "OUTSTANDING", like the card page). Setting a card's outstanding by hand
+  (`setAccountAnchor`) below its unpaid bill now lowers what's left on the bill — ₹0 =
+  paid, and the Home bill card + due reminder clear. Before, the carousel said FULLY PAID
+  while the Accounts row and Home still said the bill was due.
 
 ---
 

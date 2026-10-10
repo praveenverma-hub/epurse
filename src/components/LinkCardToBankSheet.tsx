@@ -5,7 +5,7 @@
 // AccountsScreen's own row-level "Link" pill is still the one caller.
 //
 // This component only picks a bank — it does NOT call linkDebitCardToBank or show
-// the "can't be auto-undone" confirmation itself. The caller's `onLink(bankId)`
+// the link confirmation itself. The caller's `onLink(bankId)`
 // is expected to close this sheet AND show that confirm (see AccountsScreen).
 // =============================================================================
 

@@ -223,6 +223,30 @@ check('setAccountAnchor: a bank account anchored to 12000 stays +12000',
   accts().find((a) => a.id === 'bank-anchor').balance === 12000,
   `bal ${accts().find((a) => a.id === 'bank-anchor').balance}`);
 
+// Setting a card's outstanding below its unpaid bill: the bill can't owe more
+// than the whole card, so ₹0 = paid (the carousel said FULLY PAID while the
+// Accounts row / Home card still said "due").
+{
+  const bill = { cardLast4: '5555', bankName: 'HDFC', amount: 9000, dueDate: '20-Oct-26' };
+  useStore.setState({
+    accounts: [{ id: 'cc-bill', type: 'Credit Card', bankName: 'HDFC', mask: '5555', balance: -12000, statementBalance: 9000, remainingDue: 9000, aliasMasks: [] }],
+    ccBills: { 'cc-key': bill },
+    ccDueReminderIds: { '5555:20-Oct-26': 'n1' },
+  });
+  useStore.getState().setAccountAnchor('cc-bill', 4000);
+  const c = () => accts().find((a) => a.id === 'cc-bill');
+  check('anchor below the bill caps remainingDue at the new outstanding', c().remainingDue === 4000, `${c().remainingDue}`);
+  check('…and the Home bill shows what\'s left', useStore.getState().ccBills['cc-key']?.remaining === 4000, JSON.stringify(useStore.getState().ccBills));
+  useStore.getState().setAccountAnchor('cc-bill', 0);
+  check('anchor to ₹0 → statement paid', c().remainingDue === 0, `${c().remainingDue}`);
+  check('…bill + due reminder cleared', !useStore.getState().ccBills['cc-key'] && !useStore.getState().ccDueReminderIds['5555:20-Oct-26'],
+    JSON.stringify([useStore.getState().ccBills, useStore.getState().ccDueReminderIds]));
+  useStore.setState({ accounts: [{ id: 'cc-bill', type: 'Credit Card', mask: '5555', balance: -3000, statementBalance: 9000, remainingDue: 2000, aliasMasks: [] }] });
+  useStore.getState().setAccountAnchor('cc-bill', 15000);
+  check('anchor ABOVE the bill leaves remainingDue alone', c().remainingDue === 2000, `${c().remainingDue}`);
+  useStore.setState({ ccBills: {}, ccDueReminderIds: {} });
+}
+
 // ── CC bill payment: the PAYER side is only ever RE-TAGGED, never invented ─────
 // The bank sends its own "Rs.X debited …" for the payment, and that message is what
 // moves the balance. Synthesising a debit in the true-up flow on top of it charged the
@@ -4630,6 +4654,28 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   check('a payment covering the whole statement clears the bill at once', !billFor(), JSON.stringify(useStore.getState().ccBills));
 }
 
+// ── A bill SMS with ONLY a due date still drives the due status ─────────────
+// Its date waits unconfirmed (pendingCycleDate) and there's no statement date,
+// so the status used to stay "Upcoming" with no countdown or colour change.
+{
+  reset();
+  useStore.setState({ ccBills: {}, ccDueReminderIds: {} });
+  const { ccPaymentStatus } = await import(`${PROJECT_ROOT}/src/utils/ccStatement.js`);
+  const cardId = useStore.getState().addAccount({ type: 'Credit Card', name: 'HDFC Card', mask: '8888', bankName: 'HDFC', balance: -12000 });
+  const cardNow = () => useStore.getState().accounts.find((a) => a.id === cardId);
+  const inDays = (n) => {
+    const d = new Date(); d.setDate(d.getDate() + n);
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+    return `${String(d.getDate()).padStart(2, '0')}-${mon}-${String(d.getFullYear()).slice(2)}`;
+  };
+  ingest('HDFCBK', `Total Amount Due on your HDFC Credit Card ending 8888 is Rs.12,000.00. Payment due date: ${inDays(3)}.`, { smsId: 'h-due-only' });
+  const card = cardNow();
+  check('due-date-only bill: no statement date known', card.statementBalance === 12000 && !card.statementDay && !card.lastStatementDate, JSON.stringify(card));
+  check('…yet the status counts down (due_soon, not upcoming)', ccPaymentStatus(card) === 'due_soon', ccPaymentStatus(card));
+  const past = { ...card, pendingCycleDate: { ...card.pendingCycleDate, dueDate: new Date(Date.now() - 2 * 86400000).toISOString() } };
+  check('…and turns to due_date_passed once the date goes by', ccPaymentStatus(past) === 'due_date_passed', ccPaymentStatus(past));
+}
+
 // ── v37 migration: remainingDue + actual dates ──────────────────────────────
 {
   const migrate = useStore.persist.getOptions().migrate;
@@ -5087,6 +5133,117 @@ console.log('\n— Ignore → Restore keeps a person-tagged txn\'s ledger row (O
   G().unignoreTransaction('split-x');
   const sx = G().transactions.find((t) => t.id === 'split-x');
   check('a split still restores clean (no split, no rows)', !sx.isSplit && !G().lentBorrowed.some((l) => l.sourceTxnId === 'split-x'));
+}
+
+console.log('\n— Card limits from SMS, combined limits, debit-card unlink (Oct-10-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = Date.now();
+  const at = (minsAgo) => new Date(now - minsAgo * 60000).toISOString();
+  const send = (body, minsAgo, id) => G().ingestMessage(body, { sender: 'HDFCBK', receivedAt: at(minsAgo), smsId: id });
+  send('Rs.1,250.00 spent on HDFC Bank Credit Card x1234 at AMAZON. Avl Limit: INR 1,23,456.78', 30, 'l1');
+  const card = () => G().accounts.find((a) => a.mask === '1234');
+  check('spend SMS → the bank\'s available limit lands on the card', card()?.reportedAvailable?.amount === 123456.78, JSON.stringify(card()?.reportedAvailable));
+  check('…and is NOT left on the stored transaction', !('availableLimit' in G().transactions[0]) && !('reportedCreditLimit' in G().transactions[0]));
+  send('Your available limit is Rs 1,20,000 on HDFC Credit Card xx1234', 10, 'l2');
+  check('a limit NOTICE updates it (no transaction booked)', card().reportedAvailable.amount === 120000 && G().transactions.length === 1, JSON.stringify(card().reportedAvailable));
+  send('Rs 50 spent on HDFC Bank Credit Card x1234 at CAFE. Avl Limit: INR 1,30,000', 60, 'l3');
+  check('an OLDER SMS never overwrites a newer figure', card().reportedAvailable.amount === 120000);
+  send('Rs 2,000 spent on HDFC Credit Card xx1234 at MYNTRA. Total Credit Limit: Rs 2,00,000 Available Credit Limit: Rs 1,18,000', 5, 'l4');
+  check('a reported TOTAL limit becomes the card\'s credit limit', card().creditLimit === 200000 && card().reportedAvailable.amount === 118000);
+
+  // Combined limit: a second HDFC card, linked.
+  send('Rs.700.00 spent on HDFC Bank Credit Card x5678 at UBER. Avl Limit: INR 1,17,300', 2, 'l5');
+  const card2 = () => G().accounts.find((a) => a.mask === '5678');
+  G().setCreditLimit(card2().id, 150000);
+  G().linkCardLimits(card().id, card2().id);
+  check('link: one group, the FIRST card\'s limit shared', !!card().limitGroupId && card().limitGroupId === card2().limitGroupId && card2().creditLimit === 200000);
+  G().setCreditLimit(card2().id, 250000);
+  check('setting the limit on either card updates both', card().creditLimit === 250000 && card2().creditLimit === 250000);
+  send('Your HDFC Credit Card xx5678 Total Credit Limit: Rs 3,00,000 Available limit is Rs 1,17,000', 1, 'l6');
+  check('a reported total on one card reaches the whole group', card().creditLimit === 300000 && card2().creditLimit === 300000);
+  G().dismissLimitLinkSuggestion(card2().id, card().id);
+  check('declines are remembered order-independently', (G().declinedLimitLinks || []).length === 1);
+  G().unlinkCardLimit(card().id);
+  check('unlink → both standalone, each back to ITS OWN pre-link limit', !card().limitGroupId && !card2().limitGroupId && card().creditLimit === 200000 && card2().creditLimit === 150000, `${card().creditLimit} ${card2().creditLimit}`);
+  check('…no leftover bookkeeping, own bank figure kept', !('limitBeforeLink' in card()) && !('limitBeforeLink' in card2()) && card2().reportedAvailable?.amount === 117000);
+  // A card with NO limit before linking goes back to none.
+  useStore.setState((st) => ({ accounts: st.accounts.map((a) => (a.id === card2().id ? { ...a, creditLimit: null } : a)) }));
+  G().linkCardLimits(card().id, card2().id);
+  check('…(setup) linked, the no-limit card now shows the shared limit', card2().creditLimit === 200000);
+  G().unlinkCardLimit(card2().id);
+  check('unlink a card that had no limit → no limit again', card2().creditLimit === null && card().creditLimit === 200000 && !card().limitGroupId, `${card2().creditLimit} ${card().creditLimit}`);
+
+  // Debit card ↔ bank: link, then the new unlink.
+  reset();
+  useStore.setState({ accounts: [
+    { id: 'bank', type: 'Bank', name: 'HDFC', bankName: 'HDFC', mask: '9999', balance: 10000, aliasMasks: [] },
+    { id: 'dc', type: 'Debit Card', name: 'HDFC DC', bankName: 'HDFC', mask: '4444', balance: -300 },
+  ], transactions: [
+    { id: 't1', accountId: 'dc', accountMask: '4444', type: 'debit', amount: 300, createdAt: at(50), categoryId: 'food' },
+    { id: 't2', accountId: 'bank', accountMask: '9999', type: 'debit', amount: 1000, createdAt: at(40), categoryId: 'bills' },
+  ] });
+  G().linkDebitCardToBank('dc', 'bank');
+  // After the link, a card SMS lands on the bank (aliasMasks) but keeps the card's mask.
+  G().ingestMessage('Rs 200.00 spent on HDFC Bank Debit Card xx4444 at CAFE COFFEE', { sender: 'HDFCBK', receivedAt: at(5), smsId: 'dc-after-link' });
+  const t3 = G().transactions.find((t) => t.smsId === 'dc-after-link');
+  check('setup: the post-link card spend landed on the bank', t3?.accountId === 'bank' && t3?.accountMask === '4444', JSON.stringify(t3 && { a: t3.accountId, m: t3.accountMask }));
+  const bankBal = () => G().accounts.find((a) => a.id === 'bank').balance;
+  const before = bankBal();
+  const newCard = G().unlinkDebitCardFromBank('bank', '4444');
+  const dc = G().accounts.find((a) => a.id === newCard);
+  check('unlink re-creates the debit card with the card\'s mask', dc?.type === 'Debit Card' && dc.mask === '4444');
+  check('…moves ONLY the card\'s txns back (bank\'s own stays)', G().transactions.find((t) => t.id === 't1').accountId === newCard && G().transactions.find((t) => t.smsId === 'dc-after-link').accountId === newCard && G().transactions.find((t) => t.id === 't2').accountId === 'bank');
+  check('…and its money movement: bank +500, card −500', bankBal() === before + 500 && dc.balance === -500, `${bankBal()} ${before} ${dc.balance}`);
+  check('…the alias is gone, the pair stays declined', !G().accounts.find((a) => a.id === 'bank').aliasMasks.includes('4444') && (G().declinedAccountLinks || []).length === 1);
+}
+
+console.log('\n— Existing-user safety for the card-limit change (Oct-10-26) —');
+{
+  // v41: phantom "available credit limit is Rs X" spends get IGNORED (reversible).
+  const migrate = useStore.persist.getOptions().migrate;
+  const legacy = {
+    accounts: [{ id: 'cc', type: 'Credit Card', mask: '7788', balance: -50500 }],
+    suppressedSmsIds: [],
+    transactions: [
+      { id: 'ph', source: 'sms', smsId: 'sms-ph', amount: 50000, type: 'debit', accountId: 'cc', categoryId: 'other', createdAt: '2026-09-01T10:00:00Z',
+        smsText: 'Dear Customer, your available credit limit is Rs. 50,000 on SBI Card ending 7788' },
+      { id: 'real', source: 'sms', amount: 500, type: 'debit', accountId: 'cc', categoryId: 'shopping', createdAt: '2026-09-02T10:00:00Z',
+        smsText: 'Rs 500 spent on SBI Credit Card ending 7788 at AMAZON. Available limit is Rs 45,000' },
+      { id: 'touched', source: 'sms', amount: 9000, type: 'debit', accountId: 'cc', categoryId: 'shopping', userEditedCategory: true, createdAt: '2026-09-03T10:00:00Z',
+        smsText: 'Your available credit limit is Rs 9,000 on SBI Card ending 7788' },
+    ],
+  };
+  const m = migrate(legacy, 40);
+  const byId = (id) => m.transactions.find((t) => t.id === id);
+  check('v41: phantom limit "spend" → Ignored, its ₹50,000 given back to the card', byId('ph').isIgnored === true && m.accounts[0].balance === -500, `${m.accounts[0].balance}`);
+  check('v41: …and its SMS won\'t be re-imported', (m.suppressedSmsIds || []).includes('sms-ph'));
+  check('v41: a REAL spend that mentions the limit is untouched', !byId('real').isIgnored);
+  check('v41: a row the user already re-categorised is left alone', !byId('touched').isIgnored);
+  check('v41: current data with no phantoms passes through unchanged', migrate({ accounts: [], transactions: [] }, 40).transactions.length === 0);
+
+  // Old cards (no reportedAvailable / limitGroupId) compute exactly as before.
+  reset();
+  const G = () => useStore.getState();
+  useStore.setState({ accounts: [{ id: 'old', type: 'Credit Card', name: 'Old', mask: '1111', balance: -25000, creditLimit: 100000 }] });
+  const { cardLimitPosition } = await import(`${PROJECT_ROOT}/src/utils/cardLimit.ts`);
+  const pos = cardLimitPosition(G().accounts[0], G().accounts, []);
+  check('an existing card (no new fields) → same Available/Utilization as before', pos.available === 75000 && pos.utilization === 0.25 && pos.source === 'limit');
+  G().unlinkCardLimit('old');
+  check('unlink on a never-linked card is a no-op', G().accounts[0].creditLimit === 100000);
+
+  // Debit unlink respects a balance the user set by hand after linking.
+  reset();
+  const t = (mins) => new Date(Date.now() - mins * 60000).toISOString();
+  useStore.setState({ accounts: [
+    { id: 'bank', type: 'Bank', name: 'HDFC', bankName: 'HDFC', mask: '9999', balance: 8000, aliasMasks: ['4444'], anchoredAt: Date.now() - 30 * 60000 },
+  ], transactions: [
+    { id: 'pre', accountId: 'bank', accountMask: '4444', type: 'debit', amount: 300, createdAt: t(60), categoryId: 'food' },
+    { id: 'post', accountId: 'bank', accountMask: '4444', type: 'debit', amount: 200, createdAt: t(10), categoryId: 'food' },
+  ] });
+  const cid = G().unlinkDebitCardFromBank('bank', '4444');
+  check('debit unlink after a hand-set balance: only the LATER card spend leaves the bank', G().accounts.find((a) => a.id === 'bank').balance === 8200 && G().accounts.find((a) => a.id === cid).balance === -500, `${G().accounts.find((a) => a.id === 'bank').balance} ${G().accounts.find((a) => a.id === cid).balance}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

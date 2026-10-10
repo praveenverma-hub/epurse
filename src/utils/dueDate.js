@@ -218,18 +218,45 @@ export function paymentGapDays(statementDay, dueDay, from = new Date()) {
   return daysBetween(stmt, nextOccurrenceOfDay(dueDay, addDays(stmt, 1)));
 }
 
+// A recurring due day passed this recently is still the current bill's due date.
+const DUE_GRACE_DAYS = 3;
+
+/**
+ * The due date when there's no statement date to anchor on — common, since many
+ * bill SMS name only a due date (staged in `pendingCycleDate` until confirmed).
+ * The newest real due date wins while recent, else the recurring due day.
+ */
+function dueDateWithoutStatement({ dueDay, lastDueDate, pendingCycleDate } = {}, today) {
+  const actual = [toDay(lastDueDate), toDay(pendingCycleDate?.dueDate)].filter(Boolean).sort((a, b) => b - a)[0];
+  if (actual && (!dueDay || daysBetween(actual, today) <= ACTUAL_STALE_DAYS)) return { date: actual, source: 'actual' };
+  if (!dueDay) return null;
+  const prev = previousOccurrenceOfDay(dueDay, today);
+  return { date: daysBetween(prev, today) <= DUE_GRACE_DAYS ? prev : nextOccurrenceOfDay(dueDay, today), source: 'derived' };
+}
+
 /**
  * The window between the latest statement and ITS due date — "how long do I
  * have to pay this bill". `daysToDue` is signed (negative = the due date has
- * passed); `progress` is 0-1 across the window. Null without a statement date
- * or a due date to anchor it.
+ * passed); `progress` is 0-1 across the window. With no statement date it's
+ * due-date only (`statementDate`/`progress`/`gapDays` null); null with no due date.
  */
 export function currentPaymentWindow(account = {}, from = new Date()) {
   const today = atMidnight(from);
   const stmt = resolveStatementDate(account, today);
-  if (!stmt) return null;
-  const due = resolveDueDate(account, stmt.date);
-  if (!due) return null;
+  const due = stmt ? resolveDueDate(account, stmt.date) : null;
+  if (!due) {
+    const only = dueDateWithoutStatement(account, today);
+    return only ? {
+      statementDate: null,
+      dueDate: only.date,
+      statementSource: null,
+      dueSource: only.source,
+      daysToDue: daysBetween(today, only.date),
+      progress: null,
+      gapDays: null,
+      gapUnusual: false,
+    } : null;
+  }
   const total = daysBetween(stmt.date, due.date);
   const elapsed = Math.min(total, Math.max(0, daysBetween(stmt.date, today)));
   return {

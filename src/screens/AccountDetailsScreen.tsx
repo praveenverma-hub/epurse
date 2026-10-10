@@ -59,12 +59,17 @@ import ProgressBar from '../components/ProgressBar';
 import { EMPTY_ARRAY } from '../constants/empty';
 import { currentPaymentWindow, currentBillingCycle } from '../utils/dueDate';
 import {
-  statementRemaining, ccPaymentStatus, PAYMENT_STATUS_LABEL, creditAvailability,
+  statementRemaining, ccPaymentStatus, PAYMENT_STATUS_LABEL,
   cycleSpend, lastPayment, dueRelativeText, ccStatusColor,
 } from '../utils/ccStatement';
 import { monthMoneyFlow, accountBalanceTrend } from '../utils/accountFlow';
 import { timeAgo } from '../utils/format';
 import MonthlyLineChart from '../components/MonthlyLineChart';
+import CenterModal from '../components/CenterModal';
+import AccountPickerSheet from '../components/AccountPickerSheet';
+import LinkCardToBankSheet from '../components/LinkCardToBankSheet';
+import { useToast } from '../components/Toast';
+import { cardLimitPosition, limitLinkSuggestions } from '../utils/cardLimit';
 
 // TransactionItem is plain JS; alias so tsc only requires the props this screen passes.
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -107,6 +112,11 @@ type Account = {
   cycleDaysManual?: boolean;
   pendingCycleDate?: { statementDate: string | null; dueDate: string | null } | null;
   paymentHistory?: { date: number; amount: number }[];
+  archived?: boolean;
+  /** Cards sharing ONE combined credit limit carry the same id (Oct-10-26). */
+  limitGroupId?: string | null;
+  /** The bank's own "Avl Limit" from the latest card SMS (Oct-10-26). */
+  reportedAvailable?: { amount: number; at: string } | null;
 };
 
 type Txn = {
@@ -123,6 +133,7 @@ interface Props {
   navigation: {
     goBack: () => void;
     navigate: (screen: string, params?: Record<string, unknown>) => void;
+    replace: (screen: string, params?: Record<string, unknown>) => void;
     addListener: (e: string, cb: () => void) => () => void;
   };
   route: { params?: { accountId?: string } };
@@ -190,6 +201,17 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // don't count toward balances or any totals (see store: archivedTransactions).
   const archivedTransactions = useEPurseStore((s: any) => s.archivedTransactions) ?? EMPTY_ARRAY as Txn[];
   const userName    = useEPurseStore((s: any) => s.userName)      as string;
+  const declinedLimitLinks = useEPurseStore((s: any) => s.declinedLimitLinks) as string[] | undefined;
+  const linkCardLimits = useEPurseStore((s: any) => s.linkCardLimits);
+  const unlinkCardLimit = useEPurseStore((s: any) => s.unlinkCardLimit);
+  const dismissLimitLinkSuggestion = useEPurseStore((s: any) => s.dismissLimitLinkSuggestion);
+  const linkDebitCardToBank = useEPurseStore((s: any) => s.linkDebitCardToBank);
+  const unlinkDebitCardFromBank = useEPurseStore((s: any) => s.unlinkDebitCardFromBank);
+  const toast = useToast();
+  // One confirm for every link/unlink on this page; the pickers close BEFORE it opens (§8b).
+  const [confirm, setConfirm] = useState<{ title: string; message: string; primaryText: string; destructive?: boolean; onConfirm: () => void } | null>(null);
+  const [limitPickerOpen, setLimitPickerOpen] = useState(false);
+  const [bankPickerOpen, setBankPickerOpen] = useState(false);
 
   const account = useMemo(
     () => accounts.find((a) => a.id === accountId),
@@ -424,15 +446,85 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   // so this screen can't disagree with them. `outstanding` reuses the summary's
   // own figure rather than deriving the same number twice.
   const outstanding      = summaryValue;
-  const creditLimit      = isCreditCard ? account.creditLimit ?? null : null;
-  const avail            = isCreditCard ? creditAvailability(outstanding, creditLimit) : null;
-  const hasLimit         = !!avail;
+  // Oct-10-26: `cardLimitPosition` (utils/cardLimit) — the bank's own "Avl Limit"
+  // from the latest card SMS when we have it (updated for spends since), else
+  // limit − outstanding; across every card sharing a combined limit.
+  const limitPos         = isCreditCard ? cardLimitPosition(account, accounts as any, transactions as any) : null;
+  const creditLimit      = limitPos?.limit ?? (isCreditCard ? account.creditLimit ?? null : null);
+  const hasLimit         = !!limitPos;
   // UNCLAMPED — over the limit, available goes negative and utilization past
   // 100%; shown as an "Over limit" warning instead of hidden behind ₹0 / 100%.
-  const availableCredit  = avail ? avail.availableCredit : null;
-  const utilization      = avail ? avail.utilization : null;
+  const availableCredit  = limitPos ? limitPos.available : null;
+  const utilization      = limitPos?.utilization ?? null;
   const utilPct          = utilization != null ? Math.round(utilization * 100) : null;
-  const overLimit        = !!avail?.overLimit;
+  const overLimit        = !!limitPos?.overLimit;
+
+  // ── Links: combined credit limit (CC) / debit card ↔ bank ────────────────
+  const cardLabel = (a: Account) => `${deriveBankName(a)}${a.mask ? ` ··${a.mask}` : ''}`;
+  const otherCards = isCreditCard
+    ? accounts.filter((a) => a.id !== account.id && a.type === ACCOUNT_TYPES.CREDIT_CARD && !a.archived)
+    : [];
+  const sharedWith = isCreditCard && account.limitGroupId
+    ? accounts.filter((a) => a.id !== account.id && a.limitGroupId === account.limitGroupId)
+    : [];
+  const limitSuggestion = isCreditCard && !account.limitGroupId
+    ? limitLinkSuggestions(accounts as any, declinedLimitLinks || [])
+      .map((x: any) => (x.a.id === account.id ? { other: x.b, limit: x.limit } : x.b.id === account.id ? { other: x.a, limit: x.limit } : null))
+      .find(Boolean) as { other: Account; limit: number } | undefined
+    : undefined;
+  // Who it's shared with lives in the Shared Limit row below — not repeated here.
+  const limitCaption = limitPos?.source === 'bank' && limitPos.asOf
+    ? `Available credit from your bank's SMS of ${formatDate(limitPos.asOf)}, updated for spends since.`
+    : '';
+  const bankAccounts = account.type === ACCOUNT_TYPES.DEBIT_CARD
+    ? accounts.filter((a) => a.type === ACCOUNT_TYPES.BANK && !a.archived)
+    : [];
+  const linkedCardMasks = account.type === ACCOUNT_TYPES.BANK ? (account.aliasMasks || []) : [];
+
+  const askLinkLimit = (otherId: string) => {
+    const other = accounts.find((a) => a.id === otherId);
+    setLimitPickerOpen(false);
+    if (!other) return;
+    setConfirm({
+      title: 'Share one limit?',
+      message: `${cardLabel(account)} and ${cardLabel(other)} will share one credit limit. Available credit and utilization count both cards; bills, due dates and payments stay separate.`,
+      primaryText: 'Link',
+      onConfirm: () => { linkCardLimits(account.id, other.id); setConfirm(null); toast.success('Limits linked', cardLabel(other)); },
+    });
+  };
+  const askUnlinkLimit = () => setConfirm({
+    title: 'Stop sharing the limit?',
+    message: `${cardLabel(account)} goes back to the limit it had before linking.`,
+    primaryText: 'Unlink',
+    onConfirm: () => { unlinkCardLimit(account.id); setConfirm(null); toast.success('Limit unlinked', cardLabel(account)); },
+  });
+  const askUnlinkCard = (mask: string) => setConfirm({
+    title: 'Unlink debit card?',
+    message: `Card ··${mask} becomes its own account again. Its transactions and their money move out of ${cardLabel(account)} onto it.`,
+    primaryText: 'Unlink',
+    onConfirm: () => {
+      unlinkDebitCardFromBank(account.id, mask);
+      setConfirm(null);
+      toast.success('Debit card unlinked', `··${mask}`);
+    },
+  });
+  const askLinkBank = (bankId: string) => {
+    const bank = accounts.find((a) => a.id === bankId);
+    setBankPickerOpen(false);
+    if (!bank) return;
+    setConfirm({
+      title: 'Link card to bank?',
+      message: `We'll treat ${cardLabel(account)} as part of ${cardLabel(bank)} — one balance, counted once. You can unlink it later from the bank's page.`,
+      primaryText: 'Link them',
+      onConfirm: () => {
+        linkDebitCardToBank(account.id, bankId);
+        setConfirm(null);
+        // This card's own page is gone (folded into the bank) — show the bank.
+        navigation.replace('AccountDetails', { accountId: bankId });
+        toast.success('Card linked', cardLabel(bank));
+      },
+    });
+  };
   // Same tiers Budget already uses for spend-vs-cap — not new thresholds.
   const utilColor = utilPct == null
     ? theme.primary
@@ -568,13 +660,15 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
             {hasLimit ? (
               <>
+                {creditLimit != null ? (
                 <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
                   <View style={[styles.statIconWrap, { backgroundColor: withAlpha(theme.primary, 0.12) }]}>
                     <Ionicons name="card-outline" size={16} color={theme.primary} />
                   </View>
                   <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatMoney(creditLimit as number)}</Text>
-                  <Text style={[styles.statK, { color: theme.textMuted }]}>Credit Limit</Text>
+                  <Text style={[styles.statK, { color: theme.textMuted }]}>{sharedWith.length ? 'Shared Limit' : 'Credit Limit'}</Text>
                 </View>
+                ) : null}
                 {/* Over the limit, this tile flips to the warning itself: how far
                     over, in the danger tone — never a silent ₹0. */}
                 <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: overLimit ? withAlpha(theme.danger, 0.4) : theme.divider }]}>
@@ -588,6 +682,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
                     {overLimit ? 'Over Limit By' : 'Available Credit'}
                   </Text>
                 </View>
+                {utilization != null ? (
                 <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
                   <View style={[styles.statIconWrap, { backgroundColor: withAlpha(utilColor, 0.12) }]}>
                     <Ionicons name="speedometer-outline" size={16} color={utilColor} />
@@ -598,6 +693,22 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
                       is the real, possibly >100 figure. */}
                   <ProgressBar progress={utilization as number} color={utilColor} height={5} style={styles.statBar} />
                 </View>
+                ) : (
+                  // The bank told us what's available but not the limit — one tap adds it.
+                  <TouchableOpacity
+                    style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}
+                    onPress={() => navigation.navigate('AccountForm', { accountId: account.id })}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add credit limit"
+                  >
+                    <View style={[styles.statIconWrap, { backgroundColor: withAlpha(theme.primary, 0.12) }]}>
+                      <Ionicons name="add-circle-outline" size={16} color={theme.primary} />
+                    </View>
+                    <Text style={[styles.statV, { color: theme.primary, fontSize: 13 }]}>Add Limit</Text>
+                    <Text style={[styles.statK, { color: theme.textMuted }]}>See utilization</Text>
+                  </TouchableOpacity>
+                )}
               </>
             ) : (
               // Same half-width tile as Outstanding, not a full-width one — a
@@ -618,6 +729,82 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={[styles.statK, { color: theme.textMuted }]}>See utilization</Text>
               </TouchableOpacity>
             )}
+          </View>
+          {limitCaption ? <Text style={[styles.limitCaption, { color: theme.textMuted }]}>{limitCaption}</Text> : null}
+
+          {/* Same bank + same limit → ASK (two separate cards with equal limits is common too). */}
+          {limitSuggestion ? (
+            <View style={[styles.infoCard, styles.linkSuggest, { borderColor: theme.inputBorder }]}>
+              <Text style={[styles.linkSuggestText, { color: theme.textPrimary }]}>
+                {cardLabel(limitSuggestion.other)} has the same {formatMoney(limitSuggestion.limit)} limit. Do these cards share one combined limit?
+              </Text>
+              <View style={styles.linkSuggestActions}>
+                <TouchableOpacity onPress={() => dismissLimitLinkSuggestion(account.id, limitSuggestion.other.id)} hitSlop={8} accessibilityRole="button">
+                  <Text style={[styles.linkActionText, { color: theme.textSecondary }]}>No, Separate</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => { linkCardLimits(account.id, limitSuggestion.other.id); toast.success('Limits linked', cardLabel(limitSuggestion.other)); }}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.linkActionText, { color: theme.primary }]}>Yes, Link</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
+          {otherCards.length ? (
+            <View style={[styles.infoCard, { borderColor: theme.inputBorder }]}>
+              <View style={styles.infoRow}>
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Shared Limit</Text>
+                <View style={styles.linkRowRight}>
+                  <Text style={[styles.infoValue, { color: sharedWith.length ? theme.textPrimary : theme.textMuted }]} numberOfLines={1}>
+                    {sharedWith.length ? sharedWith.map(cardLabel).join(', ') : 'Not shared'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={sharedWith.length ? askUnlinkLimit : () => setLimitPickerOpen(true)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={sharedWith.length ? 'Stop sharing the limit' : 'Share a limit with another card'}
+                  >
+                    <Text style={[styles.linkActionText, { color: sharedWith.length ? theme.textSecondary : theme.primary }]}>
+                      {sharedWith.length ? 'Unlink' : 'Link'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* ── Debit card ↔ bank (Oct-10-26): unlink from the bank's page; link from
+          the card's own page (was only a pill on the Accounts list, one-way). */}
+      {linkedCardMasks.length ? (
+        <>
+          <SectionHeader icon="git-merge-outline" title="Linked Debit Cards" accentColor={theme.primary} style={styles.sectionHead} />
+          <View style={[styles.infoCard, { borderColor: theme.inputBorder }]}>
+            {linkedCardMasks.map((mask, i) => (
+              <View key={mask} style={[styles.infoRow, i > 0 && styles.infoRowDivider, { borderTopColor: theme.divider }]}>
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Debit Card ··{mask}</Text>
+                <TouchableOpacity onPress={() => askUnlinkCard(mask)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Unlink debit card ${mask}`}>
+                  <Text style={[styles.linkActionText, { color: theme.textSecondary }]}>Unlink</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
+      {bankAccounts.length ? (
+        <>
+          <SectionHeader icon="git-merge-outline" title="Bank Account" accentColor={theme.primary} style={styles.sectionHead} />
+          <View style={[styles.infoCard, { borderColor: theme.inputBorder }]}>
+            <View style={styles.infoRow}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Spends from a bank you track?</Text>
+              <TouchableOpacity onPress={() => setBankPickerOpen(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Link to a bank account">
+                <Text style={[styles.linkActionText, { color: theme.primary }]}>Link to Bank</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </>
       ) : null}
@@ -889,6 +1076,36 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         onSave={commitAnchor}
       />
 
+      <AccountPickerSheet
+        visible={limitPickerOpen}
+        title="Shares a limit with…"
+        subtitle="Pick the card on the same combined limit"
+        accounts={[...otherCards].sort((a, b) => Number(b.bankName === account.bankName) - Number(a.bankName === account.bankName))}
+        showBalance={false}
+        skipLabel={undefined}
+        onSkip={undefined}
+        onSelect={askLinkLimit}
+        onClose={() => setLimitPickerOpen(false)}
+      />
+      <LinkCardToBankSheet
+        visible={bankPickerOpen}
+        card={bankPickerOpen ? (account as any) : null}
+        bankAccounts={bankAccounts as any}
+        onClose={() => setBankPickerOpen(false)}
+        onLink={askLinkBank}
+      />
+      <CenterModal
+        visible={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        primaryText={confirm?.primaryText}
+        destructive={!!confirm?.destructive}
+        secondaryText="Cancel"
+        onSecondary={() => setConfirm(null)}
+        onClose={() => setConfirm(null)}
+        onPrimary={() => confirm?.onConfirm()}
+      />
+
       {/* Header ⓘ → the internal mechanics this screen manages that aren't
           obvious on sight — same bar Groups/Goals hold their own "how it
           works" sheets to. "Last activity" needs no bullet (self-evident);
@@ -914,7 +1131,7 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           {
             icon: 'git-merge-outline',
             label: 'Linked cards',
-            value: 'A linked debit card’s money is folded into this balance and ledger, not tracked separately.',
+            value: 'A linked debit card’s money is folded into this balance and ledger, not tracked separately — unlink it here any time. Credit cards on one combined limit share Available Credit and Utilization.',
           },
         ]}
       />
@@ -1148,6 +1365,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
   },
   infoRowDivider: { borderTopWidth: DIVIDER_W },
+  limitCaption: { ...typography.tiny, marginTop: -spacing.xs, marginBottom: spacing.md, lineHeight: 16 },
+  linkSuggest: { paddingVertical: spacing.md },
+  linkSuggestText: { ...typography.small, lineHeight: 19 },
+  linkSuggestActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.lg, marginTop: spacing.sm },
+  linkRowRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexShrink: 1, marginLeft: spacing.md },
+  linkActionText: { ...typography.small, fontWeight: '700' },
   infoLabel: { ...typography.small, fontWeight: '500' },
   infoValue: { ...typography.small, fontWeight: '700' },
 

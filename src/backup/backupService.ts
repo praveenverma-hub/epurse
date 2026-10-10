@@ -32,7 +32,7 @@ const APP_VERSION = '1.5.0';
  * constant equals the store's `version:` — the same source-of-truth check that
  * suite already does for the OAuth scheme in app.base.json.
  */
-const STORE_VERSION = 40;
+const STORE_VERSION = 41;
 
 /** Local rollback copy, written immediately before a restore replaces state. */
 const SNAPSHOT_KEY = '@ePurse:preRestoreSnapshot';

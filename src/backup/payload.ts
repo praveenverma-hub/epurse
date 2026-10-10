@@ -129,7 +129,7 @@ export const STORE_KEYS = [
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
   'welcomeReviewSeen', 'planBannerDismissed',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',
-  'declinedAccountLinks', 'activeGroupZoneId', 'userCustomRules',
+  'declinedAccountLinks', 'declinedLimitLinks', 'activeGroupZoneId', 'userCustomRules',
 ] as const;
 
 /**
