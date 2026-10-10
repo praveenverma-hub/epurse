@@ -44,6 +44,9 @@ export async function seedMockData(store, config = MOCK_SCENARIO, now = new Date
     shares: [{ memberId: 'me', shareAmount: amount(config.groupAmount) / 2 }, { memberId: 'demo-sam', shareAmount: amount(config.groupAmount) / 2 }] });
   s().addLentBorrowed({ kind: 'lent', person: 'Demo Taylor', contactId: 'demo-taylor', amount: amount(config.lent), date: at(0) });
   s().addLentBorrowed({ kind: 'borrowed', person: 'Demo Morgan', contactId: 'demo-morgan', amount: amount(config.borrowed), date: at(0) });
+  s().addAlreadySettledLentBorrowed({ kind: 'borrowed', person: 'Demo Morgan', contactId: 'demo-morgan', amount: amount(config.repaid), date: at(0) }, { accountId: accounts.bank });
+  add('lent-sms', { merchant: 'UPI to Demo Taylor', amount: amount(config.lentFromBank), categoryId: 'food', source: 'sms', isReviewed: true });
+  s().updateTransactionCategoryWithContact('demo-lent-sms', 'lent', { person: 'Demo Taylor', contactId: 'demo-taylor' });
   s().setBudget({ perCategory: Object.fromEntries(Object.entries(config.budget).map(([key, value]) => [key, amount(value)])) });
   const allocations = {};
   for (const goal of config.goals) {

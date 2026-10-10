@@ -27,6 +27,10 @@ export const MOCK_SCENARIO = {
   groupAmount: 1800,
   lent: 2500,
   borrowed: 900,
+  // Part of the borrow repaid FROM the bank (a booked Repayment expense — the editable,
+  // account-linked LB entry) and a bank SMS tagged Lent (a view-only, txn-backed entry).
+  repaid: 400,
+  lentFromBank: 600,
   refund: 200,
   ignored: 400,
   private: 300,

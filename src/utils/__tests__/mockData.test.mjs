@@ -21,16 +21,25 @@ for (const scale of [1, 2]) {
   const ids = await seedMockData(store, c, now);
   const s = store.getState();
   const bankExpenses = c.expenses.filter((x) => x.account === 'bank').reduce((sum, x) => sum + x.amount, 0);
-  const expectedBank = (c.openingBank + c.months * (c.salary - bankExpenses) + c.refund - c.private - c.splitAmount - c.groupAmount) * scale;
+  const expectedBank = (c.openingBank + c.months * (c.salary - bankExpenses) + c.refund - c.private - c.splitAmount - c.groupAmount - c.repaid - c.lentFromBank) * scale;
   assert.equal(s.accounts.find((a) => a.id === ids.accounts.bank).balance, expectedBank, 'bank balance reflects full paid amounts, refund and ignore reversal');
   assert.equal(s.accounts.find((a) => a.id === ids.accounts.card).balance, -c.months * c.expenses.filter((x) => x.account === 'card').reduce((sum, x) => sum + x.amount, 0) * scale, 'card balance is negative for outstanding purchases');
   assert.equal(s.getMonthlyIncome(now), c.salary * scale);
   const expenseTotal = c.expenses.reduce((sum, x) => sum + x.amount, 0);
-  assert.equal(s.getMonthlySpend(now), (expenseTotal + c.private + c.splitAmount / 2 + c.groupAmount / 2 - c.refund) * scale, 'spend uses own shares, includes private and excludes ignored');
+  assert.equal(s.getMonthlySpend(now), (expenseTotal + c.private + c.splitAmount / 2 + c.groupAmount / 2 - c.refund + c.repaid) * scale, 'spend uses own shares, includes private + the repaid borrow, excludes ignored + lent');
   assert.equal(s.budget.totalCap, Object.values(c.budget).reduce((a, b) => a + b, 0) * scale);
   assert.equal(s.goalContributions.reduce((sum, x) => sum + x.amount, 0), c.goals.reduce((sum, x) => sum + x.contribution, 0) * scale);
   assert.equal(s.transactions.filter((t) => t.source === 'sms' && !t.isReviewed).length, 3);
   assert.equal(s.groups.length, 2);
+  // Every LB entry kind: plain (no account), a booked Repayment (editable, on the bank),
+  // and a bank txn tagged Lent (view-only).
+  const repaidRow = s.lentBorrowed.find((l) => l.kind === 'borrow_repaid');
+  assert.equal(s.lentBorrowedAccountId(repaidRow), ids.accounts.bank, 'repaid entry is booked on the bank');
+  assert.equal(s.isLentBorrowedEditable(repaidRow), true);
+  const smsLent = s.lentBorrowed.find((l) => l.sourceTxnId === 'demo-lent-sms');
+  assert.ok(smsLent && smsLent.kind === 'lent' && !s.isLentBorrowedEditable(smsLent), 'SMS-tagged lent is txn-backed + view-only');
+  assert.equal(s.getPersonBalances().find((p) => p.contactId === 'demo-taylor').net, (c.lent + c.lentFromBank) * scale);
+  assert.equal(s.getPersonBalances().find((p) => p.contactId === 'demo-morgan').net, -(c.borrowed - c.repaid) * scale);
   assert.equal(s.reminders.length, 1);
   await assert.rejects(seedMockData(store, c), /empty store/);
 }
