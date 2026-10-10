@@ -188,21 +188,26 @@ function AuthSessionBoot() {
   const setAuthChecked = useEPurseStore((s) => s.setAuthChecked);
 
   useEffect(() => {
+    // Never leave LoginGate's blank cover up if SecureStore stalls — after 3s it
+    // decides on what it has (isLoggedIn still false ⇒ the gate, as before).
+    const fallback = setTimeout(setAuthChecked, 3000);
     (async () => {
       try {
         const signedIn = await googleAuth.isSignedIn();
         setGoogleAccount(signedIn ? await googleAuth.getSignedInProfile() : null);
       } finally {
+        clearTimeout(fallback);
         setAuthChecked();
       }
     })();
 
-    return googleAuth.onSessionChange((signedIn) => {
+    const unsubscribe = googleAuth.onSessionChange((signedIn) => {
       if (signedIn) return; // the sign-in path already updates the store itself
       const wasLoggedIn = useEPurseStore.getState().isLoggedIn;
       setGoogleAccount(null);
       if (wasLoggedIn) setSessionExpired(true);
     });
+    return () => { clearTimeout(fallback); unsubscribe(); };
   }, [setGoogleAccount, setSessionExpired, setAuthChecked]);
 
   return null;

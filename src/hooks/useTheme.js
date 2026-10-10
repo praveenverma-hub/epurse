@@ -9,11 +9,18 @@
 
 import { useMemo } from 'react';
 import { useEPurseStore } from '../store/ePurseStore';
-import { buildPalette } from '../constants/themes';
+import { buildPalette, DEFAULT_THEME_ID } from '../constants/themes';
+import { useFeatureFlag } from './useFeatureFlag';
 
 export const useTheme = () => {
-  const themeId  = useEPurseStore((s) => s.themeId);
+  const savedThemeId = useEPurseStore((s) => s.themeId);
   const darkMode = useEPurseStore((s) => s.darkMode);
+  // Picker hidden (remote flag `themePicker`, Oct-10-26) ⇒ everyone on the default.
+  // A user who'd picked another theme can't reach Settings to change back, and the
+  // solid buttons fail white text on some (Carbon ≈1.3:1). Their saved choice is
+  // left untouched, so re-enabling the picker brings it back.
+  const pickerOn = useFeatureFlag('themePicker');
+  const themeId = pickerOn ? savedThemeId : DEFAULT_THEME_ID;
   return useMemo(() => buildPalette(themeId, darkMode), [themeId, darkMode]);
 };
 

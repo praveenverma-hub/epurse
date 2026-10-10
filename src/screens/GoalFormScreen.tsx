@@ -63,6 +63,7 @@ import GoalCategoryPickerModal from '../components/GoalCategoryPickerModal';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import { hapticLight } from '../utils/haptics';
+import { leaveDeletedItem } from '../utils/leaveDeletedItem';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -776,7 +777,8 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           setConfirmDelete(false);
           const removedName = existing?.name;
           if (existing) deleteGoal(existing.id);
-          navigation.goBack();
+          if (existing) leaveDeletedItem(navigation, 'GoalDetail', 'goalId', existing.id);
+          else navigation.goBack();
           if (removedName) toast.success('Goal deleted', removedName);
         }}
         onSecondary={() => setConfirmDelete(false)}

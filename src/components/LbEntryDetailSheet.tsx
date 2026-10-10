@@ -50,6 +50,9 @@ interface Props {
 
 const HINT = {
   txn: 'Linked to a transaction — edit it there so your account balance stays right.',
+  // Its transaction is gone (an older split is summarised after 90 days; the debt it
+  // created is kept) — say so rather than point at something that can't be opened.
+  txnGone: 'From an older transaction that’s no longer kept in the app.',
   group: "Comes from this group's expenses — change them in the group.",
 } as const;
 
@@ -148,7 +151,9 @@ export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable,
             ))}
           </View>
 
-          {source !== 'manual' && !editable ? <Text style={styles.hint}>{HINT[source]}</Text> : null}
+          {source !== 'manual' && !editable ? (
+            <Text style={styles.hint}>{source === 'txn' && !sourceTxn ? HINT.txnGone : HINT[source]}</Text>
+          ) : null}
         </View>
       </View>
     </Modal>

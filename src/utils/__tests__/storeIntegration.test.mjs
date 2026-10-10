@@ -4241,10 +4241,17 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
       && useStore.getState().accounts.find((a) => a.id === idB).primary === false,
     JSON.stringify(useStore.getState().accounts));
 
+  // Oct-10-26 user rule: the primary can't be archived — pick a new primary first.
   useStore.getState().archiveAccount(idA);
   let acc2 = useStore.getState().accounts;
-  check('archiving the primary account promotes another active one automatically',
-    acc2.find((a) => a.id === idA).primary === false && acc2.find((a) => a.id === idB).primary === true,
+  check('archiving the PRIMARY account is refused (pick another primary first)',
+    acc2.find((a) => a.id === idA).archived !== true && acc2.find((a) => a.id === idA).primary === true,
+    JSON.stringify(acc2));
+  useStore.getState().setPrimaryAccount(idB);
+  useStore.getState().archiveAccount(idA);
+  acc2 = useStore.getState().accounts;
+  check('…once another account is primary, it archives (and the new primary stays)',
+    acc2.find((a) => a.id === idA).archived === true && acc2.find((a) => a.id === idB).primary === true,
     JSON.stringify(acc2));
 
   useStore.getState().unarchiveAccount(idA);
@@ -4387,9 +4394,9 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     useStore.getState().getTotalBalance() === 10000, `${useStore.getState().getTotalBalance()}`);
 
   useStore.getState().setIncludeInNetWorth(cashId, true);
-  useStore.getState().archiveAccount(bankId);
+  useStore.getState().archiveAccount(cashId); // bank is the primary — can't be archived
   check('archiving an account ALSO drops it from net worth',
-    useStore.getState().getTotalBalance() === 500, `${useStore.getState().getTotalBalance()}`);
+    useStore.getState().getTotalBalance() === 10000, `${useStore.getState().getTotalBalance()}`);
 }
 
 // ── selectAssetsAndLiabilities — always sums back to selectEPurseNetWorth ───
@@ -4432,9 +4439,13 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   });
 
   useStore.getState().archiveAccount(cardId);
+  check('the primary card can\'t be archived', useStore.getState().accounts.find((a) => a.id === cardId).archived !== true);
+  const otherId = useStore.getState().addAccount({ type: 'Bank', name: 'Bank', mask: '9999' });
+  useStore.getState().setPrimaryAccount(otherId);
+  useStore.getState().archiveAccount(cardId);
   const archived = useStore.getState().accounts.find((a) => a.id === cardId);
   check('archiveAccount sets archived + archivedAt', archived.archived === true && !!archived.archivedAt, JSON.stringify(archived));
-  check('archiving unsets primary — a hidden account can\'t be the headline balance',
+  check('an archived account is never the primary',
     archived.primary === false, JSON.stringify(archived));
   check('archiving cancels this card\'s scheduled due reminders',
     Object.keys(useStore.getState().ccDueReminderIds).length === 0, JSON.stringify(useStore.getState().ccDueReminderIds));
@@ -4991,6 +5002,7 @@ console.log('\n— recordLbEntry: every LB entry moves an account, or links the 
   r = G().recordLbEntry({ person: 'Ravi', phone: '9000000002', kind: 'lent', amount: 700, date: now, note: 'Rent share' }, { accountId: 'a1' });
   const linkedRow = G().lentBorrowed.find((l) => l.id === r.entryId);
   check('matching UPI transfer is LINKED (no new txn, balance moved once)', r.linkedTxn?.id === 'sms-upi' && linkedRow.sourceTxnId === 'sms-upi' && G().transactions.length === txnCount && bal('a1') === before, `${r.linkedTxn?.id} ${G().transactions.length}/${txnCount} ${bal('a1')}/${before}`);
+  check('…and it leaves the review queue (recording it was the review)', G().transactions.find((t) => t.id === 'sms-upi').isReviewed === true);
   check('…the SMS is now Lent + locked; the Swiggy order untouched', G().transactions.find((t) => t.id === 'sms-upi').categoryId === 'lent' && G().transactions.find((t) => t.id === 'sms-food').categoryId === 'food');
   check('…linked (SMS) row is view-only; the note is kept', !G().isLentBorrowedEditable(linkedRow) && linkedRow.note === 'Rent share');
   r = G().recordLbEntry({ person: 'Ravi', phone: '9000000002', kind: 'lent', amount: 700, date: now }, { accountId: 'a1' });
@@ -5007,6 +5019,74 @@ console.log('\n— recordLbEntry: every LB entry moves an account, or links the 
   G().updateLentBorrowedEntry(plain.entryId, { accountId: null, note: 'cash' });
   check('…and back to "Not From an Account": txn removed, balance restored, row kept', !meera().sourceTxnId && bal('a2') === a2Before && meera().note === 'cash' && G().transactions.every((t) => !t.merchant.includes('Meera')), `${bal('a2')}`);
   check('delete a booked lent → its txn + balance go too', (() => { const id = G().lentBorrowed.find((l) => l.kind === 'lent' && l.sourceTxnId?.startsWith('txn_lb_')).id; const b = bal('a1'); G().deleteLentBorrowedEntry(id); return bal('a1') === b + 500 || bal('a1') === b + 700; })());
+}
+
+console.log('\n— OLD-INSTALL data under the Oct-10-26 LB changes —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const old = '2026-05-01T10:00:00.000Z';
+  // Shapes an install from before Oct-10-26 really has: no lbBooked anywhere, settle
+  // rows with the "Manual settlement" placeholder, a Repaid booking that was neither
+  // locked nor flagged, an SMS tagged Lent (lbLocked), and a split whose transaction
+  // was summarised away (its Lent row kept — the debt stands).
+  useStore.setState({
+    accounts: [{ id: 'a1', name: 'HDFC', bankName: 'HDFC', mask: '1111', type: 'Bank Account', balance: 5000 }],
+    transactions: [
+      { id: 'txn_repay_old', amount: 300, type: 'debit', categoryId: 'borrow_repaid', accountId: 'a1', merchant: 'Repaid Kiran', createdAt: old, source: 'manual', isReviewed: true, userEditedCategory: true },
+      { id: 'sms_lent', amount: 800, type: 'debit', categoryId: 'lent', accountId: 'a1', merchant: 'UPI KIRAN', createdAt: old, source: 'sms', lbLocked: true },
+    ],
+    lentBorrowed: [
+      { id: 'o1', kind: 'borrowed', person: 'Kiran', phone: '9111111111', amount: 1000, date: old },
+      { id: 'o2', kind: 'borrow_repaid', person: 'Kiran', phone: '9111111111', amount: 300, date: old, note: 'Manual settlement', sourceTxnId: 'txn_repay_old' },
+      { id: 'o3', kind: 'lent', person: 'Kiran', phone: '9111111111', amount: 800, date: old, note: 'From txn: UPI KIRAN', sourceTxnId: 'sms_lent' },
+      { id: 'o4', kind: 'lent', person: 'Kiran', phone: '9111111111', amount: 250, date: old, note: 'Split · Dinner', sourceTxnId: 'gone_split' },
+      { id: 'o5', kind: 'lent_settled', person: 'Kiran', phone: '9111111111', amount: 100, date: old, note: 'Manual settlement' },
+    ],
+  });
+  const row = (id) => G().lentBorrowed.find((l) => l.id === id);
+  const net = () => G().getPersonBalances()[0]?.net;
+  check('old data: balances unchanged by the new code (−1000+300+800+250−100 = 250)', net() === 250, `${net()}`);
+  check('old plain + placeholder-settle rows stay editable', G().isLentBorrowedEditable(row('o1')) && G().isLentBorrowedEditable(row('o5')));
+  check('old unflagged Repaid booking is editable (legacy path)…', G().isLentBorrowedEditable(row('o2')) && G().lentBorrowedAccountId(row('o2')) === 'a1');
+  G().updateLentBorrowedEntry('o2', { amount: 400 });
+  check('…and an edit moves its expense + balance', row('o2').amount === 400 && G().transactions.find((t) => t.id === 'txn_repay_old').amount === 400 && G().accounts[0].balance === 4900, `${G().accounts[0].balance}`);
+  check('old SMS-tagged Lent stays view-only', !G().isLentBorrowedEditable(row('o3')) && G().updateLentBorrowedEntry('o3', { amount: 1 }) === false && row('o3').amount === 800);
+  check('orphaned split row (txn summarised away): view-only, no crash, still counted', !G().isLentBorrowedEditable(row('o4')) && G().lentBorrowedAccountId(row('o4')) === null && G().deleteLentBorrowedEntry('o4') === false && !!row('o4'));
+  const r = G().recordLbEntry({ person: 'Kiran', phone: '9111111111', kind: 'lent', amount: 50 }, { accountId: 'a1' });
+  check('new entries work on top of old data (books, joins the same person)', !!r && G().getPersonBalances().length === 1 && G().accounts[0].balance === 4850, `${G().getPersonBalances().length} ${G().accounts[0].balance}`);
+}
+
+console.log('\n— Ignore → Restore keeps a person-tagged txn\'s ledger row (Oct-10-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date().toISOString();
+  useStore.setState({ accounts: [{ id: 'a1', name: 'HDFC', type: 'Bank Account', balance: 5000 }] });
+  const P = { person: 'Neha', phone: '9222222222' };
+  const net = () => G().getPersonBalances().find((p) => p.phone === P.phone)?.net ?? 0;
+  const r = G().recordLbEntry({ ...P, kind: 'lent', amount: 400, date: now }, { accountId: 'a1' });
+  const txnId = G().lentBorrowed.find((l) => l.id === r.entryId).sourceTxnId;
+  G().ignoreTransaction(txnId);
+  check('ignore: the debt leaves the ledger, the balance is reversed', net() === 0 && G().accounts[0].balance === 5000, `${net()} ${G().accounts[0].balance}`);
+  G().unignoreTransaction(txnId);
+  check('restore: the SAME ledger row is back, balance re-applied', net() === 400 && G().lentBorrowed.some((l) => l.id === r.entryId) && G().accounts[0].balance === 4600, `${net()} ${G().accounts[0].balance}`);
+  check('…and nothing is left parked on the txn', !G().transactions.find((t) => t.id === txnId).ignoredLbRows);
+  G().unignoreTransaction(txnId);
+  check('a second restore is a no-op (no duplicate row)', G().lentBorrowed.filter((l) => l.id === r.entryId).length === 1);
+  // SMS tagged to a person (the pre-existing path) gets the same treatment.
+  G().addTransaction({ id: 'sms-x', accountId: 'a1', type: 'debit', amount: 150, merchant: 'UPI', categoryId: 'transfer', source: 'sms', createdAt: now });
+  G().updateTransactionCategoryWithContact('sms-x', 'lent', { person: P.person, phone: P.phone });
+  G().ignoreTransaction('sms-x');
+  G().unignoreTransaction('sms-x');
+  check('SMS tagged Lent: ignore → restore brings its row back too', net() === 550, `${net()}`);
+  // A split stays deliberately clean on restore (its rows are NOT parked).
+  G().addTransaction({ id: 'split-x', accountId: 'a1', type: 'debit', amount: 600, merchant: 'Dinner', categoryId: 'food', createdAt: now });
+  G().setTransactionSplit('split-x', [{ name: 'Neha', contactId: null, shareAmount: 300 }], { mode: 'amount', myAmount: 300 });
+  G().ignoreTransaction('split-x');
+  G().unignoreTransaction('split-x');
+  const sx = G().transactions.find((t) => t.id === 'split-x');
+  check('a split still restores clean (no split, no rows)', !sx.isSplit && !G().lentBorrowed.some((l) => l.sourceTxnId === 'split-x'));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

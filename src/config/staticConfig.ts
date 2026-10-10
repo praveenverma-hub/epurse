@@ -150,8 +150,10 @@ export const STATIC_CONFIG = {
     /**
      * false (Oct-10-26): only Violet is designed for — primary buttons are a SOLID
      * `theme.primary` fill now, and white on some themes' primary fails (Carbon's
-     * mint ≈ 1.3:1, Orange/Blue ≈ 3:1). Remotely re-enable via `REMOTE_FLAG_KEYS`
-     * once the other themes are reviewed.
+     * mint ≈ 1.3:1, Orange/Blue ≈ 3:1). While off, `useTheme` renders EVERYONE on
+     * Violet (DEFAULT_THEME_ID) whatever `themeId` is saved; the saved choice comes
+     * back when this is re-enabled remotely (`REMOTE_FLAG_KEYS`) once the other
+     * themes are reviewed.
      */
     enabled: false,
   },

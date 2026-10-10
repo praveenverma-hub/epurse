@@ -58,6 +58,7 @@ import CenterModal from '../components/CenterModal';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import { hapticLight } from '../utils/haptics';
+import { leaveDeletedItem } from '../utils/leaveDeletedItem';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
@@ -117,6 +118,10 @@ const AccountFormScreen = ({ navigation, route }: any) => {
 
   const [confirmTypeChange, setConfirmTypeChange] = useState(false);
   const [confirmArchive, setConfirmArchive]       = useState(false);
+  // The primary can't be archived or switched off in place — the user picks the
+  // NEW primary instead (store refuses too). Saved state, not the draft toggle.
+  const isSavedPrimary = isEdit && !!account?.primary && !account?.archived;
+  const [primaryBlocked, setPrimaryBlocked]       = useState(false);
   const [confirmUnarchive, setConfirmUnarchive]   = useState(false);
   const [confirmDelete, setConfirmDelete]         = useState(false);
 
@@ -468,11 +473,14 @@ const AccountFormScreen = ({ navigation, route }: any) => {
           <View style={[styles.toggleRow, { borderTopColor: theme.divider }]}>
             <View style={styles.toggleMid}>
               <Text style={[styles.toggleLabel, { color: theme.textPrimary }]}>Primary account</Text>
-              <Text style={[styles.toggleHint, { color: theme.textSecondary }]}>Your default account, shown first</Text>
+              <Text style={[styles.toggleHint, { color: theme.textSecondary }]}>
+                {isSavedPrimary ? 'To change it, turn this on for another account' : 'Your default account, shown first'}
+              </Text>
             </View>
             <AppSwitch
               value={primaryDraft}
               onValueChange={setPrimaryDraft}
+              disabled={isSavedPrimary}
               trackColor={{ true: theme.primary, false: theme.divider }}
               thumbColor="#fff"
               ios_backgroundColor={theme.divider}
@@ -504,6 +512,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
                 onPress={() => {
                   hapticLight();
                   if (account.archived) setConfirmUnarchive(true);
+                  else if (isSavedPrimary) setPrimaryBlocked(true);
                   else setConfirmArchive(true);
                 }}
                 activeOpacity={0.8}
@@ -578,6 +587,17 @@ const AccountFormScreen = ({ navigation, route }: any) => {
       />
 
       <CenterModal
+        visible={primaryBlocked}
+        title="Primary account"
+        message={`"${account?.name}" is your primary account, so it can't be archived. Make another account primary first — open it and turn on Primary account — then archive this one.`}
+        primaryText="OK"
+        secondaryText={undefined}
+        onSecondary={undefined}
+        onClose={() => setPrimaryBlocked(false)}
+        onPrimary={() => setPrimaryBlocked(false)}
+      />
+
+      <CenterModal
         visible={confirmUnarchive}
         title="Unarchive account?"
         message={`"${account?.name}" counts toward your net worth again.`}
@@ -604,7 +624,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
         onPrimary={() => {
           deleteAccount(account.id);
           setConfirmDelete(false);
-          navigation.goBack();
+          leaveDeletedItem(navigation, 'AccountDetails', 'accountId', account.id);
           toast.success('Account deleted', account?.name);
         }}
       />

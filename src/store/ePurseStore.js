@@ -3130,16 +3130,17 @@ export const useEPurseStore = create(
        * Soft-hide an account without losing its history — unlike `deleteAccount`,
        * which unlinks transactions and wipes CC bill/reminder bookkeeping outright.
        * Cancels this card's scheduled due-date reminders (an archived card shouldn't
-       * keep nagging) but leaves `ccBills`/`paymentHistory` untouched, and drops it
-       * as primary if it was one — a hidden account can't be the app's headline
-       * balance. `ensurePrimary` immediately promotes another active account in
-       * that case, so archiving the primary account can never leave the app
-       * with none.
+       * keep nagging) but leaves `ccBills`/`paymentHistory` untouched.
+       *
+       * REFUSES the primary account (Oct-10-26, user rule): the user must make
+       * another account primary first — silently promoting "the oldest" moved every
+       * new entry's default to an account they never chose. (`ensurePrimary` below
+       * stays as the safety net for old data.)
        */
       archiveAccount: (accountId) =>
         set((s) => {
           const acct = s.accounts.find((a) => a.id === accountId);
-          if (!acct) return s;
+          if (!acct || (acct.primary && !acct.archived)) return s;
           const cardKey = acct.type === ACCOUNT_TYPES.CREDIT_CARD
             ? ccBillKey({ cardLast4: acct.mask || null, bankName: acct.bankName || null })
             : null;
@@ -4714,6 +4715,10 @@ export const useEPurseStore = create(
           // back out together (keeps the transfer net-zero across ignore/unignore).
           const children = s.transactions.filter((t) => t.derivedFromTxnId === id && !t.isIgnored);
           const ignoreIds = new Set([id, ...children.map((c) => c.id)]);
+          // A txn tagged to a person (lbLocked — SMS-tagged or LB-booked) PARKS its ledger
+          // row on itself, so Restore brings the debt back. (A split's rows are dropped for
+          // good — Restore deliberately returns a clean, un-split txn; see below.)
+          const parkedLb = txn.lbLocked ? s.lentBorrowed.filter((l) => l.sourceTxnId === id) : [];
           let accounts = applyDelta(s.accounts, txn.accountId, { ...txn, type: oppositeType(txn.type) });
           children.forEach((c) => { accounts = applyDelta(accounts, c.accountId, { ...c, type: oppositeType(c.type) }); });
           return {
@@ -4722,7 +4727,9 @@ export const useEPurseStore = create(
             // dropped too (its Lent rows go below), so a Restore brings back a CLEAN
             // transaction rather than one claiming a split that no longer exists.
             transactions: s.transactions.map((t) =>
-              ignoreIds.has(t.id) ? { ...t, isIgnored: true, isHidden: false, ...ignoredSplitPatch(t, s.groups) } : t
+              ignoreIds.has(t.id)
+                ? { ...t, isIgnored: true, isHidden: false, ...ignoredSplitPatch(t, s.groups), ...(t.id === id && parkedLb.length ? { ignoredLbRows: parkedLb } : {}) }
+                : t
             ),
             accounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, -(txn.amount || 0)),
@@ -4751,12 +4758,17 @@ export const useEPurseStore = create(
           const suppressedSmsIds = txn.smsId
             ? (s.suppressedSmsIds || []).filter((sid) => sid !== txn.smsId)
             : s.suppressedSmsIds || [];
+          // Bring back the ledger row(s) ignoring parked (skip any id already present).
+          const parked = (txn.ignoredLbRows || []).filter((r) => !s.lentBorrowed.some((l) => l.id === r.id));
           return {
-            transactions: s.transactions.map((t) =>
-              restoreIds.has(t.id) ? { ...t, isIgnored: false } : t
-            ),
+            transactions: s.transactions.map((t) => {
+              if (!restoreIds.has(t.id)) return t;
+              const { ignoredLbRows: _parked, ...rest } = t;
+              return { ...rest, isIgnored: false };
+            }),
             accounts: nextAccounts,
             groups: adjustGroupTotal(s.groups, txn.groupId, txn.amount || 0),
+            ...(parked.length ? { lentBorrowed: [...parked, ...s.lentBorrowed] } : {}),
             ...(txn.smsId ? { suppressedSmsIds } : {}),
           };
         }),
@@ -5296,7 +5308,8 @@ export const useEPurseStore = create(
         if (match) {
           set({
             transactions: s.transactions.map((t) => (t.id === match.id
-              ? { ...t, categoryId: entry.kind, lbLocked: true, userEditedCategory: true }
+              // Recording it IS the review — don't leave it waiting in the daily queue.
+              ? { ...t, categoryId: entry.kind, lbLocked: true, userEditedCategory: true, isReviewed: true }
               : t)),
             lentBorrowed: [{ ...row, sourceTxnId: match.id }, ...s.lentBorrowed],
           });
