@@ -485,6 +485,8 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Oct-10-2026: **Goal form: explanations behind ⓘ.** The grey hint lines under Type, Duration, Overall Target, Icon, Fund It Automatically and Merchants are now a tooltip that opens from an ⓘ beside each label (new shared `InfoTip` — a real floating tooltip: theme-coloured bubble + arrow anchored to the icon, tap anywhere to dismiss; Type/Duration notes cover every option). Errors, the "₹X unallocated this month" line, the "Reached on …" note and the merchant-limit message stay visible.
 - Oct-10-2026: **Settings: Logout / Delete Account rows no longer thin.** Rows without a hint now match the height of hinted ones (`NavListRow` min height 52) — no sub-text added.
   Settings also has no row separators now (spacing only).
+- Oct-10-2026: **Manage Transaction: tighter gap above Category.** The "Category" label had its own top margin on top of the body padding, so the space under the header divider was about double the other gaps; the first label now relies on the body padding alone.
+  The header divider also moved: it now sits between the merchant row and the note field (none below the note).
 
 ---
 

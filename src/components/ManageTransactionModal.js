@@ -337,7 +337,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
                   onCreateNew={createGroup}
                 />
               </> : <>
-                <Text style={styles.sectionLabel}>Category</Text>
+                <Text style={[styles.sectionLabel, styles.sectionLabelFirst]}>Category</Text>
                 {categoryLocked ? <View style={styles.notice}><Ionicons name="lock-closed-outline" size={20} color={theme.primary} /><Text style={styles.noticeText}>{linkedPerson ? `Linked to ${linkedPerson}. Category is locked.` : 'Linked to a lent/borrow record. Category is locked.'}</Text></View>
                   : <>
                     <View style={[styles.search, searchFocus.focusStyle]}>
@@ -406,18 +406,21 @@ const makeStyles = (t) => StyleSheet.create({
   backSpacer: { width: 36 },
   title: { ...typography.h3, fontWeight: '700', color: t.textPrimary, flex: 1 },
   titleCentered: { textAlign: 'center' },
-  contextBlock: { borderBottomWidth: DIVIDER_W, borderBottomColor: t.divider, paddingBottom: spacing.md },
-  context: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  contextBlock: { paddingBottom: spacing.sm },
+  // The divider sits between the merchant row and the note.
+  context: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: DIVIDER_W, borderBottomColor: t.divider, paddingBottom: spacing.md },
   avatar: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: t.primary + '12', alignItems: 'center', justifyContent: 'center' },
   grow: { flex: 1 },
   merchant: { ...typography.bodyBold, color: t.textPrimary },
   amount: { ...typography.bodyBold, color: t.textPrimary, maxWidth: '38%' },
   meta: { ...typography.tiny, color: t.textSecondary, marginTop: 3 },
-  noteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44, marginTop: spacing.sm, paddingLeft: spacing.md, paddingRight: spacing.xs, borderWidth: 1, borderColor: t.divider, borderRadius: radius.md, backgroundColor: t.background },
+  noteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44, marginTop: spacing.md, paddingLeft: spacing.md, paddingRight: spacing.xs, borderWidth: 1, borderColor: t.divider, borderRadius: radius.md, backgroundColor: t.background },
   noteInput: { ...typography.body, flex: 1, minWidth: 0, paddingVertical: spacing.sm + 2, color: t.textPrimary },
   body: { flexShrink: 1 },
   bodyContent: { paddingTop: spacing.sm, paddingBottom: spacing.sm },
   sectionLabel: { ...typography.small, fontWeight: '700', color: t.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
+  // First section: the body's own top padding already separates it from the header divider.
+  sectionLabelFirst: { marginTop: 0 },
   actions: { flexDirection: 'row', gap: spacing.sm },
   actionsSecond: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   action: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.sm + 4, paddingHorizontal: spacing.sm, borderWidth: 1, borderRadius: radius.md },
