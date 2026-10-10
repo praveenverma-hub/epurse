@@ -58,7 +58,7 @@ import {
   goalIsAchieved,
 } from '../utils/goalPlan';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
-import { parseMessageDetailed } from '../utils/messageParser';
+import { parseMessageDetailed, isLimitStatementNotice } from '../utils/messageParser';
 import { cleanMerchantName, detectIsSubscription } from '../utils/merchantEnricher';
 import {
   isSelfTransfer,
@@ -72,6 +72,7 @@ import {
 // account" — analytics and the account ledger each had their own weaker rule and
 // disagreed with this one, which is how spend went missing from a card's ledger.
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
+import { limitPairKey } from '../utils/cardLimit';
 import { isSameMonth, monthKey, formatCurrency } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt } from '../utils/notifications';
 import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSchedule';
@@ -504,10 +505,9 @@ const ensureAccountForParsed = (accounts, parsed) => {
     // `aliasMasks` = linked debit-card masks folded into a bank account (a card is
     // just an access point to the bank — same money). See linkDebitCardToBank.
     aliasMasks: [],
-    // TODO(cc-limits): `creditLimit` was built (Sep-26 account revamp — user-set via
-    // AccountFormScreen, read by AccountDetailsScreen's Overview/Available-Credit/
-    // Utilization tiles). Still NOT built: `limitGroupId` (string — cards that SHARE
-    // one limit are grouped by this id, e.g. an add-on card on the primary's limit).
+    // Card limits: `creditLimit` (user-set, or a bank-reported total), `reportedAvailable`
+    // (the bank's "Avl Limit" from the latest card SMS) and `limitGroupId` (cards on ONE
+    // combined limit, user-confirmed) — all Oct-10-26, see utils/cardLimit.ts.
     // `statementDay`/`dueDay` (1–31) ARE populated — see `applyCcCycleInfoToAccount`,
     // set from real CC-bill-reminder SMS dates, NOT here at account creation (a
     // reminder never creates an account, only updates one that already exists).
@@ -929,6 +929,39 @@ const bookedLbTxn = (state, entry) => {
   const txn = (state.transactions || []).find((t) => t.id === entry.sourceTxnId);
   if (!txn || txn.isSplit || txn.groupId || txn.categoryId !== entry.kind) return null;
   return txn.lbBooked || isLegacyRepayment(txn) ? txn : null;
+};
+
+/**
+ * Store what the BANK just said about a card's limit (Oct-10-26 — read off card SMS
+ * by `extractCardLimits`): `reportedAvailable` = { amount, at } (kept only if newer
+ * than what we have), and a reported TOTAL limit becomes the card's `creditLimit` —
+ * the bank is authoritative — copied to every card sharing that limit.
+ */
+const applyCardLimitReport = (accounts, accountId, { available = null, total = null, at }) => {
+  const card = (accounts || []).find((a) => a.id === accountId);
+  if (!card || card.type !== ACCOUNT_TYPES.CREDIT_CARD || (!available && !total)) return accounts;
+  const atIso = at ? new Date(at).toISOString() : new Date().toISOString();
+  const newer = !card.reportedAvailable?.at || new Date(atIso) >= new Date(card.reportedAvailable.at);
+  return accounts.map((a) => {
+    const sameLimit = a.id === accountId || (card.limitGroupId && a.limitGroupId === card.limitGroupId);
+    if (!sameLimit) return a;
+    return {
+      ...a,
+      ...(a.id === accountId && available && newer ? { reportedAvailable: { amount: available, at: atIso } } : {}),
+      ...(total ? { creditLimit: total } : {}),
+    };
+  });
+};
+
+/** The credit card a limit NOTICE (no transaction) is about — same loose rule as bills. */
+const cardForLimitNotice = (accounts, { cardLast4, bankName }) => {
+  const bank = (bankName || '').trim().toLowerCase();
+  return (accounts || []).find((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD && !a.archived && (
+    cardLast4
+      ? !!(a.mask && maskMatch(a.mask, cardLast4))
+      // Bank-only only when the notice named no card — never stamp the wrong one of two.
+      : !!bank && (a.bankName || '').trim().toLowerCase() === bank
+  )) || null;
 };
 
 /** Stable key for a debit-card↔bank pairing (order-independent on the masks). */
@@ -1503,6 +1536,8 @@ export const useEPurseStore = create(
       // Debit-card↔bank pairs the user explicitly declined to merge (keys via
       // linkKey(cardMask, bankMask)) — so we never re-suggest a rejected pairing.
       declinedAccountLinks: [],
+      // Credit-card pairs the user said DON'T share a limit (limitPairKey).
+      declinedLimitLinks: [],
 
       // User rules for "what counts in expenses / budget" (SpendRulesScreen).
       // Arrays of PARENT category ids that are EXCLUDED. Empty = everything counts,
@@ -3163,11 +3198,72 @@ export const useEPurseStore = create(
           ),
         })),
 
+      /** Sets the limit on this card AND every card sharing it (one combined limit). */
       setCreditLimit: (accountId, limit) =>
+        set((s) => {
+          const gid = s.accounts.find((a) => a.id === accountId)?.limitGroupId || null;
+          return {
+            accounts: s.accounts.map((a) =>
+              a.id === accountId || (gid && a.limitGroupId === gid) ? { ...a, creditLimit: limit } : a
+            ),
+          };
+        }),
+
+      /**
+       * Two credit cards on ONE combined limit (Oct-10-26 — user-confirmed, never
+       * inferred). Merges their groups; the shared limit is the first card's (else
+       * the second's). Only the LIMIT is shared — each card keeps its own
+       * outstanding, statement, due date, reminders and payments. Each card's OWN
+       * limit is remembered (`limitBeforeLink`) so unlinking puts it back.
+       */
+      linkCardLimits: (aId, bId) =>
+        set((s) => {
+          const a = s.accounts.find((x) => x.id === aId);
+          const b = s.accounts.find((x) => x.id === bId);
+          if (!a || !b || aId === bId) return s;
+          if (a.type !== ACCOUNT_TYPES.CREDIT_CARD || b.type !== ACCOUNT_TYPES.CREDIT_CARD) return s;
+          const gid = a.limitGroupId || b.limitGroupId || `lg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const merging = new Set([aId, bId, a.limitGroupId, b.limitGroupId].filter(Boolean));
+          const limit = a.creditLimit ?? b.creditLimit ?? null;
+          return {
+            accounts: s.accounts.map((x) =>
+              merging.has(x.id) || (x.limitGroupId && merging.has(x.limitGroupId))
+                ? {
+                  ...x,
+                  limitGroupId: gid,
+                  ...(x.limitBeforeLink === undefined ? { limitBeforeLink: x.creditLimit ?? null } : {}),
+                  ...(limit != null ? { creditLimit: limit } : {}),
+                }
+                : x
+            ),
+          };
+        }),
+
+      /**
+       * Take a card off its shared limit — back to how it was: its OWN limit from
+       * before the link (none, if it had none). A group left with one card dissolves
+       * the same way. Its bank-reported available figure was always its own, so stays.
+       */
+      unlinkCardLimit: (accountId) =>
+        set((s) => {
+          const gid = s.accounts.find((a) => a.id === accountId)?.limitGroupId;
+          if (!gid) return s;
+          const left = s.accounts.filter((a) => a.limitGroupId === gid && a.id !== accountId);
+          const restore = (a) => {
+            const { limitBeforeLink, ...rest } = a;
+            return { ...rest, limitGroupId: null, creditLimit: limitBeforeLink !== undefined ? limitBeforeLink : a.creditLimit };
+          };
+          return {
+            accounts: s.accounts.map((a) =>
+              a.id === accountId || (left.length === 1 && a.id === left[0].id) ? restore(a) : a
+            ),
+          };
+        }),
+
+      /** "No, these have separate limits" — stop suggesting this pair. */
+      dismissLimitLinkSuggestion: (aId, bId) =>
         set((s) => ({
-          accounts: s.accounts.map((a) =>
-            a.id === accountId ? { ...a, creditLimit: limit } : a
-          ),
+          declinedLimitLinks: Array.from(new Set([...(s.declinedLimitLinks || []), limitPairKey(aId, bId)])),
         })),
 
       setMinimumDue: (accountId, amount) =>
@@ -3248,10 +3344,12 @@ export const useEPurseStore = create(
 
       // Absolute "anchor" set used by the AccountCard flip flow.
       // For credit cards, also enables outstanding-balance tracking so the
-      // OUTSTANDING / FULLY PAID display kicks in.
+      // carousel card's FULLY PAID badge can show.
       setAccountAnchor: (accountId, newBalance) =>
-        set((s) => ({
-          accounts: s.accounts.map((a) => {
+        set((s) => {
+          let billCard = null;
+          let billRemaining = null;
+          const accounts = s.accounts.map((a) => {
             if (a.id !== accountId) return a;
             const isCC = a.type === ACCOUNT_TYPES.CREDIT_CARD;
             // A card's balance is a LIABILITY (selectEPurseNetWorth takes
@@ -3266,10 +3364,21 @@ export const useEPurseStore = create(
               balance: isCC ? -Math.abs(newBalance) : newBalance,
               anchoredAt: Date.now(),
             };
-            if (isCC) next.ccPaymentsTracked = true;
+            if (isCC) {
+              next.ccPaymentsTracked = true;
+              // The statement can't owe more than the whole card does — setting
+              // outstanding to ₹0 means the bill is paid (else it still read "due").
+              const remaining = statementRemaining(a);
+              if (remaining != null && Math.abs(newBalance) < remaining) {
+                next.remainingDue = Math.abs(newBalance);
+                billCard = a;
+                billRemaining = next.remainingDue;
+              }
+            }
             return next;
-          }),
-        })),
+          });
+          return { accounts, ...(billCard ? settleCcBillMaps(s, billCard, billRemaining) : {}) };
+        }),
 
       /**
        * Deletes the account AND prunes every stale reference it leaves behind —
@@ -3364,6 +3473,49 @@ export const useEPurseStore = create(
             ),
           };
         }),
+
+      /**
+       * Undo linkDebitCardToBank (Oct-10-26 — it was one-way). Re-creates the Debit
+       * Card account, moves the card's own transactions (those whose SMS named the
+       * card's mask) back onto it, and takes their money movement out of the bank's
+       * balance onto the card's. The pair stays "declined", so it isn't suggested
+       * again. Returns the new card's id, or null.
+       */
+      unlinkDebitCardFromBank: (bankId, cardMask) => {
+        const s = get();
+        const bank = s.accounts.find((a) => a.id === bankId);
+        if (!bank || !cardMask || !(bank.aliasMasks || []).includes(cardMask)) return null;
+        const isCardTxn = (t) => t.accountId === bankId && !!t.accountMask
+          && t.accountMask !== bank.mask && maskMatch(t.accountMask, cardMask);
+        const moved = (s.transactions || []).reduce((sum, t) => (isCardTxn(t) && !t.isIgnored
+          ? sum + (t.type === TRANSACTION_TYPES.CREDIT ? 1 : -1) * (Number(t.amount) || 0)
+          : sum), 0);
+        const cardId = get().addAccount({
+          type: ACCOUNT_TYPES.DEBIT_CARD,
+          name: `${bank.bankName || 'Debit'} Card ··${cardMask}`,
+          bankName: bank.bankName || null,
+          mask: cardMask,
+          balance: moved,
+        });
+        const repoint = (list) => (list || []).map((t) => (isCardTxn(t) ? { ...t, accountId: cardId } : t));
+        set((st) => {
+          // Back each card txn out of the bank through applyDelta — so one from before a
+          // balance the user SET by hand (anchoredAt) isn't backed out: that figure
+          // already counted it. (The new card has no anchor: it carries them all.)
+          let accounts = st.accounts;
+          for (const t of st.transactions || []) {
+            if (isCardTxn(t) && !t.isIgnored) accounts = applyDelta(accounts, bankId, { ...t, type: oppositeType(t.type) });
+          }
+          return {
+            accounts: accounts.map((a) => (a.id === bankId
+              ? { ...a, aliasMasks: (a.aliasMasks || []).filter((m) => m !== cardMask) }
+              : a)),
+            transactions: repoint(st.transactions),
+            archivedTransactions: repoint(st.archivedTransactions),
+          };
+        });
+        return cardId;
+      },
 
       /** User said "no, these are different accounts" — stop suggesting this pair. */
       dismissAccountLinkSuggestion: (cardMask, bankMask) =>
@@ -4266,6 +4418,19 @@ export const useEPurseStore = create(
           // Historical message: never surface CC prompts / bill reminders or mutate
           // balances for pre-onboarding messages — fresh start = clean slate.
           if (opts.preOnboarding || (onboardedMs > 0 && opts.receivedAt && new Date(opts.receivedAt).getTime() < onboardedMs)) return null;
+          // A limit statement ("your available limit is Rs X") — no transaction, but
+          // the card's Available Credit should still learn the bank's figure.
+          if (parsedResult?.error?.code === 'non_transaction_notice' && parsedResult.cardLimit) {
+            const { availableLimit, creditLimit, cardLast4, bankName } = parsedResult.cardLimit;
+            const card = cardForLimitNotice(get().accounts, { cardLast4, bankName });
+            if (card) {
+              set((s) => ({
+                accounts: applyCardLimitReport(s.accounts, card.id, {
+                  available: availableLimit, total: creditLimit, at: opts.receivedAt,
+                }),
+              }));
+            }
+          }
           if (
             parsedResult?.error?.code === 'credit_card_payment_notification' &&
             parsedResult.ccPayment
@@ -4559,6 +4724,9 @@ export const useEPurseStore = create(
           const txnTime  = new Date(candidate.createdAt || Date.now()).getTime();
           const historical = opts.preOnboarding || (onboardedMs > 0 && txnTime < onboardedMs);
           if (historical) {
+            // Pre-onboarding: no limit report — later spends aren't in the ledger to adjust it.
+            delete candidate.availableLimit;
+            delete candidate.reportedCreditLimit;
             candidate.preOnboarding = true;
             candidate.isReviewed = true;
             nextAccounts = accountsWithMatch;
@@ -4567,9 +4735,18 @@ export const useEPurseStore = create(
             return;
           }
 
+          // The bank's limit figures ride on the parsed txn only to get here — they
+          // describe the CARD, so they go onto the account, never into the ledger row.
+          const { availableLimit: reportedAvl = null, reportedCreditLimit: reportedTotal = null } = candidate;
+          delete candidate.availableLimit;
+          delete candidate.reportedCreditLimit;
+
           // The pre-anchor skip lives inside applyDelta now, so ingest and every
           // reversal path share one rule (see the comment there).
           nextAccounts = applyDelta(accountsWithMatch, account?.id, candidate);
+          if (reportedAvl || reportedTotal) {
+            nextAccounts = applyCardLimitReport(nextAccounts, account?.id, { available: reportedAvl, total: reportedTotal, at: candidate.createdAt });
+          }
           nextTransactions = [candidate, ...nextTransactions];
           added.push(candidate);
         });
@@ -6342,6 +6519,7 @@ export const useEPurseStore = create(
           groups: [],
           activeGroupZoneId: null,
           declinedAccountLinks: [],
+          declinedLimitLinks: [],
           excludedExpenseParents: [],
           goals: [],
           goalPlan: null,
@@ -6408,7 +6586,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 40,
+      version: 41,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -7169,6 +7347,29 @@ export const useEPurseStore = create(
           state = { ...state, transactions: unhide(state.transactions), archivedTransactions: unhide(state.archivedTransactions) };
         }
 
+        // v41 (Oct-10-26): a limit STATEMENT ("your available credit limit is Rs 50,000")
+        // used to be booked as a SPEND of the limit — the parser now rejects it. Existing
+        // phantoms are IGNORED (balance reversed, out of every total) rather than deleted,
+        // so a wrong call is one Restore away. Only untouched SMS rows: anything grouped,
+        // split, person-linked or re-categorised by the user is left exactly as it is.
+        if (version < 41) {
+          let accounts = state.accounts || [];
+          const suppress = [];
+          const transactions = (state.transactions || []).map((t) => {
+            if (t.source !== 'sms' || t.isIgnored || !t.smsText || t.groupId || t.isSplit || t.lbLocked || t.userEditedCategory) return t;
+            if (!isLimitStatementNotice(t.smsText)) return t;
+            accounts = applyDelta(accounts, t.accountId, { ...t, type: oppositeType(t.type) });
+            if (t.smsId) suppress.push(t.smsId);
+            return { ...t, isIgnored: true, isHidden: false };
+          });
+          state = {
+            ...state,
+            accounts,
+            transactions,
+            ...(suppress.length ? { suppressedSmsIds: appendSuppressedSmsIds(state.suppressedSmsIds || [], suppress) } : {}),
+          };
+        }
+
         return state;
       },
       storage: createJSONStorage(() => AsyncStorage),
@@ -7243,6 +7444,7 @@ export const useEPurseStore = create(
         groups: state.groups ?? [],
         activeGroupZoneId: state.activeGroupZoneId ?? null,
         declinedAccountLinks: state.declinedAccountLinks ?? [],
+        declinedLimitLinks: state.declinedLimitLinks ?? [],
         excludedExpenseParents: state.excludedExpenseParents ?? [],
       }),
       onRehydrateStorage: () => (state) => {

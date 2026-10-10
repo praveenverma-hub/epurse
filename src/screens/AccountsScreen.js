@@ -407,7 +407,7 @@ export default function AccountsScreen({ navigation }) {
                   onPress={() =>
                     setConfirm({
                       title: 'Link card to bank?',
-                      message: `We'll treat debit card ··${sug.cardMask} as part of ${sug.bankName} ··${sug.bankMask} — one balance, counted once. This can't be auto-undone.`,
+                      message: `We'll treat debit card ··${sug.cardMask} as part of ${sug.bankName} ··${sug.bankMask} — one balance, counted once. You can unlink it later from the bank's page.`,
                       primaryText: 'Link them',
                       destructive: false,
                       secondaryText: 'Cancel',
@@ -511,8 +511,9 @@ export default function AccountsScreen({ navigation }) {
             if (isCC) {
               const status = ccPaymentStatus(a);
               if (status !== 'no_statement') {
+                const when = dueRelativeText(currentPaymentWindow(a));
                 rowSubtitle = (status === 'upcoming' || status === 'due_soon' || status === 'due_today')
-                  ? `Payment due ${dueRelativeText(currentPaymentWindow(a))}`
+                  ? `Payment due${when ? ` ${when}` : ''}`
                   : status === 'due_date_passed' ? 'Payment due date passed'
                   : PAYMENT_STATUS_LABEL[status];
                 // `upcoming` is muted grey on the detail screen's status dot; as
@@ -620,7 +621,7 @@ export default function AccountsScreen({ navigation }) {
         onClose={() => setLinkInfoVisible(false)}
         icon={<Ionicons name="git-merge-outline" size={28} color={theme.primary} />}
         title="Linking cards & banks"
-        body="A debit card spends from a bank account — it's the same money. Link them so your balance and net worth aren't counted twice. Tap “Link” on a debit card to merge it into its bank."
+        body="A debit card spends from a bank account — it's the same money. Link them so your balance and net worth aren't counted twice. Tap “Link” on a debit card to merge it into its bank — unlink it any time from the bank's page."
       />
 
       {/* Manual link: pick which bank a debit card draws from → merge into it */}
@@ -635,7 +636,7 @@ export default function AccountsScreen({ navigation }) {
           setLinkTarget(null);
           setConfirm({
             title: 'Link card to bank?',
-            message: `We'll treat "${dc.name}" as part of "${b.name}" — one balance, counted once. This can't be auto-undone.`,
+            message: `We'll treat "${dc.name}" as part of "${b.name}" — one balance, counted once. You can unlink it later from the bank's page.`,
             primaryText: 'Link them',
             secondaryText: 'Cancel',
             onSecondary: () => setConfirm(null),

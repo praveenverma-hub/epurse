@@ -82,6 +82,23 @@ console.log(`\n${C.bold}══════ dueDate — bill-cycle math ═══
   check('no due day → no window', currentPaymentWindow({ statementDay: 20 }, new Date(2026, 2, 25)) === null);
 }
 
+// ── no statement date — a bill SMS that named only its due date ────────────
+{
+  const today = new Date(2026, 9, 10); // 10 Oct 2026
+  const pending = currentPaymentWindow({ dueDay: 15, pendingCycleDate: { statementDate: null, dueDate: new Date(2026, 9, 15).toISOString() } }, today);
+  check('an unconfirmed due date still gives a countdown', pending && isDate(pending.dueDate, 2026, 9, 15) && pending.daysToDue === 5, show(pending?.dueDate));
+  check('…with no statement-side figures', pending.statementDate === null && pending.progress === null && pending.gapUnusual === false);
+  const passed = currentPaymentWindow({ lastDueDate: new Date(2026, 9, 8).toISOString() }, today);
+  check('a real due date 2 days ago → negative', passed.daysToDue === -2, `${passed.daysToDue}`);
+  const newest = currentPaymentWindow({ lastDueDate: new Date(2026, 8, 15).toISOString(), pendingCycleDate: { dueDate: new Date(2026, 9, 15).toISOString() } }, today);
+  check('the NEWER of confirmed / pending due date wins', isDate(newest.dueDate, 2026, 9, 15), show(newest.dueDate));
+  check('due day only, passed 2 days ago → still this bill', currentPaymentWindow({ dueDay: 8 }, today).daysToDue === -2);
+  check('due day only, passed 5 days ago → next month\'s', isDate(currentPaymentWindow({ dueDay: 5 }, today).dueDate, 2026, 10, 5));
+  const stale = currentPaymentWindow({ dueDay: 15, lastDueDate: new Date(2026, 6, 15).toISOString() }, today);
+  check('a months-old real due date gives way to the due day', isDate(stale.dueDate, 2026, 9, 15), show(stale.dueDate));
+  check('nothing about the due date → no window', currentPaymentWindow({}, today) === null);
+}
+
 // ── actual statement / due date priority ────────────────────────────────────
 {
   const today = new Date(2026, 8, 26); // 26 Sep 2026

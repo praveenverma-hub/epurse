@@ -1683,6 +1683,40 @@ const KEYWORD_SHADOWING_SEP26 = [
     expect: { accept: true, type: 'debit', amount: 500, categoryId: 'travel' } },
 ];
 
+// Card LIMITS read off SMS (Oct-10-26): the bank's available / total limit rides on
+// the card txn (or on a limit-statement notice) so the card page can show real
+// Available Credit. Also pins two old bugs: "available CREDIT limit is Rs X" booked
+// as a spend of X, and a real spend ending "Available limit is Rs X" dropped.
+const CARD_LIMITS_OCT26 = [
+  { name: 'HDFC spend + "Avl Limit: INR" → available limit on the txn', sender: 'HDFCBK',
+    sms: 'Rs.1,250.00 spent on HDFC Bank Credit Card x1234 at AMAZON on 2026-10-01. Avl Limit: INR 1,23,456.78',
+    expect: { accept: true, amount: 1250, accountType: 'Credit Card', availableLimit: 123456.78, reportedCreditLimit: null } },
+  { name: 'Axis "Card XX1002 … Avl Limit Rs" (no "credit") → CC + available', sender: 'AXISBK',
+    sms: 'INR 999 spent on Axis Bank Card XX1002 at FLIPKART. Avl Limit Rs 45,000',
+    expect: { accept: true, amount: 999, accountType: 'Credit Card', availableLimit: 45000 } },
+  { name: 'Kotak "Avbl Lmt:Rs"', sender: 'KOTAKB',
+    sms: 'Rs 300 spent on Kotak Credit Card x4321 at ZOMATO. Avbl Lmt:Rs 32,100',
+    expect: { accept: true, amount: 300, availableLimit: 32100 } },
+  { name: 'Amex "Available Spends Limit is Rs"', sender: 'AMEXIN',
+    sms: 'Your Amex Card ending 1007 was charged INR 999.00 at SWIGGY. Available Spends Limit is Rs 45,000',
+    expect: { accept: true, amount: 999, availableLimit: 45000 } },
+  { name: 'total + available in one SMS — each read as itself', sender: 'HDFCBK',
+    sms: 'Rs 2,000 spent on HDFC Credit Card xx1234 at MYNTRA. Total Credit Limit: Rs 2,00,000 Available Credit Limit: Rs 1,50,000',
+    expect: { accept: true, amount: 2000, availableLimit: 150000, reportedCreditLimit: 200000 } },
+  { name: 'debit-card "Avl Bal" is a balance, never a limit', sender: 'HDFCBK',
+    sms: 'Rs 450 debited from A/c XX1234 on 01-10-26. Avl Bal Rs 10,000',
+    expect: { accept: true, amount: 450, availableLimit: null } },
+  { name: 'BUG: real spend ending "Available limit is Rs X" was DROPPED', sender: 'SBICRD',
+    sms: 'Rs 500 spent on SBI Credit Card ending 7788 at AMAZON. Available limit is Rs 45,000',
+    expect: { accept: true, amount: 500, availableLimit: 45000 } },
+  { name: 'BUG: "available CREDIT limit is Rs 50,000" was booked as a ₹50,000 spend', sender: 'SBICRD',
+    sms: 'Dear Customer, your available credit limit is Rs. 50,000 on SBI Card ending 7788',
+    expect: { accept: false, code: 'non_transaction_notice', noticeAvailableLimit: 50000, noticeCardLast4: '7788' } },
+  { name: 'limit statement notice still carries the figure for the store', sender: 'HDFCBK',
+    sms: 'Your available limit is Rs 12,000 on HDFC Credit Card xx1234',
+    expect: { accept: false, code: 'non_transaction_notice', noticeAvailableLimit: 12000, noticeCardLast4: '1234' } },
+];
+
 const SUITES = [
   ['Original (real bank SMS)', ORIGINAL],
   ['Adversarial (edge cases)', ADVERSARIAL],
@@ -1710,6 +1744,7 @@ const SUITES = [
   ['CC bill DUE DATE extraction (Aug-26)', CC_DUE_DATE_AUG26],
   ['CC card mask extraction (Sep-26)', CC_CARD_MASK_SEP26],
   ['Keyword shadowing (Sep-13-26)', KEYWORD_SHADOWING_SEP26],
+  ['Card limits from SMS (Oct-10-26)', CARD_LIMITS_OCT26],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1740,6 +1775,8 @@ function checkCase({ sender, sms, expect }) {
     cmp('counterpartyName', t.counterpartyName, expect.counterpartyName);
     cmp('transferRef', t.transferRef, expect.transferRef);
     cmp('coAccountMask', t.coAccountMask, expect.coAccountMask);
+    cmp('availableLimit', t.availableLimit ?? null, expect.availableLimit);
+    cmp('reportedCreditLimit', t.reportedCreditLimit ?? null, expect.reportedCreditLimit);
     if (expect.merchantIncludes !== undefined && !(t.merchant || '').includes(expect.merchantIncludes))
       fails.push(`merchant: expected to include ${JSON.stringify(expect.merchantIncludes)}, got ${JSON.stringify(t.merchant)}`);
   } else {
@@ -1751,6 +1788,10 @@ function checkCase({ sender, sms, expect }) {
     // payload is now STORED and shown on the Dashboard (store `ccBills`), so the
     // due date is worth asserting — it used to fail silently into a vague
     // "pay before the due date" notification.
+    if (expect.noticeAvailableLimit !== undefined)
+      cmp('cardLimit.availableLimit', r.cardLimit?.availableLimit ?? null, expect.noticeAvailableLimit);
+    if (expect.noticeCardLast4 !== undefined)
+      cmp('cardLimit.cardLast4', r.cardLimit?.cardLast4 ?? null, expect.noticeCardLast4);
     if (expect.ccDueDate !== undefined)
       cmp('ccDue.dueDate', r.ccDue?.dueDate ?? null, expect.ccDueDate);
     if (expect.ccDueAmount !== undefined)

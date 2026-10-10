@@ -456,10 +456,21 @@ const FAILED_TRANSACTION_REGEX =
 // "phantom transaction" false positives. These phrases are notice-EXCLUSIVE (never appear
 // in a real completed single-txn SMS): a spend SUMMARY, a limit STATEMENT, a conditional
 // "may be charged", or a FUTURE credit/debit notice ("scheduled/expected to be debited",
-// "will mature"). Rejected unconditionally. (Real spends say "Avl limit Rs.X", not
-// "limit is Rs.X"; a real spend line is "Rs.X spent at MERCHANT", never "spent … this month".)
+// "will mature"). Rejected unconditionally. (A real spend line is "Rs.X spent at
+// MERCHANT", never "spent … this month".)
 const NON_TXN_NOTICE_REGEX =
-  /\byou\s+have\s+spent\b|\bspent\s+(?:rs\.?|inr|₹)?\s*[\d,]+(?:\.\d+)?\s+(?:so\s+far\s+)?this\s+month\b|\btotal\s+spends?\b|\b(?:available|avl\.?)\s+limit\s+is\b|\b(?:you\s+)?(?:may|might)\s+be\s+charged\b|\bwill\s+mature\b|\b(?:scheduled|expected|due|set|going)\s+to\s+be\s+(?:auto[\s-]?)?(?:debited|credited|deducted|charged)\b/i;
+  /\byou\s+have\s+spent\b|\bspent\s+(?:rs\.?|inr|₹)?\s*[\d,]+(?:\.\d+)?\s+(?:so\s+far\s+)?this\s+month\b|\btotal\s+spends?\b|\b(?:you\s+)?(?:may|might)\s+be\s+charged\b|\bwill\s+mature\b|\b(?:scheduled|expected|due|set|going)\s+to\s+be\s+(?:auto[\s-]?)?(?:debited|credited|deducted|charged)\b/i;
+// A limit STATEMENT ("your available (credit|spends) limit is Rs X"). Was in the
+// unconditional list above until Oct-10-26, which (a) missed "available CREDIT limit
+// is" — booking the limit itself as a ₹50,000 spend — and (b) dropped REAL spends that
+// end "… Available limit is Rs X". Now a notice only when no completed verb is present.
+const LIMIT_STATEMENT_REGEX =
+  /\b(?:available|avl|avbl|avail)\.?\s+(?:cr(?:edit)?\.?\s+)?(?:spends?\s+)?(?:card\s+)?(?:limit|lmt)\s+is\b/i;
+const COMPLETED_SPEND_VERB_REGEX =
+  /\b(?:spent|debited|charged|used|paid|withdrawn|deducted|credited|refunded|purchase)\b/i;
+/** A limit statement with no completed transaction in it — never a spend (store v41 cleans up old ones). */
+export const isLimitStatementNotice = (text) =>
+  LIMIT_STATEMENT_REGEX.test(String(text || '')) && !COMPLETED_SPEND_VERB_REGEX.test(String(text || ''));
 
 // Balance / funds ALERTS — reject ONLY when no real transaction is also present, since an
 // advisory ("… low balance, add funds") can tail a genuine debit ("Rs.500 debited. Low balance.").
@@ -486,6 +497,36 @@ const includesAny = (text, list) => list.some((k) => text.includes(k));
 
 const toNumber = (str) =>
   str ? parseFloat(str.replace(/,/g, '')) || 0 : 0;
+
+// ── Card limits (Oct-10-26) ──────────────────────────────────────────────────
+// What the BANK says about a card's limit, read off any card SMS: the AVAILABLE
+// limit ("Avl Limit: INR 45,000", "Avbl Lmt Rs.32,100", "Available Credit/Spends
+// Limit is Rs X", IndusInd "Clear Spends Limit") and, rarer, the TOTAL limit
+// ("Credit Limit: Rs 1,00,000", "credit limit has been increased to Rs 3,00,000").
+// The bank's figure is ground truth at that moment — it already nets unbilled
+// spends and, for cards on one COMBINED limit, the other cards' spends too.
+const AVAILABLE_LIMIT_REGEX =
+  /\b(?:available|avl|avbl|avail|clear)\.?\s*(?:cr(?:edit)?\.?\s*)?(?:spends?\s+|spending\s+)?(?:card\s+)?(?:limit|lmt)\b[\s:.\-]*(?:is\s+)?(?:now\s+)?(?:of\s+)?(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+const TOTAL_LIMIT_REGEX =
+  /\b(?:total\s+)?(?:credit|card)\s+(?:limit|lmt)\b[\s:.\-]*(?:has\s+been\s+|is\s+)?(?:now\s+)?(?:(?:increased|enhanced|revised|upgraded)\s+(?:from\s+(?:rs\.?|inr|₹)?\s*[\d,]+(?:\.\d{1,2})?\s+)?to\s+)?(?:of\s+)?(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)/gi;
+const AVAILABLE_PREFIX = /(?:available|avl|avbl|avail|clear)\.?\s*$/i;
+
+/** { availableLimit, creditLimit } read off the SMS — each a positive number or null. */
+export const extractCardLimits = (text) => {
+  const ok = (n) => (n > 0 && n <= MAX_ALLOWED_AMOUNT ? n : null);
+  const avail = ok(toNumber(String(text || '').match(AVAILABLE_LIMIT_REGEX)?.[1]));
+  let total = null;
+  TOTAL_LIMIT_REGEX.lastIndex = 0;
+  let m;
+  while ((m = TOTAL_LIMIT_REGEX.exec(String(text || ''))) !== null) {
+    // "Available Credit Limit" is the available figure, not the total.
+    if (AVAILABLE_PREFIX.test(text.slice(Math.max(0, m.index - 12), m.index))) continue;
+    total = ok(toNumber(m[1]));
+    if (total) break;
+  }
+  TOTAL_LIMIT_REGEX.lastIndex = 0;
+  return { availableLimit: avail, creditLimit: total };
+};
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -1042,13 +1083,19 @@ export const parseMessageDetailed = (message, opts = {}) => {
   // "may be charged", future "scheduled/expected to be debited", "will mature"). Runs
   // AFTER the CC-payment/bill/outgoing + future interceptors so those keep their specific
   // codes/side-effects; these phrases are notice-EXCLUSIVE, so reject outright.
-  if (NON_TXN_NOTICE_REGEX.test(text)) {
+  if (NON_TXN_NOTICE_REGEX.test(text) || isLimitStatementNotice(text)) {
+    // A limit STATEMENT ("your available limit is Rs X") isn't a transaction but is
+    // still news about the card — hand the figures back so the store can keep them.
+    const limits = extractCardLimits(text);
     return {
       ok: false,
       error: {
         code: 'non_transaction_notice',
         message: 'Informational notice (spend summary, limit statement, or future/conditional debit) — not a completed transaction.',
       },
+      cardLimit: limits.availableLimit || limits.creditLimit
+        ? { ...limits, cardLast4: extractCardLast4(text), bankName: getBankName(opts.sender) }
+        : null,
     };
   }
   // Balance / funds alert — reject only if no genuine completed debit/credit/levy is present
@@ -1322,6 +1369,7 @@ export const parseMessageDetailed = (message, opts = {}) => {
     transferRef,
     selfDualLeg,
     coAccountMask,
+    cardLimits: accountType === ACCOUNT_TYPES.CREDIT_CARD ? extractCardLimits(text) : null,
   });
 
   return {
@@ -1355,6 +1403,7 @@ function buildTransaction({
   transferRef = null,
   selfDualLeg = false,
   coAccountMask = null,
+  cardLimits = null,
 }) {
   return {
     id:          `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1381,6 +1430,10 @@ function buildTransaction({
     // an a/c (e.g. "spent on Debit Card xx1234 from A/c xx5678"). The store pairs a
     // Debit Card account with a Bank account from this to SUGGEST a merge (same money).
     coAccountMask,
+    // The bank's own limit figures from this SMS (credit cards only). TRANSIENT: the
+    // store copies them onto the card account and strips them from the stored txn.
+    ...(cardLimits?.availableLimit ? { availableLimit: cardLimits.availableLimit } : {}),
+    ...(cardLimits?.creditLimit ? { reportedCreditLimit: cardLimits.creditLimit } : {}),
   };
 }
 

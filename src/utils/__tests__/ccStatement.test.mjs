@@ -54,6 +54,11 @@ console.log(`\n${C.bold}══════ ccStatement ══════${C.res
   const partial = { ...base, remainingDue: 2000 };
   check('part-paid, still before due → partially_paid', ccPaymentStatus(partial, at(2026, 2, 25)) === 'partially_paid');
   check('part-paid AND past due → due_date_passed wins (more urgent)', ccPaymentStatus(partial, at(2026, 3, 10)) === 'due_date_passed');
+  check('part-paid AND due in a day → due_soon (still warns)', ccPaymentStatus(partial, at(2026, 3, 6)) === 'due_soon');
+  check('part-paid AND due today → due_today', ccPaymentStatus(partial, at(2026, 3, 7)) === 'due_today');
+  const dueOnly = { statementBalance: 5000, remainingDue: 5000, dueDay: 7, pendingCycleDate: { statementDate: null, dueDate: at(2026, 3, 7).toISOString() } };
+  check('bill SMS with only a due date → countdown works (due_soon)', ccPaymentStatus(dueOnly, at(2026, 3, 4)) === 'due_soon', ccPaymentStatus(dueOnly, at(2026, 3, 4)));
+  check('…and passes', ccPaymentStatus(dueOnly, at(2026, 3, 9)) === 'due_date_passed');
   check('fully paid → paid, even past the due date', ccPaymentStatus({ ...base, remainingDue: 0 }, at(2026, 3, 10)) === 'paid');
   check('a statement with no due day known → upcoming, not a crash',
     ccPaymentStatus({ statementBalance: 5000, remainingDue: 5000 }, at(2026, 2, 25)) === 'upcoming');

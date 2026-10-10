@@ -46,8 +46,9 @@ export function applyStatementPayment(acct, amount, mode) {
 
 /**
  * Due status for the current statement. Ordering matters where two could
- * apply: paid wins; then a passed due date (more urgent than "partially paid"
- * — still short AND late); then partially paid; then the countdown tiers.
+ * apply: paid wins; then the due-date tiers (passed / today / soon) — a bill
+ * still short near its due date must warn, not read as "partially paid";
+ * then partially paid; then upcoming.
  *
  * "due_date_passed", never "overdue": ePurse is local-only and can't know a
  * payment made outside the SMS it reads, so it states the date, not a verdict.
@@ -58,10 +59,9 @@ export function ccPaymentStatus(acct, from = new Date()) {
   if (remaining <= 0) return 'paid';
   const win = currentPaymentWindow(acct, from);
   if (win && win.daysToDue < 0) return 'due_date_passed';
+  if (win && win.daysToDue === 0) return 'due_today';
+  if (win && win.daysToDue <= DUE_SOON_DAYS) return 'due_soon';
   if (remaining < acct.statementBalance) return 'partially_paid';
-  if (!win) return 'upcoming';
-  if (win.daysToDue === 0) return 'due_today';
-  if (win.daysToDue <= DUE_SOON_DAYS) return 'due_soon';
   return 'upcoming';
 }
 
