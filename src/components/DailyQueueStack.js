@@ -244,7 +244,7 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
               <Text style={styles.welcomeBody} numberOfLines={2}>
                 New transactions land here to review. Swipe right to approve, left to manage.
               </Text>
-              <View style={styles.swipeHints}>
+              <View style={[styles.swipeHints, styles.welcomeHints]}>
                 <Text style={styles.hintLeft}>← manage</Text>
                 <Text style={styles.hintRight}>got it →</Text>
               </View>
@@ -832,8 +832,10 @@ const styles = StyleSheet.create({
 
   // ── Welcome tutorial card ──
   welcomeInner: { flex: 1, justifyContent: 'center', gap: 4 },
+  welcomeHints: { justifyContent: 'flex-end' },
   welcomeTitleRow: { flexDirection: 'row', alignItems: 'center' },
-  welcomeTitle: { ...typography.bodyBold, color: colors.textPrimary },
+  // Same size + weight as the inline wordmark beside it, or the lighter text reads as a different colour.
+  welcomeTitle: { ...typography.bodyBold, fontSize: 17, fontWeight: '700', color: colors.textPrimary },
   welcomeBody:  { ...typography.small, color: colors.textSecondary, lineHeight: 18 },
 
   // RP / EPC drift badge (was xpBadge)
