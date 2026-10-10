@@ -55,6 +55,8 @@ import {
   buildListRows, makeGrouper,
 } from '../utils/txnArrange';
 import TxnDebugSheet from '../components/TxnDebugSheet';
+import InfoIcon from '../components/InfoIcon';
+import InfoSheet from '../components/InfoSheet';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import ManageTransactionModal from '../components/ManageTransactionModal';
@@ -237,6 +239,7 @@ const TransactionsScreen = ({ navigation, route }) => {
   const [groupId, setGroupId] = useState(DEFAULT_GROUP);
   const [sheetVisible,  setSheetVisible]  = useState(false);
   const [exportVisible, setExportVisible] = useState(false);
+  const [totalsInfoVisible, setTotalsInfoVisible] = useState(false);
 
   // Applied (committed) filters; pre-seed accountId if navigated from AccountDetails,
   // or category (+ date range) if navigated from a Budget category card.
@@ -892,27 +895,22 @@ const TransactionsScreen = ({ navigation, route }) => {
                   <Text style={styles.listCountTxt}>
                     {filtered.length} transaction{filtered.length !== 1 ? 's' : ''}
                   </Text>
-                  <Text style={styles.listCountTxt}>
-                    {formatCurrency(filteredTotals.debit)} out · {formatCurrency(filteredTotals.credit)} in
-                  </Text>
+                  <View style={styles.totalsRight}>
+                    <Text style={styles.listCountTxt}>
+                      {formatCurrency(filteredTotals.debit)} out · {formatCurrency(filteredTotals.credit)} in
+                    </Text>
+                    {filteredTotals.excluded > 0 || filteredTotals.refund > 0 ? (
+                      <Pressable
+                        onPress={() => setTotalsInfoVisible(true)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="About these totals"
+                      >
+                        <InfoIcon size={14} color={colors.textMuted} />
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
-
-                {/* Only when the filtered set actually contains uncounted rows.
-                    Without it, filtering to Self Transfer or Lent reads "₹0 out ·
-                    ₹0 in" over a screenful of transactions and looks broken. */}
-                {filteredTotals.excluded > 0 && (
-                  <Text style={styles.listNotCountedTxt}>
-                    {formatCurrency(filteredTotals.excluded)} excluded
-                    {filteredTotals.reasons.length ? ` · ${filteredTotals.reasons.join(', ')}` : ''}
-                  </Text>
-                )}
-                {/* Refunds net down "out" (a refund isn't income) — say so, or the
-                    number looks wrong against the rows above it. */}
-                {filteredTotals.refund > 0 && (
-                  <Text style={styles.listNotCountedTxt}>
-                    includes {formatCurrency(filteredTotals.refund)} refunded, netted off spend
-                  </Text>
-                )}
               </>
             )}
           </>
@@ -977,12 +975,10 @@ const TransactionsScreen = ({ navigation, route }) => {
                           <Pressable
                             key={panel.id}
                             onPress={() => setActivePanelId(panel.id)}
-                            style={[
-                              styles.leftItem,
-                              isActive && [styles.leftItemActive, { borderLeftColor: theme.primary }],
-                            ]}
+                            style={[styles.leftItem, isActive && styles.leftItemActive]}
                             android_ripple={{ color: theme.primary + '18' }}
                           >
+                            {isActive && <View style={[styles.leftBar, { backgroundColor: theme.primary }]} />}
                             <Ionicons
                               name={panel.icon}
                               size={15}
@@ -1180,6 +1176,24 @@ const TransactionsScreen = ({ navigation, route }) => {
         onClose={() => setExportVisible(false)}
         filteredTransactions={filtered}
         filterCtx={exportFilterCtx}
+      />
+
+      <InfoSheet
+        visible={totalsInfoVisible}
+        onClose={() => setTotalsInfoVisible(false)}
+        title="About These Totals"
+        bullets={[
+          ...(filteredTotals.excluded > 0 ? [{
+            icon: 'remove-circle-outline',
+            label: 'Excluded',
+            value: `${formatCurrency(filteredTotals.excluded)} isn't counted${filteredTotals.reasons.length ? ` — ${filteredTotals.reasons.join(', ')}` : ''}.`,
+          }] : []),
+          ...(filteredTotals.refund > 0 ? [{
+            icon: 'return-down-back-outline',
+            label: 'Refunds',
+            value: `${formatCurrency(filteredTotals.refund)} refunded is netted off what you spent — a refund isn't income.`,
+          }] : []),
+        ]}
       />
 
       {IS_STAGE_BUILD && (
@@ -1409,13 +1423,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontWeight: '600',
   },
-  // Quieter than the totals row — an explanation, not a figure to read first.
-  listNotCountedTxt: {
-    fontSize: 11,
-    color: colors.textMuted,
-    textAlign: 'right',
-    marginTop: 2,
-  },
+  totalsRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 
   // ── Sheet overlay ──────────────────────────────────────────────────────────
   sheetOverlay: { flex: 1, justifyContent: 'flex-end' },
@@ -1467,7 +1475,9 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
     position: 'relative',
   },
-  leftItemActive: { backgroundColor: colors.card, borderLeftWidth: 3, borderLeftColor: colors.primary },
+  leftItemActive: { backgroundColor: colors.card },
+  // A real filled bar, not borderLeft — a border joins the bottom divider at a diagonal and can render hollow/tapered.
+  leftBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   leftLabel: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, lineHeight: 15 },
   leftBadge: {
     position: 'absolute', top: spacing.sm, right: spacing.sm,
