@@ -58,6 +58,7 @@ import {
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { FormSelectRow } from '../components/FormField';
+import InfoTip from '../components/InfoTip';
 import CenterModal from '../components/CenterModal';
 import GoalCategoryPickerModal from '../components/GoalCategoryPickerModal';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
@@ -340,7 +341,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               accessibilityRole="button"
               accessibilityLabel="Goal FAQs"
             >
-              <Ionicons name="help-circle-outline" size={26} color={theme.primary} />
+              <Ionicons name="help-circle-outline" size={26} color={theme.textSecondary} />
             </TouchableOpacity>
           }
         />
@@ -375,7 +376,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           ) : null}
 
           {/* ── kind ───────────────────────────────────────────────────── */}
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Type</Text>
+          <InfoTip label="Type" tip={`${Object.values(GOAL_KIND_META).map((m) => `${m.label}: ${m.hint}`).join('\n')}`} labelStyle={[styles.labelText, { color: theme.textSecondary }]} style={styles.labelBlock} />
           <View style={styles.kindRow}>
             {(Object.keys(GOAL_KIND_META) as GoalKind[]).map((k) => {
               const meta = GOAL_KIND_META[k];
@@ -404,14 +405,13 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               );
             })}
           </View>
-          <Text style={[styles.hint, { color: theme.textMuted }]}>{GOAL_KIND_META[kind].hint}</Text>
 
           {/* ── duration ───────────────────────────────────────────────── */}
           {/* Chosen FIRST because it decides which single field shows next —
               a target for a one-time goal, a monthly figure for a recurring
               one, never both. Reordering this after either field would mean
               showing one, then yanking it away the moment duration is picked. */}
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Duration</Text>
+          <InfoTip label="Duration" tip={`${Object.values(GOAL_DURATION_META).map((m) => `${m.label}: ${m.hint}`).join('\n')}`} labelStyle={[styles.labelText, { color: theme.textSecondary }]} style={styles.labelBlock} />
           <View style={styles.kindRow}>
             {(Object.keys(GOAL_DURATION_META) as GoalDuration[]).map((d) => {
               const meta = GOAL_DURATION_META[d];
@@ -440,14 +440,24 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               );
             })}
           </View>
-          <Text style={[styles.hint, { color: theme.textMuted }]}>{GOAL_DURATION_META[duration].hint}</Text>
 
           {/* ── target: One-Time only ───────────────────────────────────── */}
           {isOneTime ? (
             <>
-              <Text style={[styles.label, { color: theme.textSecondary }]}>
-                Overall target <Text style={{ color: theme.textMuted }}>· optional</Text>
-              </Text>
+              {existing?.achievedAt ? (
+                <Text style={[styles.label, { color: theme.textSecondary }]}>
+                  Overall target <Text style={{ color: theme.textMuted }}>· optional</Text>
+                </Text>
+              ) : (
+                <InfoTip
+                  label={<>Overall target <Text style={{ color: theme.textMuted }}>· optional</Text></>}
+                  tip={monthly
+                    ? "We'll tell you the month you'll finish at this pace — and celebrate when you get there."
+                    : 'Set one, and optionally a monthly amount below to track your pace toward it.'}
+                  labelStyle={[styles.labelText, { color: theme.textSecondary }]}
+                  style={styles.labelBlock}
+                />
+              )}
               {/* LOCKED once reached. Raising a target after it's already been
                   crossed (and celebrated) would rewrite the finish line the
                   achievement was measured against — the same reasoning that
@@ -480,13 +490,11 @@ const GoalFormScreen = ({ navigation, route }: any) => {
                   ]}
                 />
               )}
-              <Text style={[styles.hint, { color: theme.textMuted }]}>
-                {existing?.achievedAt
-                  ? `Reached ${new Date(existing.achievedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} — add a new goal to save more.`
-                  : monthly
-                    ? "We'll tell you the month you'll finish at this pace — and celebrate when you get there."
-                    : 'Set one, and optionally a monthly amount below to track your pace toward it.'}
-              </Text>
+              {existing?.achievedAt ? (
+                <Text style={[styles.hint, { color: theme.textMuted }]}>
+                  {`Reached ${new Date(existing.achievedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} — add a new goal to save more.`}
+                </Text>
+              ) : null}
             </>
           ) : null}
 
@@ -547,7 +555,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           )}
 
           {/* ── glyph ──────────────────────────────────────────────────── */}
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Icon</Text>
+          <InfoTip label="Icon" tip="Tap ⌨️ to use any emoji from your keyboard." labelStyle={[styles.labelText, { color: theme.textSecondary }]} style={styles.labelBlock} />
           <View style={styles.wrap}>
             {/* Type any emoji — the DEVICE keyboard is the picker, so there is no
                 emoji-picker dependency (same approach as GroupFormScreen and
@@ -596,9 +604,6 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={[styles.hint, { color: theme.textMuted }]}>
-            Tap ⌨️ to use any emoji from your keyboard.
-          </Text>
 
           {/* ── colour ─────────────────────────────────────────────────── */}
           <Text style={[styles.label, { color: theme.textSecondary }]}>Colour</Text>
@@ -622,15 +627,17 @@ const GoalFormScreen = ({ navigation, route }: any) => {
           {/* ── auto-funding rule ──────────────────────────────────────── */}
           {/* The one place the goal namespace READS the spend tree. A goal
               names categories; it never becomes one. */}
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Fund it automatically</Text>
-          <Text style={[styles.hint, { color: theme.textMuted, marginTop: 0, marginBottom: spacing.sm }]}>
-            {isWidening
+          <InfoTip
+            label="Fund it automatically"
+            tip={isWidening
               // Says exactly what adding one will and won't do. Without the second
               // half a user reasonably expects a newly added category to sweep up
               // the spend already sitting in it.
               ? 'You can add more categories — they count from today onward, so this goal\'s progress so far stays as it is. What it already tracks can\'t be removed.'
               : 'Pick the categories this goal is made of. Merchants are optional, and you can still add money by hand.'}
-          </Text>
+            labelStyle={[styles.labelText, { color: theme.textSecondary }]}
+            style={[styles.labelBlock, { marginBottom: spacing.sm }]}
+          />
 
           <FormSelectRow
             leading={<Ionicons name="pricetag-outline" size={16} color={theme.textSecondary} />}
@@ -639,7 +646,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
             onPress={() => { hapticLight(); setCategoryPickerOpen(true); }}
           />
 
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Merchants</Text>
+          <InfoTip label="Merchants" tip={'Part of a name is enough — "epurse" matches "UPI-EPURSE BROKING".'} labelStyle={[styles.labelText, { color: theme.textSecondary }]} style={styles.labelBlock} />
           <View style={styles.merchantRow}>
             <TextInput
               value={merchantText}
@@ -700,11 +707,11 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               ))}
             </View>
           ) : null}
-          <Text style={[styles.hint, { color: theme.textMuted }]}>
-            {merchants.length >= GOAL_MERCHANT_LIMIT
-              ? `That's the limit of ${GOAL_MERCHANT_LIMIT} merchants.`
-              : 'Part of a name is enough — "epurse" matches "UPI-EPURSE BROKING".'}
-          </Text>
+          {merchants.length >= GOAL_MERCHANT_LIMIT ? (
+            <Text style={[styles.hint, { color: theme.textMuted }]}>
+              {`That's the limit of ${GOAL_MERCHANT_LIMIT} merchants.`}
+            </Text>
+          ) : null}
         </ScrollView>
 
         {/* Pinned below the scroll view, per the footer-CTA rule — a Save that
@@ -824,6 +831,14 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
   flex1: { flex: 1 },
 
+  // Label text with no outer spacing — `labelBlock` carries it when an InfoTip wraps the label.
+  labelText: {
+    ...typography.tiny,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  labelBlock: { marginTop: spacing.lg, marginBottom: spacing.sm },
   label: {
     ...typography.tiny,
     fontWeight: '700',

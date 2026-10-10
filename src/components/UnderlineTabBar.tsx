@@ -10,6 +10,10 @@
 // open-bottomed outline whose sides run into one baseline across the bar, all in
 // the accent — the form below reads as the section that tab opens. Its inside is
 // `colors.background`, the same as the form area, so tab and section are one shape.
+//
+// tone 'dark' (underline variant only): the bar is filled with `accentColor` (the
+// theme colour) and the labels + underline are white — for a bar that sits on a
+// coloured surface rather than the page's white one.
 // =============================================================================
 import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
@@ -33,10 +37,12 @@ interface Props {
   topBorder?: boolean;
   /** 'underline' (default) or 'folder' — see the header. */
   variant?: 'underline' | 'folder';
+  /** 'light' (default) or 'dark' — see the header. */
+  tone?: 'light' | 'dark';
   style?: StyleProp<ViewStyle>;
 }
 
-export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor = colors.primary, topBorder = true, variant = 'underline', style }: Props) {
+export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor = colors.primary, topBorder = true, variant = 'underline', tone = 'light', style }: Props) {
   if (variant === 'folder') {
     const edge = { borderBottomWidth: FOLDER_W, borderBottomColor: accentColor };
     return (
@@ -67,8 +73,12 @@ export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor
       </View>
     );
   }
+  const dark = tone === 'dark';
   return (
-    <View style={[styles.row, !topBorder && styles.noTopBorder, style]} accessibilityRole="tablist">
+    <View
+      style={[styles.row, !topBorder && styles.noTopBorder, dark && [styles.rowDark, { backgroundColor: accentColor }], style]}
+      accessibilityRole="tablist"
+    >
       {tabs.map((t) => {
         const active = t.key === activeKey;
         return (
@@ -82,12 +92,12 @@ export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor
             accessibilityLabel={t.label}
           >
             <Text
-              style={[styles.label, { color: active ? accentColor : colors.textSecondary }]}
+              style={[styles.label, { color: dark ? (active ? DARK_INK : DARK_INK_QUIET) : active ? accentColor : colors.textSecondary }]}
               numberOfLines={1}
             >
               {t.label}
             </Text>
-            <View style={[styles.indicator, active && { backgroundColor: accentColor }]} />
+            <View style={[styles.indicator, active && { backgroundColor: dark ? DARK_INK : accentColor }]} />
           </TouchableOpacity>
         );
       })}
@@ -97,6 +107,8 @@ export default function UnderlineTabBar({ tabs, activeKey, onChange, accentColor
 
 // Heavier than a hairline: this line IS the section's top edge, not a divider.
 const FOLDER_W = 1.5;
+const DARK_INK = '#FFFFFF';
+const DARK_INK_QUIET = 'rgba(255,255,255,0.72)';
 
 const styles = StyleSheet.create({
   row: {
@@ -108,6 +120,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
   },
   noTopBorder: { borderTopWidth: 0 },
+  rowDark: { borderTopWidth: 0, borderBottomWidth: 0 },
   tab: {
     flex: 1,
     alignItems: 'center',

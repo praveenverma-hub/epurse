@@ -14,8 +14,9 @@
 // =============================================================================
 
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
-import type { TextStyle } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, Dimensions } from 'react-native';
+import type { TextStyle, LayoutChangeEvent } from 'react-native';
+import { TabView } from 'react-native-tab-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,7 +39,8 @@ import GoalFundModal from '../components/GoalFundModal';
 import GoalAchievedModal from '../components/GoalAchievedModal';
 import { useGoalAchievement } from '../hooks/useGoalAchievement';
 import TransactionItemRaw from '../components/TransactionItem';
-import MonthDivider from '../components/MonthDivider';
+import UnderlineTabBar from '../components/UnderlineTabBar';
+import { goalMonths, summarizeGoalMonths, isMet } from '../utils/goalHistory';
 import TxnDetailSheet from '../components/TxnDetailSheet';
 import FAB from '../components/FAB';
 import { hapticLight } from '../utils/haptics';
@@ -50,6 +52,100 @@ const typography = typographyBase as unknown as Record<string, TextStyle>;
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any; onPress?: () => void;
 }>;
+
+const GOAL_TABS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'history', label: 'History' },
+];
+
+const monthName = (mk: string, style: 'long' | 'short') => {
+  const [y, m] = mk.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-IN', style === 'long' ? { month: 'long', year: 'numeric' } : { month: 'short' });
+};
+
+const CHART_MONTHS = 6;
+const BAR_AREA_H = 84;
+
+/** Closed months: summary numbers, planned-vs-funded bars for the latest months, then every month as a row. */
+const GoalHistoryTab: React.FC<{ months: any[]; summary: any; color: string; theme: any }> = ({ months, summary, color, theme }) => {
+  // Always CHART_MONTHS calendar slots ending at the newest closed month — months before the
+  // goal existed (or with no activity) show as empty slots, so a short history still fills the chart.
+  const byKey = new Map<string, any>(months.map((m) => [m.monthKey, m]));
+  const [ny, nm] = months[0].monthKey.split('-').map(Number);
+  const shown = Array.from({ length: CHART_MONTHS }, (_, i) => {
+    const d = new Date(ny, nm - 1 - (CHART_MONTHS - 1 - i), 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return byKey.get(key) || { monthKey: key, planned: 0, funded: 0 };
+  });
+  const peak = Math.max(1, ...shown.map((m) => Math.max(m.planned, m.funded)));
+  const barH = (v: number) => Math.max(v > 0 ? 3 : 0, Math.round((v / peak) * BAR_AREA_H));
+  const tiles: [string, string][] = [
+    ...(summary.planMonths > 0 ? [
+      ['Plan Met', `${summary.metMonths} of ${summary.planMonths} ${summary.planMonths === 1 ? 'month' : 'months'}`] as [string, string],
+      ['Current Streak', `${summary.streak} ${summary.streak === 1 ? 'month' : 'months'}`] as [string, string],
+    ] : []),
+    ['Average Funded / Month', formatCompact(summary.avgFunded)],
+    ...(summary.best ? [['Best Month', `${formatCompact(summary.best.funded)} · ${monthName(summary.best.monthKey, 'short')}`] as [string, string]] : []),
+  ];
+  return (
+    <>
+      <View style={styles.statGrid}>
+        {tiles.map(([k, v]) => (
+          <View key={k} style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+            <Text style={[styles.statV, { color: theme.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>{v}</Text>
+            <Text style={[styles.statK, { color: theme.textMuted }]}>{k}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader icon="stats-chart-outline" title="Planned vs Funded" accentColor={theme.primary} style={styles.secHead} />
+        <View style={[styles.chartCard, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          <View style={styles.chartBars}>
+            {shown.map((m) => (
+              <View key={m.monthKey} style={styles.chartCol}>
+                <View style={[styles.chartPair, { height: BAR_AREA_H }]}>
+                  <View style={[styles.bar, { height: barH(m.planned), backgroundColor: theme.divider }]} />
+                  <View style={[styles.bar, { height: barH(m.funded), backgroundColor: color }]} />
+                </View>
+                <Text style={[styles.chartLabel, { color: theme.textMuted }]}>{monthName(m.monthKey, 'short')}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.legend}>
+            <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: theme.divider }]} /><Text style={[styles.legendTxt, { color: theme.textMuted }]}>Planned</Text></View>
+            <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: color }]} /><Text style={[styles.legendTxt, { color: theme.textMuted }]}>Funded</Text></View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader icon="time-outline" title="Monthly Breakdown" accentColor={theme.primary} style={styles.secHead} />
+        <View style={[styles.monthCard, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          {months.map((m, i) => {
+            const met = isMet(m);
+            return (
+              <View key={m.monthKey} style={[styles.monthRow, i > 0 && { borderTopWidth: 1, borderTopColor: theme.divider }]}>
+                <Text style={[styles.monthName, { color: theme.textPrimary }]}>{monthName(m.monthKey, 'long')}</Text>
+                <Text style={[styles.monthAmt, { color: theme.textSecondary }]}>
+                  {m.planned > 0 ? `${formatCurrency(m.funded)} of ${formatCurrency(m.planned)}` : `${formatCurrency(m.funded)} funded`}
+                </Text>
+                {m.planned > 0 ? (
+                  <Ionicons
+                    name={met ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={18}
+                    color={met ? theme.success : theme.textMuted}
+                    accessibilityLabel={met ? 'Plan met' : 'Plan not met'}
+                  />
+                ) : <View style={styles.monthIconSpace} />}
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    </>
+  );
+};
 
 /** Same words `GoalCard`'s ribbon uses for this month's pace. */
 const PACE_LABEL: Record<string, string> = {
@@ -141,14 +237,20 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [goal, theme.textMuted]);
 
   // Closed months only — the live month is already the stat row above.
-  const history = useMemo(() => {
-    if (!goal) return [];
-    const thisMonth = monthKey(new Date());
-    return Object.entries(goalHistory || {})
-      .filter(([mk, snap]: [string, any]) => mk !== thisMonth && snap?.perGoal?.[goal.id])
-      .map(([mk, snap]: [string, any]) => ({ monthKey: mk, ...snap.perGoal[goal.id] }))
-      .sort((a, b) => (a.monthKey < b.monthKey ? 1 : -1));
-  }, [goalHistory, goal]);
+  const history = useMemo(
+    () => (goal ? goalMonths(goalHistory, goal.id, monthKey(new Date())) : []),
+    [goalHistory, goal],
+  );
+  const historySummary = useMemo(() => summarizeGoalMonths(history), [history]);
+  const [tab, setTab] = useState<'overview' | 'history'>('overview');
+  // The pager's height follows the active page's measured content (the page scrolls, not the pages).
+  const [sceneH, setSceneH] = useState<Record<string, number>>({});
+  const measureScene = (key: string) => (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height);
+    setSceneH((prev) => (Math.abs((prev[key] || 0) - h) < 1 ? prev : { ...prev, [key]: h }));
+  };
+  // No History tab (and no tab bar) until a month has closed.
+  const activeTab = history.length > 0 ? tab : 'overview';
 
   const txns = useMemo(
     () => (goal ? getGoalTransactions(goal.id) : []),
@@ -182,6 +284,56 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const durationMeta = GOAL_DURATION_META[
     (goal.duration || GOAL_DURATIONS.RECURRING) as keyof typeof GOAL_DURATION_META
   ];
+
+  // This month's transactions — the auto-fund link, surfaced.
+  const overviewScene = (
+    <>
+      {/* ── stat grid ──────────────────────────────────────────────────── */}
+      <View style={styles.statGrid}>
+        <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatCompact(lifetimeSaved)}</Text>
+          <Text style={[styles.statK, { color: theme.textMuted }]}>Saved so far</Text>
+        </View>
+        <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          <Text style={[styles.statV, { color: theme.textPrimary }]}>
+            {isOneTime ? formatCompact(goal.lifetimeTarget) : '—'}
+          </Text>
+          <Text style={[styles.statK, { color: theme.textMuted }]}>
+            {isOneTime ? 'Target' : 'No target · recurring'}
+          </Text>
+        </View>
+        <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatCompact(planned)}</Text>
+          <Text style={[styles.statK, { color: theme.textMuted }]}>This month planned</Text>
+        </View>
+        <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
+          <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatCompact(funded)}</Text>
+          <Text style={[styles.statK, { color: theme.textMuted }]}>This month funded</Text>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader icon="receipt-outline" title="Transactions" accentColor={theme.primary} style={styles.secHead} />
+        {txns.length > 0 ? (
+          <FlatList
+            data={txns}
+            keyExtractor={(t: any) => t.id}
+            scrollEnabled={false}
+            renderItem={({ item }) => (
+              <TransactionItem txn={item} onPress={() => setDetailTxn(item)} />
+            )}
+          />
+        ) : (
+          <EmptyState
+            compact
+            icon="link-outline"
+            title="Nothing yet this month"
+            subtitle="Auto-matched spend and anything you add by hand will show up here."
+          />
+        )}
+      </View>
+    </>
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -307,61 +459,35 @@ const GoalDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </View>
 
-        {/* ── stat grid ──────────────────────────────────────────────────── */}
-        <View style={styles.statGrid}>
-          <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
-            <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatCompact(lifetimeSaved)}</Text>
-            <Text style={[styles.statK, { color: theme.textMuted }]}>Saved so far</Text>
-          </View>
-          <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
-            <Text style={[styles.statV, { color: theme.textPrimary }]}>
-              {isOneTime ? formatCompact(goal.lifetimeTarget) : '—'}
-            </Text>
-            <Text style={[styles.statK, { color: theme.textMuted }]}>
-              {isOneTime ? 'Target' : 'No target · recurring'}
-            </Text>
-          </View>
-          <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
-            <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatCompact(planned)}</Text>
-            <Text style={[styles.statK, { color: theme.textMuted }]}>This month planned</Text>
-          </View>
-          <View style={[styles.statTile, { backgroundColor: theme.card, borderColor: theme.divider }]}>
-            <Text style={[styles.statV, { color: theme.textPrimary }]}>{formatCompact(funded)}</Text>
-            <Text style={[styles.statK, { color: theme.textMuted }]}>This month funded</Text>
-          </View>
-        </View>
-
-        {/* Closed months only — a total only shows once a month has ended. */}
         {history.length > 0 ? (
-          <View style={styles.section}>
-            <SectionHeader icon="time-outline" title="History" accentColor={theme.primary} style={styles.secHead} />
-            {history.map((h: any) => (
-              <MonthDivider key={h.monthKey} monthKey={h.monthKey} total={h.funded} />
-            ))}
-          </View>
-        ) : null}
-
-        {/* ── this month's transactions — the auto-fund link, surfaced ──── */}
-        <View style={styles.section}>
-          <SectionHeader icon="receipt-outline" title="Transactions" accentColor={theme.primary} style={styles.secHead} />
-          {txns.length > 0 ? (
-            <FlatList
-              data={txns}
-              keyExtractor={(t: any) => t.id}
-              scrollEnabled={false}
-              renderItem={({ item }) => (
-                <TransactionItem txn={item} onPress={() => setDetailTxn(item)} />
+          <>
+            {/* Edge-to-edge bar (cancels the page padding) + a real swipe pager, like Group Detail. */}
+            <View style={styles.bleed}>
+              <UnderlineTabBar
+                tabs={GOAL_TABS}
+                activeKey={activeTab}
+                onChange={(k) => setTab(k as 'overview' | 'history')}
+                accentColor={theme.primary}
+                style={styles.tabs}
+              />
+            </View>
+            <TabView
+              navigationState={{ index: activeTab === 'history' ? 1 : 0, routes: GOAL_TABS }}
+              renderScene={({ route }) => (
+                <View style={styles.page} onLayout={measureScene(route.key)}>
+                  {route.key === 'history'
+                    ? <GoalHistoryTab months={history} summary={historySummary} color={goal.color} theme={theme} />
+                    : overviewScene}
+                </View>
               )}
+              renderTabBar={() => null}
+              onIndexChange={(i) => setTab(GOAL_TABS[i].key as 'overview' | 'history')}
+              initialLayout={{ width: Dimensions.get('window').width }}
+              swipeEnabled
+              style={[styles.bleed, { height: sceneH[activeTab] || 240 }]}
             />
-          ) : (
-            <EmptyState
-              compact
-              icon="link-outline"
-              title="Nothing yet this month"
-              subtitle="Auto-matched spend and anything you add by hand will show up here."
-            />
-          )}
-        </View>
+          </>
+        ) : overviewScene}
       </ScrollView>
       </SafeAreaView>
 
@@ -476,6 +602,26 @@ const styles = StyleSheet.create({
   },
   statV: { ...typography.bodyBold, fontWeight: '800' },
   statK: { ...typography.tiny, marginTop: 2, textAlign: 'center' },
+
+  tabs: { marginTop: spacing.md },
+  // Cancels scrollContent's side padding; pages put it back so content lines up.
+  bleed: { marginHorizontal: -spacing.md },
+  page: { paddingHorizontal: spacing.md },
+  chartCard: { borderWidth: 1, borderRadius: radius.md, padding: spacing.md },
+  chartBars: { flexDirection: 'row', justifyContent: 'space-around' },
+  chartCol: { alignItems: 'center', gap: spacing.xs },
+  chartPair: { flexDirection: 'row', alignItems: 'flex-end', gap: 3 },
+  bar: { width: 10, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
+  chartLabel: { ...typography.tiny },
+  legend: { flexDirection: 'row', justifyContent: 'center', gap: spacing.md, marginTop: spacing.sm },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendTxt: { ...typography.tiny },
+  monthCard: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md },
+  monthRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+  monthName: { ...typography.body, fontWeight: '600', flex: 1 },
+  monthAmt: { ...typography.small },
+  monthIconSpace: { width: 18 },
 
   section: { marginTop: spacing.lg },
   // `SectionHeader` carries no bottom margin of its own (that's layout, the

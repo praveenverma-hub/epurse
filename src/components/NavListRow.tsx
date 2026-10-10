@@ -54,6 +54,8 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
+const ROW_MIN_H = 52;
+
 const NavListRow = ({
   icon,
   label,
@@ -142,6 +144,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing.sm,
+    // A row with no hint matches the height of one with it, so a list doesn't mix thin and tall rows.
+    minHeight: ROW_MIN_H,
   },
   // A hub row is a destination, not a line item — it gets the taller box.
   rowTile: { paddingVertical: spacing.md },

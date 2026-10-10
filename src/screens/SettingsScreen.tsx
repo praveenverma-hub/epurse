@@ -128,7 +128,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
               icon="color-palette-outline"
               label="Appearance"
               hint={activeThemeLabel}
-              divided
               onPress={() => setThemeSheetOpen(true)}
             />
           ) : null}
@@ -136,13 +135,11 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             icon="document-text-outline"
             label="Monthly Recap"
             hint={showMonthlyRecap ? 'On' : 'Off'}
-            divided
             onPress={() => navigation.navigate('MonthlyRecapSettings')}
           />
           <NavListRow
             icon="calculator-outline"
             label="Expense Inclusions"
-            divided
             onPress={() => navigation.navigate('SpendRules')}
             /* An exclusion has to be visible from OUTSIDE the screen that set it —
                otherwise "why is Spent low?" has no discoverable answer. */
@@ -157,14 +154,12 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             icon="pricetags-outline"
             label="Categories"
             hint="Add or remove your own"
-            divided
             onPress={() => navigation.navigate('Categories')}
           />
           <NavListRow
             icon="notifications-outline"
             label="Notifications"
             hint="Automatic nudges from ePurse"
-            divided
             onPress={() => navigation.navigate('Notifications')}
           />
           {SMS_DIAGNOSTIC_ENABLED ? (
@@ -172,7 +167,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
               icon="flask-outline"
               label="SMS Diagnostic"
               hint="See how messages are parsed"
-              divided
               onPress={() => navigation.navigate('SmsDiagnostic')}
             />
           ) : null}
@@ -180,35 +174,30 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             icon="help-circle-outline"
             label="Help & Support"
             hint="FAQs and how to reach us"
-            divided
             onPress={() => navigation.navigate('HelpSupport')}
           />
           <NavListRow
             icon="star-outline"
             label="Rate & Feedback"
             hint={RATING_ENABLED ? 'Rate us and tell us what you think' : 'Send feedback'}
-            divided
             onPress={() => navigation.navigate('RateFeedback')}
           />
           <NavListRow
             icon="information-circle-outline"
             label="About"
             hint={`Version ${APP_VERSION}`}
-            divided
             onPress={() => navigation.navigate('About')}
           />
           <NavListRow
             icon="log-out-outline"
             label="Logout"
             chevron={false}
-            divided
             onPress={() => setConfirmLogout(true)}
           />
           <NavListRow
             icon="trash-outline"
             label="Delete Account"
             chevron={false}
-            divided
             onPress={() => setConfirmDelete(true)}
           />
         </>
