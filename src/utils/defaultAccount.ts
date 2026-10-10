@@ -7,4 +7,6 @@ interface AccountLike {
 }
 
 export const defaultAccountId = (accounts: AccountLike[]): string | null =>
-  accounts.find((a) => a.primary && !a.archived)?.id ?? accounts[0]?.id ?? null;
+  accounts.find((a) => a.primary && !a.archived)?.id
+  ?? accounts.find((a) => !a.archived)?.id
+  ?? null;

@@ -431,7 +431,9 @@ const LbPersonScreen = ({ route, navigation }) => {
         editable={!!detailEntry && !detailEntry.isGroupLine && isLentBorrowedEditable(detailEntry)}
         accountLabel={detailTxn
           ? txnAccountLabel(detailTxn, accounts.find((a) => a.id === detailTxn.accountId))
-          : LB_NO_ACCOUNT}
+          // A row whose transaction is gone (older split, summarised) — account unknown,
+          // so no Account row rather than a false "Not From an Account".
+          : detailEntry?.sourceTxnId ? '' : LB_NO_ACCOUNT}
         onClose={() => setDetailEntry(null)}
         onEdit={setEditEntry}
         onViewTxn={setViewTxn}

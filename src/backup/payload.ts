@@ -52,6 +52,8 @@ export const TXN_FIELDS = [
   'isRefund', 'isReviewed', 'isIgnored', 'isHidden', 'isSubscription', 'lbLocked',
   // owned by its LB ledger row (bookLbTxn) — without it a restore leaves the entry read-only
   'lbBooked',
+  // an IGNORED person-tagged txn's parked ledger row(s) — Restore puts them back
+  'ignoredLbRows',
   // direct split
   'isSplit', 'splitWith', 'myShareAmount', 'myPercent', 'isSplitMemo', 'splitPaidBy', 'memoAccountId',
   // groups

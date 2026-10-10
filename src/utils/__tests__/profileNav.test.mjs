@@ -179,9 +179,11 @@ console.log('\n── reminders ──');
   // ("Remind yourself to pay ₹1,200 to Rahul"), which the first cut demoted to a
   // muted one-liner and then lost. It needs the amount and name as SEPARATE
   // params — half of a pre-composed sentence can't be emphasised.
+  // The bell is the shared ReminderBell (Oct-10-26) — LB tab + Group Members use it.
   const lb = read('screens/LentBorrowedScreen.js');
+  const bell = read('components/ReminderBell.tsx');
   check('the LB bell passes the amount + person structured, not pre-composed',
-    /presetAmount:/.test(lb) && /presetPerson:/.test(lb) && !/presetBody:/.test(lb),
+    /presetAmount:/.test(bell) && /presetPerson:/.test(bell) && !/presetBody:/.test(bell),
     'a ready-made sentence cannot be partially bolded');
   check('the form states the balance in words', /Remind yourself to pay /.test(form));
   check('…with the amount emphasised via formatCurrency', /formatCurrency\(amount as number\)/.test(form));
@@ -191,7 +193,7 @@ console.log('\n── reminders ──');
   // One form, three entry points — the reason BorrowReminderModal was deleted.
   check('the borrow-only reminder sheet is gone', !existsSync(`${ROOT}/components/BorrowReminderModal.js`));
   check('Lent/Borrowed routes its bell to the shared form',
-    /navigate\('ReminderForm'/.test(lb));
+    /<ReminderBell\b/.test(lb) && /navigate\('ReminderForm'/.test(bell));
 
   // The two directions are deliberately NOT symmetric: money you owe is your own
   // task (schedule an alarm), money owed TO you is someone else's (message them).
