@@ -25,12 +25,12 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography, shadows, DIVIDER_W, readableOn } from '../constants/theme';
+import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import { INPUT_LIMITS, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
-import { FormField, FormTextInput, FormAmountInput, FormChip, FormChipRow } from '../components/FormField';
+import { FormField, FormTextInput, FormAmountInput, FormValueCard, FormValueRow } from '../components/FormField';
 import DateField from '../components/DateField';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
@@ -41,7 +41,11 @@ import LbEntryForm from '../components/LbEntryForm';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import LbEntryDetailSheet, { lbToneInk } from '../components/LbEntryDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
-import { lbEntryMeta, lbEntryTitle, lbEntryTone, lbEntrySign, lbNoteText } from '../utils/lbEntryDisplay';
+import {
+  LB_NO_ACCOUNT, lbAccountFieldLabel, lbEffectiveKind, lbEntryMeta, lbEntrySign, lbEntryTitle,
+  lbEntryTone, lbLinkedLine, lbMoneyOut, lbNoteText, lbToastTitle,
+} from '../utils/lbEntryDisplay';
+import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
 import { txnAccountLabel } from '../utils/txnCardModel';
 import { useToast } from '../components/Toast';
 
@@ -75,8 +79,7 @@ const LbPersonScreen = ({ route, navigation }) => {
   const accounts              = useEPurseStore((s) => s.accounts);
   const transactions          = useEPurseStore((s) => s.transactions);
   const settlePersonBalance   = useEPurseStore((s) => s.settlePersonBalance);
-  const addLentBorrowed       = useEPurseStore((s) => s.addLentBorrowed);
-  const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
+  const recordLbEntry         = useEPurseStore((s) => s.recordLbEntry);
   const updateLentBorrowedEntry = useEPurseStore((s) => s.updateLentBorrowedEntry);
   const deleteLentBorrowedEntry = useEPurseStore((s) => s.deleteLentBorrowedEntry);
   const isLentBorrowedEditable  = useEPurseStore((s) => s.isLentBorrowedEditable);
@@ -87,7 +90,6 @@ const LbPersonScreen = ({ route, navigation }) => {
   const [viewTxn,      setViewTxn]      = useState(null);  // the transaction behind a row
   const [addOpen,      setAddOpen]      = useState(false);  // new entry for this person
   const [addKind,      setAddKind]      = useState('lent');  // direction of that new entry
-  const [pendingSettledAdd, setPendingSettledAdd] = useState(null); // already-repaid borrow awaiting account pick
   const [confirm,      setConfirm]      = useState(null);
   const [settleTarget, setSettleTarget] = useState(null);
 
@@ -169,34 +171,30 @@ const LbPersonScreen = ({ route, navigation }) => {
   const lastActivityDate = displayEntries[0]?.date || null;
 
   // ── Settle the person's FULL net ────────────────────────────────────────────
+  // Either direction asks which account the money moved through (the picker IS the
+  // confirmation); "Not from an account" keeps it ledger-only.
   const handleSettlePress = useCallback(() => {
     if (!person || net === 0) return;
-    if (net < 0) { setSettleTarget(person); return; }
-    setConfirm({
-      title: 'Mark as settled?',
-      message:
-        `${person.person} · ${formatCurrency(netAbs)}\n\n` +
-        `Settles the FULL net outstanding of ${formatCurrency(netAbs)} ` +
-        `across all groups, splits and manual entries.`,
-      primaryText: 'Settle',
-      destructive: true,
-      secondaryText: 'Cancel',
-      onSecondary: () => setConfirm(null),
-      onConfirm: () => {
-        settlePersonBalance(person.personKey);
-        setConfirm(null);
-        const who = firstName(person.person);
-        toast.success(
-          `Settled ${formatCurrency(netAbs)} with ${who}`,
-          formatOutstanding(freshNet(), who),
-        );
-      },
-    });
-  }, [person, net, netAbs, settlePersonBalance, toast, freshNet]);
+    setSettleTarget(person);
+  }, [person, net]);
+
+  /** Both committing exits of the settle picker — with an account, or ledger-only. */
+  const commitSettle = useCallback((accountId) => {
+    const target = settleTarget;
+    if (!target) return;
+    const res = settlePersonBalance(target.personKey, accountId ? { accountId } : undefined);
+    const who = firstName(target.person);
+    toast.success(
+      lbToastTitle(target.net < 0 ? 'borrow_repaid' : 'lent_settled', Math.abs(target.net), who),
+      res?.linkedTxn ? lbLinkedLine(res.linkedTxn) : formatOutstanding(freshNet(), who),
+    );
+    setSettleTarget(null);
+  }, [settleTarget, settlePersonBalance, toast, freshNet]);
 
   /**
    * Add a new row for THIS person, straight from their ledger — saves bouncing back
-   * to the LB tab and re-picking someone you're already looking at.
+   * to the LB tab and re-picking someone you're already looking at. Committed through
+   * recordLbEntry, which books (or links) it on the form's account.
    *
    * contactId / phone are carried over deliberately: getPersonBalances groups by
    * those authoritative ids first, so omitting them would file the entry under a
@@ -204,81 +202,33 @@ const LbPersonScreen = ({ route, navigation }) => {
    */
   const handleAddEntry = useCallback((entry) => {
     if (!person) return;
-    const { kind, alreadySettled, ...base } = entry;
-    // Always file against THIS person's authoritative ids, whatever the form sent:
-    // getPersonBalances groups by contactId / phone first, so a name-only row would
-    // split one person into two on the LB screen.
+    const { kind: addKind, alreadySettled, accountId, ...base } = entry;
+    const kind = lbEffectiveKind(addKind, alreadySettled);
     const seeded = {
       ...base,
       person:    base.person || person.person,
       contactId: person.contactId ?? null,
       phone:     person.phone ?? null,
     };
-    const who = firstName(seeded.person);
     setAddOpen(false);
-
-    if (alreadySettled) {
-      // Same handoff as the LB tab: an already-repaid BORROW books a real Repayment
-      // expense, so it needs an account before it can commit.
-      if (kind === 'borrowed') {
-        setPendingSettledAdd({ ...seeded, kind: 'borrowed' });
-        return;
-      }
-      addAlreadySettledLentBorrowed({ ...seeded, kind: 'lent' });
-      toast.success(
-        `Settled ${formatCurrency(seeded.amount)} with ${who}`,
-        formatOutstanding(freshNet(), who),
-      );
-      return;
-    }
-
-    addLentBorrowed({ ...seeded, kind: kind === 'borrowed' ? 'borrowed' : 'lent' });
+    const res = recordLbEntry({ ...seeded, kind }, { accountId });
+    if (!res) return;
+    const who = firstName(seeded.person);
     toast.success(
-      kind === 'borrowed'
-        ? `Borrowed ${formatCurrency(seeded.amount)} from ${who}`
-        : `Lent ${formatCurrency(seeded.amount)} to ${who}`,
-      formatOutstanding(freshNet(), who),
+      lbToastTitle(kind, seeded.amount, who),
+      res.linkedTxn ? lbLinkedLine(res.linkedTxn) : formatOutstanding(freshNet(), who),
     );
-  }, [person, addLentBorrowed, addAlreadySettledLentBorrowed, toast, freshNet]);
-
-  /** The already-repaid BORROW added from this screen, after its account question. */
-  const commitSettledAdd = useCallback((accountId) => {
-    const entry = pendingSettledAdd;
-    if (!entry) return;
-    addAlreadySettledLentBorrowed(entry, accountId ? { accountId } : undefined);
-    const who = firstName(entry.person);
-    toast.success(
-      `Repaid ${formatCurrency(entry.amount)} to ${who}`,
-      formatOutstanding(freshNet(), who),
-    );
-    setPendingSettledAdd(null);
-  }, [pendingSettledAdd, addAlreadySettledLentBorrowed, toast, freshNet]);
-
-  /**
-   * Both committing exits of the repay-account picker (a BORROW settle): with an
-   * account, which also books the real Repayment expense, or without it.
-   */
-  const commitBorrowSettle = useCallback((accountId) => {
-    const target = settleTarget;
-    if (!target) return;
-    settlePersonBalance(target.personKey, accountId ? { accountId } : undefined);
-    const who = firstName(target.person);
-    toast.success(
-      `Repaid ${formatCurrency(Math.abs(target.net))} to ${who}`,
-      formatOutstanding(freshNet(), who),
-    );
-    setSettleTarget(null);
-  }, [settleTarget, settlePersonBalance, toast, freshNet]);
+  }, [person, recordLbEntry, toast, freshNet]);
 
   // ── Delete a manual row ─────────────────────────────────────────────────────
   const handleDelete = useCallback((entry) => {
-    const paidFrom = accounts.find((a) => a.id === lentBorrowedAccountId(entry));
+    const viaAccount = accounts.find((a) => a.id === lentBorrowedAccountId(entry));
     setConfirm({
       title: 'Delete this entry?',
       message:
         `${ENTRY_LABEL[entry.kind] || entry.kind} · ${formatCurrency(entry.amount)}\n\n` +
-        (paidFrom
-          ? `Also deletes its Repayment expense and puts ${formatCurrency(entry.amount)} back in ${paidFrom.name}. This cannot be undone.`
+        (viaAccount
+          ? `Also deletes its transaction and ${lbMoneyOut(entry.kind) ? 'puts' : 'takes'} ${formatCurrency(entry.amount)} ${lbMoneyOut(entry.kind) ? 'back in' : 'back out of'} ${viaAccount.name}. This cannot be undone.`
           : 'Removes it from the ledger and re-nets the balance. This cannot be undone.'),
       primaryText: 'Delete',
       destructive: true,
@@ -454,7 +404,7 @@ const LbPersonScreen = ({ route, navigation }) => {
         <PrimaryButton
           title="Add Entry"
           variant={net !== 0 ? 'outline' : 'filled'}
-          icon={<Ionicons name="add" size={18} color={net !== 0 ? readableOn(colors.card, theme.primary) : '#FFFFFF'} />}
+          icon={<Ionicons name="add" size={18} color={net !== 0 ? theme.primary : '#FFFFFF'} />}
           onPress={() => {
             // Pre-pick the likelier direction: if you already owe them, the next
             // entry is usually another borrow. Still one tap to flip.
@@ -479,7 +429,9 @@ const LbPersonScreen = ({ route, navigation }) => {
         person={person.person}
         sourceTxn={detailTxn}
         editable={!!detailEntry && !detailEntry.isGroupLine && isLentBorrowedEditable(detailEntry)}
-        accountLabel={detailTxn ? txnAccountLabel(detailTxn, accounts.find((a) => a.id === detailTxn.accountId)) : ''}
+        accountLabel={detailTxn
+          ? txnAccountLabel(detailTxn, accounts.find((a) => a.id === detailTxn.accountId))
+          : LB_NO_ACCOUNT}
         onClose={() => setDetailEntry(null)}
         onEdit={setEditEntry}
         onViewTxn={setViewTxn}
@@ -548,6 +500,8 @@ const LbPersonScreen = ({ route, navigation }) => {
                   contactId: person.contactId ?? null,
                   phone: person.phone ?? null,
                 }}
+                accounts={accounts}
+                defaultAccountId={pickDefaultAccountId(accounts)}
                 onSubmit={handleAddEntry}
                 theme={theme}
                 submitLabel="Add Entry"
@@ -561,32 +515,17 @@ const LbPersonScreen = ({ route, navigation }) => {
       </Modal>
 
       <AccountPickerSheet
-        visible={!!pendingSettledAdd}
-        title="Repaid from which account?"
-        subtitle={pendingSettledAdd
-          ? `${pendingSettledAdd.person} · ${formatCurrency(pendingSettledAdd.amount)} — records a Repayment expense`
-          : undefined}
-        accounts={accounts}
-        onSelect={(accountId) => commitSettledAdd(accountId)}
-        skipLabel="Just mark repaid (no expense)"
-        // Dismissing still logs it — the user already committed by tapping Add; only
-        // the account question was left open (same rule as the LB tab's picker).
-        onSkip={() => commitSettledAdd(null)}
-        onClose={() => commitSettledAdd(null)}
-      />
-
-      <AccountPickerSheet
         visible={!!settleTarget}
-        title="Repay from which account?"
+        title={settleTarget?.net < 0 ? 'Repay from which account?' : 'Received in which account?'}
         subtitle={settleTarget
-          ? `${settleTarget.person} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
+          ? `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`
           : undefined}
-        accounts={accounts}
-        onSelect={(accountId) => commitBorrowSettle(accountId)}
-        skipLabel="Just mark repaid (no expense)"
-        onSkip={() => commitBorrowSettle(null)}
-        // Dismissing cancels outright — unlike the add form's picker, nothing has
-        // been committed yet here; the settle IS the action being chosen.
+        accounts={accounts.filter((a) => !a.archived)}
+        selectedId={pickDefaultAccountId(accounts)}
+        onSelect={(accountId) => commitSettle(accountId)}
+        skipLabel={LB_NO_ACCOUNT}
+        onSkip={() => commitSettle(null)}
+        // Dismissing cancels outright — nothing is committed until a choice is made.
         onClose={() => setSettleTarget(null)}
       />
 
@@ -633,8 +572,12 @@ const EditEntrySheet = ({ entry, personName, accounts, accountId, theme, onClose
  */
 const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccountId, theme, onClose, onSave, onDelete }) => {
   const [amount, setAmount] = useState(String(entry.amount ?? ''));
-  // Only a booked Repayment has one — its expense moves with this edit.
+  // The account its money moved through (null = ledger-only). Changing it moves the
+  // booked transaction, books one for a ledger-only entry, or removes it for "none".
   const [accountId, setAccountId] = useState(initialAccountId);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const liveAccounts = accounts.filter((a) => !a.archived);
+  const selectedAccount = liveAccounts.find((a) => a.id === accountId) || null;
   const [note,   setNote]   = useState(() => lbNoteText(entry.note));
   const [date,   setDate]   = useState(() => new Date(entry.date));
 
@@ -686,21 +629,21 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
               </View>
             </FormField>
 
-            {/* Inline chips, not AccountField: its picker is a second native Modal (§8b). */}
-            {initialAccountId ? (
-              <FormField label="Paid From">
-                <FormChipRow>
-                  {accounts.map((a) => (
-                    <FormChip
-                      key={a.id}
-                      label={a.name}
-                      active={a.id === accountId}
-                      onPress={() => setAccountId(a.id)}
-                      accentColor={theme.primary}
-                    />
-                  ))}
-                </FormChipRow>
-              </FormField>
+            {/* One row → the account picker sheet, rendered INSIDE this sheet's Modal
+                (nested, like DateField's iOS picker), never beside it (§8b). */}
+            {liveAccounts.length ? (
+              <View style={styles.accountField}>
+                <FormValueCard>
+                  <FormValueRow
+                    icon="wallet-outline"
+                    label={lbAccountFieldLabel(entry.kind)}
+                    value={selectedAccount?.name || LB_NO_ACCOUNT}
+                    isPlaceholder={!selectedAccount}
+                    onPress={() => setAccountsOpen(true)}
+                    accentColor={theme.primary}
+                  />
+                </FormValueCard>
+              </View>
             ) : null}
 
             <FormField label="Note">
@@ -723,7 +666,8 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
                 onPress={() => onSave({
                   amount: Number(amount),
                   note: note.trim(),
-                  ...(initialAccountId ? { accountId } : {}),
+                  // Only when changed — an unchanged account must not re-book anything.
+                  ...(accountId !== initialAccountId ? { accountId } : {}),
                   date: date.toISOString(),
                 })}
                 style={{ flex: 1 }}
@@ -732,6 +676,16 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
           </ScrollView>
         </View>
       </View>
+      <AccountPickerSheet
+        visible={accountsOpen}
+        title={lbMoneyOut(entry.kind) ? 'Paid from which account?' : 'Received in which account?'}
+        accounts={liveAccounts}
+        selectedId={selectedAccount?.id}
+        onSelect={(id) => { setAccountId(id); setAccountsOpen(false); }}
+        skipLabel={LB_NO_ACCOUNT}
+        onSkip={() => { setAccountId(null); setAccountsOpen(false); }}
+        onClose={() => setAccountsOpen(false)}
+      />
     </Modal>
   );
 };
@@ -901,6 +855,7 @@ const styles = StyleSheet.create({
   // Matches LbEntryForm's amountRow — the amount and the date button must not read
   // as one merged field (see the note there).
   amountRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  accountField: { marginBottom: spacing.lg }, // same rhythm as a FormField
   amountInput: { flex: 1 },
   // LbEntryForm renders as a card (fill + shadow + margin). Inside this sheet the
   // sheet IS the surface, so flatten it rather than nesting a card in a card.

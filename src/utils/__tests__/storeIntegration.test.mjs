@@ -4936,15 +4936,77 @@ console.log('\n— LB booked Repayment: edits/deletes move its expense too (Oct-
   G().updateLentBorrowedEntry(row().id, { accountId: 'a2' });
   check('move account → HDFC restored, ICICI debited', bal('a1') === 10000 && bal('a2') === 4300 && txn().accountId === 'a2', `${bal('a1')} ${bal('a2')}`);
 
-  G().updateTransaction(txn().id, { amount: 500, accountId: 'a2', categoryId: 'borrow_repaid' });
-  check('editing the EXPENSE (Activity) syncs the ledger row', row().amount === 500 && net() === -500, `${row().amount} ${net()}`);
+  check('a booked txn is locked to its ledger row — Activity can\'t edit it', G().updateTransaction(txn().id, { amount: 500, accountId: 'a2', categoryId: 'borrow_repaid' }) === null && row().amount === 700);
 
   check('delete → ok', G().deleteLentBorrowedEntry(row().id) === true);
   check('…expense gone, ICICI restored, debt back to 1000', !G().transactions.length && bal('a2') === 5000 && net() === -1000 && !row(), `${G().transactions.length} ${bal('a2')} ${net()}`);
 
+  // Pre-Oct-10 data: a Repaid booking that was neither locked nor flagged.
   G().addAlreadySettledLentBorrowed({ kind: 'borrowed', person: 'Rohit', phone: '9876543210', amount: 200 }, { accountId: 'a1' });
-  G().updateTransaction(txn().id, { amount: 200, accountId: 'a1', categoryId: 'food' });
-  check('recategorising the expense off Repayment drops its ledger row', !row() && net() === -1000, `${net()}`);
+  useStore.setState((st) => ({ transactions: st.transactions.map((t) => { const { lbLocked, lbBooked, ...rest } = t; return rest; }) }));
+  check('legacy repayment: still editable from its row', G().isLentBorrowedEditable(row()) === true);
+  G().updateTransaction(txn().id, { amount: 300, accountId: 'a1', categoryId: 'borrow_repaid' });
+  check('legacy repayment: editing the EXPENSE (Activity) syncs the ledger row', row().amount === 300 && net() === -700, `${row().amount} ${net()}`);
+  G().updateTransaction(txn().id, { amount: 300, accountId: 'a1', categoryId: 'food' });
+  check('legacy repayment: recategorised off Repayment drops its row', !row() && net() === -1000, `${net()}`);
+}
+
+console.log('\n— recordLbEntry: every LB entry moves an account, or links the SMS (Oct-10-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date().toISOString();
+  useStore.setState({ accounts: [
+    { id: 'a1', name: 'HDFC', bankName: 'HDFC', mask: '1111', type: 'Bank Account', balance: 10000, primary: true },
+    { id: 'a2', name: 'ICICI', bankName: 'ICICI', mask: '2222', type: 'Bank Account', balance: 5000 },
+  ] });
+  const bal = (id) => G().accounts.find((a) => a.id === id).balance;
+  const P = { person: 'Asha', phone: '9000000001' };
+  const net = () => G().getPersonBalances().find((p) => p.phone === P.phone)?.net;
+  const spend = () => G().getMonthlySpend(new Date());
+  const income = () => G().getMonthlyIncome(new Date());
+
+  let r = G().recordLbEntry({ ...P, kind: 'lent', amount: 500, date: now }, { accountId: 'a1' });
+  const lentTxn = G().transactions.find((t) => t.id === G().lentBorrowed.find((l) => l.id === r.entryId).sourceTxnId);
+  check('lent → books a DEBIT on the account', bal('a1') === 9500 && lentTxn?.type === 'debit' && lentTxn.categoryId === 'lent' && lentTxn.merchant === 'Lent to Asha', `${bal('a1')} ${JSON.stringify(lentTxn)}`);
+  check('…locked + owned by its row (editable from the ledger)', lentTxn.lbLocked && lentTxn.lbBooked && G().isLentBorrowedEditable(G().lentBorrowed[0]));
+  check('…not spend', spend() === 0, `${spend()}`);
+  G().recordLbEntry({ ...P, kind: 'borrowed', amount: 300, date: now }, { accountId: 'a1' });
+  check('borrowed → CREDIT, not income', bal('a1') === 9800 && income() === 0, `${bal('a1')} ${income()}`);
+  G().recordLbEntry({ ...P, kind: 'lent_settled', amount: 100, date: now }, { accountId: 'a2' });
+  check('received back → CREDIT on its account, not income', bal('a2') === 5100 && income() === 0 && net() === 100, `${bal('a2')} ${income()} ${net()}`);
+  r = G().recordLbEntry({ ...P, kind: 'lent', amount: 50, date: '2025-01-01T00:00:00.000Z' }, {});
+  check('"Not From an Account" → ledger-only, no balance move', !G().lentBorrowed.find((l) => l.id === r.entryId).sourceTxnId && bal('a1') === 9800 && net() === 150);
+
+  // Settle: either direction now moves the chosen account.
+  const key = G().getPersonBalances().find((p) => p.phone === P.phone).personKey;
+  G().settlePersonBalance(key, { accountId: 'a2' });
+  check('settle what THEY owe → received-back CREDIT on the account', net() === 0 && bal('a2') === 5250, `${net()} ${bal('a2')}`);
+
+  // Matching: the UPI SMS already moved the balance → link it, don't book a second one.
+  G().addTransaction({ id: 'sms-upi', accountId: 'a1', type: 'debit', amount: 700, merchant: 'UPI-RAVI', categoryId: 'transfer', source: 'sms', createdAt: now });
+  G().addTransaction({ id: 'sms-food', accountId: 'a1', type: 'debit', amount: 700, merchant: 'Swiggy', categoryId: 'food', source: 'sms', createdAt: now });
+  const before = bal('a1');
+  const txnCount = G().transactions.length;
+  r = G().recordLbEntry({ person: 'Ravi', phone: '9000000002', kind: 'lent', amount: 700, date: now, note: 'Rent share' }, { accountId: 'a1' });
+  const linkedRow = G().lentBorrowed.find((l) => l.id === r.entryId);
+  check('matching UPI transfer is LINKED (no new txn, balance moved once)', r.linkedTxn?.id === 'sms-upi' && linkedRow.sourceTxnId === 'sms-upi' && G().transactions.length === txnCount && bal('a1') === before, `${r.linkedTxn?.id} ${G().transactions.length}/${txnCount} ${bal('a1')}/${before}`);
+  check('…the SMS is now Lent + locked; the Swiggy order untouched', G().transactions.find((t) => t.id === 'sms-upi').categoryId === 'lent' && G().transactions.find((t) => t.id === 'sms-food').categoryId === 'food');
+  check('…linked (SMS) row is view-only; the note is kept', !G().isLentBorrowedEditable(linkedRow) && linkedRow.note === 'Rent share');
+  r = G().recordLbEntry({ person: 'Ravi', phone: '9000000002', kind: 'lent', amount: 700, date: now }, { accountId: 'a1' });
+  check('a second identical entry does not re-link a used txn → books', !r.linkedTxn && bal('a1') === before - 700, `${bal('a1')}`);
+  r = G().recordLbEntry({ person: 'Ravi', phone: '9000000002', kind: 'lent', amount: 700, date: '2025-01-01T00:00:00.000Z' }, { accountId: 'a1' });
+  check('outside ±3 days → no match (books)', !r.linkedTxn);
+
+  // Editing the account on a row.
+  const plain = G().recordLbEntry({ person: 'Meera', phone: '9000000003', kind: 'borrowed', amount: 400, date: now }, {});
+  const a2Before = bal('a2');
+  G().updateLentBorrowedEntry(plain.entryId, { accountId: 'a2' });
+  const meera = () => G().lentBorrowed.find((l) => l.id === plain.entryId);
+  check('ledger-only → put on an account: books it now', !!meera().sourceTxnId && bal('a2') === a2Before + 400, `${bal('a2')}`);
+  G().updateLentBorrowedEntry(plain.entryId, { accountId: null, note: 'cash' });
+  check('…and back to "Not From an Account": txn removed, balance restored, row kept', !meera().sourceTxnId && bal('a2') === a2Before && meera().note === 'cash' && G().transactions.every((t) => !t.merchant.includes('Meera')), `${bal('a2')}`);
+  check('delete a booked lent → its txn + balance go too', (() => { const id = G().lentBorrowed.find((l) => l.kind === 'lent' && l.sourceTxnId?.startsWith('txn_lb_')).id; const b = bal('a1'); G().deleteLentBorrowedEntry(id); return bal('a1') === b + 500 || bal('a1') === b + 700; })());
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

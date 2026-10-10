@@ -2,7 +2,8 @@
 // LB person ledger row wording — each fact once (Oct-10-26)
 //     npm run test:lbEntry
 // =============================================================================
-import { lbEntryTitle, lbEntryMeta, lbEntrySign, lbEntrySource, lbEntryTone, lbNoteText } from '../lbEntryDisplay.ts';
+import { suggestLbPeople } from '../lbPeopleSearch.ts';
+import { lbEntryTitle, lbEntryMeta, lbEntrySign, lbEntrySource, lbEntryTone, lbNoteText, lbEffectiveKind, lbAccountFieldLabel, lbToastTitle } from '../lbEntryDisplay.ts';
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -35,6 +36,27 @@ check('borrowed arrives, plain', lbEntrySign(row({ kind: 'borrowed' })) === '+' 
 check('source: manual', lbEntrySource(row({ kind: 'lent' })) === 'manual');
 check('source: txn', lbEntrySource(row({ kind: 'lent', sourceTxnId: 't1' })) === 'txn');
 check('source: group wins over txn', lbEntrySource(row({ kind: 'lent', sourceTxnId: 't1', groupId: 'g' })) === 'group');
+
+console.log('\n— recording (form → kind, account label, toast) —');
+check('form: lent + already settled → received back', lbEffectiveKind('lent', true) === 'lent_settled' && lbEffectiveKind('borrowed', true) === 'borrow_repaid' && lbEffectiveKind('lent', false) === 'lent');
+check('account label follows the money', lbAccountFieldLabel('lent') === 'Paid From' && lbAccountFieldLabel('borrow_repaid') === 'Paid From' && lbAccountFieldLabel('borrowed') === 'Received In' && lbAccountFieldLabel('lent_settled') === 'Received In');
+check('toast titles', lbToastTitle('lent', 500, 'Asha').startsWith('Lent ') && lbToastTitle('borrow_repaid', 500, 'Asha').startsWith('Repaid ') && lbToastTitle('lent_settled', 5, 'A').startsWith('Settled '));
+
+console.log('\n— name suggestions (people already on the ledger) —');
+const people = [
+  { personKey: 'a', person: 'Rohit Sharma', net: 2300 },
+  { personKey: 'b', person: 'Rohan', net: -100 },
+  { personKey: 'c', person: 'Asha Rao', net: 0 },
+  { personKey: 'd', person: 'Sharon', net: 50 },
+];
+const names = (q) => suggestLbPeople(people, q).map((p) => p.person).join(',');
+check('word-start match, bigger balance first', names('roh') === 'Rohit Sharma,Rohan', names('roh'));
+check('matches a later word ("sharma")', names('sharma') === 'Rohit Sharma', names('sharma'));
+check('word-starts (by balance) rank above a mid-word match', names('sha') === 'Rohit Sharma,Sharon,Asha Rao', names('sha'));
+check('case-insensitive, trims', names('  ASHA ') === 'Asha Rao');
+check('empty query → none', suggestLbPeople(people, '').length === 0);
+check('exact full name → nothing to suggest', names('rohan') === '');
+check('limit 3', suggestLbPeople([...people, { personKey: 'e', person: 'Rhea', net: 1 }], 'r').length === 3);
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

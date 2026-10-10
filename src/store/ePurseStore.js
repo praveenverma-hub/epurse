@@ -830,25 +830,41 @@ const clearAccountMeta = (txn) => {
  * tags a settlement re-tag.
  * Returns { accounts, transactions, txnId } or null if no/invalid account.
  */
-const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) => {
-  if (!accountId || !amount) return null;
+// What a ledger kind does to an account: Lent/Repaid = money out, Borrowed/Received back = in.
+const LB_MONEY_OUT = new Set(['lent', 'borrow_repaid']);
+const LB_ENTRY_KINDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
+const lbTxnMerchant = (kind, who) => {
+  if (!who) return kind === 'borrow_repaid' ? 'Loan repayment' : 'Lent / borrowed';
+  return { lent: `Lent to ${who}`, borrowed: `Borrowed from ${who}`, lent_settled: `Received from ${who}`, borrow_repaid: `Repaid ${who}` }[kind];
+};
+
+/**
+ * Book the REAL transaction behind a ledger entry the user added (LB form / Settle)
+ * on the account its money moved through (Oct-10-26: every kind, was Repaid only).
+ * `lbBooked` marks it as OWNED by its ledger row: edited from the LB ledger (amount,
+ * date and account move both), `lbLocked` so nothing else re-categorises it.
+ */
+const bookLbTxn = (state, accountId, kind, amount, personName, nowIso) => {
+  if (!accountId || !amount || !LB_ENTRY_KINDS.has(kind)) return null;
   const acct = state.accounts.find((a) => a.id === accountId);
   if (!acct) return null;
-  const txnId = `txn_repay_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const txnId = `txn_${kind === 'borrow_repaid' ? 'repay' : 'lb'}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const txn = {
     id: txnId,
     amount,
-    type: TRANSACTION_TYPES.DEBIT,
-    categoryId: 'borrow_repaid',
+    type: LB_MONEY_OUT.has(kind) ? TRANSACTION_TYPES.DEBIT : TRANSACTION_TYPES.CREDIT,
+    categoryId: kind,
     accountId,
     accountType: acct.type,
     accountMask: acct.mask || null,
     bankName: acct.bankName || null,
-    merchant: personName ? `Repaid ${personName}` : 'Loan repayment',
+    merchant: lbTxnMerchant(kind, personName),
     createdAt: nowIso,
     source: 'manual',
     isReviewed: true,
     userEditedCategory: true,
+    lbLocked: true,
+    lbBooked: true,
     isSplit: false,
     splitWith: [],
   };
@@ -859,26 +875,60 @@ const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) => {
   };
 };
 
+/** Kept for its callers — a Repaid booking. */
+const bookRepaymentExpense = (state, accountId, amount, personName, nowIso) =>
+  bookLbTxn(state, accountId, 'borrow_repaid', amount, personName, nowIso);
+
+const LB_MATCH_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+// Only an UNTOUCHED person-transfer can be what the user is logging — never a
+// categorised spend that happens to share the amount (a ₹500 Swiggy order).
+const LB_MATCHABLE_CATS = new Set(['transfer', 'other', undefined, null, '']);
+
 /**
- * The Repayment expense a 'borrow_repaid' LB row was booked with (settle / already-repaid
- * borrow with an account — bookRepaymentExpense), or null. Such a row is edited AS ONE
- * with its expense (amount/date/account move both), unlike an SMS-backed (lbLocked) or
- * split row whose amount belongs to something else.
+ * The bank transaction an LB entry is probably describing — same account, same
+ * direction, same amount, within ±3 days, an untouched person transfer, not already
+ * on a ledger. Linking it (instead of booking a new one) stops the SMS + the form
+ * from moving the balance twice. Closest in time wins.
  */
-// A booked Repayment's ledger row follows its expense: new amount/date, or gone once
-// the expense is recategorised away from a repayment (it no longer settles anything).
-const syncBookedRepayment = (lentBorrowed, old, updated) => {
-  if (old.isSplit || old.lbLocked || old.categoryId !== 'borrow_repaid') return lentBorrowed;
-  if (updated.categoryId !== 'borrow_repaid') return lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
-  return lentBorrowed.map((l) => (l.sourceTxnId === old.id && l.kind === 'borrow_repaid'
+const findLbMatch = (state, { accountId, kind, amount, dateIso }) => {
+  const type = LB_MONEY_OUT.has(kind) ? TRANSACTION_TYPES.DEBIT : TRANSACTION_TYPES.CREDIT;
+  const at = new Date(dateIso).getTime();
+  const used = new Set((state.lentBorrowed || []).map((l) => l.sourceTxnId).filter(Boolean));
+  let best = null;
+  let bestGap = Infinity;
+  for (const t of state.transactions || []) {
+    if (t.accountId !== accountId || t.type !== type || Math.abs(Number(t.amount) - amount) > 0.005) continue;
+    if (t.isIgnored || t.lbLocked || t.groupId || t.isSplit || t.isSplitMemo || t.userEditedCategory) continue;
+    if (!LB_MATCHABLE_CATS.has(t.categoryId) || used.has(t.id)) continue;
+    const gap = Math.abs(new Date(t.createdAt).getTime() - at);
+    if (gap <= LB_MATCH_WINDOW_MS && gap < bestGap) { best = t; bestGap = gap; }
+  }
+  return best;
+};
+
+// Pre-Oct-10 Repaid bookings weren't locked or flagged — still owned by their row.
+const isLegacyRepayment = (t) => !t.lbLocked && !t.lbBooked && t.categoryId === 'borrow_repaid';
+
+// A booked transaction's ledger row follows it: new amount/date, or gone once it's
+// recategorised away from that kind (it no longer lends/settles anything).
+const syncBookedLb = (lentBorrowed, old, updated) => {
+  if (old.isSplit || !(old.lbBooked || isLegacyRepayment(old))) return lentBorrowed;
+  if (updated.categoryId !== old.categoryId) return lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
+  return lentBorrowed.map((l) => (l.sourceTxnId === old.id
     ? { ...l, amount: updated.amount, date: updated.createdAt }
     : l));
 };
 
-const bookedRepaymentTxn = (state, entry) => {
-  if (!entry || entry.kind !== 'borrow_repaid' || !entry.sourceTxnId || entry.groupId) return null;
+/**
+ * The transaction an LB row OWNS (booked from the LB form / Settle — bookLbTxn), or
+ * null. Such a row is edited AS ONE with it (amount/date/account move both), unlike a
+ * row LINKED to an SMS or a split, whose amount belongs to that transaction.
+ */
+const bookedLbTxn = (state, entry) => {
+  if (!entry || !entry.sourceTxnId || entry.groupId) return null;
   const txn = (state.transactions || []).find((t) => t.id === entry.sourceTxnId);
-  return txn && !txn.lbLocked && !txn.isSplit && !txn.groupId ? txn : null;
+  if (!txn || txn.isSplit || txn.groupId || txn.categoryId !== entry.kind) return null;
+  return txn.lbBooked || isLegacyRepayment(txn) ? txn : null;
 };
 
 /** Stable key for a debit-card↔bank pairing (order-independent on the masks). */
@@ -4720,9 +4770,10 @@ export const useEPurseStore = create(
        * Refuses group-tagged or LB-linked transactions — those have their own dedicated
        * edit flows (group expense form / LB re-link) that keep their own ledgers in sync.
        */
-      updateTransaction: (txnId, { amount, type, accountId, merchant, categoryId, parentCategory, childCategory, note, createdAt } = {}) => {
+      updateTransaction: (txnId, { amount, type, accountId, merchant, categoryId, parentCategory, childCategory, note, createdAt } = {}, { fromLbEntry = false } = {}) => {
         const old = get().transactions.find((t) => t.id === txnId);
-        if (!old || old.groupId || old.lbLocked) return null;
+        // An LB-booked txn is locked to everyone but its own ledger row (updateLentBorrowedEntry).
+        if (!old || old.groupId || (old.lbLocked && !(fromLbEntry && old.lbBooked))) return null;
 
         const newAmount = Number(amount) || 0;
         if (newAmount <= 0 || newAmount > MAX_ALLOWED_AMOUNT) return null;
@@ -4791,7 +4842,7 @@ export const useEPurseStore = create(
             accounts,
             lentBorrowed: mustClearSplit
               ? s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId)
-              : syncBookedRepayment(s.lentBorrowed, old, updatedTxn),
+              : syncBookedLb(s.lentBorrowed, old, updatedTxn),
           };
         });
 
@@ -5209,6 +5260,57 @@ export const useEPurseStore = create(
        * against a person's existing outstanding balance, use addAlreadySettledLentBorrowed
        * instead — it writes a single settlement-kind row (like re-tagging a transaction).
        */
+      /**
+       * THE way the UI records a ledger entry (LB form, Settle) — Oct-10-26.
+       * entry: { kind: lent|borrowed|lent_settled|borrow_repaid, person, amount, date?,
+       *          note?, phone?, contactId? }; opts.accountId — the account the money moved
+       * through (null/absent = "Not From an Account": ledger-only, e.g. an old loan).
+       * With an account it first LINKS a matching untouched bank transfer (findLbMatch —
+       * the SMS already moved the balance), else books a new transaction (bookLbTxn).
+       * Returns { entryId, linkedTxn } (linkedTxn = the matched txn, for the toast) or null.
+       */
+      recordLbEntry: (entry, opts = {}) => {
+        if (!entry || !LB_ENTRY_KINDS.has(entry.kind)) return null;
+        const amount = Number(entry.amount);
+        if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_ALLOWED_AMOUNT) return null;
+        const s = get();
+        const nowIso = new Date().toISOString();
+        const date = entry.date || nowIso;
+        const row = {
+          id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          kind: entry.kind,
+          person: (entry.person || '').trim(),
+          phone: entry.phone || null,
+          contactId: entry.contactId || null,
+          amount,
+          note: entry.note || null,
+          date,
+          createdAt: nowIso,
+        };
+        const accountId = opts.accountId && s.accounts.some((a) => a.id === opts.accountId) ? opts.accountId : null;
+        if (!accountId) {
+          set({ lentBorrowed: [row, ...s.lentBorrowed] });
+          return { entryId: row.id, linkedTxn: null };
+        }
+        const match = findLbMatch(s, { accountId, kind: entry.kind, amount, dateIso: date });
+        if (match) {
+          set({
+            transactions: s.transactions.map((t) => (t.id === match.id
+              ? { ...t, categoryId: entry.kind, lbLocked: true, userEditedCategory: true }
+              : t)),
+            lentBorrowed: [{ ...row, sourceTxnId: match.id }, ...s.lentBorrowed],
+          });
+          return { entryId: row.id, linkedTxn: match };
+        }
+        const booked = bookLbTxn(s, accountId, entry.kind, amount, row.person, date);
+        set({
+          accounts: booked.accounts,
+          transactions: booked.transactions,
+          lentBorrowed: [{ ...row, sourceTxnId: booked.txnId }, ...s.lentBorrowed],
+        });
+        return { entryId: row.id, linkedTxn: null };
+      },
+
       addLentBorrowed: (entry) =>
         set((s) => {
           if (!entry?.amount || entry.amount <= 0 || entry.amount > MAX_ALLOWED_AMOUNT) return s;
@@ -5237,13 +5339,13 @@ export const useEPurseStore = create(
        *                     account balance the transaction already moved.
        * Everything else came from the LB add form and is the user's own bookkeeping, so it
        * is safe to change — as is a booked Repayment row, whose edits move its expense too
-       * (see bookedRepaymentTxn). Exported so the UI can grey the row instead of failing on tap.
+       * (see bookedLbTxn). Exported so the UI can grey the row instead of failing on tap.
        */
       isLentBorrowedEditable: (entry) =>
-        !!entry && !entry.groupId && (!entry.sourceTxnId || !!bookedRepaymentTxn(get(), entry)),
+        !!entry && !entry.groupId && (!entry.sourceTxnId || !!bookedLbTxn(get(), entry)),
 
-      /** The account a booked Repayment row paid from (its expense's), else null. */
-      lentBorrowedAccountId: (entry) => bookedRepaymentTxn(get(), entry)?.accountId || null,
+      /** The account a booked row's money moved through (its transaction's), else null. */
+      lentBorrowedAccountId: (entry) => bookedLbTxn(get(), entry)?.accountId || null,
 
       /**
        * Edit a MANUAL lent/borrowed row in place. Returns true on success, false if the
@@ -5252,15 +5354,23 @@ export const useEPurseStore = create(
        *
        * A plain row never moved an account — getPersonBalances re-derives every net from
        * the rows on read, so writing the new values is the whole update. A BOOKED Repayment
-       * row (bookedRepaymentTxn) moves its expense too, via updateTransaction (which
+       * row (bookedLbTxn) moves its transaction too, via updateTransaction (which
        * reverses + re-applies the balance and syncs this row's amount/date).
        */
       updateLentBorrowedEntry: (id, patch = {}) => {
         const s = get();
         const old = (s.lentBorrowed || []).find((l) => l.id === id);
         if (!old || old.groupId) return false;
-        const booked = old.sourceTxnId ? bookedRepaymentTxn(s, old) : null;
+        const booked = old.sourceTxnId ? bookedLbTxn(s, old) : null;
         if (old.sourceTxnId && !booked) return false;
+        if (booked && patch.accountId === null) {
+          // "Not From an Account": detach first (deleteTransaction drops rows pointing
+          // at it), remove the transaction — reversing its balance — save ledger-only.
+          set((st) => ({ lentBorrowed: st.lentBorrowed.map((l) => (l.id === id ? { ...l, sourceTxnId: null } : l)) }));
+          get().deleteTransaction(booked.id);
+          const { accountId: _off, ...rest } = patch;
+          return get().updateLentBorrowedEntry(id, rest);
+        }
         if (booked) {
           const ok = get().updateTransaction(booked.id, {
             amount: patch.amount ?? booked.amount,
@@ -5269,7 +5379,7 @@ export const useEPurseStore = create(
             merchant: booked.merchant,
             categoryId: booked.categoryId,
             note: booked.note,
-          });
+          }, { fromLbEntry: true });
           if (!ok) return false;
           if (patch.note !== undefined) {
             set((st) => ({ lentBorrowed: st.lentBorrowed.map((l) => (l.id === id ? { ...l, note: patch.note || null } : l)) }));
@@ -5295,7 +5405,13 @@ export const useEPurseStore = create(
         if (patch.phone     !== undefined) next.phone     = patch.phone || null;
         if (patch.contactId !== undefined) next.contactId = patch.contactId || null;
 
-        set({ lentBorrowed: s.lentBorrowed.map((l) => (l.id === id ? next : l)) });
+        // A ledger-only row put onto an account now books its transaction.
+        const bookNow = patch.accountId ? bookLbTxn(s, patch.accountId, next.kind, next.amount, next.person, next.date) : null;
+        if (bookNow) next.sourceTxnId = bookNow.txnId;
+        set({
+          ...(bookNow ? { accounts: bookNow.accounts, transactions: bookNow.transactions } : {}),
+          lentBorrowed: s.lentBorrowed.map((l) => (l.id === id ? next : l)),
+        });
         return true;
       },
 
@@ -5303,16 +5419,16 @@ export const useEPurseStore = create(
        * Delete a MANUAL lent/borrowed row. Returns true on success. Derived rows are
        * refused — a group row is removed by untagging/deleting its group expense, and a
        * txn-backed row by deleting its transaction, so that the two systems can't drift.
-       * Exception: a booked Repayment row is deleted together WITH its expense.
+       * Exception: a BOOKED row (bookLbTxn) is deleted together WITH its transaction.
        */
       deleteLentBorrowedEntry: (id) => {
         const s = get();
         const old = (s.lentBorrowed || []).find((l) => l.id === id);
         if (!old || old.groupId) return false;
         if (old.sourceTxnId) {
-          // A booked Repayment goes with its expense (deleteTransaction reverses the
-          // balance and drops this row); any other txn-backed row is refused.
-          const booked = bookedRepaymentTxn(s, old);
+          // A booked entry goes with its transaction (deleteTransaction reverses the
+          // balance and drops this row); a row linked to an SMS / split is refused.
+          const booked = bookedLbTxn(s, old);
           if (!booked) return false;
           get().deleteTransaction(booked.id);
           return true;
@@ -5413,32 +5529,16 @@ export const useEPurseStore = create(
       // settles, or borrow settles with no account, stay ledger-only.
       settlePersonBalance: (personKey, opts = {}) => {
         const person = get().getPersonBalances().find((p) => p.personKey === personKey);
-        if (!person || person.net === 0) return;
-        const netAmt = Math.abs(person.net);
-        const isBorrowSettle = person.net < 0;
-        const kind   = isBorrowSettle ? 'borrow_repaid' : 'lent_settled';
-        const now    = new Date().toISOString();
-        const booked = isBorrowSettle
-          ? bookRepaymentExpense(get(), opts.accountId, netAmt, person.person, now)
-          : null;
-        set((s) => ({
-          ...(booked ? { accounts: booked.accounts, transactions: booked.transactions } : {}),
-          lentBorrowed: [
-            {
-              id:        `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-              kind,
-              person:    person.person,
-              phone:     person.phone    || null,
-              contactId: person.contactId || null,
-              amount:    netAmt,
-              note:      'Manual settlement',
-              date:      now,
-              createdAt: new Date().toISOString(),
-              ...(booked ? { sourceTxnId: booked.txnId } : {}),
-            },
-            ...s.lentBorrowed,
-          ],
-        }));
+        if (!person || person.net === 0) return null;
+        // One entry for the full net, through the chosen account — either direction
+        // since Oct-10-26 (a lent settle used to move no account at all).
+        return get().recordLbEntry({
+          kind: person.net < 0 ? 'borrow_repaid' : 'lent_settled',
+          person: person.person,
+          phone: person.phone,
+          contactId: person.contactId,
+          amount: Math.abs(person.net),
+        }, { accountId: opts.accountId });
       },
 
       // ----- SMS sync flags ---------------------------------------------

@@ -22,6 +22,8 @@ import { formatCurrency, formatOutstanding, firstName, titleCaseName } from '../
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import LbEntryForm from '../components/LbEntryForm';
+import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
+import { lbEffectiveKind, lbLinkedLine, lbToastTitle } from '../utils/lbEntryDisplay';
 import InfoIcon from '../components/InfoIcon';
 import InfoSheet from '../components/InfoSheet';
 import Svg, { Path } from 'react-native-svg';
@@ -54,15 +56,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   const all = useEPurseStore((s) => s.lentBorrowed);
   const groups = useEPurseStore((s) => s.groups);
   const accounts = useEPurseStore((s) => s.accounts);
-  const addLentBorrowed      = useEPurseStore((s) => s.addLentBorrowed);
-  const addAlreadySettledLentBorrowed = useEPurseStore((s) => s.addAlreadySettledLentBorrowed);
-  // The LB form has no account field of its own — a borrow-repaid entry that
-  // books a real Repayment expense uses the store's own PRIMARY account
-  // rather than interrupting with a picker (see ensurePrimary in ePurseStore.js).
-  const primaryAccountId = useMemo(
-    () => accounts.find((a) => a.primary && !a.archived)?.id ?? accounts[0]?.id ?? null,
-    [accounts],
-  );
+  const recordLbEntry        = useEPurseStore((s) => s.recordLbEntry);
+  // The form preselects the PRIMARY account (see ensurePrimary in ePurseStore.js).
+  const primaryAccountId = useMemo(() => pickDefaultAccountId(accounts), [accounts]);
   const getPersonBalances    = useEPurseStore((s) => s.getPersonBalances);
   /**
    * The person's signed net (> 0 = they owe you) as it stands NOW — call after the
@@ -83,51 +79,31 @@ const LentBorrowedScreen = ({ route, navigation }) => {
   }, [getPersonBalances]);
 
   /**
-   * Commit a validated entry from LbEntryForm. Validation + field state live in the
-   * form now; this owns only what the STORE should do with the result — including
-   * the one branch that can't just write and finish: an already-repaid BORROW books
-   * a real Repayment expense, so it needs an account before it can commit.
+   * Commit a validated entry from LbEntryForm through the store's recordLbEntry —
+   * it books (or links) the transaction on the form's account. Validation + field
+   * state live in the form.
    */
   const handleAdd = useCallback((entry) => {
-    const { kind: addKind, alreadySettled: settled, ...baseEntry } = entry;
-    const n = baseEntry.amount;
-
-    if (settled) {
-      // A borrow's counterpart (borrow_repaid) is a real expense — the LB form
-      // has no account field of its own, so it books against the PRIMARY
-      // account directly instead of interrupting with a picker.
-      if (addKind === 'borrowed') {
-        addAlreadySettledLentBorrowed({ ...baseEntry, kind: 'borrowed' }, primaryAccountId ? { accountId: primaryAccountId } : undefined);
-        const repaidWho = firstName(baseEntry.person);
-        toast.success(
-          `Repaid ${formatCurrency(n)} to ${repaidWho}`,
-          formatOutstanding(netWithPerson(baseEntry), repaidWho),
-        );
-        return;
-      }
-      addAlreadySettledLentBorrowed({ ...baseEntry, kind: 'lent' });
-      const settledWho = firstName(baseEntry.person);
-      toast.success(
-        `Settled ${formatCurrency(n)} with ${settledWho}`,
-        formatOutstanding(netWithPerson(baseEntry), settledWho),
-      );
-      return;
-    }
-
-    addLentBorrowed({ ...baseEntry, kind: addKind });
+    const { kind: addKind, alreadySettled, accountId, ...baseEntry } = entry;
+    const kind = lbEffectiveKind(addKind, alreadySettled);
+    const res = recordLbEntry({ ...baseEntry, kind }, { accountId });
+    if (!res) return;
     const who = firstName(baseEntry.person);
     const net = netWithPerson(baseEntry);
     toast.success(
-      addKind === 'lent'
-        ? `Lent ${formatCurrency(n)} to ${who}`
-        : `Borrowed ${formatCurrency(n)} from ${who}`,
-      // Only worth a second line when the running total says something the title
-      // doesn't — on a first entry the two are identical.
-      net != null && Math.abs(Math.abs(net) - n) > 0.01
-        ? formatOutstanding(net, who)
-        : undefined,
+      lbToastTitle(kind, baseEntry.amount, who),
+      // Linking an SMS is worth saying; otherwise the running total, only when it
+      // says something the title doesn't (on a first entry the two are identical).
+      res.linkedTxn
+        ? lbLinkedLine(res.linkedTxn)
+        : net != null && Math.abs(Math.abs(net) - baseEntry.amount) > 0.01
+          ? formatOutstanding(net, who)
+          : undefined,
     );
-  }, [addLentBorrowed, addAlreadySettledLentBorrowed, toast, netWithPerson, primaryAccountId]);
+  }, [recordLbEntry, toast, netWithPerson]);
+
+  // Everyone already on the ledger — the form suggests them as you type a name.
+  const ledgerPeople = useMemo(() => getPersonBalances(), [getPersonBalances, all]);
 
   // Per-person balances for BOTH panels (both scenes are mounted by the pager).
   // lent panel shows net > 0, borrowed panel shows net < 0. Also include
@@ -290,6 +266,9 @@ const LentBorrowedScreen = ({ route, navigation }) => {
     <LbEntryForm
       // `kind` comes from the panel, so no direction selector here.
       kind={k}
+      people={ledgerPeople}
+      accounts={accounts}
+      defaultAccountId={primaryAccountId}
       onSubmit={handleAdd}
       theme={theme}
       submitOutlined

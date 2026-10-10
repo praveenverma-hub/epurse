@@ -5,7 +5,7 @@
 // title didn't (the kind, unless the title already is the kind) plus the date.
 // =============================================================================
 import { ENTRY_LABEL } from '../constants/lbEntries';
-import { formatDate } from './format';
+import { formatCurrency, formatDate } from './format';
 
 export interface LbDisplayEntry {
   id: string;
@@ -47,9 +47,12 @@ export function lbEntryMeta(e: LbDisplayEntry): string {
   return lbEntryTitle(e) === kindLabel(e) ? date : `${kindLabel(e)} · ${date}`;
 }
 
+/** Lent / Repaid = your money leaving an account; Borrowed / Received back = arriving. */
+export const lbMoneyOut = (kind: string) => kind === 'lent' || kind === 'borrow_repaid';
+
 export function lbEntryTone(e: LbDisplayEntry): LbEntryTone {
   if (e.isGroupLine) return e.kind === 'lent' ? 'lent' : 'borrowed';
-  return e.kind === 'lent' || e.kind === 'borrow_repaid' ? 'outflow' : 'plain';
+  return lbMoneyOut(e.kind) ? 'outflow' : 'plain';
 }
 
 /** Sign follows literal cash direction (+ arriving, − leaving); a group line follows its net. */
@@ -61,3 +64,29 @@ export function lbEntrySign(e: LbDisplayEntry): '+' | '−' {
 export type LbEntrySource = 'manual' | 'txn' | 'group';
 export const lbEntrySource = (e: LbDisplayEntry): LbEntrySource =>
   e.isGroupLine || e.groupId ? 'group' : e.sourceTxnId ? 'txn' : 'manual';
+
+// ── Recording an entry (LB form, Settle) ─────────────────────────────────────
+
+/** The form's direction + "already settled" tick → the ledger kind it records. */
+export const lbEffectiveKind = (kind: 'lent' | 'borrowed', alreadySettled: boolean) =>
+  alreadySettled ? (kind === 'lent' ? 'lent_settled' : 'borrow_repaid') : kind;
+
+/** The account field's label, by which way the money went. */
+export const lbAccountFieldLabel = (kind: string) => (lbMoneyOut(kind) ? 'Paid From' : 'Received In');
+
+/** The account choice for a ledger-only entry (an old loan, untracked cash). */
+export const LB_NO_ACCOUNT = 'Not From an Account';
+
+export function lbToastTitle(kind: string, amount: number, who: string): string {
+  const amt = formatCurrency(amount);
+  switch (kind) {
+    case 'lent': return `Lent ${amt} to ${who}`;
+    case 'borrowed': return `Borrowed ${amt} from ${who}`;
+    case 'lent_settled': return `Settled ${amt} with ${who}`;
+    default: return `Repaid ${amt} to ${who}`;
+  }
+}
+
+/** Toast line when recordLbEntry linked an existing bank transfer instead of booking one. */
+export const lbLinkedLine = (txn: { amount: number; createdAt?: string }) =>
+  `Linked to your ${formatCurrency(txn.amount)} transfer of ${formatDate(txn.createdAt || '')}`;
