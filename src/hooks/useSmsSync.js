@@ -32,6 +32,7 @@
 // =============================================================================
 
 import { useEffect, useRef, useCallback } from 'react';
+import { useStoreHydrated } from './useStoreHydrated';
 import { Platform, AppState } from 'react-native';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -181,6 +182,7 @@ export async function syncNow() {
 }
 
 export function useSmsSync() {
+  const hydrated          = useStoreHydrated();
   const permissionGranted = useEPurseStore((s) => s.smsPermissionGranted);
   const enabled           = useEPurseStore((s) => s.smsAutoImport);
   const ingestMessage     = useEPurseStore((s) => s.ingestMessage);
@@ -241,6 +243,9 @@ export function useSmsSync() {
 
   // ── Mount / permission change ─────────────────────────────────────────────
   useEffect(() => {
+    // Before the store loads, smsPermissionGranted is its default (false): starting now
+    // would settle the "first sweep" signal as no-permission before any SMS was read.
+    if (!hydrated) return undefined;
     let cancelled = false;
 
     const safeStart = () => {
@@ -261,5 +266,5 @@ export function useSmsSync() {
       stop();
       sub.remove();
     };
-  }, [permissionGranted, enabled]); // intentionally exclude start/stop — they're stable callbacks
+  }, [hydrated, permissionGranted, enabled]); // intentionally exclude start/stop — they're stable callbacks
 }

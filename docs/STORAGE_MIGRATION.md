@@ -101,6 +101,24 @@ the partialized state **object**, so nothing is stringified up front.
 4. MMKV keys are written synchronously as they change. They aren't coupled to the ledger, so no
    atomicity is needed.
 
+**One connection — never `withExclusiveTransactionAsync`** (found on the emulator, Oct-11-26). It
+opens a SECOND native connection (`useNewConnection: true`) that never receives the SQLCipher
+`PRAGMA key`, so to it the file is random bytes: every write failed, the WAL stayed 0 bytes,
+hydration never finished, and every `AppModal` (which renders null until hydrated) was invisible —
+onboarding's Continue appeared to do nothing. `expoSqlDriver` now runs `BEGIN IMMEDIATE`/`COMMIT`/
+`ROLLBACK` on the keyed connection behind its own queue; `test:storage` source-guards it. Node can't
+reproduce this (better-sqlite3 has no SQLCipher and no second connection).
+
+**Hydration is slower now, so boot code must not race it.** `AuthSessionBoot` set `googleAccount`/
+`isLoggedIn` before hydration finished; hydration then REPLACED `googleAccount` with the stored copy
+(isLoggedIn isn't stored) → "Signed in as …" with isLoggedIn false, no sign-in button, LoginGate
+impassable. It now waits for `persist.onFinishHydration` before applying its answer. Anything that
+`set`s persisted keys at boot must do the same. Same family, also fixed: `AppNavigator` read
+`hasOnboarded` once at mount (default false) → relaunch opened Onboarding under LoginGate — now
+mounted only after hydration (`HydratedNavigator`, App.js); `useSmsSync` and `CompactionBoot` wait
+for hydration (an early sweep settled the first-sweep signal as "no permission"); `appStorage.getItem`
+never throws (a throw left zustand never hydrated → stuck splash) and blocks saves after a failed load.
+
 **Pre-hydration writes are dropped.** `persist` calls `setItem` after every `set`, including any
 `set` that lands while `getItem` is still loading, and at that moment the state is the INITIAL
 defaults. Writing it would overwrite stored data. `setItem` is a no-op until `getItem` has finished

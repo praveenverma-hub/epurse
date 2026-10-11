@@ -42,6 +42,7 @@ let backend: Backend | null = null;
 let hybrid: HybridStorage | null = null;
 let records: RecordStore | null = null;
 let ready: Promise<void> | null = null;
+let loadFailed = false;
 let recovery: StorageRecovery | null = null;
 
 /** Set when this phone's data couldn't be unlocked and was set aside (see init). */
@@ -135,9 +136,22 @@ const ensure = (name: string) => (ready ??= init(name).catch((e) => {
 
 export function createAppStorage() {
   return {
-    getItem: async (name: string) => { await ensure(name); return backend!.getItem(name); },
+    getItem: async (name: string) => {
+      await ensure(name);
+      try {
+        return await backend!.getItem(name);
+      } catch (e) {
+        // A throw here would leave zustand never "hydrated" — the app stuck on the
+        // splash for good. Start empty instead; saves stay blocked (the storage never
+        // finished loading), so nothing stored is overwritten.
+        report('load-failed', { mode, message: msg(e) });
+        loadFailed = true;
+        return null;
+      }
+    },
     // Before the backend is chosen this is the pre-hydration default state — drop it.
-    setItem: (name: string, value: any) => { if (backend) return backend.setItem(name, value); },
+    // After a failed load the store holds defaults: never save them over the real data.
+    setItem: (name: string, value: any) => { if (backend && !loadFailed) return backend.setItem(name, value); },
     removeItem: async (name: string) => { await ensure(name); return backend!.removeItem(name); },
   };
 }
