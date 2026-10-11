@@ -47,7 +47,7 @@ import { colors, radius, readableOn, spacing, typography, shadows, pinnedHeaderC
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
 import { STATIC_CONFIG } from '../config/staticConfig';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatCompact } from '../utils/format';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { syncNow } from '../hooks/useSmsSync';
@@ -57,7 +57,7 @@ import { TAB_BAR_HEIGHT, tabBarClearance } from '../context/TabBarVisibilityCont
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import { BudgetSummary } from '../components/BudgetSummary';
-import GoalsSummary from '../components/GoalsSummary';
+import GoalsStrip from '../components/GoalsStrip';
 import WeeklyRecapModal from '../components/WeeklyRecapModal';
 import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
@@ -375,6 +375,14 @@ const DashboardScreen = ({ navigation }) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goals, goalPlan, goalContributions, goalHistory, transactions, groups, getGoalLifetimeSaved]);
+
+  const txnSubtitle = useMemo(() => {
+    const { count, recent, biggest } = periodStats;
+    if (recent.length === 0) return undefined;
+    const countText = `${count} ${count === 1 ? 'transaction' : 'transactions'}`;
+    if (!biggest || count < 2) return countText;
+    return `${countText} · biggest ${formatCompact(biggest.amount)}${biggest.merchant ? ` at ${biggest.merchant}` : ''}`;
+  }, [periodStats]);
 
   const homeCards = useMemo(
     () => buildHomeCards(
@@ -821,21 +829,26 @@ const DashboardScreen = ({ navigation }) => {
 
           {/* Monthly budget — empty CTA or active progress */}
           <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
-
-          {/* Self-hides without an active goal. */}
-          <GoalsSummary onPress={() => navigation.navigate('Goals')} />
         </View>
 
         {/* Weekly spend recap is no longer an inline card — it appears once, after
             a week ends, as a centered modal (WeeklyRecapModal below). */}
 
         {/* ═══ "ACTIVITY" group ═══
-            The day's review and the period's transactions are the same subject.
-            `DailyQueueStack` self-hides when empty, but the transaction section
+            The day's review, goal progress and the period's transactions.
+            The queue and goals self-hide when empty, but the transaction section
             always renders, so this wrapper always has content. */}
         <View style={styles.group}>
           {/* Daily review queue — appears only when unreviewed SMS transactions exist */}
           <DailyQueueStack />
+
+          {/* Below the queue (the day's one action, hidden when empty) — goals
+              change slowly and the carousel's goal_pace carries the urgency.
+              Self-hides without an active goal. */}
+          <GoalsStrip
+            onOpenGoal={(goalId) => navigation.navigate('GoalDetail', { goalId })}
+            onViewAll={() => navigation.navigate('Goals')}
+          />
 
           {/* Period transactions — wrapped as ONE section so the row list keeps its
               own tight spacing while the group `gap` spaces the sections evenly. */}
@@ -843,20 +856,19 @@ const DashboardScreen = ({ navigation }) => {
             <SectionHeader
               icon="receipt-outline"
               accentColor={theme.primary}
-              style={styles.recentHeader}
-              // A node title, not a string: the count keeps its own muted style
-              // rather than inheriting the h3 weight.
-              title={<>
-                Transactions · {txnSectionLabel}
-                <Text style={styles.txnCount}> ({periodStats.count})</Text>
-              </>}
-              a11yTitle={`Transactions, ${txnSectionLabel}`}
-              // Nothing to view when the period is empty (e.g. a freshly onboarded user).
-              right={periodStats.recent.length > 0 ? (
-                <TouchableOpacity onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}>
+              title={`Transactions · ${txnSectionLabel}`}
+              // The period's biggest spend — the one thing Home shows nowhere else.
+              // An empty period gets no subtitle: the empty state below says it.
+              subtitle={txnSubtitle}
+              subtitleRight={periodStats.recent.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('Transactions', { initialPeriod: period })}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <Text style={[styles.viewAll, { color: theme.primary }]}>View all</Text>
                 </TouchableOpacity>
               ) : null}
+              style={periodStats.recent.length === 0 && styles.recentHeader}
             />
 
             {periodStats.recent.length === 0 ? (
@@ -1302,17 +1314,11 @@ const styles = StyleSheet.create({
   // at least one always-rendered section (see the JSX comments).
   group: { gap: spacing.lg },
 
-  txnCount: { ...typography.small, color: colors.textSecondary, fontWeight: '400' },
 
   // Recent
   txnSection: {},
-  recentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    // No marginTop — the parent `gap` spaces this section from the queue above.
-    marginBottom: spacing.sm,
-  },
+  // Only for an empty period (no subtitle, whose own margin spaces the list).
+  recentHeader: { marginBottom: spacing.sm },
   viewAll: { ...typography.small, color: colors.primary, fontWeight: '700' },
   // `compact` EmptyState is intentionally short (it's built to sit inside a card),
   // which on Home leaves the whole page barely taller than the header. Reserve the

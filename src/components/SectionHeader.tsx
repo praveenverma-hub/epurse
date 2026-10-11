@@ -35,10 +35,9 @@ type Props = {
   /** Ionicons name. Reuse the type's canonical icon (ui-consistency §5). */
   icon: React.ComponentProps<typeof Ionicons>['name'];
   /**
-   * Usually a string. A ReactNode is allowed for the one real case in the app —
-   * a title carrying a differently-styled inline count ("Transactions (12)") —
-   * so that screen can share this component instead of keeping its own copy.
-   * Pass `a11yTitle` alongside it when `onInfo` is set.
+   * Usually a string. A ReactNode is allowed for mixed styling; no caller uses
+   * one since Home's count moved to its subtitle (Oct-11-26). Pass `a11yTitle`
+   * alongside it when `onInfo` is set.
    */
   title: React.ReactNode;
   /** Plain-text title for accessibility when `title` is a node. */
@@ -57,6 +56,11 @@ type Props = {
    */
   right?: React.ReactNode;
   /**
+   * Trailing slot on the SUBTITLE row — a "View all" sitting beside the line it
+   * qualifies ("Latest 10 of 42 · View all"), rather than up on the title row.
+   */
+  subtitleRight?: React.ReactNode;
+  /**
    * `md` (default) — the canonical `h3` tier used everywhere. `sm` steps the
    * title down to `bodyBold` (15/600, same weight, 2px smaller) for a card
    * whose title reads as a full sentence rather than a short label, where h3
@@ -67,7 +71,7 @@ type Props = {
 };
 
 const SectionHeader = ({
-  icon, title, a11yTitle, subtitle, accentColor, onInfo, right, size = 'md', style,
+  icon, title, a11yTitle, subtitle, accentColor, onInfo, right, subtitleRight, size = 'md', style,
 }: Props) => (
   <View style={style}>
     <View style={styles.row}>
@@ -75,7 +79,7 @@ const SectionHeader = ({
       {/* flex + numberOfLines so a long title can't push the trailing slot off-row. */}
       {/* Every heading is Title Case (ui-consistency rule) — enforced HERE so a new
           card's title doesn't depend on the caller remembering. A ReactNode title
-          (DashboardScreen's count-suffixed one) passes through untouched. */}
+          passes through untouched. */}
       <Text style={[styles.title, size === 'sm' && styles.titleSm]} numberOfLines={1}>
         {typeof title === 'string' ? titleCaseLabel(title) : title}
       </Text>
@@ -91,7 +95,14 @@ const SectionHeader = ({
       ) : null}
       {right}
     </View>
-    {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+    {subtitleRight ? (
+      <View style={styles.subRow}>
+        <Text style={[styles.subtitle, styles.subtitleInRow]} numberOfLines={1}>{subtitle}</Text>
+        {subtitleRight}
+      </View>
+    ) : subtitle ? (
+      <Text style={styles.subtitle}>{subtitle}</Text>
+    ) : null}
   </View>
 );
 
@@ -108,6 +119,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: spacing.md,
   },
+  // The row takes over the subtitle's own margins so the spacing is unchanged.
+  subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2, marginBottom: spacing.md },
+  subtitleInRow: { flex: 1, marginTop: 0, marginBottom: 0 },
 });
 
 export default SectionHeader;
