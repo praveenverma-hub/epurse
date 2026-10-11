@@ -78,6 +78,15 @@ export const PROMO_CARDS = [
     target: ['Insights', { defaultTab: 'budget' }],
   },
   {
+    id: 'promo_goals',
+    icon: 'flag-outline',
+    eyebrow: 'Plan ahead',
+    title: 'Set money aside,\nwatch it grow',
+    body: 'Goals fill themselves from the spends you choose.',
+    cta: 'Start a goal',
+    target: ['Goals'],
+  },
+  {
     id: 'promo_backup',
     icon: 'shield-checkmark-outline',
     eyebrow: 'Private by design',
@@ -272,6 +281,43 @@ const weekCard = (week) => {
   };
 };
 
+/**
+ * The goal furthest behind this month's plan, from nudgeFacts' `goalsBehindPlan`
+ * — the same rule the scheduled push uses, so the two can't disagree.
+ */
+const goalPaceCard = (goalsBehind) => {
+  const g = (goalsBehind || [])[0];
+  if (!g || !(g.shortfall > 0)) return null;
+  return {
+    id: 'goal_pace',
+    tier: TIER.MOMENT,
+    tone: TONE.ACCENT,
+    icon: 'flag-outline',
+    eyebrow: 'Goal this month',
+    title: `${formatCompact(g.shortfall)} to go`,
+    body: `${g.name}: ${formatCompact(g.funded)} of ${formatCompact(g.planned)} set aside.`,
+    cta: 'Open goal',
+    target: ['GoalDetail', { goalId: g.id }],
+  };
+};
+
+/** A one-time goal at ≥ 90% of its target (`goalsNearTarget`). */
+const goalNearCard = (goalsNear) => {
+  const g = (goalsNear || [])[0];
+  if (!g || !(g.remaining > 0)) return null;
+  return {
+    id: 'goal_near',
+    tier: TIER.INSIGHT,
+    tone: TONE.SUCCESS,
+    icon: 'trophy-outline',
+    eyebrow: 'Almost there',
+    title: `${formatCompact(g.remaining)} to go`,
+    body: `${g.name} is ${Math.floor((g.saved / g.target) * 100)}% of the way to ${formatCompact(g.target)}.`,
+    cta: 'Open goal',
+    target: ['GoalDetail', { goalId: g.id }],
+  };
+};
+
 /** Where the money actually went this month. */
 const topCategoryCard = (topCategory) => {
   if (!topCategory || !(topCategory.total > 0)) return null;
@@ -370,6 +416,8 @@ export function buildHomeCards(facts = {}, promos = [], limit = HOME_CARD_LIMIT)
     ccBillCard(facts.ccBills, facts.now),
     budgetCard(facts.budget),
     weekCard(facts.week),
+    goalPaceCard(facts.goalsBehind),
+    goalNearCard(facts.goalsNear),
     topCategoryCard(facts.topCategory),
     subscriptionsCard(facts.subscriptions),
     subscriptionHikeCard(facts.subscriptions),
@@ -387,7 +435,9 @@ export function buildHomeCards(facts = {}, promos = [], limit = HOME_CARD_LIMIT)
 
   // Backfill with promos — the empty state. Tagged with the PROMO tier so the
   // carousel (and any test) can tell education from live data.
+  // The goals promo is for people without goals — it's an introduction.
   const fillers = (promos || [])
+    .filter((p) => !(p.id === 'promo_goals' && facts.hasGoals))
     .map((p) => ({ tone: TONE.ACCENT, ...p, tier: TIER.PROMO }))
     .slice(0, limit - live.length);
 

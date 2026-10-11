@@ -16,6 +16,7 @@
 // hand-off in both directions is tested too.
 // =============================================================================
 import { buildHomeCards, HOME_CARD_LIMIT, PROMO_CARDS, TIER } from '../../analytics/homeCards.js';
+import { formatCompact } from '../../utils/format.js';
 import { CARD_BODY_MAX_CHARS, CARD_TITLE_MAX_CHARS_PER_LINE } from '../../constants/carousel.js';
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m' };
@@ -37,6 +38,8 @@ const SUBS_HIKED   = [{ merchant: 'Netflix', amount: 649, priceHike: true, hikeF
 const TOP_CAT      = { name: 'Food & Dining', emoji: '🍔', total: 8200, percent: 42 };
 const WEEK         = { total: 4300, dailyAvg: 614, daysElapsed: 7 };
 const UNCAT        = { amount: 5600, count: 4 };
+const GOAL_BEHIND_LONG = { id: 'gb', name: 'Emergency Fund 2026', planned: 125000, funded: 25000, shortfall: 100000 };
+const GOAL_NEAR_LONG   = { id: 'gn', name: 'MacBook Pro Upgrade', target: 250000, saved: 240000, remaining: 10000 };
 
 // ── Nothing is invented from nothing ────────────────────────────────────────
 console.log('\n── a card needs real data ──');
@@ -279,6 +282,7 @@ console.log('\n── copy fits the card ──');
       subscriptions: SUBS_HIKED, uncategorised: UNCAT,
       ccBills: { h: { amount: 12400, cardLast4: '4021', bankName: 'HDFC Bank', dueDate: '13-Aug-26' } },
       now: new Date(2026, 7, 10).getTime(),
+      goalsBehind: [GOAL_BEHIND_LONG], goalsNear: [GOAL_NEAR_LONG],
     },
     PROMO_CARDS, 20,
   );
@@ -312,6 +316,25 @@ console.log('\n── copy fits the card ──');
   check('every CTA stays short enough for one line', longCtas.length === 0, longCtas.join(', '));
   const longEyebrows = variants.filter((c) => c.eyebrow.length > 18).map((c) => `${c.id} (${c.eyebrow.length})`);
   check('every eyebrow stays short (it is UPPERCASED, so it grows)', longEyebrows.length === 0, longEyebrows.join(', '));
+}
+
+// ── Goals (Oct-11-26) ───────────────────────────────────────────────────────
+console.log('\n── goals ──');
+{
+  const behind = { id: 'g1', name: 'Holiday', planned: 6000, funded: 2000, shortfall: 4000 };
+  const near = { id: 'g2', name: 'Laptop', target: 80000, saved: 74000, remaining: 6000 };
+  let c = buildHomeCards({ goalsBehind: [behind] }, []);
+  check('a goal behind plan → goal_pace, opening that goal', c[0]?.id === 'goal_pace' && c[0].target[0] === 'GoalDetail' && c[0].target[1].goalId === 'g1', JSON.stringify(c[0]));
+  check('…titled by the shortfall', c[0]?.title === `${formatCompact(4000)} to go`);
+  c = buildHomeCards({ goalsNear: [near] }, []);
+  check('a goal ≥ 90% → goal_near with its percentage', c[0]?.id === 'goal_near' && /92%/.test(c[0].body), c[0]?.body);
+  check('no goal facts → no goal cards', !ids(buildHomeCards({ goalsBehind: [], goalsNear: null }, [])).some((i) => i.startsWith('goal_')));
+  c = buildHomeCards({ budget: OVER_BUDGET, week: WEEK, goalsBehind: [behind], goalsNear: [near], topCategory: TOP_CAT }, [], 10);
+  check('goal_pace ranks with the moments (after urgent, after the week card)',
+    ids(c).indexOf('budget_over') < ids(c).indexOf('goal_pace') && ids(c).indexOf('week_pace') < ids(c).indexOf('goal_pace'), ids(c).join());
+  check('goal_near ranks with the insights', c.find((x) => x.id === 'goal_near')?.tier === TIER.INSIGHT);
+  check('the goals promo shows for someone with no goals', ids(buildHomeCards({}, PROMO_CARDS, 10)).includes('promo_goals'));
+  check('…and never for someone who has goals', !ids(buildHomeCards({ hasGoals: true }, PROMO_CARDS, 10)).includes('promo_goals'));
 }
 
 // ── Defensive: selectors do return junk sometimes ───────────────────────────

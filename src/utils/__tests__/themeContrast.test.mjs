@@ -763,6 +763,7 @@ console.log('\n── gradients stay dark enough for white ──');
     'components/LentBorrowedWidget.js',
     'components/MonthlyRecapCard.tsx',
     'components/BudgetSummary.tsx',
+    'components/GoalsSummary.tsx',
     'components/DailyQueueStack.js',
     'components/TransactionItem.js',
   ];
