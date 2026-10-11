@@ -43,11 +43,9 @@ export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const BACKUP_FILE_PREFIX = 'epurse-backup';
 export const BACKUP_MIME = 'application/octet-stream';
 
-/**
- * How many backups to keep. Older ones are pruned after a successful upload, so
- * a corrupted or wrongly-passworded recent backup isn't the only copy left.
- */
-export const KEEP_BACKUPS = 5;
+// How many backups to keep (older ones pruned after a successful upload, so a corrupted or
+// wrongly-passworded recent backup isn't the only copy left) lives in constants/retention.ts.
+export { KEEP_BACKUPS } from '../constants/retention';
 
 export const isBackupConfigured = (): boolean =>
   !!GOOGLE_ANDROID_CLIENT_ID && !GOOGLE_ANDROID_CLIENT_ID.startsWith('REPLACE_ME');

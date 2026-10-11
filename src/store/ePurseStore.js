@@ -73,6 +73,11 @@ import {
 // disagreed with this one, which is how spend went missing from a card's ledger.
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
 import { limitPairKey } from '../utils/cardLimit';
+import {
+  DAY_MS, RAW_RETENTION_MS, AGG_RETENTION_MS, LB_SETTLED_RETENTION_MS, COMPACT_THROTTLE,
+  GROUP_INACTIVE_PRUNE_MS, CC_PROMPT_MAX_AGE_MS, RAW_SMS_RETENTION_MS, PAYMENT_HISTORY_CAP,
+  SUPPRESS_SMS_CAP, ONBOARDING_QUEUE_LIMIT,
+} from '../constants/retention';
 import { isSameMonth, monthKey, formatCurrency } from '../utils/format';
 import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt } from '../utils/notifications';
 import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSchedule';
@@ -104,20 +109,13 @@ import {
 // =============================================================================
 // Constants
 // =============================================================================
-const DAY_MS = 24 * 60 * 60 * 1000;
-const RAW_RETENTION_MS  = 90  * DAY_MS;  // 3 months of raw transactions
-const AGG_RETENTION_MS  = 730 * DAY_MS;  // 24 months of aggregates
-const COMPACT_THROTTLE  = 6   * 60 * 60 * 1000; // run at most every 6 hrs
 const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill'];
 
 /** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
 /** Settled categories — same; kept raw ≤ 2 yr then dropped, never merged into monthly aggregates. */
 const LB_SETTLED_CATS = new Set(['lent_settled', 'borrow_repaid']);
-// 2 years (was 1): a settled IOU is the receipt for a debt and people look those up
-// long after the fact. Matches AGG_RETENTION_MS, so the ledger reaches as far back as
-// the monthly aggregates do. Measured from `recordedAt`, never the backdatable `date`.
-const LB_SETTLED_RETENTION_MS = 730 * DAY_MS;
+// Settled-IOU retention (2 yr) lives in constants/retention.ts. Measured from `recordedAt`, never the backdatable `date`.
 /**
  * When a lentBorrowed row was RECORDED, for retention/recency decisions.
  *
@@ -135,12 +133,6 @@ const recordedAt = (l) => {
   return Number.isNaN(t) ? Infinity : t;
 };
 
-/** Groups untouched this long AND fully settled are auto-removed (debts, if any, keep them alive). */
-const GROUP_INACTIVE_PRUNE_MS = 180 * DAY_MS;
-
-/** CC-payment prompts only fire for recent payments; older swept SMS are ignored
- *  outright (never prompted, never filed) so ccHandledSmsIds can't balloon. */
-const CC_PROMPT_MAX_AGE_MS = 5 * DAY_MS;
 const CC_REVIEW_NOTIFICATION_KEY = 'pending:cc_payment_review';
 
 const syncCcReviewNotification = (queue = []) => {
@@ -160,8 +152,6 @@ const syncCcReviewNotification = (queue = []) => {
     meta: { count },
   });
 };
-// TODO: remove RAW_SMS_RETENTION_MS + rawSms/rawSender fields before production — preview-only debug data
-const RAW_SMS_RETENTION_MS = 3 * DAY_MS;
 
 /**
  * Key for the `ccBills` map — one outstanding bill per card.
@@ -382,14 +372,12 @@ const applyCcCycleInfoToAccount = (accounts, {
 
 /** Push a settled-payment entry onto a card's history, newest last, capped so
  *  the array can't grow unbounded across years of statements. */
-const PAYMENT_HISTORY_CAP = 24;
 const appendPaymentHistory = (history, entry) => {
   const next = [...(history || []), entry];
   return next.length > PAYMENT_HISTORY_CAP ? next.slice(-PAYMENT_HISTORY_CAP) : next;
 };
 
 /** SMS `_id` strings we must never re-ingest (user deleted / ignored the txn). */
-const SUPPRESS_SMS_CAP = 2500;
 
 const appendSuppressedSmsIds = (existing = [], additions = []) => {
   const seen = new Set(existing);
@@ -2716,7 +2704,7 @@ export const useEPurseStore = create(
       // Called once at the end of the onboarding inbox sweep.
       // Keeps only `limit` newest unreviewed SMS in the queue so a brand-new
       // user isn't overwhelmed by dozens of cards on first open.
-      capOnboardingQueue: (limit = 5) =>
+      capOnboardingQueue: (limit = ONBOARDING_QUEUE_LIMIT) =>
         set((s) => {
           const unreviewed = s.transactions
             .filter((t) => t.source === 'sms' && !t.isIgnored && !t.isReviewed)
