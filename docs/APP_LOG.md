@@ -2451,6 +2451,10 @@ off are DONE (see Backup).
   Auto Backup OFF** (`android.allowBackup: false`, `test:drive`) — Expo's default `true` let Android's
   cloud backup copy the whole store without the user enabling ePurse backup. Needs a rebuild.
 
+- **Oct-11-26 storage Step 0, PRs 1–2** (`docs/STORAGE_MIGRATION.md`): MMKV + nitro + expo-sqlite
+  (SQLCipher) installed; `src/storage/` keys, schema, SQL/memory `RecordStore`; `test:storage` 31.
+  Not wired into the app yet.
+
 **Open**
 - **Untested against a real Google account** — phases 1-6 (manual backup+restore,
   onboarding restore) are done and unit-tested, but nobody has run a real sign-in +
