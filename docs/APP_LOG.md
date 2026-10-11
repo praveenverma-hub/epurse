@@ -2041,6 +2041,16 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 
 ## Analytics & Insights / Home
 
+**Open — long-range stats audit (Oct-11-26, not fixed yet)**
+- Raw-first getters (`getMonthlySpend`/`getMonthlyIncome`/`getCategoryBreakdown`, `selectMonthlyReport`
+  `hasRaw`) ignore the month's aggregate if ANY raw row survives → the month crossing the 90-day
+  line shows only its un-compacted days; old months with a kept-raw `borrow_repaid`/`lent` row show
+  ~only that row.
+- `compactTransactions` keeps `lent`/`borrowed` LB rows forever but prunes `lent_settled`/`borrow_repaid`
+  after 2 yr → `getPersonBalances` resurrects settled debts.
+- Raw-only features go blank past 90 days: GhostLineChart, HabitLeakMatrix, per-account spend, group
+  totals/6-month chart, recap daily/merchant sections, account balance trend months 4–6.
+
 **Done**
 - Behavioral Insights (GhostLineChart, HabitLeakMatrix, SubscriptionHeartbeat).
 - Refund/expense model: Spent = expenses − refunds, Received = non-refund credits, with a
@@ -2421,6 +2431,13 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   TextEncoder/Buffer/atob dependency).
 - **Sep-14-26: FAQ section** (shared `FaqAccordion`) — encryption safety, lost-phone restore,
   forgotten-password recovery, raw SMS never uploaded. Second adopter after Shop.
+- **Oct-11-26 completeness audit** — fixed: (1) `REWARD_KEYS` named fields the reward store
+  doesn't have (`coins`/`streak`…), so EVERY backup carried no RP/EPC/Aware Run/widgets (test
+  seeded the same fake shape); (2) an older-version backup skipped store migrations →
+  `migrateRestoredState` runs the store's `migrate`; (3) custom-category maps not rebuilt after
+  restore → `refreshCategoryMaps`; (4) `preOnboarding` added to `TXN_FIELDS`; (5) notify
+  dedup guards (`subscriptionHikesNotified`, `ccCycleHeadsUpNotified`, `lastMidmonthNudgeMonth`)
+  now backed up. Every persisted key is now test-asserted as backed-up or `STORE_KEYS_EXCLUDED`.
 
 **Open**
 - **Untested against a real Google account** — phases 1-6 (manual backup+restore,

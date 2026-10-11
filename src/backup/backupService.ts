@@ -19,7 +19,7 @@ function assertRealData() {
 import { useEPurseStore } from '../store/ePurseStore';
 import { useRewardStore } from '../store/useRewardStore';
 
-import { buildBackupPayload, readBackupPayload } from './payload';
+import { buildBackupPayload, readBackupPayload, migrateRestoredState } from './payload';
 import { sealBackup, openBackup, BackupError, toKeyMaterial, type BackupMeta } from './envelope';
 import { randomBytes } from './random';
 import { getAccessToken } from './googleAuth';
@@ -90,6 +90,7 @@ export async function runBackup(password: string, onProgress?: BackupProgress): 
 }
 
 // ── Restore ──────────────────────────────────────────────────────────────────
+
 export const listRemoteBackups = () => listBackups(deps());
 export const removeRemoteBackup = (fileId: string) => deleteBackup(deps(), fileId);
 
@@ -115,7 +116,10 @@ export async function fetchAndDecrypt(fileId: string, password: string, onProgre
       'This backup came from a newer version of ePurse. Update the app, then restore.',
     );
   }
-  return { payload: readBackupPayload(payload as any), meta };
+  const read = readBackupPayload(payload as any);
+  const { migrate } = useEPurseStore.persist.getOptions();
+  const epurse = migrateRestoredState(read.epurse, meta.storeVersion, STORE_VERSION, migrate);
+  return { payload: { ...read, epurse }, meta };
 }
 
 /**
@@ -138,6 +142,7 @@ export async function applyRestore(
   await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ at: Date.now(), snapshot }));
 
   useEPurseStore.setState(decrypted.epurse as any);
+  useEPurseStore.getState().refreshCategoryMaps();
   if (decrypted.rewards && Object.keys(decrypted.rewards).length) {
     useRewardStore.setState(decrypted.rewards as any);
   }
@@ -159,6 +164,7 @@ export async function undoRestore(): Promise<boolean> {
     const { snapshot } = JSON.parse(raw);
     const { epurse, rewards } = readBackupPayload(snapshot);
     useEPurseStore.setState(epurse as any);
+    useEPurseStore.getState().refreshCategoryMaps();
     if (rewards && Object.keys(rewards).length) useRewardStore.setState(rewards as any);
     await AsyncStorage.removeItem(SNAPSHOT_KEY);
     return true;
