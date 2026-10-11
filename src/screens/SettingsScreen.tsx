@@ -41,6 +41,7 @@ import { CHANNELS, pushEnabled } from '../constants/notificationPolicy';
 import type { NotificationKind } from '../constants/notificationPolicy';
 import { getNotificationPermission } from '../utils/notifications';
 import { Storage } from '../utils/storage';
+import { flushAppStorage } from '../storage/appStorage';
 import { spacing } from '../constants/theme';
 import { THEMES } from '../constants/themes';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
@@ -109,6 +110,8 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
     setConfirmDelete(false);
     await deleteAccount();
     deleteAllUserData();
+    // The emptied store must reach SQLite now, not after the coalescing window.
+    await flushAppStorage();
     await Storage.wipeEverything();
   };
 
