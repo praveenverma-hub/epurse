@@ -22,6 +22,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '../dev/mockStorage';
+import { NOTIFICATION_MAX_AGE_MS, NOTIFICATION_MAX_ENTRIES } from '../constants/retention';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -75,8 +76,6 @@ interface State {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const FIFTEEN_DAYS_MS = 15 * 24 * 60 * 60 * 1000;
-const MAX_ENTRIES     = 80;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -84,7 +83,7 @@ const newId = (): string =>
   `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 const dropStale = (entries: NotificationEntry[]): NotificationEntry[] => {
-  const cutoff = Date.now() - FIFTEEN_DAYS_MS;
+  const cutoff = Date.now() - NOTIFICATION_MAX_AGE_MS;
   return entries.filter((e) => e.createdAt >= cutoff);
 };
 
@@ -108,7 +107,7 @@ export const useNotificationStore = create<State>()(
         };
         const filtered = dropStale(get().entries)
           .filter((e) => e.dedupeKey !== p.dedupeKey);
-        const trimmed  = [next, ...filtered].slice(0, MAX_ENTRIES);
+        const trimmed  = [next, ...filtered].slice(0, NOTIFICATION_MAX_ENTRIES);
         set({ entries: trimmed });
       },
 

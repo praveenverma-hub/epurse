@@ -489,6 +489,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   The header divider also moved: it now sits between the merchant row and the note field (none below the note).
 - Oct-10-2026: **Welcome review card title.** "Welcome to" and the ePurse wordmark use the same colour, but the text was 15/600 beside a 17/700 wordmark, so it looked lighter. The text now matches the wordmark's size and weight.
   The "← manage · got it →" hints on the welcome card are right-aligned.
+- Oct-10-2026: **Retention in one file.** New `src/constants/retention.ts` holds every keep-for / cap value (raw transactions 90 d, monthly totals 2 yr, settled lent/borrow 2 yr, inactive groups 180 d, card-payment prompts 5 d, ignored-SMS ids 2500, card payment history 24, notification feed 15 d / 80, onboarding queue 5, Drive backups 5, preview SMS text 3 d) plus a plain-language `RETENTION_SUMMARY`. The store, notification store and backup config import from it — no values changed. `test:retention` checks the table.
 
 ---
 
