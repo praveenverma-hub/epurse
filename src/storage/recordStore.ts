@@ -22,7 +22,8 @@ export type ChangeSet = {
   rows?: Partial<Record<RowCollection, Changes<Row>>>;
   maps?: Partial<Record<MapCollection, Changes<{ key: string; value: unknown }>>>;
   kv?: Changes<{ key: string; value: unknown }>;
-  meta?: Record<string, string>;
+  /** `null` deletes the key. */
+  meta?: Record<string, string | null>;
 };
 
 export type Snapshot = {
@@ -143,7 +144,8 @@ export function createSqlRecordStore(driver: SqlDriver): RecordStore {
         }
         for (const key of changes.kv?.remove ?? []) await tx.run('DELETE FROM kv WHERE key = ?;', [key]);
         for (const [key, value] of Object.entries(changes.meta ?? {})) {
-          await tx.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?);', [key, value]);
+          if (value === null) await tx.run('DELETE FROM meta WHERE key = ?;', [key]);
+          else await tx.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?);', [key, value]);
         }
       });
     },
@@ -154,6 +156,9 @@ export function createSqlRecordStore(driver: SqlDriver): RecordStore {
         for (const c of ROW_COLLECTIONS) await tx.run(`DELETE FROM ${ROW_TABLES[c]};`);
         for (const t of ['month_doc', 'kv', 'meta']) await tx.run(`DELETE FROM ${t};`);
       });
+      // Deleted rows otherwise linger in free pages and the WAL until overwritten.
+      await driver.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      await driver.exec('VACUUM;');
     },
   };
 }
@@ -213,7 +218,7 @@ export function createMemoryRecordStore(): RecordStore {
       }
       for (const { key, value } of changes.kv?.upsert ?? []) nKv.set(key, toDoc(value, key));
       for (const key of changes.kv?.remove ?? []) nKv.delete(key);
-      for (const [k, v] of Object.entries(changes.meta ?? {})) nMeta.set(k, v);
+      for (const [k, v] of Object.entries(changes.meta ?? {})) { if (v === null) nMeta.delete(k); else nMeta.set(k, v); }
       rows = nRows; maps = nMaps; kv = nKv; meta = nMeta;
     },
 

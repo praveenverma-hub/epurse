@@ -46,6 +46,8 @@ export const ONBOARDING_QUEUE_LIMIT = 5;
 // ── Backups ──────────────────────────────────────────────────────────────────
 /** Drive backups kept; older ones are pruned after a successful upload. */
 export const KEEP_BACKUPS = 5;
+/** The local copy taken just before a restore (for Undo) is deleted after this long. */
+export const PRE_RESTORE_SNAPSHOT_MS = 7 * DAY_MS;
 
 const days = (ms: number) => Math.round(ms / DAY_MS);
 
@@ -63,5 +65,6 @@ export const RETENTION_SUMMARY: { data: string; keeps: string; then: string }[] 
   { data: 'Card payment history', keeps: `last ${PAYMENT_HISTORY_CAP} per card`, then: 'oldest dropped' },
   { data: 'Notification feed', keeps: `${days(NOTIFICATION_MAX_AGE_MS)} days, last ${NOTIFICATION_MAX_ENTRIES}`, then: 'dropped' },
   { data: 'Drive backups', keeps: `latest ${KEEP_BACKUPS}`, then: 'older ones deleted after an upload' },
+  { data: 'Pre-restore copy (for Undo)', keeps: `${days(PRE_RESTORE_SNAPSHOT_MS)} days`, then: 'deleted; Undo no longer offered' },
   { data: 'Full SMS text (preview builds)', keeps: `${days(RAW_SMS_RETENTION_MS)} days`, then: 'stripped' },
 ];

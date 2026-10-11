@@ -84,6 +84,10 @@ async function contract(label, store) {
   check(`${label}: rows come back in seq order, not insert order`, J(s.rows.transactions.map((r) => r.rid)) === J(['t1', 't2', 't3']));
   check(`${label}: a document round-trips exactly (unicode included)`, J(s.rows.transactions[0].value) === J(txn('t1', { note: 'chai ☕ — ₹' })));
   check(`${label}: readMeta returns bookkeeping without loading rows`, J(await store.readMeta()) === J({ storeVersion: '42' }));
+  await store.apply({ meta: { 'aside:snap': '{"at":1}' } });
+  await store.apply({ meta: { 'aside:snap': null } });
+  check(`${label}: a null meta value deletes the key (used to expire the pre-restore copy)`,
+    J(await store.readMeta()) === J({ storeVersion: '42' }));
   check(`${label}: maps, kv and meta round-trip`,
     s.maps.monthlyAggregates['2026-07'].totalSpend === 1200 && s.kv.userName === 'Praveen'
     && s.kv.budget.perCategory.food === 8000 && s.meta.storeVersion === '42' && s.rows.lentBorrowed[0].value.amount === 750);
@@ -147,6 +151,48 @@ await contract('memory', createMemoryRecordStore());
     await fd.close();
     check('sql: data survives closing and reopening the file', s.kv.userName === 'Persisted' && s.rows.groups[0].value.name === 'Goa');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+// ── 5. Small stores: copy-once from AsyncStorage into MMKV ──────────────────
+{
+  const { createMigratingStateStorage, KV_MIGRATED_PREFIX } = await import(`${PROJECT_ROOT}/src/storage/kvStateStorage.ts`);
+  const { createMemoryDeviceKv } = await import(`${PROJECT_ROOT}/src/storage/deviceKv.ts`);
+  const legacy = new Map([['@ePurse:rewards', '{"state":{"totalRP":1200},"version":3}']]);
+  const reads = [];
+  const read = async (n) => { reads.push(n); return legacy.get(n) ?? null; };
+
+  const kv = createMemoryDeviceKv();
+  const st = createMigratingStateStorage(kv, read);
+  const first = await st.getItem('@ePurse:rewards');
+  check('kv: first launch returns the AsyncStorage value…', first === legacy.get('@ePurse:rewards'));
+  check('kv: …copied into MMKV and marked', kv.getString('@ePurse:rewards') === first && !!kv.getString(`${KV_MIGRATED_PREFIX}@ePurse:rewards`));
+  const second = st.getItem('@ePurse:rewards');
+  check('kv: next read is SYNCHRONOUS from MMKV (hydrates before first render), no AsyncStorage read',
+    typeof second === 'string' && second === first && reads.length === 1);
+  check('kv: the AsyncStorage value is left in place', legacy.has('@ePurse:rewards'));
+
+  st.setItem('@ePurse:rewards', '{"state":{"totalRP":1300},"version":3}');
+  check('kv: writes go to MMKV', JSON.parse(kv.getString('@ePurse:rewards')).state.totalRP === 1300);
+
+  const kv2 = createMemoryDeviceKv();
+  const st2 = createMigratingStateStorage(kv2, read);
+  check('kv: nothing in AsyncStorage → null, marked so it is not re-read',
+    (await st2.getItem('ePurse_notifications_v1')) === null && st2.getItem('ePurse_notifications_v1') === null);
+
+  const kv3 = createMemoryDeviceKv();
+  const st3 = createMigratingStateStorage(kv3, async () => { throw new Error('io'); });
+  await st3.getItem('@ePurse:rewards');
+  st3.setItem('@ePurse:rewards', '{"state":{"totalRP":0},"version":3}');
+  check('kv: if AsyncStorage could not be read, DEFAULTS are never written over it (retried next launch)',
+    kv3.getString('@ePurse:rewards') === undefined && kv3.getString(`${KV_MIGRATED_PREFIX}@ePurse:rewards`) === undefined);
+
+  const inner = createMemoryDeviceKv();
+  const garbling = { ...inner, set: (k, v) => inner.set(k, k.startsWith(KV_MIGRATED_PREFIX) ? v : v.slice(1)) };
+  const st4 = createMigratingStateStorage(garbling, read);
+  const got = await st4.getItem('@ePurse:rewards');
+  check('kv: a copy that reads back wrong is removed, unmarked, and the real value used this session',
+    got === legacy.get('@ePurse:rewards') && inner.getString('@ePurse:rewards') === undefined
+    && inner.getString(`${KV_MIGRATED_PREFIX}@ePurse:rewards`) === undefined);
 }
 
 // ── 6. Device driver guard (source check — expo-sqlite can't run in Node) ──

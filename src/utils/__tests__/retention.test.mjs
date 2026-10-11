@@ -1,5 +1,5 @@
 // The retention table stays in step with the constants:  npm run test:retention
-import { RETENTION_SUMMARY, RAW_RETENTION_MS, AGG_RETENTION_MS, DAY_MS, KEEP_BACKUPS } from '../../constants/retention.ts';
+import { RETENTION_SUMMARY, RAW_RETENTION_MS, AGG_RETENTION_MS, DAY_MS, KEEP_BACKUPS, PRE_RESTORE_SNAPSHOT_MS } from '../../constants/retention.ts';
 import { KEEP_BACKUPS as backupKeep } from '../../backup/config.ts';
 
 let pass = 0, fail = 0;
@@ -15,6 +15,7 @@ check('settled lent/borrow: 730 days', row('Settled lent / borrowed').keeps === 
 check('every row names what it keeps and what happens after', RETENTION_SUMMARY.every((r) => r.data && r.keeps && r.then));
 check('the backup config re-exports the same number', backupKeep === KEEP_BACKUPS && row('Drive backups').keeps === `latest ${KEEP_BACKUPS}`);
 check('raw rows never outlive the monthly totals', RAW_RETENTION_MS <= AGG_RETENTION_MS);
+check('pre-restore copy: 7 days', PRE_RESTORE_SNAPSHOT_MS === 7 * DAY_MS && row('Pre-restore copy (for Undo)').keeps === '7 days');
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

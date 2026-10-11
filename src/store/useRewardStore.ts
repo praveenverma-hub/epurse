@@ -24,7 +24,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { appStateStorage } from '../storage/appKv';
 
 import {
   REWARD_CONFIG,
@@ -576,7 +576,7 @@ export const useRewardStore = create<RewardState>()(
     }),
     {
       name:    '@ePurse:rewards',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => appStateStorage()),
       version: 3,
       // Major schema rebuild from v2 → v3 (xp/coins → RP/EPC/Aware Run).
       // We can't safely migrate the old shape; nuke and start fresh.

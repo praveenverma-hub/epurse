@@ -94,7 +94,19 @@ const STUBS = {
     'setItem:(n,v)=>AsyncStorage.setItem(n,JSON.stringify(v)),' +
     'removeItem:(n)=>AsyncStorage.removeItem(n)});' +
     'export const flushAppStorage=async()=>{};' +
-    "export const getStorageMode=()=>'legacy';",
+    'export const writeAside=(k,v)=>AsyncStorage.setItem(k,v);export const readAside=(k)=>AsyncStorage.getItem(k);' +
+    'export const removeAside=(k)=>AsyncStorage.removeItem(k);export const wipeAppStorage=async()=>{};' +
+    "export const getStorageMode=()=>'legacy';export const getStorageRecovery=()=>null;",
+  // MMKV for the small stores — same idea: the AsyncStorage stub behind a StateStorage.
+  appKv:
+    "import AsyncStorage from '@react-native-async-storage/async-storage';" +
+    'const m=new Map();' +
+    'export const getAppKv=()=>({getString:(k)=>m.get(k),set:(k,v)=>{m.set(k,v);},remove:(k)=>{m.delete(k);},' +
+    'getAllKeys:()=>[...m.keys()],clearAll:()=>{m.clear();}});' +
+    'export const appStateStorage=()=>({getItem:(n)=>AsyncStorage.getItem(n),' +
+    'setItem:(n,v)=>AsyncStorage.setItem(n,v),removeItem:(n)=>AsyncStorage.removeItem(n)});' +
+    'export const wipeAppKvs=()=>{m.clear();};' +
+    "export const APP_KV_ID='epurse-app';export const STORE_KV_ID='epurse-store';",
 };
 
 function stubFor(specifier) {
@@ -106,6 +118,7 @@ function stubFor(specifier) {
   if (/services\/smsService$/.test(specifier)) return STUBS.smsService;
   if (/services\/locationService$/.test(specifier)) return STUBS.locationService;
   if (/storage\/appStorage$/.test(specifier)) return STUBS.appStorage;
+  if (/storage\/appKv$/.test(specifier)) return STUBS.appKv;
   return null;
 }
 

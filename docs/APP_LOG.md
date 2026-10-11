@@ -2458,6 +2458,10 @@ off are DONE (see Backup).
   **PR 4 — WIRED:** `ePurseStore` persists via `storage/appStorage.ts`; first launch copies the
   AsyncStorage value, verifies an exact reload, then marks done (AsyncStorage copy kept as fallback).
   Modes hybrid/legacy/unavailable; flush on background + in Delete Account. `test:storage` 85.
+  **PR 5:** rewards / notification feed / `utils/storage` → encrypted MMKV (`storage/appKv.ts`), copied
+  once from AsyncStorage. **PR 6:** pre-restore snapshot in SQLite, deleted after 7 days; Delete Account
+  empties + VACUUMs SQLite and clears both MMKV; key loss → old DB set aside (never deleted), fresh DB,
+  onboarding says why next to Restore. `test:storage` 95.
   **Needs on-device checks (STORAGE_MIGRATION.md step 7) before release.**
 
 **Open**

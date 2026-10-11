@@ -1,8 +1,8 @@
 # Storage migration — AsyncStorage → SQLite + MMKV (Step 0)
 
-**Status:** Oct-11-2026 — PRs 1–4 built and tested. **The store now runs on SQLite + MMKV**
-(`storage/appStorage.ts`), migrating once from AsyncStorage on first launch. PRs 5–6 and the
-on-device checks (step 7) remain.
+**Status:** Oct-11-2026 — PRs 1–6 built and tested. Everything persisted now lives in SQLite + MMKV
+(ePurse store → `storage/appStorage.ts`; rewards, notification feed, `utils/storage` → `storage/appKv.ts`),
+each copied once from AsyncStorage. Remaining: the on-device checks (step 7), then retention (step 8).
 **Why:** the retention plan keeps ALL financial history by default (cleanup only by user choice).
 Today's storage can't hold that. See [Retention plan](#9-what-this-unblocks).
 
@@ -166,7 +166,8 @@ MMKV.
 | SQLite opens, migrated (or migrates + verifies now) | `hybrid` | normal |
 | SQLite won't open, data NOT moved yet | `legacy` | AsyncStorage exactly as before; retried next launch |
 | Migration fails to verify | `legacy` | same; half-copy wiped; Sentry `storage: migration-failed` (key names only) |
-| SQLite won't open, data HAS moved (MMKV mirror flag) | `unavailable` | memory only, so nothing is overwritten and the stale AsyncStorage copy is NOT used. PR 6 adds the restore prompt |
+| SQLite won't open, data HAS moved (MMKV mirror flag), key still present | `unavailable` | memory only for this session (could be transient), nothing overwritten, stale AsyncStorage copy NOT used; retried next launch |
+| **Key lost**: a NEW db key but a NON-EMPTY database that won't open | `hybrid` on a fresh DB | old file moved aside (`epurse.db.unreadable-<ts>` + WAL/SHM, never deleted), fresh DB marked migrated (so stale AsyncStorage is never copied), `storageRecovery` meta set → onboarding shows "COULDN'T OPEN YOUR DATA" above its Restore link. An EMPTY file isn't key loss (a failed first open creates one) |
 
 ## 7. Encryption, keys, failure modes
 
@@ -231,8 +232,8 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
 | 2 ✅ | `schema.ts`, `sqlDriver.ts`, `expoSqlDriver.ts`, `recordStore.ts` (SQL + memory), `test:storage` 31 checks | no |
 | 3 ✅ | `hybridStorage.ts` (diff, coalesce, atomic flush, hydration, freeze guard), `deviceKv.ts` + `mmkvDeviceKv.ts`; `storageHybrid.test.mjs` 37 incl. the REAL store under freeze across 15 actions, reload == persisted state | no |
 | 4 ✅ | `legacyMigration.ts` (copy as-is → reload → exact-equality verify → only then mark; any failure wipes the half-copy) + `appStorage.ts` (modes hybrid / legacy / unavailable, Sentry tags only) wired into `ePurseStore`; flush on background (App.js) and in Delete Account; `_store-hook` stubs appStorage for the Node suites; `storageMigration.test.mjs` 15 incl. a real v41 store end-to-end | no |
-| 5 | Rewards, notifications, remote config, utils → MMKV (+ their migration) | no |
-| 6 | Snapshot → SQLite 7-day; delete-account wipes all engines; key-loss path + restore prompt | no |
+| 5 ✅ | `appKv.ts` (one encrypted MMKV `epurse-app`) + pure `kvStateStorage.ts` (copy once, verify read-back, skip writes if AsyncStorage couldn't be read so defaults never shadow it); `useRewardStore`, `useNotificationStore`, `utils/storage` moved | no |
+| 6 ✅ | Pre-restore snapshot → SQLite meta (`writeAside`), deleted after `PRE_RESTORE_SNAPSHOT_MS` (7 d, retention.ts; checked on app start); Delete Account: `wipeAppStorage` (empty + `wal_checkpoint(TRUNCATE)` + `VACUUM`, re-mark migrated) then AsyncStorage + both MMKV; key-loss set-aside + onboarding notice | no |
 | 7 | **On-device checks (you):** fresh install; upgrade from the current build with real data; kill the app mid-ingest; Drive restore; delete account; start-up time with a large history | — |
 | 8 | Retention change (§9) | no |
 

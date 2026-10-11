@@ -9,10 +9,11 @@
 //   • pruning happens AFTER a successful upload, never before
 //   • a failed restore leaves the device exactly as it was
 // =============================================================================
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useRewardStore } from '../store/useRewardStore';
+import { writeAside, readAside, removeAside } from '../storage/appStorage';
+import { PRE_RESTORE_SNAPSHOT_MS } from '../constants/retention';
 
 import { buildBackupPayload, readBackupPayload, migrateRestoredState } from './payload';
 import { sealBackup, openBackup, BackupError, toKeyMaterial, type BackupMeta } from './envelope';
@@ -34,7 +35,10 @@ const APP_VERSION = '1.5.0';
  */
 const STORE_VERSION = 42;
 
-/** Local rollback copy, written immediately before a restore replaces state. */
+/**
+ * Local rollback copy, written immediately before a restore replaces state. Kept
+ * beside the store (encrypted SQLite) and deleted after PRE_RESTORE_SNAPSHOT_MS.
+ */
 const SNAPSHOT_KEY = '@ePurse:preRestoreSnapshot';
 
 const deps = (): DriveDeps => ({ fetch: globalThis.fetch, getAccessToken });
@@ -131,9 +135,8 @@ export async function applyRestore(
     useEPurseStore.getState() as unknown as Record<string, unknown>,
     useRewardStore.getState() as unknown as Record<string, unknown>,
   );
-  // Plaintext, but device-local and never uploaded — it's the same data the app
-  // already holds in AsyncStorage, so it adds no new exposure.
-  await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ at: Date.now(), snapshot }));
+  // Device-local, never uploaded; encrypted with the rest of the store once it has moved.
+  await writeAside(SNAPSHOT_KEY, JSON.stringify({ at: Date.now(), snapshot }));
 
   useEPurseStore.setState(decrypted.epurse as any);
   useEPurseStore.getState().refreshCategoryMaps();
@@ -142,23 +145,40 @@ export async function applyRestore(
   }
 }
 
-export async function getPreRestoreSnapshot(): Promise<{ at: number } | null> {
-  const raw = await AsyncStorage.getItem(SNAPSHOT_KEY);
+/** The snapshot if it exists and is still within PRE_RESTORE_SNAPSHOT_MS; an expired one is deleted. */
+async function readSnapshot(): Promise<{ at: number; snapshot: any } | null> {
+  const raw = await readAside(SNAPSHOT_KEY);
   if (!raw) return null;
-  try { const { at } = JSON.parse(raw); return { at }; } catch { return null; }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!(Date.now() - parsed.at < PRE_RESTORE_SNAPSHOT_MS)) {
+      await removeAside(SNAPSHOT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch { return null; }
+}
+
+export async function getPreRestoreSnapshot(): Promise<{ at: number } | null> {
+  const s = await readSnapshot();
+  return s ? { at: s.at } : null;
+}
+
+/** Deletes the snapshot once it's past its 7 days. Run on app start. */
+export async function expirePreRestoreSnapshot(): Promise<void> {
+  await readSnapshot().catch(() => null);
 }
 
 /** Undo the last restore. */
 export async function undoRestore(): Promise<boolean> {
-  const raw = await AsyncStorage.getItem(SNAPSHOT_KEY);
-  if (!raw) return false;
+  const s = await readSnapshot();
+  if (!s) return false;
   try {
-    const { snapshot } = JSON.parse(raw);
-    const { epurse, rewards } = readBackupPayload(snapshot);
+    const { epurse, rewards } = readBackupPayload(s.snapshot);
     useEPurseStore.setState(epurse as any);
     useEPurseStore.getState().refreshCategoryMaps();
     if (rewards && Object.keys(rewards).length) useRewardStore.setState(rewards as any);
-    await AsyncStorage.removeItem(SNAPSHOT_KEY);
+    await removeAside(SNAPSHOT_KEY);
     return true;
   } catch { return false; }
 }
