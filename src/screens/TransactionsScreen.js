@@ -500,14 +500,15 @@ const TransactionsScreen = ({ navigation, route }) => {
     // Inline search
     if (search.trim()) {
       const q = search.toLowerCase();
-      // `smsText` is the bank message body (was stored in `note` until the Jul-31
-      // split); `note` is now only the user's own note. Match BOTH so searching for
-      // something that appears in the SMS still finds the transaction.
+      // No SMS body is stored, so match the parsed fields that carried most of what
+      // people searched it for: the raw payee token, UPI/NEFT ref and sender name.
       list = list.filter(
         (t) =>
           (t.merchant || '').toLowerCase().includes(q) ||
           (t.note || '').toLowerCase().includes(q) ||
-          (t.smsText || '').toLowerCase().includes(q),
+          (t.rawMerchant || '').toLowerCase().includes(q) ||
+          (t.transferRef || '').toLowerCase().includes(q) ||
+          (t.counterpartyName || '').toLowerCase().includes(q),
       );
     }
 

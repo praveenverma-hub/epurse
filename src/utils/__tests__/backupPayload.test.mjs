@@ -70,7 +70,7 @@ const ingest = (sender, body, smsId) =>
 ingest('HDFCBK', 'Rs.450.00 debited from A/c xx4021 on 06-Aug-26 to SWIGGY via UPI. Avl bal Rs.42,310.50', 'sms-1');
 ingest('HDFCBK', 'INR 1,299 spent on HDFC Credit Card ending 4321 at AMAZON on 05-Aug-26.', 'sms-2');
 ingest('HDFCBK', 'Your a/c xxxx5678 is credited with Rs.55,000.00 - SALARY AUG 2026.', 'sms-3');
-// A CC bill payment — this is the path that ALWAYS writes smsText onto the txn.
+// A CC bill payment — this path once stored the FULL message on the txn.
 ingest('HDFCBK', 'Rs.5,000.00 paid towards HDFC Credit Card XX4321 from A/c XX4021 on 07-Aug-26.', 'sms-4');
 // Pre-onboarding history lands in archivedTransactions — completeness must see those rows too.
 S().ingestMessage('Rs.120.00 debited from A/c xx4021 on 01-Jul-26 to ZOMATO via UPI.',
@@ -133,7 +133,7 @@ const envelope = sealBackup(payload, 'a-good-password', {
   const wire = J(payload);
   check('leak: no `smsText` field survives into the payload', !wire.includes('smsText'));
   check('leak: no `rawSms` / `rawSender` field survives', !wire.includes('rawSms') && !wire.includes('rawSender'));
-  // The literal message body of the CC-bill SMS — the path that always stores smsText.
+  // The literal message body of the CC-bill SMS — the path that once stored it whole.
   check('leak: the original SMS body is absent',
     !wire.includes('paid towards HDFC Credit Card') && !wire.includes('Avl bal'));
   check('leak: no SMS body from ANY ingested message',
@@ -142,8 +142,8 @@ const envelope = sealBackup(payload, 'a-good-password', {
   check('kept: the parsed merchant IS backed up', wire.includes('SWIGGY'));
   check('kept: smsId (an opaque id, needed for dedup) IS backed up', wire.includes('sms-1'));
 
-  const rawStillOnDevice = S().transactions.some((t) => !!t.smsText);
-  check('the device itself still has smsText (we strip on EXPORT, not on ingest)', rawStillOnDevice);
+  check('the device itself keeps no SMS body either (parsed values only)',
+    S().transactions.every((t) => t.smsText === undefined));
 }
 
 // ── 2. THE COMPLETENESS ALARM ───────────────────────────────────────────────

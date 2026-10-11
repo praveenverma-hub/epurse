@@ -72,6 +72,10 @@ const expectCode = async (fn, code) => {
   check("config: the app's own 'epurse' scheme is still registered", schemes.includes('epurse'));
   check('config: only drive.file is requested (broader scopes need Google review)',
     cfg.DRIVE_SCOPE === 'https://www.googleapis.com/auth/drive.file', cfg.DRIVE_SCOPE);
+  // Expo defaults this to true, which lets Android's own cloud backup copy the whole
+  // store off the phone — breaking "nothing is uploaded unless you turn on backup".
+  check('config: Android Auto Backup is OFF (ePurse backup is the only upload)',
+    appJson.expo.android?.allowBackup === false, String(appJson.expo.android?.allowBackup));
 }
 
 console.log(`\n${C.bold}══════ Encrypted Backup — Drive client ══════${C.reset}\n`);
