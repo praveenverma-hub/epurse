@@ -13,20 +13,21 @@
 // =============================================================================
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Sentry from '@sentry/react-native';
 import { createJSONStorage } from 'zustand/middleware';
 import { MOCK_DATA_ENABLED } from '../config/mockData';
 import { createHybridStorage, type HybridStorage } from './hybridStorage';
 import { createSqlRecordStore, createMemoryRecordStore, type RecordStore } from './recordStore';
 import { createMemoryDeviceKv, type DeviceKv } from './deviceKv';
-import { migrateFromLegacy } from './legacyMigration';
-import { openExpoSqlDriver } from './expoSqlDriver';
+import { migrateFromLegacy, MIGRATED_META } from './legacyMigration';
+import { openExpoSqlDriver, setAsideDatabase } from './expoSqlDriver';
 import { getMmkvDeviceKv } from './mmkvDeviceKv';
-import { getDbKey } from './keys';
+import { getDbKey, type StorageKey } from './keys';
+import { report, msg } from './report';
+import { STORE_KV_ID } from './appKv';
 
 export type StorageMode = 'hybrid' | 'legacy' | 'unavailable';
 
-const STORE_KV_ID = 'epurse-store';
+
 // Mirrors the SQLite migration mark, so "data has moved" is known even when SQLite won't open.
 const DEVICE_MIGRATED = 'storage.migratedAt';
 
@@ -39,17 +40,19 @@ type Backend = {
 let mode: StorageMode | null = null;
 let backend: Backend | null = null;
 let hybrid: HybridStorage | null = null;
+let records: RecordStore | null = null;
 let ready: Promise<void> | null = null;
+let recovery: StorageRecovery | null = null;
 
-/** Counts and reasons only — never stored data. */
-function report(event: string, extra?: Record<string, unknown>, level: 'error' | 'info' = 'error') {
-  try { Sentry.captureMessage(`storage: ${event}`, { level, tags: { storage: event }, extra }); } catch { /* best effort */ }
-}
-const msg = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 200);
+/** Set when this phone's data couldn't be unlocked and was set aside (see init). */
+export type StorageRecovery = { at: string; file: string };
+const RECOVERY_META = 'storageRecovery';
+
 
 async function init(name: string): Promise<void> {
   if (MOCK_DATA_ENABLED) {
-    hybrid = createHybridStorage({ records: createMemoryRecordStore(), device: createMemoryDeviceKv() });
+    records = createMemoryRecordStore();
+    hybrid = createHybridStorage({ records, device: createMemoryDeviceKv() });
     backend = hybrid; mode = 'hybrid';
     return;
   }
@@ -60,20 +63,47 @@ async function init(name: string): Promise<void> {
     device = createMemoryDeviceKv(); // device-local prefs won't persist this session; user data is unaffected
   }
 
-  let records: RecordStore | null = null;
+  const openSql = async (keyHex: string) => {
+    const store = createSqlRecordStore(await openExpoSqlDriver(keyHex));
+    await store.readMeta();
+    return store;
+  };
+  let sql: RecordStore | null = null;
+  let keyLost = false;
+  let dbKey: StorageKey | null = null;
   try {
-    records = createSqlRecordStore(await openExpoSqlDriver(getDbKey().value));
-    await records.readMeta();
+    dbKey = getDbKey();
+    sql = await openSql(dbKey.value);
   } catch (e) {
     report('sqlite-open-failed', { message: msg(e) });
-    records = null;
+    sql = null;
+    // A NEW key, yet a non-empty database that won't open: the key that encrypted it is
+    // gone (Keystore reset, phone-to-phone copy), so it can never be read again. Set it
+    // aside — never delete — and start a fresh database. The old AsyncStorage copy is
+    // NOT used: it's from before the move, so it would show the user stale data.
+    if (dbKey?.created) {
+      try {
+        const file = await setAsideDatabase();
+        if (file) {
+          keyLost = true;
+          sql = await openSql(dbKey.value);
+          const at = new Date().toISOString();
+          await sql.apply({ meta: { [MIGRATED_META]: at, [RECOVERY_META]: JSON.stringify({ at, file }) } });
+          report('key-lost-set-aside', { file });
+        }
+      } catch (e2) {
+        report('set-aside-failed', { message: msg(e2) });
+        sql = null;
+      }
+    }
   }
 
   const legacy = createJSONStorage(() => AsyncStorage) as unknown as Backend;
-  if (!records) {
-    if (device.getString(DEVICE_MIGRATED)) {
+  if (!sql) {
+    if (keyLost || device.getString(DEVICE_MIGRATED)) {
       report('unavailable');
-      hybrid = createHybridStorage({ records: createMemoryRecordStore(), device: createMemoryDeviceKv() });
+      records = createMemoryRecordStore();
+      hybrid = createHybridStorage({ records, device: createMemoryDeviceKv() });
       backend = hybrid; mode = 'unavailable';
     } else {
       backend = legacy; mode = 'legacy';
@@ -81,7 +111,7 @@ async function init(name: string): Promise<void> {
     return;
   }
 
-  const res = await migrateFromLegacy({ readLegacy: () => AsyncStorage.getItem(name), records, device });
+  const res = await migrateFromLegacy({ readLegacy: () => AsyncStorage.getItem(name), records: sql, device });
   if (res.status === 'failed') {
     report('migration-failed', { reason: res.reason });
     backend = legacy; mode = 'legacy';
@@ -90,6 +120,9 @@ async function init(name: string): Promise<void> {
   if (res.status === 'migrated') report('migrated', { counts: res.counts }, 'info');
   if (!device.getString(DEVICE_MIGRATED)) device.set(DEVICE_MIGRATED, new Date().toISOString());
 
+  records = sql;
+  const rec = (await sql.readMeta())[RECOVERY_META];
+  try { recovery = rec ? JSON.parse(rec) : null; } catch { recovery = null; }
   hybrid = createHybridStorage({ records, device, onError: (e) => report('flush-failed', { message: msg(e) }) });
   backend = hybrid; mode = 'hybrid';
 }
@@ -115,3 +148,45 @@ export async function flushAppStorage(): Promise<void> {
 }
 
 export const getStorageMode = (): StorageMode | null => mode;
+
+/**
+ * Non-null when the data saved on this phone couldn't be unlocked and the app started
+ * fresh. Onboarding uses it to say why, beside its Restore link. A wipe clears it.
+ */
+export const getStorageRecovery = (): StorageRecovery | null => recovery;
+
+// ── Documents kept beside the store (e.g. the pre-restore snapshot) ─────────
+// SQLite meta once the store has moved; AsyncStorage while still in legacy mode.
+const ASIDE = 'aside:';
+
+export async function writeAside(key: string, value: string): Promise<void> {
+  if (records) await records.apply({ meta: { [ASIDE + key]: value } });
+  else await AsyncStorage.setItem(key, value);
+}
+
+export async function readAside(key: string): Promise<string | null> {
+  if (records) {
+    const v = (await records.readMeta())[ASIDE + key];
+    if (v !== undefined) return v;
+  }
+  return AsyncStorage.getItem(key); // also finds one written before the move
+}
+
+export async function removeAside(key: string): Promise<void> {
+  if (records) await records.apply({ meta: { [ASIDE + key]: null } });
+  await AsyncStorage.removeItem(key);
+}
+
+/**
+ * Delete Account: empty the database (scrubbing freed pages) and this store's MMKV
+ * keys. Call AFTER the store has been reset (deleteAllUserData + flushAppStorage).
+ * The schema and encryption keys stay — they protect an empty database.
+ */
+export async function wipeAppStorage(): Promise<void> {
+  if (!hybrid || !records) return;
+  await hybrid.removeItem('');
+  recovery = null;
+  // Re-mark as moved: otherwise, if clearing AsyncStorage then failed, the next launch
+  // would copy the old AsyncStorage data back over the deleted account.
+  await records.apply({ meta: { [MIGRATED_META]: new Date().toISOString() } });
+}

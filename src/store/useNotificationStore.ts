@@ -16,12 +16,12 @@
 //      REPLACES the older one (so banks resending updated bill totals just
 //      refresh the existing chip).
 //   2. Entries older than 15 calendar days are pruned on hydrate and on add.
-//   3. Hard cap of 80 entries to keep AsyncStorage lean.
+//   3. Hard cap of 80 entries to keep storage lean.
 // =============================================================================
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '../dev/mockStorage';
+import { appStateStorage } from '../storage/appKv';
 import { NOTIFICATION_MAX_AGE_MS, NOTIFICATION_MAX_ENTRIES } from '../constants/retention';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ export const useNotificationStore = create<State>()(
     }),
     {
       name:    'ePurse_notifications_v1',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => appStateStorage()),
       onRehydrateStorage: () => (state) => {
         if (state) state.pruneStale();
       },

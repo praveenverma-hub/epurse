@@ -8,6 +8,7 @@ import * as Sentry from '@sentry/react-native';
 import * as Notifications from 'expo-notifications';
 import { initSentry } from './src/config/sentry';
 import { flushAppStorage } from './src/storage/appStorage';
+import { expirePreRestoreSnapshot } from './src/backup/backupService';
 
 // Runs once at module load, before anything else in this file — catches
 // crashes as early in boot as possible. See src/config/sentry.ts for why
@@ -261,6 +262,7 @@ function BudgetRolloverBoot() {
     weeklyRecap();
     reconcileReminders();
     replanPushes();
+    expirePreRestoreSnapshot();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         markOpened();

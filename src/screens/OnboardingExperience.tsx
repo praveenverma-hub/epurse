@@ -68,6 +68,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, radius, BUTTON_H } from '../constants/theme';
 import { useEPurseStore, selectAccountLinkSuggestions } from '../store/ePurseStore';
@@ -80,6 +81,7 @@ import { requestLocationPermission } from '../services/locationService';
 import { requestContactsPermission } from '../services/contactsService';
 import { requestNotificationPermissions } from '../utils/notifications';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
+import { getStorageRecovery } from '../storage/appStorage';
 import { shouldShowAccountConfirmation } from '../utils/onboardingRouting';
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount } from '../utils/validation';
 
@@ -488,6 +490,8 @@ export default function OnboardingDeck({
   const theme = useTheme() as Theme;
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => deckStyles(theme), [theme]);
+  // This phone's saved data couldn't be unlocked, so the app started fresh.
+  const storageRecovery = getStorageRecovery();
 
   const setUserName = useEPurseStore((s: any) => s.setUserName);
   const setHasOnboarded = useEPurseStore((s: any) => s.setHasOnboarded);
@@ -887,6 +891,20 @@ export default function OnboardingDeck({
                   <Text style={[styles.regTrustText, { color: theme.textSecondary }]}>Your financial ledger stays on this device by default.</Text>
                 </View>
               </View>
+
+              {storageRecovery ? (
+                <View style={styles.regTrustRow} accessibilityRole="alert">
+                  <View style={[styles.regTrustIcon, { backgroundColor: theme.danger + '14' }]}>
+                    <Ionicons name="alert-circle-outline" size={18} color={theme.danger} />
+                  </View>
+                  <View style={styles.regTrustCopy}>
+                    <Text style={[styles.regTrustLabel, { color: theme.danger }]}>COULDN'T OPEN YOUR DATA</Text>
+                    <Text style={[styles.regTrustText, { color: theme.textSecondary }]}>
+                      The data saved on this phone can't be unlocked. Restore your Google Drive backup to get it back.
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
 
               {/* Restore path for a NEW phone. Placed under Get Started, not beside
                   it: setting up fresh is the common case, and a returning user is
