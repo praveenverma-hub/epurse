@@ -1,7 +1,7 @@
 # Storage migration — AsyncStorage → SQLite + MMKV (Step 0)
 
-**Status:** Oct-11-2026 — PRs 1–2 built (deps + keys, schema + record store, `test:storage`).
-Nothing is wired into the app yet; the next native build only proves the libraries compile.
+**Status:** Oct-11-2026 — PRs 1–3 built and tested; release build GREEN with all native libs in the
+APK. Nothing is wired into the app yet — PR 4 (migration + wiring) is the first that changes runtime.
 **Why:** the retention plan keeps ALL financial history by default (cleanup only by user choice).
 Today's storage can't hold that. See [Retention plan](#9-what-this-unblocks).
 
@@ -99,6 +99,12 @@ the partialized state **object**, so nothing is stringified up front.
    keys, delete removed ids, write the store version. It all commits or none of it does.
 4. MMKV keys are written synchronously as they change. They aren't coupled to the ledger, so no
    atomicity is needed.
+
+**Pre-hydration writes are dropped.** `persist` calls `setItem` after every `set`, including any
+`set` that lands while `getItem` is still loading, and at that moment the state is the INITIAL
+defaults. Writing it would overwrite stored data. `setItem` is a no-op until `getItem` has finished
+(test-covered, mutation-verified). Hydration itself uses the raw `set` and only calls `setItem`
+after a migration.
 
 **The one assumption, and its guard:** nothing may mutate a stored row in place (a reference diff
 can't see it). The store already follows this. `stampAccountMeta` mutates, but only fresh
@@ -199,7 +205,7 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
 |---|---|---|
 | 1 ✅ | `react-native-mmkv` 4.3.2 + `react-native-nitro-modules` 0.37.1, `expo-sqlite` 57.0.4 w/ `useSQLCipher`; key manager `storage/keys.ts` (SecureStore, sync) + pure `keyFormat.ts` | **yes** |
 | 2 ✅ | `schema.ts`, `sqlDriver.ts`, `expoSqlDriver.ts`, `recordStore.ts` (SQL + memory), `test:storage` 31 checks | no |
-| 3 | `hybridStorage` for ePurseStore: diff, coalesce, atomic flush, hydration, freeze guard | no |
+| 3 ✅ | `hybridStorage.ts` (diff, coalesce, atomic flush, hydration, freeze guard), `deviceKv.ts` + `mmkvDeviceKv.ts`; `storageHybrid.test.mjs` 37 incl. the REAL store under freeze across 15 actions, reload == persisted state | no |
 | 4 | One-time AsyncStorage migration + verify + fallback | no |
 | 5 | Rewards, notifications, remote config, utils → MMKV (+ their migration) | no |
 | 6 | Snapshot → SQLite 7-day; delete-account wipes all engines; key-loss path + restore prompt | no |
@@ -208,10 +214,14 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
 
 ## 12. Open questions / risks
 
-1. **Compatibility at install:** MMKV 4.x needs Nitro + New Architecture (we're on it, RN 0.86).
-   Peer deps are `*`, so confirm with a real build. SQLCipher option CONFIRMED: `useSQLCipher`
-   (expo-sqlite plugin, `withSQLite.js`).
+1. ~~Compatibility at install~~ **RESOLVED Oct-11:** `assembleRelease` green; APK carries
+   `libNitroMmkv.so`, `libmmkv.so`, `libNitroModules.so`, `libexpo-sqlite.so`, `libcrypto.so`.
+   (A raw `./gradlew assembleRelease` fails at Sentry source-map upload without
+   `SENTRY_AUTH_TOKEN`; `build.sh` sets `SENTRY_DISABLE_AUTO_UPLOAD=true` for that. Not a storage issue.)
 2. **Start-up time** at large histories, measured in step 7. Decides when Phase B is needed.
+   Node baseline (Mac, trend only) at 36 k rows: initial write 147 ms, **one new txn 11.7 ms**,
+   full load 35 ms. The same data as one AsyncStorage value = 10.7 MB (> the 6 MB cap). Expect
+   Hermes on a mid-range phone to be several × slower.
 3. **Flush window:** a change made <100 ms before a hard kill can be lost. That's the same as today
    (AsyncStorage writes are async too), and the background flush covers normal app switches.
 4. **Backup size** grows with keep-all. Measure seal time (AES-GCM is pure JS) at 20 k txns.
