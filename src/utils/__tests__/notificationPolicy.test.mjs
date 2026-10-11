@@ -113,9 +113,10 @@ const cards = buildHomeCards({
   ccBills: { h: { amount: 12400, cardLast4: '4021', bankName: 'HDFC Bank', dueDate: '12-Aug-26' } },
   budget: { total: { cap: 10000, actual: 12000, pct: 120, remaining: 0, over: true, overshoot: 2000 }, daysLeftInMonth: 9 },
   subscriptions: [{ merchant: 'Netflix', amount: 649, priceHike: true, hikeFrom: 549, hikeTo: 649 }],
+  goalsBehind: [{ id: 'g', name: 'Holiday', planned: 6000, funded: 2000, shortfall: 4000 }],
 }, [], 10).map((c) => c.id);
 const shared = PUSH_PRIORITY.filter((k) => CAROUSEL_CARD[k] && cards.includes(CAROUSEL_CARD[k]));
-check('fixture produces every shared card that exists today', shared.length >= 3, cards.join());
+check('fixture produces every shared card', shared.length === Object.keys(CAROUSEL_CARD).length, cards.join());
 check('shared kinds rank the same in the carousel as in PUSH_PRIORITY',
   shared.every((k, i) => i === 0 || cards.indexOf(CAROUSEL_CARD[shared[i - 1]]) < cards.indexOf(CAROUSEL_CARD[k])),
   `${shared.join()} vs ${cards.join()}`);

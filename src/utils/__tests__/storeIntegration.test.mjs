@@ -5368,5 +5368,35 @@ console.log('\n— replanPushes(): the scheduled plan (Oct-11-26) —');
   check('a budget this month → next month\'s plan-budget push is scheduled', G().plannedPushes.some((p) => p.kind === 'budgetPlan'));
 }
 
+console.log('\n— buildGoalMonthFacts: Home card + push share one source (Oct-11-26) —');
+{
+  reset();
+  const d = new Date();
+  const mk = (n) => { const x = new Date(d.getFullYear(), d.getMonth() - n, 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`; };
+  const on = (n, day) => new Date(d.getFullYear(), d.getMonth() - n, day, 12).toISOString();
+  useStore.setState({
+    goals: [
+      { id: 'a', name: 'Holiday', emoji: '🏖️', duration: 'recurring', autoRule: null },
+      { id: 'b', name: 'Old', duration: 'oneTime', archivedAt: on(0, 1) },
+      { id: 'c', name: 'Done', duration: 'oneTime', achievedAt: on(0, 1) },
+      { id: 'e', name: 'Stopped', duration: 'recurring', discontinuedAt: on(0, 1) },
+    ],
+    goalPlan: { monthKey: mk(0), salary: 50000, allocations: { a: 6000 } },
+    goalContributions: [
+      { goalId: 'a', amount: 2000, date: on(0, 1) },
+      { goalId: 'a', amount: 6000, date: on(1, 6) },
+      { goalId: 'a', amount: 6000, date: on(2, 4) },
+      { goalId: 'a', amount: 6000, date: on(3, 5) },
+    ],
+  });
+  const f = mod.buildGoalMonthFacts(useStore.getState(), d.getTime());
+  const a = f.find((g) => g.id === 'a');
+  check('planned + funded for this month', a.planned === 6000 && a.funded === 2000, JSON.stringify(a));
+  check('usual funding day = median of the last 3 months', a.usualFundingDay === 5, String(a.usualFundingDay));
+  check('archived, achieved one-time and discontinued goals are inactive', ['b', 'c', 'e'].every((id) => f.find((g) => g.id === id).inactive) && !a.inactive);
+  useStore.setState({ goalPlan: { monthKey: mk(1), salary: 50000, allocations: { a: 6000 } } });
+  check('last month\'s plan is not this month\'s plan', mod.buildGoalMonthFacts(useStore.getState(), d.getTime()).find((g) => g.id === 'a').planned === 0);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

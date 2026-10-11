@@ -1813,10 +1813,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - `test:store` 564 → 568 (new goal is not born funded/achieved for one-time; recurring still counts
   the whole month; two older tests whose setups assumed the old ungated behaviour corrected).
   `tsc` clean, full suite green.
+- Oct-11-2026: **Goals on Home.** New `GoalsSummary` card under the Budget card (only with an active goal): "Goals · October", "₹8,000 of ₹12,000" + bar, up to 3 goal emojis (+N); "Set October's Goal Plan" when the month has no plan; "Carried from September" for the first 7 days of an untouched carried plan; tap → Goals. Carousel: `goal_pace` (worst goal behind this month's plan, after its usual funding day + 3 or the 25th; MOMENT tier; opens the goal), `goal_near` (one-time goal ≥ 90% of target; INSIGHT), `promo_goals` (empty-state promo, hidden once any goal exists). Card and "behind plan" push share `buildGoalMonthFacts` + nudgeFacts. `test:homeCards` +8, `test:store` +4.
 - Oct-11-2026: **Goal-plan rollover now runs at app start / foreground** (`BudgetRolloverBoot`), not only when the Goals screen opens — a month nobody opened Goals in was never snapshotted into `goalHistory` until they did.
 
 **Open**
-- Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block. Agreed Oct-11-26: a slim `GoalsSummary` under the Home budget card + carousel `goal_pace` / `goal_near` / `promo_goals`, and a "behind plan" push timed off the goal's usual funding day.
+- Not yet in the monthly recap.
 - The liquid-fill visual from the prototype was deliberately NOT used — `DailyBudgetLiquidWave`
   is a PAID shop widget (`liquid_wave`, 600 EPC), so reusing it free here would undercut the
   shop. Goal progress uses a plain track/fill instead; a distinct Goals visual is open.

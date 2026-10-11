@@ -774,6 +774,28 @@ const mergeRuleAdditions = (current, incoming, nowIso) => {
 /** Total funded in one month. The breakdown is `goalFundingForMonth`. */
 const goalFundedForMonth = (state, goal, mk) => goalFundingForMonth(state, goal, mk).total;
 
+/**
+ * This month's facts per goal for `nudgeFacts` — one builder so the Home card
+ * and the scheduled push judge "behind plan" from the same numbers.
+ */
+export const buildGoalMonthFacts = (state, now = Date.now()) => {
+  const d = new Date(now);
+  const thisMonth = monthKey(d);
+  const prevMonths = [3, 2, 1].map((n) => monthKey(new Date(d.getFullYear(), d.getMonth() - n, 1)));
+  const planCurrent = state.goalPlan?.monthKey === thisMonth;
+  return (state.goals || []).map((g) => ({
+    id: g.id,
+    name: g.name,
+    emoji: g.emoji,
+    planned: planCurrent ? Number(state.goalPlan.allocations?.[g.id]) || 0 : 0,
+    funded: goalFundedForMonth(state, g, thisMonth),
+    inactive: isGoalInactive(g),
+    usualFundingDay: usualFundingDay(prevMonths.map((m) => goalFundingDays(state, g, m))),
+  }));
+};
+
+export const isGoalInactive = (g) => !!(g.archivedAt || g.discontinuedAt || (g.duration !== 'recurring' && g.achievedAt));
+
 /** Each contribution's day of month, for `usualFundingDay`. */
 const goalFundingDays = (state, goal, mk) => [
   ...goalAutoTxns(state, goal, mk).map((t) => ({ day: new Date(t.createdAt).getDate(), amount: spendContribution(t) })),
@@ -1777,17 +1799,7 @@ export const useEPurseStore = create(
             const reviewLast = lastReview ? { at: lastReview.at, count: lastReview.count || 0 } : (s.reviewReminderLast || null);
             const log = prunePushLog([...(s.pushLog || []), ...delivered.map(({ key, kind, at }) => ({ key, kind, at }))], now);
 
-            const prevMonths = [3, 2, 1].map((n) => monthKey(new Date(new Date(now).getFullYear(), new Date(now).getMonth() - n, 1)));
-            const planCurrent = s.goalPlan?.monthKey === thisMonth;
-            const goals = (s.goals || []).map((g) => ({
-              id: g.id,
-              name: g.name,
-              emoji: g.emoji,
-              planned: planCurrent ? Number(s.goalPlan.allocations?.[g.id]) || 0 : 0,
-              funded: goalFundedForMonth(s, g, thisMonth),
-              inactive: !!(g.archivedAt || g.discontinuedAt || (g.duration !== 'recurring' && g.achievedAt)),
-              usualFundingDay: usualFundingDay(prevMonths.map((m) => goalFundingDays(s, g, m))),
-            }));
+            const goals = buildGoalMonthFacts(s, now);
             const cards = (s.accounts || [])
               .filter((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD && a.statementDay)
               .map((a) => {

@@ -35,7 +35,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
-import { useEPurseStore, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded } from '../store/ePurseStore';
+import { useEPurseStore, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive } from '../store/ePurseStore';
+import { goalsBehindPlan, goalsNearTarget } from '../analytics/nudgeFacts';
 import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import {
   useRewardStore,
@@ -56,6 +57,7 @@ import { TAB_BAR_HEIGHT, tabBarClearance } from '../context/TabBarVisibilityCont
 
 import LentBorrowedWidget from '../components/LentBorrowedWidget';
 import { BudgetSummary } from '../components/BudgetSummary';
+import GoalsSummary from '../components/GoalsSummary';
 import WeeklyRecapModal from '../components/WeeklyRecapModal';
 import DailyQueueStack from '../components/DailyQueueStack';
 import CrystalPiggyVault from '../components/CrystalPiggyVault';
@@ -355,6 +357,25 @@ const DashboardScreen = ({ navigation }) => {
     return { amount, count };
   }, [transactions, groups]);
 
+  const goals = useEPurseStore((s) => s.goals);
+  const goalPlan = useEPurseStore((s) => s.goalPlan);
+  const goalContributions = useEPurseStore((s) => s.goalContributions);
+  const goalHistory = useEPurseStore((s) => s.goalHistory);
+  const getGoalLifetimeSaved = useEPurseStore((s) => s.getGoalLifetimeSaved);
+  // Same facts builder as the scheduled push (replanPushes).
+  const goalFacts = useMemo(() => {
+    const now = Date.now();
+    const oneTime = goals.filter((g) => !isGoalInactive(g) && g.duration !== 'recurring' && Number(g.lifetimeTarget) > 0);
+    return {
+      hasGoals: goals.length > 0,
+      goalsBehind: goalsBehindPlan(buildGoalMonthFacts(useEPurseStore.getState(), now), now),
+      goalsNear: goalsNearTarget(oneTime.map((g) => ({
+        id: g.id, name: g.name, emoji: g.emoji, target: Number(g.lifetimeTarget), saved: getGoalLifetimeSaved(g.id),
+      }))),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goals, goalPlan, goalContributions, goalHistory, transactions, groups, getGoalLifetimeSaved]);
+
   const homeCards = useMemo(
     () => buildHomeCards(
       {
@@ -364,13 +385,14 @@ const DashboardScreen = ({ navigation }) => {
         uncategorised,
         week: weekSummary,
         ccBills,
+        ...goalFacts,
         // Read once per rebuild rather than inside the builder, so the card set is
         // a pure function of its inputs and the due-date window is testable.
         now: Date.now(),
       },
       PROMO_CARDS,
     ),
-    [budgetUsage, topCategory, subscriptions, uncategorised, weekSummary, ccBills],
+    [budgetUsage, topCategory, subscriptions, uncategorised, weekSummary, ccBills, goalFacts],
   );
 
   // The single LB entry this LB-tagged (locked) transaction created — powers the
@@ -799,6 +821,9 @@ const DashboardScreen = ({ navigation }) => {
 
           {/* Monthly budget — empty CTA or active progress */}
           <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
+
+          {/* Self-hides without an active goal. */}
+          <GoalsSummary onPress={() => navigation.navigate('Goals')} />
         </View>
 
         {/* Weekly spend recap is no longer an inline card — it appears once, after
