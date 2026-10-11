@@ -5246,5 +5246,28 @@ console.log('\n— Existing-user safety for the card-limit change (Oct-10-26) �
   check('debit unlink after a hand-set balance: only the LATER card spend leaves the bank', G().accounts.find((a) => a.id === 'bank').balance === 8200 && G().accounts.find((a) => a.id === cid).balance === -500, `${G().accounts.find((a) => a.id === 'bank').balance} ${G().accounts.find((a) => a.id === cid).balance}`);
 }
 
+console.log('\n— Keep Last Month\'s Plan on a new month (Oct-11-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMk = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+  const thisMk = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const last = { perCategory: { food: 8000, shopping: 4000, transfers: 3000, travel: 0 }, totalCap: 15000, monthKey: prevMk };
+
+  const carry = mod.carryableBudgetPlan(last);
+  check('carryable plan keeps budgetable parents with a cap only', carry && Object.keys(carry.perCategory).sort().join() === 'food,shopping' && carry.totalCap === 12000 && carry.count === 2, JSON.stringify(carry));
+  check('this month\'s own plan (budget reset, not rolled over) is not offered', mod.carryableBudgetPlan({ ...last, monthKey: thisMk }) === null);
+  check('no last plan → nothing to keep', mod.carryableBudgetPlan(null) === null && mod.carryableBudgetPlan({ perCategory: { transfers: 500 }, monthKey: prevMk }) === null);
+
+  useStore.setState({ budget: null, lastBudgetPlan: last });
+  const kept = G().keepLastBudgetPlan();
+  check('keep → this month\'s budget = last month\'s caps', kept === true && G().budget?.monthKey === thisMk && G().budget.totalCap === 12000 && G().budget.perCategory.food === 8000 && G().budget.perCategory.transfers === undefined, JSON.stringify(G().budget));
+  check('keep → lastBudgetPlan now this month (offer disappears)', mod.carryableBudgetPlan(G().lastBudgetPlan) === null);
+  const before = G().budget;
+  check('keep again with a budget in place is a no-op', G().keepLastBudgetPlan() === false && G().budget === before);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

@@ -1872,6 +1872,16 @@ export const useEPurseStore = create(
           };
         }),
 
+      /** One tap on a new month: re-applies last month's caps. False when there's nothing to keep. */
+      keepLastBudgetPlan: () => {
+        const s = get();
+        if (s.budget) return false;
+        const plan = carryableBudgetPlan(s.lastBudgetPlan);
+        if (!plan) return false;
+        get().setBudget({ perCategory: plan.perCategory });
+        return true;
+      },
+
       /** Upsert one category cap. Creates the plan record if it doesn't exist yet. */
       updateBudgetCategory: (categoryId, cap) =>
         set((s) => {
@@ -7467,6 +7477,23 @@ export const selectLentBorrowed = (s) => s.lentBorrowed;
  * Sorted newest-first so the most recent card is always on top.
  * Excludes ignored transactions (balance already reversed — not actionable).
  */
+/**
+ * Last month's plan as it would be kept today — budgetable parents with a
+ * positive cap only, same filter as BudgetPlanScreen's prefill. null when
+ * the plan is this month's (budget was reset, not rolled over) or empty.
+ */
+export const carryableBudgetPlan = (lastBudgetPlan, now = new Date()) => {
+  if (!lastBudgetPlan?.perCategory || lastBudgetPlan.monthKey >= monthKey(now)) return null;
+  const perCategory = {};
+  Object.entries(lastBudgetPlan.perCategory).forEach(([id, cap]) => {
+    const n = Number(cap);
+    if (BUDGETABLE_PARENT_IDS.has(id) && n > 0) perCategory[id] = n;
+  });
+  const ids = Object.keys(perCategory);
+  if (ids.length === 0) return null;
+  return { perCategory, totalCap: sumCaps(perCategory), monthKey: lastBudgetPlan.monthKey, count: ids.length };
+};
+
 export const selectUnreviewedQueue = (s) =>
   s.transactions
     .filter((t) => t.source === 'sms' && !t.isIgnored && !t.isReviewed)

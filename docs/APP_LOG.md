@@ -514,6 +514,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   recomputed even if it had — the card was frozen at whatever spend existed the instant it
   first mounted. `BudgetScreen.js`'s own `usage` memo already included `transactions`, which
   is why that screen looked live. Now matches that pattern.
+- Oct-11-2026: **New month: Keep Last Month's Plan.** After a rollover the Home budget card reads "Plan October · September: ₹25,000 across 4 categories" with one filled **Keep Last Month's Plan** button (store `keepLastBudgetPlan`; same budgetable-parent filter as the plan screen's prefill, via `carryableBudgetPlan`). Tapping the card still opens the plan to adjust. Not offered when the last plan is this month's own (budget reset mid-month). The monthly recap modal also gets an outlined "Plan October's Budget" button while no budget exists. Explicit tap only — still no auto-carry.
 
 **Open — reported Sep-6-2026, NOT YET REPRODUCED, needs your help to pin down**
 - **"App breaks when creating/saving a new budget plan"** — reported right after a month
@@ -1812,9 +1813,10 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - `test:store` 564 → 568 (new goal is not born funded/achieved for one-time; recurring still counts
   the whole month; two older tests whose setups assumed the old ungated behaviour corrected).
   `tsc` clean, full suite green.
+- Oct-11-2026: **Goal-plan rollover now runs at app start / foreground** (`BudgetRolloverBoot`), not only when the Goals screen opens — a month nobody opened Goals in was never snapshotted into `goalHistory` until they did.
 
 **Open**
-- Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block.
+- Not yet surfaced outside Profile: no Home card, no notifications, no monthly-recap block. Agreed Oct-11-26: a slim `GoalsSummary` under the Home budget card + carousel `goal_pace` / `goal_near` / `promo_goals`, and a "behind plan" push timed off the goal's usual funding day.
 - The liquid-fill visual from the prototype was deliberately NOT used — `DailyBudgetLiquidWave`
   is a PAID shop widget (`liquid_wave`, 600 EPC), so reusing it free here would undercut the
   shop. Goal progress uses a plain track/fill instead; a distinct Goals visual is open.
@@ -2353,6 +2355,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 - Not built from the suggested list: renewal reminders before a recurring charge (the data is
   already there — `detectSubscriptions` returns merchant + amount + `dayOfMonth`), stale
   settle-up nudges, stale-balance nudges, quiet hours, snooze.
+- Oct-11-2026: **Notification plan agreed, not built (steps 2–6).** One policy module (priority, max 2 app-decided pushes/day, quiet hours 21:30–08:30, back-off), `notify()` as the single entry for event pushes + bell, a scheduler for recap / plan-month / mid-month / weekly / goal-behind pushes (most nudges today fire only when the app is opened), grouped Settings rows + a banner when Android has notifications blocked, and an opt-in review reminder (5+ unsorted or oldest >3 days, 3-day cooldown). Step 1 (budget/goal new-month fixes) shipped — see Budget and Goals.
 
 - **Sep-14-2026: Reminders vs Notifications, separated.** Requested directly: a reminder is
   something the user asked to be reminded about; the "Automatic nudges" section listed

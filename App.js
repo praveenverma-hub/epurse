@@ -217,6 +217,7 @@ function AuthSessionBoot() {
 function BudgetRolloverBoot() {
   const hydrated = useStoreHydrated();
   const rollover   = useEPurseStore((s) => s.rolloverBudgetIfNeeded);
+  const goalRollover = useEPurseStore((s) => s.rolloverGoalPlanIfNeeded);
   const nudge      = useEPurseStore((s) => s.maybeFireMidmonthNudge);
   const subAlerts  = useEPurseStore((s) => s.maybeFireSubscriptionAlerts);
   const ccCycle    = useEPurseStore((s) => s.maybeFireCcCycleHeadsUp);
@@ -233,6 +234,7 @@ function BudgetRolloverBoot() {
   useEffect(() => {
     if (!hydrated) return;
     rollover();
+    goalRollover();
     nudge();
     subAlerts();
     ccCycle();
@@ -242,6 +244,7 @@ function BudgetRolloverBoot() {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         rollover();
+        goalRollover();
         nudge();
         subAlerts();
         ccCycle();
@@ -251,7 +254,7 @@ function BudgetRolloverBoot() {
       }
     });
     return () => sub.remove();
-  }, [hydrated, rollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders]);
+  }, [hydrated, rollover, goalRollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders]);
   return null;
 }
 

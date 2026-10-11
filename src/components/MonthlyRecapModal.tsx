@@ -32,12 +32,14 @@ type Props = {
   previewReport?: MonthlyReport;
   onPreviewClose?: () => void;
   onViewFull?: (monthKey: string, previewReport?: MonthlyReport) => void;
+  onPlanBudget?: () => void;
 };
 
-const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, explicitlyRequested = false, previewReport, onPreviewClose, onViewFull }) => {
+const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, explicitlyRequested = false, previewReport, onPreviewClose, onViewFull, onPlanBudget }) => {
   const pendingMonthlyRecap      = useEPurseStore((s) => s.pendingMonthlyRecap);
   const showMonthlyRecap         = useEPurseStore((s) => s.showMonthlyRecap);
   const clearPendingMonthlyRecap = useEPurseStore((s) => s.clearPendingMonthlyRecap);
+  const hasBudget                = useEPurseStore((s) => !!s.budget);
 
   // Only when this is the top of the auto-modal queue — otherwise it would
   // stack on whatever is already open (§8b). Held back, not dropped: the pending
@@ -52,6 +54,8 @@ const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, explicitlyRequest
     && (previewReport || explicitlyRequested || showMonthlyRecap)
     && activeAutoModal === 'monthlyRecap';
   const close = () => previewReport ? onPreviewClose?.() : clearPendingMonthlyRecap();
+  const canPlan = !hasBudget && !previewReport && !!onPlanBudget;
+  const thisMonthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
 
   return (
     <RecapModalShell
@@ -69,6 +73,8 @@ const MonthlyRecapModal: React.FC<Props> = ({ activeAutoModal, explicitlyRequest
           onDownloaded={close}
           previewReport={previewReport}
           onViewFull={onViewFull ? () => onViewFull(monthKey, previewReport) : undefined}
+          planLabel={canPlan ? `Plan ${thisMonthName}'s Budget` : undefined}
+          onPlan={canPlan ? () => { close(); onPlanBudget?.(); } : undefined}
         />
       )}
     </RecapModalShell>
