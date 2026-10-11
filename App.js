@@ -173,15 +173,25 @@ function SmsSyncBoot() {
  * this often is cheap.
  */
 function CompactionBoot() {
+  const hydrated = useStoreHydrated();
   const compact = useEPurseStore((s) => s.compactTransactions);
   useEffect(() => {
+    if (!hydrated) return undefined; // before load there's nothing real to compact
     compact();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') compact();
     });
     return () => sub.remove();
-  }, [compact]);
+  }, [hydrated, compact]);
   return null;
+}
+
+// AppNavigator reads hasOnboarded ONCE, at mount, to pick its first screen. Mounted
+// before the store loads it saw the default (false) and opened Onboarding for an
+// onboarded user — visible once SQLite made loading slower. ROOT_BG shows meanwhile.
+function HydratedNavigator() {
+  const hydrated = useStoreHydrated();
+  return hydrated ? <AppNavigator /> : null;
 }
 
 /**
@@ -209,7 +219,16 @@ function AuthSessionBoot() {
     (async () => {
       try {
         const signedIn = await googleAuth.isSignedIn();
-        setGoogleAccount(signedIn ? await googleAuth.getSignedInProfile() : null);
+        const profile = signedIn ? await googleAuth.getSignedInProfile() : null;
+        // Hydration REPLACES googleAccount with its stored copy (isLoggedIn isn't stored).
+        // Applied before it, a signed-out answer was overwritten by a stale account:
+        // "Signed in as …" with isLoggedIn false, and no way past LoginGate.
+        if (!useEPurseStore.persist.hasHydrated()) {
+          await new Promise((resolve) => {
+            const unsub = useEPurseStore.persist.onFinishHydration(() => { unsub(); resolve(); });
+          });
+        }
+        setGoogleAccount(profile);
       } finally {
         clearTimeout(fallback);
         setAuthChecked();
@@ -305,7 +324,7 @@ function App() {
             <BudgetRolloverBoot />
             <AwareRunBoot />
             <AuthSessionBoot />
-            <AppNavigator />
+            <HydratedNavigator />
             <AppLockGate />
             <LoginGate />
             <UpdateRequiredGate />

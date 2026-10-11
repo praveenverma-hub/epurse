@@ -149,6 +149,18 @@ await contract('memory', createMemoryRecordStore());
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+// ── 6. Device driver guard (source check — expo-sqlite can't run in Node) ──
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(`${PROJECT_ROOT}/src/storage/expoSqlDriver.ts`, 'utf8').replace(/\/\/.*$/gm, '');
+  // withExclusiveTransactionAsync opens a SECOND connection that never gets the
+  // SQLCipher PRAGMA key: every write failed and hydration hung (Oct-11-26, emulator).
+  check('device driver: never opens a second (unkeyed) connection',
+    !/withExclusiveTransactionAsync|useNewConnection/.test(src));
+  check('device driver: transactions run BEGIN/COMMIT on the keyed connection',
+    /BEGIN IMMEDIATE/.test(src) && /COMMIT/.test(src) && /ROLLBACK/.test(src));
+}
+
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);
 console.log(`  ${fail ? C.red : C.green}${C.bold}${pass}/${pass + fail} passed${C.reset}\n`);
 process.exit(fail ? 1 : 0);

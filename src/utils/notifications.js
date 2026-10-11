@@ -43,7 +43,6 @@ export async function setupAndroidChannel() {
 // Lazily request permission (call before scheduling, not at startup)
 /** For Settings' "notifications are off" banner. `canAskAgain` false = only system settings can fix it. */
 export async function getNotificationPermission() {
-  if (MOCK_DATA_ENABLED) return { granted: true, canAskAgain: true };
   const p = await Notifications.getPermissionsAsync();
   return { granted: p.status === 'granted', canAskAgain: p.canAskAgain !== false };
 }
@@ -146,13 +145,11 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
 
 /** Reset / Delete Account: nothing the app armed may fire about data that's gone. */
 export async function cancelAllScheduledNotifications() {
-  if (MOCK_DATA_ENABLED) return;
   try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch {}
 }
 
 /** Cancels every pending push from the scheduled plan — tagged, so no stored ids are needed. */
 export async function cancelPlannedPushes() {
-  if (MOCK_DATA_ENABLED) return;
   try {
     const all = await Notifications.getAllScheduledNotificationsAsync();
     await Promise.all(all
@@ -163,7 +160,6 @@ export async function cancelPlannedPushes() {
 
 /** One push from the scheduled plan (`analytics/notificationPlan`). Returns the id, or null. */
 export async function schedulePlannedPush({ title, body, data, fireAt, channel }) {
-  if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
   const trigger = triggerAt(fireAt);

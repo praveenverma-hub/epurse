@@ -18,8 +18,6 @@ Today's storage can't hold that. See [Retention plan](#9-what-this-unblocks).
 | `utils/storage.js` (`@ePurse:*`) | AsyncStorage | remote-config cache |
 | `backupService` pre-restore snapshot | AsyncStorage | a full plaintext copy, kept forever |
 
-All three stores import AsyncStorage from `src/dev/mockStorage.js`, which swaps in an in-memory
-Map when `MOCK_DATA_ENABLED`.
 
 **Why it can't scale:**
 - **6 MB cap.** async-storage on Android defaults its whole DB to 6 MB (`getDatabaseSize()` →
@@ -101,6 +99,24 @@ the partialized state **object**, so nothing is stringified up front.
 4. MMKV keys are written synchronously as they change. They aren't coupled to the ledger, so no
    atomicity is needed.
 
+**One connection — never `withExclusiveTransactionAsync`** (found on the emulator, Oct-11-26). It
+opens a SECOND native connection (`useNewConnection: true`) that never receives the SQLCipher
+`PRAGMA key`, so to it the file is random bytes: every write failed, the WAL stayed 0 bytes,
+hydration never finished, and every `AppModal` (which renders null until hydrated) was invisible —
+onboarding's Continue appeared to do nothing. `expoSqlDriver` now runs `BEGIN IMMEDIATE`/`COMMIT`/
+`ROLLBACK` on the keyed connection behind its own queue; `test:storage` source-guards it. Node can't
+reproduce this (better-sqlite3 has no SQLCipher and no second connection).
+
+**Hydration is slower now, so boot code must not race it.** `AuthSessionBoot` set `googleAccount`/
+`isLoggedIn` before hydration finished; hydration then REPLACED `googleAccount` with the stored copy
+(isLoggedIn isn't stored) → "Signed in as …" with isLoggedIn false, no sign-in button, LoginGate
+impassable. It now waits for `persist.onFinishHydration` before applying its answer. Anything that
+`set`s persisted keys at boot must do the same. Same family, also fixed: `AppNavigator` read
+`hasOnboarded` once at mount (default false) → relaunch opened Onboarding under LoginGate — now
+mounted only after hydration (`HydratedNavigator`, App.js); `useSmsSync` and `CompactionBoot` wait
+for hydration (an early sweep settled the first-sweep signal as "no permission"); `appStorage.getItem`
+never throws (a throw left zustand never hydrated → stuck splash) and blocks saves after a failed load.
+
 **Pre-hydration writes are dropped.** `persist` calls `setItem` after every `set`, including any
 `set` that lands while `getItem` is still loading, and at that moment the state is the INITIAL
 defaults. Writing it would overwrite stored data. `setItem` is a no-op until `getItem` has finished
@@ -151,7 +167,6 @@ MMKV.
 | SQLite won't open, data NOT moved yet | `legacy` | AsyncStorage exactly as before; retried next launch |
 | Migration fails to verify | `legacy` | same; half-copy wiped; Sentry `storage: migration-failed` (key names only) |
 | SQLite won't open, data HAS moved (MMKV mirror flag) | `unavailable` | memory only, so nothing is overwritten and the stale AsyncStorage copy is NOT used. PR 6 adds the restore prompt |
-| Mock-data mode | `hybrid` on memory | never touches real files |
 
 ## 7. Encryption, keys, failure modes
 
@@ -172,7 +187,6 @@ MMKV.
 | `Storage.wipeEverything` / `deleteAllUserData` | Also close + delete the SQLite file, `clearAll()` every MMKV instance, delete both keys from SecureStore |
 | Pre-restore snapshot | AsyncStorage → SQLite `kv` row, **expires after 7 days** (retention plan) |
 | Drive backup | **Format unchanged.** It's a logical export built from store state, not a DB-file copy, so no SQLite backup API is involved |
-| `MOCK_DATA_ENABLED` | Memory drivers for both engines, so mock mode never touches the real files (as today) |
 | `migrateRestoredState` | Unchanged (works on the state object) |
 
 ## 8. Later — Phase B (not part of Step 0)
@@ -197,7 +211,7 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
   (`expoSqlDriver.ts`), **better-sqlite3** in Node (`__tests__/_sqliteNodeDriver.mjs`, devDependency),
   so the REAL SQL and schema are tested. No SQLCipher in Node: encryption is checked on device only.
 - **`RecordStore`** (`load / apply(ChangeSet) / wipe`) — one contract, two implementations: SQL
-  and memory (mock mode + the existing suites). `test:storage` runs the SAME contract against both,
+  and memory (the existing suites). `test:storage` runs the SAME contract against both,
   including atomicity (mutation-verified: commit-on-error and in-place memory writes both fail it).
 - Rows are keyed by `rid`, not the record's `id`, and ordered by `seq` (the store prepends new
   transactions and tests read `transactions[0]`): a legacy row with no id, or two sharing one,
@@ -219,7 +233,7 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
 | 4 ✅ | `legacyMigration.ts` (copy as-is → reload → exact-equality verify → only then mark; any failure wipes the half-copy) + `appStorage.ts` (modes hybrid / legacy / unavailable, Sentry tags only) wired into `ePurseStore`; flush on background (App.js) and in Delete Account; `_store-hook` stubs appStorage for the Node suites; `storageMigration.test.mjs` 15 incl. a real v41 store end-to-end | no |
 | 5 | Rewards, notifications, remote config, utils → MMKV (+ their migration) | no |
 | 6 | Snapshot → SQLite 7-day; delete-account wipes all engines; key-loss path + restore prompt | no |
-| 7 | **On-device checks (you):** fresh install; upgrade from the current build with real data; kill the app mid-ingest; Drive restore; delete account; start-up time with mock 20 k txns | — |
+| 7 | **On-device checks (you):** fresh install; upgrade from the current build with real data; kill the app mid-ingest; Drive restore; delete account; start-up time with a large history | — |
 | 8 | Retention change (§9) | no |
 
 ## 12. Open questions / risks

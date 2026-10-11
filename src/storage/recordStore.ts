@@ -2,7 +2,7 @@
 // RecordStore — where ePurse user data is durably kept. Two implementations with
 // ONE contract (the Node suite runs the same checks against both):
 //   • createSqlRecordStore(driver) — SQLite (device: expo-sqlite + SQLCipher)
-//   • createMemoryRecordStore()    — mock-data mode and headless tests
+//   • createMemoryRecordStore()    — headless tests
 //
 // It knows nothing about zustand. The layer above diffs store state into a
 // ChangeSet; `apply` writes it in ONE transaction, so a flush is all-or-nothing.

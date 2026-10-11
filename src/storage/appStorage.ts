@@ -8,14 +8,12 @@
 //   unavailable Data HAS moved but SQLite won't open (e.g. key lost). Memory only,
 //               so nothing is overwritten — and never the stale AsyncStorage copy.
 //
-// Mock-data mode: memory for both, so it never touches the real files.
 // Device only — the Node suites stub this module (see _store-hook.mjs).
 // =============================================================================
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Sentry from '@sentry/react-native';
 import { createJSONStorage } from 'zustand/middleware';
-import { MOCK_DATA_ENABLED } from '../config/mockData';
 import { createHybridStorage, type HybridStorage } from './hybridStorage';
 import { createSqlRecordStore, createMemoryRecordStore, type RecordStore } from './recordStore';
 import { createMemoryDeviceKv, type DeviceKv } from './deviceKv';
@@ -40,6 +38,7 @@ let mode: StorageMode | null = null;
 let backend: Backend | null = null;
 let hybrid: HybridStorage | null = null;
 let ready: Promise<void> | null = null;
+let loadFailed = false;
 
 /** Counts and reasons only — never stored data. */
 function report(event: string, extra?: Record<string, unknown>, level: 'error' | 'info' = 'error') {
@@ -48,12 +47,6 @@ function report(event: string, extra?: Record<string, unknown>, level: 'error' |
 const msg = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 200);
 
 async function init(name: string): Promise<void> {
-  if (MOCK_DATA_ENABLED) {
-    hybrid = createHybridStorage({ records: createMemoryRecordStore(), device: createMemoryDeviceKv() });
-    backend = hybrid; mode = 'hybrid';
-    return;
-  }
-
   let device: DeviceKv;
   try { device = getMmkvDeviceKv(STORE_KV_ID); } catch (e) {
     report('mmkv-open-failed', { message: msg(e) });
@@ -102,9 +95,22 @@ const ensure = (name: string) => (ready ??= init(name).catch((e) => {
 
 export function createAppStorage() {
   return {
-    getItem: async (name: string) => { await ensure(name); return backend!.getItem(name); },
+    getItem: async (name: string) => {
+      await ensure(name);
+      try {
+        return await backend!.getItem(name);
+      } catch (e) {
+        // A throw here would leave zustand never "hydrated" — the app stuck on the
+        // splash for good. Start empty instead; saves stay blocked (the storage never
+        // finished loading), so nothing stored is overwritten.
+        report('load-failed', { mode, message: msg(e) });
+        loadFailed = true;
+        return null;
+      }
+    },
     // Before the backend is chosen this is the pre-hydration default state — drop it.
-    setItem: (name: string, value: any) => { if (backend) return backend.setItem(name, value); },
+    // After a failed load the store holds defaults: never save them over the real data.
+    setItem: (name: string, value: any) => { if (backend && !loadFailed) return backend.setItem(name, value); },
     removeItem: async (name: string) => { await ensure(name); return backend!.removeItem(name); },
   };
 }

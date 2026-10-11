@@ -1,5 +1,5 @@
 // DeviceKv on MMKV, encrypted (AES-256) with the per-install key from SecureStore.
-// Device only — tests and mock-data mode use createMemoryDeviceKv().
+// Device only — tests use createMemoryDeviceKv().
 
 import { createMMKV } from 'react-native-mmkv';
 import { getKvKey } from './keys';

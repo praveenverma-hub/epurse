@@ -1,5 +1,5 @@
 // Synchronous key-value store for DEVICE-LOCAL state (MMKV on device). The subset of
-// the MMKV API we use, so tests and mock-data mode can swap in memory. PURE.
+// the MMKV API we use, so tests can swap in memory. PURE.
 
 export interface DeviceKv {
   getString(key: string): string | undefined;
