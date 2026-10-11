@@ -65,6 +65,14 @@ export async function requestNotificationPermissions() {
  * Returns the scheduled id, or null when the moment has passed / permission is
  * not granted — callers treat null as "not scheduled" rather than an error.
  */
+/** Immediate unless the policy moved it (quiet hours) — then a DATE trigger. */
+const triggerAt = (fireAt) => {
+  const when = Number(fireAt);
+  return Number.isFinite(when) && when > Date.now() + 5_000
+    ? { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(when) }
+    : null;
+};
+
 export async function scheduleReminderAt({ title, body, fireAt }) {
   if (MOCK_DATA_ENABLED) return `mock-reminder-${fireAt}`;
   const { status } = await Notifications.getPermissionsAsync();
@@ -134,6 +142,36 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
   });
 }
 
+/** Cancels every pending push from the scheduled plan — tagged, so no stored ids are needed. */
+export async function cancelPlannedPushes() {
+  if (MOCK_DATA_ENABLED) return;
+  try {
+    const all = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(all
+      .filter((n) => n?.content?.data?.planned)
+      .map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier)));
+  } catch {}
+}
+
+/** One push from the scheduled plan (`analytics/notificationPlan`). Returns the id, or null. */
+export async function schedulePlannedPush({ title, body, data, fireAt, channel }) {
+  if (MOCK_DATA_ENABLED) return null;
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return null;
+  const trigger = triggerAt(fireAt);
+  if (!trigger) return null;
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      data: { ...(data || {}), planned: true },
+      priority: Notifications.AndroidNotificationPriority?.DEFAULT,
+      ...(Platform.OS === 'android' ? { channelId: channel === 'payments' ? CHANNEL_ID : BUDGET_CHANNEL_ID } : {}),
+    },
+    trigger,
+  });
+}
+
 export async function cancelScheduledNotification(notificationId) {
   if (MOCK_DATA_ENABLED) return;
   if (!notificationId) return;
@@ -167,7 +205,7 @@ export async function setupBudgetAlertChannel() {
  * Silently no-ops if permission isn't granted (we don't prompt here — the
  * borrow reminder flow already asks, and the budget breach is a follow-up).
  */
-export async function fireBudgetBreachNotification({ scope, categoryName, actual, cap }) {
+export async function fireBudgetBreachNotification({ scope, categoryName, actual, cap, fireAt }) {
   if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
@@ -192,7 +230,7 @@ export async function fireBudgetBreachNotification({ scope, categoryName, actual
       priority: Notifications.AndroidNotificationPriority?.HIGH,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
-    trigger: null, // fires immediately
+    trigger: triggerAt(fireAt),
   });
 }
 
@@ -200,7 +238,7 @@ export async function fireBudgetBreachNotification({ scope, categoryName, actual
  * Fire an immediate notification when a CC bill payment is received by the bank.
  * Silently no-ops if permission isn't granted.
  */
-export async function fireCCPaymentNotification({ amount, accountMask, bankName }) {
+export async function fireCCPaymentNotification({ amount, accountMask, bankName, fireAt }) {
   if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
@@ -216,7 +254,7 @@ export async function fireCCPaymentNotification({ amount, accountMask, bankName 
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
-    trigger: null,
+    trigger: triggerAt(fireAt),
   });
 }
 
@@ -224,7 +262,7 @@ export async function fireCCPaymentNotification({ amount, accountMask, bankName 
  * Fire an immediate notification when a recurring subscription's price is detected
  * to have increased. No-ops without notification permission.
  */
-export async function fireSubscriptionHikeNotification({ merchant, oldAmount, newAmount }) {
+export async function fireSubscriptionHikeNotification({ merchant, oldAmount, newAmount, fireAt }) {
   if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
@@ -237,7 +275,7 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
-    trigger: null,
+    trigger: triggerAt(fireAt),
   });
 }
 
@@ -249,7 +287,7 @@ export async function fireSubscriptionHikeNotification({ merchant, oldAmount, ne
  * DEFAULT-priority/budget-channel treatment as the mid-cycle nudge and
  * subscription-hike alerts — none of those are urgent either.
  */
-export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
+export async function fireCcCycleHeadsUpNotification({ cardLabel, fireAt }) {
   if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
@@ -260,7 +298,7 @@ export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
-    trigger: null,
+    trigger: triggerAt(fireAt),
   });
 }
 
@@ -269,7 +307,7 @@ export async function fireCcCycleHeadsUpNotification({ cardLabel }) {
  * month. No-ops without notification permission. Carries `data.monthKey` so
  * tapping it (handled by the listener in App.js) re-opens that month's recap.
  */
-export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
+export async function fireMonthlyRecapNotification({ monthLabel, monthKey, fireAt }) {
   if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
@@ -281,7 +319,7 @@ export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
       data: { type: 'monthly_recap', monthKey },
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
-    trigger: null,
+    trigger: triggerAt(fireAt),
   });
 }
 
@@ -290,7 +328,7 @@ export async function fireMonthlyRecapNotification({ monthLabel, monthKey }) {
  * but with a friendlier tone (passed in as title/body from the store action).
  * No-ops without notification permission.
  */
-export async function fireMidmonthNudgeNotification({ title, body }) {
+export async function fireMidmonthNudgeNotification({ title, body, fireAt }) {
   if (MOCK_DATA_ENABLED) return null;
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== 'granted') return null;
@@ -301,6 +339,6 @@ export async function fireMidmonthNudgeNotification({ title, body }) {
       priority: Notifications.AndroidNotificationPriority?.DEFAULT,
       ...(Platform.OS === 'android' ? { channelId: BUDGET_CHANNEL_ID } : {}),
     },
-    trigger: null,
+    trigger: triggerAt(fireAt),
   });
 }

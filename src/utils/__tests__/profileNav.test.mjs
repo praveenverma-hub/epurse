@@ -243,12 +243,13 @@ console.log('\n── notifications ──');
   check('…reading each value from notificationPrefs', /notificationPrefs\?\.\[key\]/.test(notifs));
 
   // A switch that moves nothing is the failure this block has always guarded
-  // against: every pref row must have a matching GATE at a fire site.
+  // against: every pref row must reach a fire site. Since Oct-11-26 the gate is
+  // `notify({ kind })` — notificationPolicy's `decide` reads the switch by kind.
   const rowKeys = [...notifs.matchAll(/\{ key: '([A-Za-z]+)'/g)].map((m) => m[1]);
   check(`the screen lists several nudges (${rowKeys.length})`, rowKeys.length >= 5, rowKeys.join(','));
   for (const key of rowKeys) {
     check(`"${key}" is actually gated in the store`,
-      new RegExp(`nudgeAllowed\\((?:get\\(\\)|s|state), '${key}'\\)`).test(store),
+      new RegExp(`notify\\(\\{\\s*kind: '${key}'`).test(store),
       'a switch with no gate at the fire site moves nothing');
   }
 

@@ -31,6 +31,8 @@ export type NotificationKind =
   | 'cc_payment_review'
   | 'cc_cycle_heads_up'
   | 'subscription_hike'
+  | 'budget_breach'
+  | 'midmonth_check_in'
   | 'monthly_recap'
   | 'weekly_recap'
   | 'aware_savings_ready'

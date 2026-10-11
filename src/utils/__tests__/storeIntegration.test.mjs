@@ -29,6 +29,7 @@ const reset = () =>
     budgetHistory: {}, showMonthlyRecap: true, pendingMonthlyRecap: null,
     recapMonthHandled: null, monthlyRecapCardDismissed: null,
     showWeeklySummary: true, pendingWeeklyRecap: null, weeklyRecapHandled: null,
+    pushLog: [], lastAppOpenAt: 0,
   });
 
 const ingest = (sender, body, opts = {}) =>
@@ -5267,6 +5268,104 @@ console.log('\n— Keep Last Month\'s Plan on a new month (Oct-11-26) —');
   check('keep → lastBudgetPlan now this month (offer disappears)', mod.carryableBudgetPlan(G().lastBudgetPlan) === null);
   const before = G().budget;
   check('keep again with a budget in place is a no-op', G().keepLastBudgetPlan() === false && G().budget === before);
+}
+
+console.log('\n— notify(): one gate for every app-decided push (Oct-11-26) —');
+{
+  const RN = await import('react-native');
+  const G = () => useStore.getState();
+  const DAY = 24 * 60 * 60 * 1000;
+  const fresh = () => { reset(); useStore.setState({ notificationPrefs: {} }); RN.AppState.currentState = 'background'; };
+  const send = (kind, key, fireAt) => {
+    let sent = false;
+    G().notify({ kind, key, fireAt, push: () => { sent = true; return Promise.resolve('id'); } });
+    return sent;
+  };
+
+  fresh();
+  check('a push goes out and is logged', send('weeklyRecap', 'w1') && G().pushLog.length === 1 && G().pushLog[0].key === 'w1');
+  check('the same event key never sends twice', !send('weeklyRecap', 'w1') && G().pushLog.length === 1);
+  check('a second kind the same day still goes out', send('midmonthNudge', 'm1'));
+  check('a third that day is capped', !send('goalBehind', 'g1') && G().pushLog.length === 2);
+  check('CC bill due is not capped', send('ccBillDue', 'c1', Date.now() + 2 * DAY));
+
+  fresh();
+  RN.AppState.currentState = 'active';
+  check('an immediate push while the app is open is held back', !send('budgetBreach', 'b1') && G().pushLog.length === 0);
+  check('…but a future one is still scheduled', send('ccBillDue', 'c2', Date.now() + 2 * DAY));
+  RN.AppState.currentState = 'background';
+
+  fresh();
+  check('review reminder is off until the user turns it on', !send('reviewReminder', 'r1'));
+  useStore.setState({ notificationPrefs: { reviewReminder: true } });
+  check('…and goes out once they do', send('reviewReminder', 'r1'));
+
+  fresh();
+  const now = Date.now();
+  useStore.setState({
+    lastAppOpenAt: now - 5 * DAY,
+    pushLog: [1, 2, 3].map((i) => ({ key: `old${i}`, kind: 'subscriptionHike', at: now - (4 - i) * DAY })),
+  });
+  check('3 unseen of a kind → that kind pauses', !send('subscriptionHike', 'h4'));
+  G().markAppOpened();
+  check('opening the app lifts the pause', send('subscriptionHike', 'h4'));
+
+  fresh();
+  globalThis.__notifCalls = [];
+  useStore.setState({
+    budget: { monthKey: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`, totalCap: 100, perCategory: { food: 100 }, createdAt: new Date().toISOString() },
+    budgetBreachNotified: {},
+  });
+  G().addTransaction({ amount: 500, type: 'debit', merchant: 'Swiggy', categoryId: 'food', createdAt: new Date().toISOString() });
+  G().checkBudgetBreach?.('food');
+  const breachKeys = G().pushLog.filter((e) => e.kind === 'budgetBreach').map((e) => e.key);
+  check('a real breach logs one push per category + total, keyed by month', breachKeys.length === 2 && breachKeys.every((k) => k.startsWith('budget:')), breachKeys.join());
+}
+
+console.log('\n— replanPushes(): the scheduled plan (Oct-11-26) —');
+{
+  const G = () => useStore.getState();
+  const now = Date.now();
+  const mk = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const fresh = () => {
+    reset();
+    globalThis.__notifCalls = [];
+    globalThis.__notifDenied = false;
+    useStore.setState({
+      notificationPrefs: {}, plannedPushes: [], reviewReminderLast: null,
+      showMonthlyRecap: true, recapMonthHandled: null,
+      transactions: [{ id: 't1', type: 'debit', amount: 100, createdAt: new Date(now - 60000).toISOString(), categoryId: 'food' }],
+    });
+  };
+
+  fresh();
+  await G().replanPushes();
+  const calls = globalThis.__notifCalls;
+  check('re-plan cancels the old plan before scheduling', calls[0] === 'cancelPlanned' && calls.includes('planned:monthlyRecap'), calls.join());
+  check('the plan is remembered (key, kind, time)', G().plannedPushes.some((p) => p.kind === 'monthlyRecap' && p.at > now && p.key.startsWith('recap:')));
+
+  useStore.setState({ plannedPushes: [{ key: 'recap:2026-01', kind: 'monthlyRecap', at: now - 1000 }, { key: 'review:x', kind: 'reviewReminder', at: now - 500, count: 7 }] });
+  await G().replanPushes();
+  check('a planned push whose time has passed moves into pushLog', G().pushLog.some((e) => e.key === 'recap:2026-01'));
+  check('…and leaves the plan', !G().plannedPushes.some((p) => p.key === 'recap:2026-01'));
+  check('a delivered review reminder starts its cooldown with the count it was sent at', G().reviewReminderLast?.count === 7);
+
+  fresh();
+  G().setNotificationPref('monthlyRecap', false);
+  await new Promise((r) => setTimeout(r, 0));
+  await G().replanPushes();
+  check('switching a kind off re-plans without it', !G().plannedPushes.some((p) => p.kind === 'monthlyRecap'));
+
+  fresh();
+  globalThis.__notifDenied = true;
+  await G().replanPushes();
+  check('no notification permission → nothing recorded as planned', G().plannedPushes.length === 0);
+  globalThis.__notifDenied = false;
+
+  fresh();
+  useStore.setState({ budget: { monthKey: mk, totalCap: 1000, perCategory: { food: 1000 }, createdAt: new Date().toISOString() } });
+  await G().replanPushes();
+  check('a budget this month → next month\'s plan-budget push is scheduled', G().plannedPushes.some((p) => p.kind === 'budgetPlan'));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

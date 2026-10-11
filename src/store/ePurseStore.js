@@ -79,7 +79,11 @@ import {
   SUPPRESS_SMS_CAP, ONBOARDING_QUEUE_LIMIT,
 } from '../constants/retention';
 import { isSameMonth, monthKey, formatCurrency } from '../utils/format';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt } from '../utils/notifications';
+import { AppState } from 'react-native';
+import { decide, planPushes } from '../constants/notificationPolicy';
+import { buildPlannedPushes } from '../analytics/notificationPlan';
+import { usualFundingDay } from '../analytics/nudgeFacts';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt, schedulePlannedPush, cancelPlannedPushes } from '../utils/notifications';
 import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSchedule';
 // Imported directly from the pure module, NOT from notifications.js — that module
 // is stubbed wholesale in the headless test runner (it pulls in expo-notifications),
@@ -164,22 +168,14 @@ const syncCcReviewNotification = (queue = []) => {
  */
 const ccBillKey = ({ cardLast4, bankName }) => String(cardLast4 || bankName || 'unknown');
 
-/**
- * May this automatic nudge fire? Reads the user's `notificationPrefs` switch for
- * it (Reminders screen → "Automatic nudges").
- *
- * Every automatic notification in the app is fired from THIS file, so this one
- * gate covers all of them — the reason the toggles could be added without
- * touching a single screen. Absent/unknown keys are ON: a nudge must never go
- * silent just because a pref row hasn't been written yet, and that also makes the
- * upgrade path a no-op for existing users.
- *
- * It gates the OS notification ONLY, never the in-app feed entry beside it. The
- * switch is about what interrupts you; the bell is a log you open on purpose, and
- * silencing that would delete information rather than stop an interruption —
- * a user who turns off budget pings still expects to find the breach in the feed.
- */
-const nudgeAllowed = (state, prefKey) => (state?.notificationPrefs?.[prefKey] ?? true) !== false;
+/** `pushLog` bounds — enough history for the daily cap, cooldowns and back-off. */
+const PUSH_LOG_MAX = 80;
+const PUSH_LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const prunePushLog = (log, now) => log.filter((e) => now - e.at < PUSH_LOG_MAX_AGE_MS).slice(-PUSH_LOG_MAX);
+
+// One re-plan at a time; a request arriving mid-run re-plans once more after it.
+let replanRunning = false;
+let replanAgain = false;
 
 /**
  * Remove any stored bill belonging to the card a payment just landed on.
@@ -777,6 +773,14 @@ const mergeRuleAdditions = (current, incoming, nowIso) => {
 
 /** Total funded in one month. The breakdown is `goalFundingForMonth`. */
 const goalFundedForMonth = (state, goal, mk) => goalFundingForMonth(state, goal, mk).total;
+
+/** Each contribution's day of month, for `usualFundingDay`. */
+const goalFundingDays = (state, goal, mk) => [
+  ...goalAutoTxns(state, goal, mk).map((t) => ({ day: new Date(t.createdAt).getDate(), amount: spendContribution(t) })),
+  ...(state.goalContributions || [])
+    .filter((c) => c.goalId === goal.id && monthKey(c.date) === mk)
+    .map((c) => ({ day: new Date(c.date).getDate(), amount: Number(c.amount) || 0 })),
+];
 
 /**
  * First millisecond of a `YYYY-MM` month key. Used to ask "is this ENTIRE month
@@ -1431,6 +1435,12 @@ export const useEPurseStore = create(
       ccCycleHeadsUpNotified: {},
       // Subscription price-hike alerts already sent: keys `${merchantKey}:${hikeTo}`.
       subscriptionHikesNotified: [],
+      // Pushes the app decided to send ({ key, kind, at }) — see `notify`. Device-only, not backed up.
+      pushLog: [],
+      lastAppOpenAt: 0,
+      // The current scheduled plan ({ key, kind, at, count? }) — see `replanPushes`.
+      plannedPushes: [],
+      reviewReminderLast: null,
 
       // ─── Budget plan ────────────────────────────────────────────────────────
       // `budget` is null until the user sets a plan. When set:
@@ -1617,15 +1627,17 @@ export const useEPurseStore = create(
         });
         if (!hasData) return;
         set({ pendingWeeklyRecap: lastWeekStart, weeklyRecapHandled: key });
-        try {
-          useNotificationStore.getState().add({
+        get().notify({
+          kind: 'weeklyRecap',
+          key: `weekly:${key}`,
+          bell: {
             kind: 'weekly_recap',
             title: 'Your weekly summary is ready',
             body: 'See last week’s spending and progress.',
             dedupeKey: `pending:weekly_recap:${key}`,
             meta: { weekKey: key, anchorDate: lastWeekStart },
-          });
-        } catch {}
+          },
+        });
       },
 
       /** Weekly recap modal closed. */
@@ -1674,18 +1686,18 @@ export const useEPurseStore = create(
         // Both carry monthKey so tapping either re-opens THIS month's recap —
         // see openMonthlyRecap() + the notification-tap listener in App.js.
         const label = prev.toLocaleDateString('en-IN', { month: 'long' });
-        try {
-          useNotificationStore.getState().add({
+        get().notify({
+          kind: 'monthlyRecap',
+          key: `recap:${prevMk}`,
+          bell: {
             kind: 'monthly_recap',
             title: `Your ${label} recap is ready`,
             body: 'See where your money went last month — tap to view and download.',
             dedupeKey: `recap:${prevMk}`,
             meta: { monthKey: prevMk },
-          });
-        } catch {}
-        if (nudgeAllowed(get(), 'monthlyRecap')) {
-          fireMonthlyRecapNotification({ monthLabel: label, monthKey: prevMk });
-        }
+          },
+          push: (fireAt) => fireMonthlyRecapNotification({ monthLabel: label, monthKey: prevMk, fireAt }),
+        });
       },
 
       /** Recap modal closed — stop showing it (kept marked handled). */
@@ -1703,8 +1715,128 @@ export const useEPurseStore = create(
 
       // ─── Reminders ──────────────────────────────────────────────────────────
       /** Turn one automatic nudge on/off (see `notificationPrefs`). */
-      setNotificationPref: (key, value) =>
-        set((s) => ({ notificationPrefs: { ...s.notificationPrefs, [key]: !!value } })),
+      setNotificationPref: (key, value) => {
+        set((s) => ({ notificationPrefs: { ...s.notificationPrefs, [key]: !!value } }));
+        get().replanPushes();
+      },
+
+      markAppOpened: () => set({ lastAppOpenAt: Date.now() }),
+
+      /**
+       * THE way the app sends a notification it decided on itself (user-set
+       * reminders don't come through here). `decide` applies the switch, dedupe,
+       * app-open, quiet-hours, back-off and daily-cap rules; `bell` is the feed
+       * entry, `push(fireAt)` sends the OS notification — `fireAt` is null for
+       * "now", or the time quiet hours moved it to.
+       */
+      notify: ({ kind, key, fireAt, bell, push }) => {
+        const s = get();
+        const now = Date.now();
+        const d = decide({ kind, key, fireAt: fireAt ?? now }, {
+          now,
+          prefs: s.notificationPrefs,
+          log: s.pushLog || [],
+          lastOpenAt: s.lastAppOpenAt || 0,
+          appActive: AppState.currentState === 'active',
+        });
+        if (d.bell && bell) {
+          try { useNotificationStore.getState().add(bell); } catch {}
+        }
+        if (!d.push || !push) return null;
+        // Logged before the async send so a second event in the same tick sees it.
+        set((cur) => ({
+          pushLog: [...(cur.pushLog || []), { key, kind, at: d.fireAt }]
+            .filter((e) => now - e.at < PUSH_LOG_MAX_AGE_MS)
+            .slice(-PUSH_LOG_MAX),
+        }));
+        try {
+          return Promise.resolve(push(d.fireAt > now ? d.fireAt : null)).catch(() => null);
+        } catch {
+          return null;
+        }
+      },
+
+      /**
+       * Rebuilds the scheduled pushes (recap, plan budget, mid-month, weekly,
+       * goal behind, statement closed, review) from current state. Run on every
+       * open and close: anything that already fired moves into `pushLog`, the
+       * rest is cancelled and planned afresh, so a resolved condition just isn't
+       * requested again.
+       */
+      replanPushes: async () => {
+        if (replanRunning) { replanAgain = true; return; }
+        replanRunning = true;
+        try {
+          do {
+            replanAgain = false;
+            const s = get();
+            const now = Date.now();
+            const thisMonth = monthKey(new Date(now));
+            const delivered = (s.plannedPushes || []).filter((p) => p.at <= now);
+            const lastReview = delivered.filter((p) => p.kind === 'reviewReminder').sort((a, b) => b.at - a.at)[0];
+            const reviewLast = lastReview ? { at: lastReview.at, count: lastReview.count || 0 } : (s.reviewReminderLast || null);
+            const log = prunePushLog([...(s.pushLog || []), ...delivered.map(({ key, kind, at }) => ({ key, kind, at }))], now);
+
+            const prevMonths = [3, 2, 1].map((n) => monthKey(new Date(new Date(now).getFullYear(), new Date(now).getMonth() - n, 1)));
+            const planCurrent = s.goalPlan?.monthKey === thisMonth;
+            const goals = (s.goals || []).map((g) => ({
+              id: g.id,
+              name: g.name,
+              emoji: g.emoji,
+              planned: planCurrent ? Number(s.goalPlan.allocations?.[g.id]) || 0 : 0,
+              funded: goalFundedForMonth(s, g, thisMonth),
+              inactive: !!(g.archivedAt || g.discontinuedAt || (g.duration !== 'recurring' && g.achievedAt)),
+              usualFundingDay: usualFundingDay(prevMonths.map((m) => goalFundingDays(s, g, m))),
+            }));
+            const cards = (s.accounts || [])
+              .filter((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD && a.statementDay)
+              .map((a) => {
+                const bill = (s.ccBills || {})[ccBillKey({ cardLast4: a.mask, bankName: a.bankName })];
+                const billThisMonth = bill?.seenAt && monthKey(new Date(bill.seenAt)) === thisMonth;
+                return {
+                  id: a.id,
+                  label: [a.bankName || a.name, a.mask ? `••${a.mask}` : null].filter(Boolean).join(' '),
+                  statementDay: a.statementDay,
+                  notifiedMonth: billThisMonth ? thisMonth : (s.ccCycleHeadsUpNotified || {})[a.id] || null,
+                };
+              });
+
+            const wanted = buildPlannedPushes({
+              now,
+              hasRecentActivity: (s.transactions || []).some((t) => !t.isIgnored && now - new Date(t.createdAt).getTime() < 30 * DAY_MS),
+              monthlyRecapOn: !!s.showMonthlyRecap,
+              recapMonthHandled: s.recapMonthHandled || null,
+              weeklyRecapOn: !!s.showWeeklySummary,
+              weeklyRecapHandled: s.weeklyRecapHandled || null,
+              budgetMonthKey: s.budget?.monthKey || null,
+              lastPlanMonthKey: carryableBudgetPlan(s.lastBudgetPlan, new Date(now))?.monthKey || null,
+              lastMidmonthNudgeMonth: s.lastMidmonthNudgeMonth || null,
+              goals,
+              reviewQueue: selectUnreviewedQueue(s),
+              reviewLast,
+              cards,
+            });
+            const accepted = planPushes(wanted, { now, prefs: s.notificationPrefs, log, lastOpenAt: s.lastAppOpenAt || 0 });
+            const byKey = new Map(wanted.map((w) => [w.key, w]));
+
+            await cancelPlannedPushes();
+            const next = [];
+            for (const a of accepted) {
+              const w = byKey.get(a.key);
+              const id = await schedulePlannedPush({ ...w, fireAt: a.at }).catch(() => null);
+              if (id) next.push({ key: a.key, kind: a.kind, at: a.at, ...(w.meta?.count != null ? { count: w.meta.count } : {}) });
+            }
+            // Functional: `notify` may have logged an event push during the awaits.
+            set((cur) => ({
+              pushLog: prunePushLog([...(cur.pushLog || []), ...delivered.map(({ key, kind, at }) => ({ key, kind, at }))], now),
+              plannedPushes: next,
+              reviewReminderLast: reviewLast,
+            }));
+          } while (replanAgain);
+        } finally {
+          replanRunning = false;
+        }
+      },
 
       /**
        * Create (or replace) a reminder and arm it with the OS.
@@ -2766,14 +2898,13 @@ export const useEPurseStore = create(
           body = `You're at ${Math.round(pct)}% of your budget. Nice pace — keep it up.`;
         }
         const monthName = now.toLocaleDateString('en-IN', { month: 'long' });
-
-        // Fire-and-forget — runs through the same budget_alerts channel
-        if (nudgeAllowed(s, 'midmonthNudge')) {
-          fireMidmonthNudgeNotification({
-            title: `${tone} ${monthName} check-in`,
-            body,
-          }).catch(() => {});
-        }
+        const title = `${tone} ${monthName} check-in`;
+        get().notify({
+          kind: 'midmonthNudge',
+          key: `midmonth:${currentMonth}`,
+          bell: { kind: 'midmonth_check_in', title, body, dedupeKey: `midmonth:${currentMonth}` },
+          push: (fireAt) => fireMidmonthNudgeNotification({ title, body, fireAt }),
+        });
       },
 
       /**
@@ -2799,18 +2930,20 @@ export const useEPurseStore = create(
           const key = `${sub.merchantKey}:${Math.round(sub.hikeTo)}`;
           if (notified.has(key)) return;
           freshKeys.push(key);
-          useNotificationStore.getState().add({
-            kind:  'subscription_hike',
-            title: `📈 ${sub.merchant} price went up`,
-            body:  `Rose from ₹${Math.round(sub.hikeFrom).toLocaleString('en-IN')} to ₹${Math.round(sub.hikeTo).toLocaleString('en-IN')}. Still using it?`,
-            dedupeKey: `sub_hike:${sub.merchantKey}`,
-            meta:  { merchant: sub.merchant, hikeFrom: sub.hikeFrom, hikeTo: sub.hikeTo, dayOfMonth: sub.dayOfMonth },
+          get().notify({
+            kind: 'subscriptionHike',
+            key: `sub_hike:${key}`,
+            bell: {
+              kind:  'subscription_hike',
+              title: `📈 ${sub.merchant} price went up`,
+              body:  `Rose from ₹${Math.round(sub.hikeFrom).toLocaleString('en-IN')} to ₹${Math.round(sub.hikeTo).toLocaleString('en-IN')}. Still using it?`,
+              dedupeKey: `sub_hike:${sub.merchantKey}`,
+              meta:  { merchant: sub.merchant, hikeFrom: sub.hikeFrom, hikeTo: sub.hikeTo, dayOfMonth: sub.dayOfMonth },
+            },
+            push: (fireAt) => fireSubscriptionHikeNotification({
+              merchant: sub.merchant, oldAmount: sub.hikeFrom, newAmount: sub.hikeTo, fireAt,
+            }),
           });
-          if (nudgeAllowed(s, 'subscriptionHike')) {
-            fireSubscriptionHikeNotification({
-              merchant: sub.merchant, oldAmount: sub.hikeFrom, newAmount: sub.hikeTo,
-            }).catch(() => {});
-          }
         });
         if (freshKeys.length) {
           // Keep the notified list bounded (last 100 keys).
@@ -2855,16 +2988,18 @@ export const useEPurseStore = create(
           if (bill?.seenAt && monthKey(new Date(bill.seenAt)) === thisMonth) return;
 
           const cardLabel = [a.bankName || a.name, a.mask ? `••${a.mask}` : null].filter(Boolean).join(' ');
-          useNotificationStore.getState().add({
-            kind:  'cc_cycle_heads_up',
-            title: `💳 ${cardLabel} cycle closed`,
-            body:  'Your billing cycle likely just closed — a new statement should arrive soon.',
-            dedupeKey: `cc_cycle:${a.id}:${thisMonth}`,
-            meta:  { accountId: a.id, statementDay: a.statementDay },
+          get().notify({
+            kind: 'ccCycleHeadsUp',
+            key: `cc_cycle:${a.id}:${thisMonth}`,
+            bell: {
+              kind:  'cc_cycle_heads_up',
+              title: `💳 ${cardLabel} cycle closed`,
+              body:  'Your billing cycle likely just closed — a new statement should arrive soon.',
+              dedupeKey: `cc_cycle:${a.id}:${thisMonth}`,
+              meta:  { accountId: a.id, statementDay: a.statementDay },
+            },
+            push: (fireAt) => fireCcCycleHeadsUpNotification({ cardLabel, fireAt }),
           });
-          if (nudgeAllowed(s, 'ccCycleHeadsUp')) {
-            fireCcCycleHeadsUpNotification({ cardLabel }).catch(() => {});
-          }
           notified[a.id] = thisMonth;
           changed = true;
         });
@@ -2912,6 +3047,18 @@ export const useEPurseStore = create(
         const month        = usage.monthKey;
         const notifiedList = s.budgetBreachNotified?.[month] || [];
         const toMark       = [];
+        const monthName    = new Date().toLocaleDateString('en-IN', { month: 'long' });
+        const breach = (id, scope, name, actual, cap) => get().notify({
+          kind: 'budgetBreach',
+          key: `budget:${month}:${id}`,
+          bell: {
+            kind:  'budget_breach',
+            title: `🚨 ${scope === 'total' ? monthName : name} budget crossed`,
+            body:  `${formatCurrency(actual)} of ${formatCurrency(cap)} — ${formatCurrency(Math.max(0, actual - cap))} over your ${monthName} cap`,
+            dedupeKey: `budget:${month}:${id}`,
+          },
+          push: (fireAt) => fireBudgetBreachNotification({ scope, categoryName: name, actual, cap, fireAt }),
+        });
 
         // ── Category-level breach ─────────────────────────────────────────
         // Budgets are keyed by first-level (parent) category, but callers pass
@@ -2922,28 +3069,14 @@ export const useEPurseStore = create(
           if (cat?.over && !notifiedList.includes(parentId)) {
             toMark.push(parentId);
             const meta = s.categories.find((c) => c.id === parentId);
-            // Fire-and-forget — don't block the action on permission/network
-            if (nudgeAllowed(s, 'budgetBreach')) {
-              fireBudgetBreachNotification({
-                scope: 'category',
-                categoryName: meta?.name || 'Category',
-                actual: cat.actual,
-                cap: cat.cap,
-              }).catch(() => {});
-            }
+            breach(parentId, 'category', meta?.name || 'Category', cat.actual, cat.cap);
           }
         }
 
         // ── Total-level breach ────────────────────────────────────────────
         if (s.budget.totalCap != null && usage.total.over && !notifiedList.includes('__total__')) {
           toMark.push('__total__');
-          if (nudgeAllowed(s, 'budgetBreach')) {
-            fireBudgetBreachNotification({
-              scope: 'total',
-              actual: usage.total.actual,
-              cap: usage.total.cap,
-            }).catch(() => {});
-          }
+          breach('__total__', 'total', null, usage.total.actual, usage.total.cap);
         }
 
         if (toMark.length === 0) return;
@@ -4226,13 +4359,16 @@ export const useEPurseStore = create(
           })(),
         });
         syncCcReviewNotification(nextQueue);
-        if (nudgeAllowed(state, 'ccPayment')) {
-          fireCCPaymentNotification({
+        get().notify({
+          kind: 'ccPayment',
+          key: `cc_paid:${smsId || `${account.id}:${amount}:${receivedAt || Date.now()}`}`,
+          push: (fireAt) => fireCCPaymentNotification({
             amount,
             accountMask: account.mask || accountMask || null,
             bankName:    account.bankName || bankName || null,
-          });
-        }
+            fireAt,
+          }),
+        });
         return { ccPayment: 'pending', accountId: account.id };
       },
 
@@ -4486,14 +4622,18 @@ export const useEPurseStore = create(
                 accounts,
               };
             });
-            useNotificationStore.getState().add({
-              kind:      'cc_due',
-              title:     `₹${Math.round(amount).toLocaleString('en-IN')} due on ${cardLabel}`,
-              body:      dueDate
-                ? `Pay by ${dueDate} to avoid late fees.`
-                : 'Pay before the due date to avoid late fees.',
-              dedupeKey: `cc_due:${cardLast4 || bankName || 'unknown'}`,
-              meta:      { amount, cardLast4, dueDate, bankName },
+            get().notify({
+              kind: 'ccBillDue',
+              key: `cc_due_feed:${cardLast4 || bankName || 'unknown'}:${dueDate || ''}`,
+              bell: {
+                kind:      'cc_due',
+                title:     `₹${Math.round(amount).toLocaleString('en-IN')} due on ${cardLabel}`,
+                body:      dueDate
+                  ? `Pay by ${dueDate} to avoid late fees.`
+                  : 'Pay before the due date to avoid late fees.',
+                dedupeKey: `cc_due:${cardLast4 || bankName || 'unknown'}`,
+                meta:      { amount, cardLast4, dueDate, bankName },
+              },
             });
             // Also schedule an OS reminder ahead of the due date (the feed chip alone
             // is easy to miss). Dedupe/replace per card+date so a resent bill doesn't
@@ -4502,65 +4642,72 @@ export const useEPurseStore = create(
               const key = `${cardLast4 || bankName || 'unknown'}:${dueDate}`;
               const cardKey = `${cardLast4 || bankName || 'unknown'}`;
               const existingMap = get().ccDueReminderIds || {};
-              if (!existingMap[key] && nudgeAllowed(get(), 'ccBillDue')) {
-                // Cancel any prior reminder for this card (older due date) before scheduling.
-                Object.entries(existingMap).forEach(([k, id]) => {
-                  if (k.startsWith(`${cardKey}:`)) { cancelScheduledNotification(id); }
-                });
+              if (!existingMap[key]) {
                 // The moment it will actually fire — the SAME helper the scheduler
                 // uses, so the Reminders screen can't display a different time from
                 // the one that's armed.
                 const fireAt = ccReminderFireAt(dueDate);
-                const cardLabel = cardLast4
-                  ? `${bankName || 'Credit card'} ··${cardLast4}`
-                  : (bankName || 'Credit card');
-                scheduleCCBillDueReminder({ amount, cardLast4, bankName, dueDate })
-                  .then((id) => {
-                    if (!id) return;
-                    set((s) => {
-                      const map = { ...(s.ccDueReminderIds || {}) };
-                      Object.keys(map).forEach((k) => { if (k.startsWith(`${cardKey}:`)) delete map[k]; });
-                      map[key] = id;
-
-                      // Mirror it into the reminder registry so it appears on the
-                      // Reminders screen alongside the user's own. One record per
-                      // card (a new bill is a new cycle and replaces the old one),
-                      // and `reminderNotifIds` carries the same id so cancelling it
-                      // from the screen really cancels the OS notification.
-                      const rest = (s.reminders || []).filter(
-                        (r) => !(r.kind === 'cc_bill' && r.cardKey === cardKey),
-                      );
-                      const dropped = (s.reminders || []).filter(
-                        (r) => r.kind === 'cc_bill' && r.cardKey === cardKey,
-                      );
-                      const notifMap = { ...(s.reminderNotifIds || {}) };
-                      dropped.forEach((r) => { delete notifMap[r.id]; });
-
-                      if (!fireAt) return { ccDueReminderIds: map, reminders: rest, reminderNotifIds: notifMap };
-
-                      const recordId = `rem_cc_${cardKey}`;
-                      notifMap[recordId] = [id];
-                      return {
-                        ccDueReminderIds: map,
-                        reminders: [...rest, {
-                          id: recordId,
-                          kind: 'cc_bill',
-                          title: 'Credit card bill due',
-                          body: `${formatCurrency(amount)} on ${cardLabel}`,
-                          repeat: REPEAT.ONCE,
-                          anchorAt: fireAt,
-                          // The `ccDueReminderIds` key, so cancelling from the screen
-                          // can clear that index too and not leave it blocking the
-                          // next bill for this card.
-                          sourceKey: key,
-                          cardKey,
-                          createdAt: Date.now(),
-                        }],
-                        reminderNotifIds: notifMap,
-                      };
+                get().notify({
+                  kind: 'ccBillDue',
+                  key: `cc_due:${key}`,
+                  fireAt: fireAt || undefined,
+                  push: () => {
+                    // Cancel any prior reminder for this card (older due date) before scheduling.
+                    Object.entries(existingMap).forEach(([k, id]) => {
+                      if (k.startsWith(`${cardKey}:`)) { cancelScheduledNotification(id); }
                     });
-                  })
-                  .catch(() => {});
+                    const cardLabel = cardLast4
+                      ? `${bankName || 'Credit card'} ··${cardLast4}`
+                      : (bankName || 'Credit card');
+                    return scheduleCCBillDueReminder({ amount, cardLast4, bankName, dueDate })
+                      .then((id) => {
+                        if (!id) return;
+                        set((s) => {
+                          const map = { ...(s.ccDueReminderIds || {}) };
+                          Object.keys(map).forEach((k) => { if (k.startsWith(`${cardKey}:`)) delete map[k]; });
+                          map[key] = id;
+
+                          // Mirror it into the reminder registry so it appears on the
+                          // Reminders screen alongside the user's own. One record per
+                          // card (a new bill is a new cycle and replaces the old one),
+                          // and `reminderNotifIds` carries the same id so cancelling it
+                          // from the screen really cancels the OS notification.
+                          const rest = (s.reminders || []).filter(
+                            (r) => !(r.kind === 'cc_bill' && r.cardKey === cardKey),
+                          );
+                          const dropped = (s.reminders || []).filter(
+                            (r) => r.kind === 'cc_bill' && r.cardKey === cardKey,
+                          );
+                          const notifMap = { ...(s.reminderNotifIds || {}) };
+                          dropped.forEach((r) => { delete notifMap[r.id]; });
+
+                          if (!fireAt) return { ccDueReminderIds: map, reminders: rest, reminderNotifIds: notifMap };
+
+                          const recordId = `rem_cc_${cardKey}`;
+                          notifMap[recordId] = [id];
+                          return {
+                            ccDueReminderIds: map,
+                            reminders: [...rest, {
+                              id: recordId,
+                              kind: 'cc_bill',
+                              title: 'Credit card bill due',
+                              body: `${formatCurrency(amount)} on ${cardLabel}`,
+                              repeat: REPEAT.ONCE,
+                              anchorAt: fireAt,
+                              // The `ccDueReminderIds` key, so cancelling from the screen
+                              // can clear that index too and not leave it blocking the
+                              // next bill for this card.
+                              sourceKey: key,
+                              cardKey,
+                              createdAt: Date.now(),
+                            }],
+                            reminderNotifIds: notifMap,
+                          };
+                        });
+                      })
+                      .catch(() => {});
+                  },
+                });
               }
             }
           }
@@ -6468,6 +6615,10 @@ export const useEPurseStore = create(
           ccDueReminderIds: {},
           ccBills: {},
           subscriptionHikesNotified: [],
+          pushLog: [],
+          lastAppOpenAt: 0,
+          plannedPushes: [],
+          reviewReminderLast: null,
           budget: null,
           budgetHistory: {},
           budgetStreak: { current: 0, best: 0, lastResetMonth: null },
@@ -6566,6 +6717,10 @@ export const useEPurseStore = create(
             monthlyRecap: true,
           },
           subscriptionHikesNotified: [],
+          pushLog: [],
+          lastAppOpenAt: 0,
+          plannedPushes: [],
+          reviewReminderLast: null,
           budget: null,
           budgetHistory: {},
           lastBudgetPlan: null,
@@ -7420,6 +7575,10 @@ export const useEPurseStore = create(
         ccBills: state.ccBills ?? {},
         ccCycleHeadsUpNotified: state.ccCycleHeadsUpNotified ?? {},
         subscriptionHikesNotified: state.subscriptionHikesNotified ?? [],
+        pushLog: state.pushLog ?? [],
+        lastAppOpenAt: state.lastAppOpenAt ?? 0,
+        plannedPushes: state.plannedPushes ?? [],
+        reviewReminderLast: state.reviewReminderLast ?? null,
         budget: state.budget,
         lastBudgetPlan: state.lastBudgetPlan,
         budgetHistory: state.budgetHistory,
