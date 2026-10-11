@@ -43,7 +43,9 @@ const STUBS = {
     // the reminder registry was never executed by ANY test — which is how a missing
     // `formatCurrency` import survived in there. Same trap as the parseDueDate stub.
     'export const scheduleCCBillDueReminder=async()=>{rec("ccBillDue");return "notif_cc";};' +
-    'export const cancelScheduledNotification=async()=>{};' +
+    'export const cancelScheduledNotification=async(id)=>{(globalThis.__notifCancelled ||= []).push(id);};' +
+    'let __p=0; export const schedulePlannedPush=async(p)=>{rec("planned:"+p.kind);return globalThis.__notifDenied ? null : `planned_${++__p}`;};' +
+    'export const cancelPlannedPushes=async()=>{rec("cancelPlanned");};' +
     'export const fireSubscriptionHikeNotification=async()=>{rec("subscriptionHike");return null;};' +
     'export const fireMonthlyRecapNotification=async()=>{rec("monthlyRecap");return null;};' +
     'export const fireCcCycleHeadsUpNotification=async()=>{rec("ccCycleHeadsUp");return null;};' +

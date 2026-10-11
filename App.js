@@ -217,6 +217,7 @@ function BudgetRolloverBoot() {
   const hydrated = useStoreHydrated();
   const rollover   = useEPurseStore((s) => s.rolloverBudgetIfNeeded);
   const goalRollover = useEPurseStore((s) => s.rolloverGoalPlanIfNeeded);
+  const markOpened = useEPurseStore((s) => s.markAppOpened);
   const nudge      = useEPurseStore((s) => s.maybeFireMidmonthNudge);
   const subAlerts  = useEPurseStore((s) => s.maybeFireSubscriptionAlerts);
   const ccCycle    = useEPurseStore((s) => s.maybeFireCcCycleHeadsUp);
@@ -230,8 +231,11 @@ function BudgetRolloverBoot() {
   // records come back from the backup but the notification ids deliberately
   // don't. See utils/reminderSchedule.
   const reconcileReminders = useEPurseStore((s) => s.reconcileReminders);
+  // Last: it plans from what the checks above just decided (recap shown, etc.).
+  const replanPushes = useEPurseStore((s) => s.replanPushes);
   useEffect(() => {
     if (!hydrated) return;
+    markOpened();
     rollover();
     goalRollover();
     nudge();
@@ -240,8 +244,10 @@ function BudgetRolloverBoot() {
     recap();
     weeklyRecap();
     reconcileReminders();
+    replanPushes();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
+        markOpened();
         rollover();
         goalRollover();
         nudge();
@@ -250,10 +256,13 @@ function BudgetRolloverBoot() {
         recap();
         weeklyRecap();
         reconcileReminders();
+        replanPushes();
+      } else if (state === 'background') {
+        replanPushes();
       }
     });
     return () => sub.remove();
-  }, [hydrated, rollover, goalRollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders]);
+  }, [hydrated, markOpened, rollover, goalRollover, nudge, subAlerts, ccCycle, recap, weeklyRecap, reconcileReminders, replanPushes]);
   return null;
 }
 
