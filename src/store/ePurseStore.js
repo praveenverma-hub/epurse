@@ -5615,6 +5615,12 @@ export const useEPurseStore = create(
           return { customParents, customChildren };
         }),
 
+      // After a bulk setState that bypasses rehydrate (backup restore / undo).
+      refreshCategoryMaps: () => {
+        const s = get();
+        refreshCatMaps(s.customParents, s.customChildren);
+      },
+
       // ----- lent / borrowed --------------------------------------------
       /**
        * Add a manual OUTSTANDING lent/borrow entry.

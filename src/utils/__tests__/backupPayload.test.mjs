@@ -22,8 +22,11 @@ const mod = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 const useStore = mod.useEPurseStore || mod.default;
 const S = () => useStore.getState();
 
-const { buildBackupPayload, readBackupPayload, unknownTxnFields, TXN_FIELDS, STORE_KEYS } =
+const { buildBackupPayload, readBackupPayload, unknownTxnFields, TXN_FIELDS, STORE_KEYS,
+  STORE_KEYS_EXCLUDED, REWARD_KEYS, migrateRestoredState } =
   await import(`${PROJECT_ROOT}/src/backup/payload.ts`);
+const { useRewardStore } = await import(`${PROJECT_ROOT}/src/store/useRewardStore.ts`);
+const R = () => useRewardStore.getState();
 const { sealBackup, openBackup, DEFAULT_KDF } =
   await import(`${PROJECT_ROOT}/src/backup/envelope.ts`);
 
@@ -69,6 +72,9 @@ ingest('HDFCBK', 'INR 1,299 spent on HDFC Credit Card ending 4321 at AMAZON on 0
 ingest('HDFCBK', 'Your a/c xxxx5678 is credited with Rs.55,000.00 - SALARY AUG 2026.', 'sms-3');
 // A CC bill payment — this is the path that ALWAYS writes smsText onto the txn.
 ingest('HDFCBK', 'Rs.5,000.00 paid towards HDFC Credit Card XX4321 from A/c XX4021 on 07-Aug-26.', 'sms-4');
+// Pre-onboarding history lands in archivedTransactions — completeness must see those rows too.
+S().ingestMessage('Rs.120.00 debited from A/c xx4021 on 01-Jul-26 to ZOMATO via UPI.',
+  { sender: 'HDFCBK', receivedAt: now - 40 * 86400000, smsId: 'sms-old', preOnboarding: true });
 
 S().addTransaction({ amount: 900, type: 'debit', merchant: 'Dinner', categoryId: 'food', accountId: 'acc1',
   isSplit: true, myShareAmount: 300,
@@ -111,7 +117,13 @@ const snapshot = () => ({
 const before = snapshot();
 
 // ── Build the payload, then seal it ─────────────────────────────────────────
-const payload = buildBackupPayload(S(), { coins: 1200, xp: 340, level: 5, streak: 7 });
+// The REAL reward store — a hand-made shape here once hid that REWARD_KEYS named
+// fields the store doesn't have, so every real backup carried no rewards at all.
+useRewardStore.setState({ totalRP: 1200, epcBalance: 340, awareStreak: 7,
+  inventory: R().inventory.map((i, n) => (n === 0 ? { ...i, isUnlocked: true, isActive: true } : i)) });
+const rewardsBefore = { rp: R().totalRP, epc: R().epcBalance, streak: R().awareStreak,
+  unlocked: R().inventory.filter((i) => i.isUnlocked).map((i) => i.id) };
+const payload = buildBackupPayload(S(), R());
 const envelope = sealBackup(payload, 'a-good-password', {
   storeVersion: 23, appVersion: '1.5.0', createdAt: new Date().toISOString(), device: 'Pixel 8',
 }, FAST);
@@ -140,7 +152,7 @@ const envelope = sealBackup(payload, 'a-good-password', {
 {
   const DELIBERATE = new Set(['smsText', 'rawSms', 'rawSender']);
   const stray = new Set();
-  for (const t of S().transactions) for (const f of unknownTxnFields(t)) if (!DELIBERATE.has(f)) stray.add(f);
+  for (const t of [...S().transactions, ...S().archivedTransactions]) for (const f of unknownTxnFields(t)) if (!DELIBERATE.has(f)) stray.add(f);
   check('completeness: no transaction field is silently unaccounted for',
     stray.size === 0,
     `unlisted: ${[...stray].join(', ')} — add to TXN_FIELDS, or to the deliberate-exclusion list`);
@@ -151,6 +163,23 @@ const envelope = sealBackup(payload, 'a-good-password', {
     .filter((k) => typeof S()[k] !== 'function' && S()[k] !== undefined);
   // Informational: many are ephemeral by design. Printed, not asserted.
   console.log(`      (store keys not backed up: ${missingStoreKeys.length} — ephemeral/UI state)`);
+
+  // What IS asserted: every PERSISTED key is either backed up or a declared exclusion.
+  const persisted = Object.keys(useStore.persist.getOptions().partialize(S()));
+  const declared = new Set([...STORE_KEYS, ...STORE_KEYS_EXCLUDED, 'transactions', 'archivedTransactions']);
+  const undeclared = persisted.filter((k) => !declared.has(k));
+  check('completeness: every persisted store key is backed up or deliberately excluded',
+    undeclared.length === 0, `undeclared: ${undeclared.join(', ')}`);
+  const ghost = STORE_KEYS.filter((k) => !persisted.includes(k));
+  check('completeness: STORE_KEYS names no key the store does not persist',
+    ghost.length === 0, `not persisted: ${ghost.join(', ')}`);
+
+  const rewardPersisted = Object.keys(useRewardStore.persist.getOptions().partialize(R()));
+  const rewardMissing = rewardPersisted.filter((k) => !REWARD_KEYS.includes(k));
+  const rewardGhost = REWARD_KEYS.filter((k) => !rewardPersisted.includes(k));
+  check('completeness: REWARD_KEYS matches the reward store\'s persisted keys',
+    rewardMissing.length === 0 && rewardGhost.length === 0,
+    `missing: ${rewardMissing.join(', ')} | not persisted: ${rewardGhost.join(', ')}`);
 }
 
 // ── 3. THE FIDELITY TEST — restore into a WIPED store ───────────────────────
@@ -171,6 +200,9 @@ const envelope = sealBackup(payload, 'a-good-password', {
   check('restore: per-person LB BALANCES are identical', J(after.people) === J(before.people), J(after.people));
   check('restore: ACCOUNT balances are identical', J(after.balances) === J(before.balances));
   check('restore: every transaction is present', J(after.txnIds) === J(before.txnIds));
+  check('restore: pre-onboarding history keeps its muted flag',
+    S().archivedTransactions.length > 0 && S().archivedTransactions.every((t) => t.preOnboarding === true),
+    J(S().archivedTransactions.map((t) => t.preOnboarding)));
   check('restore: GROUPS and their totals are identical', J(after.groups) === J(before.groups));
   check('restore: the LB ledger is identical', J(after.lb) === J(before.lb));
   // Not covered by any selector snapshot above — asserted directly, because a
@@ -185,7 +217,14 @@ const envelope = sealBackup(payload, 'a-good-password', {
   check('restore: profile + theme survive', S().userName === 'Praveen' && S().themeId === 'ocean');
   check('restore: dedup ids survive (a re-scan will not duplicate)',
     S().transactions.some((t) => t.smsId === 'sms-1'));
-  check('restore: reward economy survives', rewards.coins === 1200 && rewards.streak === 7);
+  useRewardStore.setState({ totalRP: 0, epcBalance: 0, awareStreak: 0,
+    inventory: R().inventory.map((i) => ({ ...i, isUnlocked: false, isActive: false })) });
+  useRewardStore.setState(rewards);
+  check('restore: reward economy survives (RP, EPC, Aware Run, unlocked widgets)',
+    J({ rp: R().totalRP, epc: R().epcBalance, streak: R().awareStreak,
+        unlocked: R().inventory.filter((i) => i.isUnlocked).map((i) => i.id) }) === J(rewardsBefore)
+    && rewardsBefore.unlocked.length === 1,
+    J(rewards));
 
   // And the leak guarantee holds on the RESTORED device too.
   check('restore: the restored device carries NO original SMS text',
@@ -197,6 +236,24 @@ const envelope = sealBackup(payload, 'a-good-password', {
   let threw = false;
   try { readBackupPayload({ payloadVersion: 99, epurse: {}, rewards: {} }); } catch { threw = true; }
   check('a payload from a NEWER app version is refused, not half-applied', threw);
+}
+
+// ── 5. An OLDER backup is migrated before it is applied ──────────────────────
+{
+  const { migrate, version } = useStore.persist.getOptions();
+  const old = {
+    accounts: [{ id: 'a1', name: 'HDFC', type: 'Bank', mask: '1111', balance: 100 }],
+    transactions: [{ id: 't1', amount: 50, type: 'debit', createdAt: Date.now(), source: 'manual',
+      isIgnored: true, isHidden: true }],
+    userName: 'Old',
+  };
+  const out = migrateRestoredState(old, 38, version, migrate);
+  check('migrate: a v38 backup gains later account fields (v39 colorKey)', out.accounts?.[0]?.colorKey === null, J(out.accounts));
+  check('migrate: a v38 backup gets later txn fixes (v40 ignored ⇒ not private)', out.transactions?.[0]?.isHidden === false);
+  check('migrate: user data is carried through', out.userName === 'Old');
+  const leaked = Object.keys(out).filter((k) => !STORE_KEYS.includes(k) && !['transactions', 'archivedTransactions'].includes(k));
+  check('migrate: no device-local key is introduced by migration defaults', leaked.length === 0, leaked.join(', '));
+  check('migrate: a current-version backup is passed through untouched', migrateRestoredState(old, version, version, migrate) === old);
 }
 
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);

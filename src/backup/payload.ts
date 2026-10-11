@@ -61,8 +61,8 @@ export const TXN_FIELDS = [
   // self-transfer hints — still needed AFTER a restore, because ingesting new SMS
   // re-checks earlier transactions against the grown mask set.
   'counterpartyMask', 'counterpartyPhone', 'counterpartyName', 'transferRef', 'selfDualLeg',
-  // dedup + provenance
-  'smsId', 'derivedFromTxnId',
+  // dedup + provenance. `preOnboarding` mutes pre-setup history rows on Account Details.
+  'smsId', 'derivedFromTxnId', 'preOnboarding',
 ] as const;
 
 type Txn = Record<string, unknown>;
@@ -126,6 +126,8 @@ export const STORE_KEYS = [
   // them, and restoring them would leave the app listing reminders as armed that
   // nothing will ever deliver.
   'reminders', 'notificationPrefs', 'reviewReminderAtMin',
+  // "already told you" guards — without them a restore re-sends old alerts
+  'subscriptionHikesNotified', 'ccCycleHeadsUpNotified', 'lastMidmonthNudgeMonth',
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
   'welcomeReviewSeen', 'planBannerDismissed', 'reviewReminderOffered',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',
@@ -133,13 +135,29 @@ export const STORE_KEYS = [
 ] as const;
 
 /**
- * Reward economy (coins / XP / streak / owned widgets). Backed up so a restored
+ * Reward economy (RP / EPC / Aware Run / unlocked widgets). Backed up so a restored
  * device doesn't silently reset progress the user paid attention to.
- * NOT security-sensitive, but it IS user progress.
+ * Mirrors useRewardStore's `partialize` (test-enforced) — level is derived from totalRP.
  */
 export const REWARD_KEYS = [
-  'coins', 'xp', 'level', 'streak', 'longestStreak', 'lastCheckInAt',
-  'ownedItems', 'activeWidgets',
+  'awareStreak', 'lastCheckedInDate', 'lastClaimedBonusDate', 'pendingSavingsReward',
+  'totalRP', 'epcBalance', 'dailyReviewedCount', 'lastCapResetDate', 'inventory',
+  'isFirstLaunch', 'goalRewardMonthKey', 'goalRpEarnedThisMonth', 'goalEpcEarnedThisMonth',
+] as const;
+
+/**
+ * Persisted ePurse-store keys deliberately NOT backed up: device-local handles,
+ * permission grants, identity, transient modal queues and "already notified"
+ * bookkeeping for this phone. Test-enforced: every `partialize` key is in
+ * STORE_KEYS or here.
+ */
+export const STORE_KEYS_EXCLUDED = [
+  'googleAccount', 'smsPermissionGranted', 'contactsPermissionGranted', 'appLockEnabled',
+  'reminderNotifIds', 'ccDueReminderIds', 'pushLog', 'lastAppOpenAt', 'plannedPushes',
+  'reviewReminderLast', 'pendingWeeklyRecap', 'pendingMonthlyRecap', 'pendingCelebration',
+  'pendingCCPayment',
+  // unread legacy fields (rewards moved to useRewardStore)
+  'xp', 'reviewStreak',
 ] as const;
 
 export type BackupPayload = {
@@ -187,4 +205,24 @@ export function readBackupPayload(payload: BackupPayload): {
     throw new Error('This backup was made by a newer version of ePurse.');
   }
   return { epurse: payload.epurse || {}, rewards: payload.rewards || {} };
+}
+
+const RESTORABLE_KEYS = new Set<string>([...STORE_KEYS, 'transactions', 'archivedTransactions']);
+
+/**
+ * An older backup skipped every store migration since it was made, so run the
+ * store's own `migrate` from its version. Only backed-up keys are kept — a
+ * migration's defaults for device-local keys must not clobber this phone's.
+ */
+export function migrateRestoredState(
+  epurse: Record<string, unknown>,
+  fromVersion: number,
+  currentVersion: number,
+  migrate?: (state: unknown, version: number) => unknown,
+): Record<string, unknown> {
+  if (!migrate || !(fromVersion < currentVersion)) return epurse;
+  const migrated = migrate(epurse, fromVersion) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(migrated)) if (RESTORABLE_KEYS.has(k)) out[k] = migrated[k];
+  return out;
 }
