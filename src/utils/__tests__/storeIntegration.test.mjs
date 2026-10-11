@@ -5443,5 +5443,23 @@ console.log('\n— Open items closed: background price rise, wipe cancels everyt
   check('…and so does a full reset', globalThis.__notifCalls.includes('cancelAll'));
 }
 
+console.log('\n— selectExpenseStats.biggest: Home Transactions subtitle (Oct-11-26) —');
+{
+  reset();
+  const now = new Date().toISOString();
+  useStore.setState({ transactions: [
+    { id: 'a', type: 'debit', amount: 900, merchant: 'Swiggy', categoryId: 'food', createdAt: now },
+    { id: 'b', type: 'debit', amount: 4200, merchant: 'Amazon', categoryId: 'shopping', createdAt: now },
+    { id: 'c', type: 'credit', amount: 50000, merchant: 'Salary', categoryId: 'salary', createdAt: now },
+    { id: 'd', type: 'debit', amount: 9000, merchant: 'Ignored', categoryId: 'shopping', createdAt: now, isIgnored: true },
+    { id: 'e', type: 'debit', amount: 8000, merchant: 'Private', categoryId: 'shopping', createdAt: now, isHidden: true },
+  ] });
+  const st = mod.selectExpenseStats('M')(useStore.getState());
+  check('biggest = largest eligible DEBIT (credits, ignored and private don\'t count)',
+    st.biggest?.id === 'b' && st.biggest.amount === 4200 && st.biggest.merchant === 'Amazon', JSON.stringify(st.biggest));
+  useStore.setState({ transactions: [{ id: 'c', type: 'credit', amount: 500, merchant: 'X', categoryId: 'salary', createdAt: now }] });
+  check('no spend in the period → null', mod.selectExpenseStats('M')(useStore.getState()).biggest === null);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

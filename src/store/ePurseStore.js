@@ -7857,6 +7857,15 @@ export const selectExpenseStats = (period) => (state) => {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, HOME_RECENT_LIMIT);
 
+  // Home's Transactions subtitle. Same eligibility as `count`, sized by MY cost —
+  // the figure the transaction's own card shows.
+  let biggest = null;
+  eligible.forEach((t) => {
+    if (t.type !== TRANSACTION_TYPES.DEBIT) return;
+    const amount = debitDisplayAmount(t);
+    if (amount > 0 && (!biggest || amount > biggest.amount)) biggest = { id: t.id, amount, merchant: t.merchant || null };
+  });
+
   return {
     spent,               // net expense = expenses − refunds (≥ 0)
     received,            // income + non-refund credits (P2P-in)
@@ -7868,6 +7877,7 @@ export const selectExpenseStats = (period) => (state) => {
     credits: received,
     count: eligible.length,
     recent,
+    biggest,             // { id, amount, merchant } | null
   };
 };
 

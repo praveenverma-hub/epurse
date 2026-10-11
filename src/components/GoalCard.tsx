@@ -134,6 +134,12 @@ export interface GoalCardProps {
    */
   rpEarned?: number;
   epcEarned?: number;
+  /**
+   * 'tile'    — the Goals screen's tile (default).
+   * 'compact' — Home's goal strip: the same tile without the ribbon, the corner
+   *             buttons and the stats/footer, plus one line on this month.
+   */
+  variant?: 'tile' | 'compact';
   style?: StyleProp<ViewStyle>;
 }
 
@@ -167,9 +173,10 @@ const RIBBON_UNPLANNED = 'NOTHING PLANNED';
 const GoalCard: React.FC<GoalCardProps> = ({
   name, emoji, color, planned, funded, status, lifetimeSaved, lifetimeTarget,
   monthsLeft, achieved, discontinued, onPress, onEdit, onAddMoney, onResume,
-  rpEarned, epcEarned, style,
+  rpEarned, epcEarned, variant = 'tile', style,
 }) => {
   const theme = useTheme();
+  const compact = variant === 'compact';
 
   // Layout branches on the same reward kill switch, not a prop.
   const rewardsOn = REWARD_CONFIG.GOAL_REWARD_ENABLED;
@@ -342,6 +349,14 @@ const GoalCard: React.FC<GoalCardProps> = ({
       ? `Add more to ${name}, already at its target`
       : `Update how much you've put into ${name}`;
 
+  const monthDone = planned > 0 && funded >= planned;
+  const stripLine = monthDone
+    ? 'Done this month'
+    : planned > 0
+      ? `${formatCompact(planned - funded)} to go this month`
+      : isOneTime ? `${formatCompact(Math.max(0, lifetimeTarget - lifetimeSaved))} left` : 'No plan this month';
+  const stripInk = monthDone ? theme.success : status === 'behind' ? theme.warning : theme.textSecondary;
+
   return (
     <View style={[styles.cardShell, style]}>
     <Pressable
@@ -351,6 +366,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
       accessibilityLabel={`${name}, ${formatCompact(lifetimeSaved)} saved`}
       style={({ pressed }) => [
         styles.card,
+        compact && styles.cardCompact,
         {
           backgroundColor: theme.card,
           borderColor: withAlpha(accentColor, 0.25),
@@ -373,6 +389,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
           truncated "15 MONTHS TO GO" to "15 MONTH…" on a 360pt phone — a status
           chip nobody can finish reading is worse than none. `adjustsFontSizeToFit`
           is the backstop for a narrow device or a long month count. */}
+      {!compact ? (
       <View
         style={[
           styles.ribbon,
@@ -392,10 +409,11 @@ const GoalCard: React.FC<GoalCardProps> = ({
           {ribbonText}
         </Text>
       </View>
+      ) : null}
 
       {/* The ONLY way into the edit form. Left when rewards are on (right
           otherwise), so the quick action below can take the freed corner. */}
-      {onEdit ? (
+      {onEdit && !compact ? (
         <Pressable
           onPress={onEdit}
           hitSlop={10}
@@ -412,7 +430,7 @@ const GoalCard: React.FC<GoalCardProps> = ({
       ) : null}
 
       {/* Same action as the bottom button below, icon-only, rewards-on only. */}
-      {rewardsOn && actionHandler ? (
+      {rewardsOn && actionHandler && !compact ? (
         <Pressable
           onPress={actionHandler}
           hitSlop={10}
@@ -483,6 +501,19 @@ const GoalCard: React.FC<GoalCardProps> = ({
         {name}
       </Text>
 
+      {compact ? (
+        <View style={styles.stripLine}>
+          {monthDone ? <Ionicons name="checkmark-circle" size={14} color={stripInk} /> : null}
+          <Text
+            style={[styles.stripTxt, { color: stripInk }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.85}
+          >
+            {stripLine}
+          </Text>
+        </View>
+      ) : (
       <View style={styles.stats}>
         {stats.map((s, i) => (
           <View
@@ -497,9 +528,10 @@ const GoalCard: React.FC<GoalCardProps> = ({
           </View>
         ))}
       </View>
+      )}
 
       {/* Rewards off: original labelled footer button. */}
-      {!rewardsOn && showResume ? (
+      {compact ? null : !rewardsOn && showResume ? (
         <Pressable
           onPress={onResume}
           hitSlop={6}
@@ -571,6 +603,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
   },
+  // No ribbon above the ring in the strip.
+  cardCompact: { paddingTop: spacing.xs },
+  stripLine: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: spacing.xs, maxWidth: '100%' },
+  stripTxt: { ...typography.small, fontWeight: '600', flexShrink: 1 },
 
   // Edge to edge across the top, INSIDE the card's 1pt border. Relying on
   // `overflow: hidden` alone left the band square against the card's rounded
