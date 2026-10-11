@@ -240,20 +240,26 @@ console.log('\n── notifications ──');
   // on unmount.
   check('every nudge switch writes to the store', /setNotificationPref/.test(notifs));
   check('…and the store really exposes that action', /setNotificationPref:/.test(store));
-  check('…reading each value from notificationPrefs', /notificationPrefs\?\.\[key\]/.test(notifs));
+  check('…reading each value through the policy default', /pushEnabled\(notificationPrefs, key\)/.test(notifs));
 
   // A switch that moves nothing is the failure this block has always guarded
   // against: every pref row must reach a fire site. Since Oct-11-26 the gate is
-  // `notify({ kind })` — notificationPolicy's `decide` reads the switch by kind.
+  // `notify({ kind })` — notificationPolicy's `decide` reads the switch by kind —
+  // or, for a push only ever scheduled ahead, `req('<kind>'` in notificationPlan.
+  const plan = read('analytics/notificationPlan.ts');
   const rowKeys = [...notifs.matchAll(/\{ key: '([A-Za-z]+)'/g)].map((m) => m[1]);
   check(`the screen lists several nudges (${rowKeys.length})`, rowKeys.length >= 5, rowKeys.join(','));
   for (const key of rowKeys) {
     check(`"${key}" is actually gated in the store`,
-      new RegExp(`notify\\(\\{\\s*kind: '${key}'`).test(store),
+      new RegExp(`notify\\(\\{\\s*kind: '${key}'`).test(store) || new RegExp(`req\\('${key}'`).test(plan),
       'a switch with no gate at the fire site moves nothing');
   }
 
   check('uses the shared header like every other pushed screen', /<PlainScreenHeader/.test(notifs));
+  const policyKinds = [...read('constants/notificationPolicy.ts').matchAll(/^\s+(\w+):\s+\{ bell:/gm)].map((m) => m[1]);
+  check('every notification kind has a switch, and every switch is a kind',
+    policyKinds.length > 0 && policyKinds.every((k) => rowKeys.includes(k)) && rowKeys.every((k) => policyKinds.includes(k)),
+    `kinds ${policyKinds.join(',')} vs rows ${rowKeys.join(',')}`);
 }
 
 // ── 5b. Settings — ONE consistent list, no inline sections (Sep-14-26) ─────

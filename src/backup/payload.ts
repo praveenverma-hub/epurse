@@ -125,9 +125,9 @@ export const STORE_KEYS = [
   // `ccDueReminderIds`: OS notification ids belong to the device that scheduled
   // them, and restoring them would leave the app listing reminders as armed that
   // nothing will ever deliver.
-  'reminders', 'notificationPrefs',
+  'reminders', 'notificationPrefs', 'reviewReminderAtMin',
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
-  'welcomeReviewSeen', 'planBannerDismissed',
+  'welcomeReviewSeen', 'planBannerDismissed', 'reviewReminderOffered',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',
   'declinedAccountLinks', 'declinedLimitLinks', 'activeGroupZoneId', 'userCustomRules',
 ] as const;

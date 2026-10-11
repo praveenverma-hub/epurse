@@ -51,6 +51,8 @@ export interface PlanFacts {
   goals: GoalMonthFact[];
   reviewQueue: Array<{ createdAt: string | number }>;
   reviewLast: { at: number; count: number } | null;
+  /** The user's review reminder time, minutes after midnight. Default `AT.reviewReminder`. */
+  reviewAtMin?: number;
   /** Credit cards with a learned statement day. */
   cards: Array<{ id: string; label: string; statementDay: number; notifiedMonth: string | null }>;
 }
@@ -192,7 +194,8 @@ export function buildPlannedPushes(f: PlanFacts): PlannedPush[] {
 
   // Review — the queue as it stood when the app last ran.
   {
-    const fireAt = nextAt(f.now, AT.reviewReminder.h, AT.reviewReminder.m);
+    const min = f.reviewAtMin ?? AT.reviewReminder.h * 60 + AT.reviewReminder.m;
+    const fireAt = nextAt(f.now, Math.floor(min / 60), min % 60);
     const fact = reviewReminderFact({ queue: f.reviewQueue, now: fireAt, lastSent: f.reviewLast });
     if (fact) {
       out.push(req('reviewReminder', `review:${dateKey(fireAt)}`, fireAt, {

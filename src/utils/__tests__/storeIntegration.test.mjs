@@ -5398,5 +5398,21 @@ console.log('\n— buildGoalMonthFacts: Home card + push share one source (Oct-1
   check('last month\'s plan is not this month\'s plan', mod.buildGoalMonthFacts(useStore.getState(), d.getTime()).find((g) => g.id === 'a').planned === 0);
 }
 
+console.log('\n— Review reminder: time + one-time offer (Oct-11-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  useStore.setState({ notificationPrefs: {}, reviewReminderOffered: false, reviewReminderAtMin: 19 * 60 });
+  G().setReviewReminderTime(8 * 60 + 45);
+  check('time is stored in minutes after midnight', G().reviewReminderAtMin === 525);
+  G().setReviewReminderTime(99999);
+  check('…clamped to a real time of day', G().reviewReminderAtMin === 24 * 60 - 1);
+  G().answerReviewReminderOffer(false);
+  check('"no thanks" closes the offer and leaves the reminder off', G().reviewReminderOffered === true && G().notificationPrefs.reviewReminder === undefined);
+  useStore.setState({ reviewReminderOffered: false });
+  G().answerReviewReminderOffer(true);
+  check('"turn on" closes the offer and switches it on', G().reviewReminderOffered === true && G().notificationPrefs.reviewReminder === true);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

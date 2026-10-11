@@ -45,6 +45,9 @@ import InfoSheet from './InfoSheet';
 import { setReviewFlowDraft, takePendingReviewFlowDraft } from '../utils/reviewFlowDraft';
 import InfoIcon from './InfoIcon';
 import { REWARD_CONFIG, REWARD_COPY } from '../config/rewardConfig';
+import { REVIEW_MIN_COUNT } from '../analytics/nudgeFacts';
+import { requestNotificationPermissions } from '../utils/notifications';
+import { useToast } from './Toast';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_H         = 152;
@@ -315,6 +318,9 @@ const DailyQueueStack = () => {
   const groups   = useEPurseStore((s) => s.groups);
   const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
   const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);
+  const reviewOfferPending  = useEPurseStore((s) => !s.reviewReminderOffered && s.notificationPrefs?.reviewReminder === undefined);
+  const answerReviewReminderOffer = useEPurseStore((s) => s.answerReviewReminderOffer);
+  const toast = useToast();
   const totalRP    = useRewardStore(selectTotalRP);
   const awareStreak = useRewardStore(selectAwareStreak);
   const recordReview = useRewardStore((s) => s.recordReview);
@@ -601,6 +607,33 @@ const DailyQueueStack = () => {
         </Text>
       )}
 
+      {/* One-time opt-in, only once a pile-up makes it useful. Off by default. */}
+      {reviewOfferPending && !showWelcome && queue.length >= REVIEW_MIN_COUNT && (
+        <View style={styles.offer}>
+          <Ionicons name="notifications-outline" size={16} color={theme.primary} />
+          <Text style={styles.offerText}>Get a reminder when spends pile up?</Text>
+          <TouchableOpacity
+            onPress={() => {
+              answerReviewReminderOffer(true);
+              requestNotificationPermissions().catch(() => {});
+              toast.success('Review reminder on', 'Change it in Settings → Notifications');
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.offerCta, { color: theme.primary }]}>Turn On</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => answerReviewReminderOffer(false)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="No thanks"
+          >
+            <Ionicons name="close" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ── Category picker ── */}
       <CategoryPickerModal
         transaction={pickerTxn}
@@ -856,6 +889,19 @@ const styles = StyleSheet.create({
   },
 
   // ── Footer hint ──
+  offer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    ...shadows.card,
+  },
+  offerText: { ...typography.small, color: colors.textSecondary, flex: 1 },
+  offerCta: { ...typography.small, fontWeight: '700' },
   footerHint: {
     ...typography.tiny,
     color: colors.textMuted,
