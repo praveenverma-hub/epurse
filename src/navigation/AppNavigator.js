@@ -59,6 +59,12 @@ export default function AppNavigator() {
       navigationRef.navigate('Main', { screen: 'Dashboard' });
     }
   }, [navigationReady, appReady, request, navigationRef]);
+  const routeRequest = usePresentationSession((s) => s.routeRequest);
+  useEffect(() => {
+    if (!navigationReady || !appReady || !routeRequest) return;
+    navigationRef.navigate(routeRequest.name, routeRequest.params);
+    usePresentationSession.getState().clearRouteRequest();
+  }, [navigationReady, appReady, routeRequest, navigationRef]);
 
   return (
     <NavigationContainer ref={navigationRef} onReady={() => setNavigationReady(true)}>

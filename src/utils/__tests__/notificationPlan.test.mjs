@@ -122,5 +122,15 @@ check(`never more than ${DAILY_PUSH_CAP} on any day`, Object.values(perDay).ever
 check('review reminder needs the switch', !planPushes(all, { now: NOW, prefs: {}, log: [], lastOpenAt: NOW }).some((p) => p.kind === 'reviewReminder'));
 check('weeklies stop after 3 unseen (user never opens the app)', plan.filter((p) => p.kind === 'weeklyRecap').length === 3, plan.filter((p) => p.kind === 'weeklyRecap').length);
 
+console.log('\n── every push opens somewhere ──');
+{
+  const { readFileSync } = await import('node:fs');
+  const planSrc = readFileSync(new URL('../../analytics/notificationPlan.ts', import.meta.url), 'utf8');
+  const appSrc = readFileSync(new URL('../../../App.js', import.meta.url), 'utf8');
+  const types = [...new Set([...planSrc.matchAll(/type: '([a-z_]+)'/g)].map((m) => m[1]))];
+  const unrouted = types.filter((t) => !new RegExp(`\\b${t}:`).test(appSrc));
+  check(`every planned push type is handled on tap (${types.length})`, types.length >= 5 && unrouted.length === 0, unrouted.join(', '));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

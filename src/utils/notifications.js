@@ -149,6 +149,12 @@ export async function scheduleCCBillDueReminder({ amount, cardLast4, bankName, d
   });
 }
 
+/** Reset / Delete Account: nothing the app armed may fire about data that's gone. */
+export async function cancelAllScheduledNotifications() {
+  if (MOCK_DATA_ENABLED) return;
+  try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch {}
+}
+
 /** Cancels every pending push from the scheduled plan — tagged, so no stored ids are needed. */
 export async function cancelPlannedPushes() {
   if (MOCK_DATA_ENABLED) return;

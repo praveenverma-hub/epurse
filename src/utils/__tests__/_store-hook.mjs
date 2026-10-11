@@ -46,6 +46,7 @@ const STUBS = {
     'export const cancelScheduledNotification=async(id)=>{(globalThis.__notifCancelled ||= []).push(id);};' +
     'let __p=0; export const schedulePlannedPush=async(p)=>{rec("planned:"+p.kind);return globalThis.__notifDenied ? null : `planned_${++__p}`;};' +
     'export const cancelPlannedPushes=async()=>{rec("cancelPlanned");};' +
+    'export const cancelAllScheduledNotifications=async()=>{rec("cancelAll");};' +
     'export const fireSubscriptionHikeNotification=async()=>{rec("subscriptionHike");return null;};' +
     'export const fireMonthlyRecapNotification=async()=>{rec("monthlyRecap");return null;};' +
     'export const fireCcCycleHeadsUpNotification=async()=>{rec("ccCycleHeadsUp");return null;};' +

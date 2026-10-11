@@ -119,6 +119,7 @@ export function buildPlannedPushes(f: PlanFacts): PlannedPush[] {
     out.push(req('budgetPlan', `budget_missing:${target}`, t, {
       title: `📋 Plan ${monthLabel(new Date(t))}'s budget`,
       body: `Keep ${monthLabel(new Date(ly, lm - 1, 1))}'s plan in one tap, or adjust it.`,
+      data: { type: 'budget_plan' },
       channel: 'budget',
     }));
   }
@@ -131,6 +132,7 @@ export function buildPlannedPushes(f: PlanFacts): PlannedPush[] {
       out.push(req('midmonthNudge', `midmonth:${f.budgetMonthKey}`, t, {
         title: `🧭 Halfway through ${monthLabel(d)}`,
         body: 'See how your spending pace looks against your budget.',
+        data: { type: 'budget_midmonth' },
         channel: 'budget',
       }));
     }
@@ -174,6 +176,7 @@ export function buildPlannedPushes(f: PlanFacts): PlannedPush[] {
       out.push(req('goalBehind', `goal_behind:${g.id}:${mk(d)}`, g.fireAt, {
         title: `${g.emoji ? `${g.emoji} ` : ''}${g.name} needs ₹${Math.round(g.shortfall).toLocaleString('en-IN')} more`,
         body: `₹${Math.round(g.funded).toLocaleString('en-IN')} of ₹${Math.round(g.planned).toLocaleString('en-IN')} set aside this month.`,
+        data: { type: 'goal_behind', goalId: g.id },
         channel: 'budget',
       }));
     }
@@ -201,6 +204,7 @@ export function buildPlannedPushes(f: PlanFacts): PlannedPush[] {
       out.push(req('reviewReminder', `review:${dateKey(fireAt)}`, fireAt, {
         title: `${fact.count} ${fact.count === 1 ? 'spend needs' : 'spends need'} a category`,
         body: 'A quick sort keeps your monthly reports accurate.',
+        data: { type: 'review_reminder' },
         channel: 'budget',
         meta: { count: fact.count },
       }));
