@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore, selectMonthlyReport } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import PrimaryButton from './PrimaryButton';
 import { radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';
 import { formatCurrency, formatCompact } from '../utils/format';
 import { useToast } from './Toast';
@@ -39,10 +40,13 @@ export interface MonthlyRecapCardProps {
   previewReport?: MonthlyReport;
   /** Opens the complete in-app report. */
   onViewFull?: () => void;
+  /** Secondary "plan this month" action — the recap modal passes it while no budget exists. */
+  planLabel?: string;
+  onPlan?: () => void;
 }
 
 const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({
-  monthKey, isNew, onDismiss, onDownloaded, previewReport, onViewFull,
+  monthKey, isNew, onDismiss, onDownloaded, previewReport, onViewFull, planLabel, onPlan,
 }) => {
   const theme = useTheme() as Palette;
   const toast = useToast();
@@ -197,6 +201,9 @@ const MonthlyRecapCard: React.FC<MonthlyRecapCardProps> = ({
           {!onViewFull ? <Text style={styles.dlText}>Download report</Text> : null}
         </Pressable>
       </View>
+      {onPlan && planLabel ? (
+        <PrimaryButton variant="outline" title={planLabel} onPress={onPlan} style={styles.planBtn} />
+      ) : null}
       <Text style={styles.foot}>Review here or save a private PDF for your records</Text>
 
       <CenterModal
@@ -260,5 +267,6 @@ const makeStyles = (theme: Palette) => StyleSheet.create({
   viewBtn: { flex: 1, minHeight: BUTTON_H, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.lg, paddingHorizontal: 12 },
   exportBtn: { width: BUTTON_H, minHeight: BUTTON_H, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: 1 },
   dlText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  planBtn: { marginTop: 8 },
   foot: { fontSize: 10.5, color: theme.textMuted, textAlign: 'center', marginTop: 9 },
 });

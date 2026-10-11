@@ -964,6 +964,10 @@ const DashboardScreen = ({ navigation }) => {
           setActiveAutoModal(null);
           navigation.navigate('MonthlyRecapSummary', { monthKey, previewReport });
         }}
+        onPlanBudget={() => {
+          setActiveAutoModal(null);
+          navigation.navigate('Insights', { defaultTab: 'budget', openPlan: true });
+        }}
       />
 
       {/* Weekly recap — one-time centered modal after a week ends */}

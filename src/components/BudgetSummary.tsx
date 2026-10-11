@@ -2,8 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, carryableBudgetPlan } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import PrimaryButton from './PrimaryButton';
+import { useToast } from './Toast';
+import { formatCurrency as formatAmount } from '../utils/format';
 import InfoSheet from './InfoSheet';
 import SheetCloseButton from './SheetCloseButton';
 import InfoIcon from './InfoIcon';
@@ -54,6 +57,9 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   const excludedExpenseParents = useEPurseStore((s) => s.excludedExpenseParents);
   const getBudgetUsage = useEPurseStore((s) => s.getBudgetUsage);
   const updateBudgetCategory = useEPurseStore((s) => s.updateBudgetCategory);
+  const lastBudgetPlan = useEPurseStore((s) => s.lastBudgetPlan);
+  const keepLastBudgetPlan = useEPurseStore((s) => s.keepLastBudgetPlan);
+  const toast = useToast();
   // Typed at the boundary: the store is untyped JS, so without these the entries
   // below come through as `unknown` and `find`'s parameter as implicit `any` —
   // the three long-standing tsc errors in this file. Every check in this session
@@ -157,6 +163,16 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
 
   const formatCurrency = (val: number) => `₹${(val / 1000).toFixed(1)}k`;
 
+  const carry = useMemo(() => (budget ? null : carryableBudgetPlan(lastBudgetPlan)), [budget, lastBudgetPlan]);
+  const thisMonthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
+  const monthName = (mk: string) => {
+    const [y, m] = mk.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'long' });
+  };
+  const keepLastPlan = () => {
+    if (keepLastBudgetPlan()) toast.success(`${thisMonthName} plan saved`);
+  };
+
   const freezeLabel = daysRemaining <= 10 ? `⚡ Start ${daysRemaining}-Day Freeze` : '⚡ 5-Day Cooldown';
 
   // REBALANCE LOGIC
@@ -175,6 +191,28 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
   // Empty state - no budget set — every hook above has now run unconditionally
   // (see the comment on the first useMemo), so it's safe to branch on the
   // RENDER OUTPUT here.
+  // New month after a rollover: last month's caps are one tap away; the card
+  // itself still opens the plan to adjust them.
+  if (!budget && carry) {
+    return (
+      <TouchableOpacity style={[styles.emptyCard, styles.carryCard, { backgroundColor: theme.card, borderColor: theme.primary + '44' }]} onPress={onPress} activeOpacity={0.85}>
+        <View style={styles.carryHead}>
+          <View style={[styles.emptyLeft, { backgroundColor: theme.background }]}>
+            <Text style={styles.emptyEmoji}>📋</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>Plan {thisMonthName}</Text>
+            <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
+              {monthName(carry.monthKey)}: {formatAmount(carry.totalCap)} across {carry.count} {carry.count === 1 ? 'category' : 'categories'}
+            </Text>
+          </View>
+          <Text style={[styles.emptyArrow, { color: theme.primary }]}>›</Text>
+        </View>
+        <PrimaryButton title="Keep Last Month's Plan" onPress={keepLastPlan} />
+      </TouchableOpacity>
+    );
+  }
+
   if (!budget || !usage) {
     return (
       <TouchableOpacity style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.primary + '44' }]} onPress={onPress} activeOpacity={0.85}>
@@ -352,6 +390,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyEmoji: { fontSize: 22 },
+  carryCard: { flexDirection: 'column', alignItems: 'stretch' },
+  carryHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   emptyTitle: {
     fontSize: 15,
     fontWeight: '700',
