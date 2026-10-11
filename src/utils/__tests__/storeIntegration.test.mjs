@@ -5414,5 +5414,34 @@ console.log('\n— Review reminder: time + one-time offer (Oct-11-26) —');
   check('"turn on" closes the offer and switches it on', G().reviewReminderOffered === true && G().notificationPrefs.reviewReminder === true);
 }
 
+console.log('\n— Open items closed: background price rise, wipe cancels everything (Oct-11-26) —');
+{
+  const RN = await import('react-native');
+  const G = () => useStore.getState();
+  const real = G().maybeFireSubscriptionAlerts;
+  let scans = 0;
+  const spy = () => { scans++; };
+
+  reset();
+  useStore.setState({ maybeFireSubscriptionAlerts: spy });
+  RN.AppState.currentState = 'background';
+  ingest('HDFCBK', 'Rs.649 debited from A/c XX4021 at NETFLIX on 22-07-26.', { receivedAt: Date.now(), smsId: 'bg-1' });
+  check('an SMS read in the background checks for a price rise', scans === 1, String(scans));
+
+  RN.AppState.currentState = 'active';
+  ingest('HDFCBK', 'Rs.649 debited from A/c XX4021 at NETFLIX on 23-07-26.', { receivedAt: Date.now() + 1000, smsId: 'fg-1' });
+  check('…not in the foreground (the on-open check + carousel cover it)', scans === 1, String(scans));
+  RN.AppState.currentState = 'background';
+  useStore.setState({ maybeFireSubscriptionAlerts: real });
+
+  reset();
+  globalThis.__notifCalls = [];
+  G().deleteAllUserData();
+  check('Delete Account cancels every scheduled OS notification', globalThis.__notifCalls.includes('cancelAll'));
+  globalThis.__notifCalls = [];
+  G().resetAll();
+  check('…and so does a full reset', globalThis.__notifCalls.includes('cancelAll'));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

@@ -83,7 +83,7 @@ import { AppState } from 'react-native';
 import { decide, planPushes } from '../constants/notificationPolicy';
 import { buildPlannedPushes } from '../analytics/notificationPlan';
 import { usualFundingDay } from '../analytics/nudgeFacts';
-import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt, schedulePlannedPush, cancelPlannedPushes } from '../utils/notifications';
+import { fireBudgetBreachNotification, fireMidmonthNudgeNotification, fireCCPaymentNotification, scheduleCCBillDueReminder, cancelScheduledNotification, fireSubscriptionHikeNotification, fireMonthlyRecapNotification, fireCcCycleHeadsUpNotification, scheduleReminderAt, schedulePlannedPush, cancelPlannedPushes, cancelAllScheduledNotifications } from '../utils/notifications';
 import { REPEAT, nextOccurrences, isReminderExpired } from '../utils/reminderSchedule';
 // Imported directly from the pure module, NOT from notifications.js — that module
 // is stubbed wholesale in the headless test runner (it pulls in expo-notifications),
@@ -5001,6 +5001,11 @@ export const useEPurseStore = create(
         const affectedCats = new Set();
         added.forEach((t) => { if (t.categoryId) affectedCats.add(t.categoryId); });
         affectedCats.forEach((catId) => get().checkBudgetBreach(catId));
+        // The only moment a price rise can PUSH: in the foreground `notify` sends it
+        // to the bell, and the on-open check runs in the foreground.
+        if (AppState.currentState === 'background' && added.some((t) => t.type === 'debit')) {
+          get().maybeFireSubscriptionAlerts();
+        }
 
         return added[0] || null;
       },
@@ -6602,7 +6607,9 @@ export const useEPurseStore = create(
       },
 
       // ----- danger zone -------------------------------------------------
-      resetAll: () =>
+      resetAll: () => {
+        // Same as deleteAllUserData: nothing armed may outlive the data it was about.
+        cancelAllScheduledNotifications();
         set({
           accounts: [],
           transactions: [],
@@ -6657,7 +6664,8 @@ export const useEPurseStore = create(
           lastMidmonthNudgeMonth: null,
           xp: 0,
           reviewStreak: { current: 0, best: 0, lastReviewDate: null },
-        }),
+        });
+      },
 
       /**
        * "Delete Account & Data" (docs/ANDROID_RELEASE.md §0.3/§7 item 10) —
@@ -6684,7 +6692,9 @@ export const useEPurseStore = create(
        * concern (`googleAuth.revokeAndSignOut`) — this only owns what's in
        * THIS store. The caller (SettingsScreen) runs both.
        */
-      deleteAllUserData: () =>
+      deleteAllUserData: () => {
+        // Every scheduled OS notification belongs to the data being wiped — user reminders included.
+        cancelAllScheduledNotifications();
         set({
           accounts: [],
           transactions: [],
@@ -6764,7 +6774,8 @@ export const useEPurseStore = create(
           welcomeReviewSeen: false,
           planBannerDismissed: false,
           reviewStreak: { current: 0, best: 0, lastReviewDate: null },
-        }),
+        });
+      },
     }),
     {
       name: '@ePurse:store',

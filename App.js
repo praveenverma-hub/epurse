@@ -82,6 +82,20 @@ function NotificationTapBoot() {
           modal === 'monthlyRecap' && typeof data.monthKey === 'string' ? data.monthKey : undefined,
         );
         void Notifications.clearLastNotificationResponseAsync();
+        return;
+      }
+      // Scheduled pushes that open a screen rather than a modal (notificationPlan).
+      const budgetTab = { screen: 'Insights', params: { defaultTab: 'budget' } };
+      const routeByType = {
+        budget_plan: ['Main', { screen: 'Insights', params: { defaultTab: 'budget', openPlan: true } }],
+        budget_midmonth: ['Main', budgetTab],
+        goal_behind: typeof data?.goalId === 'string' ? ['GoalDetail', { goalId: data.goalId }] : ['Goals'],
+        review_reminder: ['Main', { screen: 'Dashboard' }],
+      };
+      const route = routeByType[data?.type];
+      if (route) {
+        usePresentationSession.getState().requestRoute(route[0], route[1]);
+        void Notifications.clearLastNotificationResponseAsync();
       }
     };
     Notifications.getLastNotificationResponseAsync().then((response) => {

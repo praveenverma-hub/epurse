@@ -6,12 +6,17 @@ import type { AutoModalId } from '../constants/autoModals';
 export const usePresentationSession = create<{
   automaticShown: boolean;
   request: { modal: AutoModalId; monthKey?: string } | null;
+  /** A screen a notification tap asked for — AppNavigator navigates once it's ready. */
+  routeRequest: { name: string; params?: Record<string, unknown> } | null;
   claimAutomatic: () => boolean;
   requestModal: (modal: AutoModalId, monthKey?: string) => void;
   clearRequest: () => void;
+  requestRoute: (name: string, params?: Record<string, unknown>) => void;
+  clearRouteRequest: () => void;
 }>((set, get) => ({
   automaticShown: false,
   request: null,
+  routeRequest: null,
   claimAutomatic: () => {
     if (get().automaticShown) return false;
     set({ automaticShown: true });
@@ -19,4 +24,6 @@ export const usePresentationSession = create<{
   },
   requestModal: (modal, monthKey) => set({ request: { modal, monthKey } }),
   clearRequest: () => set({ request: null }),
+  requestRoute: (name, params) => set({ routeRequest: { name, params } }),
+  clearRouteRequest: () => set({ routeRequest: null }),
 }));
