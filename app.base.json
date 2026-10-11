@@ -39,6 +39,12 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ],
       "@react-native-community/datetimepicker",
       "expo-sharing",
       "expo-status-bar",
