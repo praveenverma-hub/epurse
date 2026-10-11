@@ -4786,7 +4786,6 @@ export const useEPurseStore = create(
                 bankName:    srcAccount.bankName || bankName || null,
                 merchant:    'Credit card bill payment',
                 source:      'sms',
-                smsText:     rawMessage || '',
                 isReviewed:  true,
                 // The category is decided by the parser, not guessed — protect it from
                 // self-transfer reconciliation, which would otherwise re-tag it.
@@ -6788,7 +6787,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 41,
+      version: 42,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -7570,6 +7569,17 @@ export const useEPurseStore = create(
             transactions,
             ...(suppress.length ? { suppressedSmsIds: appendSuppressedSmsIds(state.suppressedSmsIds || [], suppress) } : {}),
           };
+        }
+
+        // v42 (Oct-11-26): production keeps no SMS body on a transaction (parsed values
+        // only). Strip `smsText` — must stay AFTER v41, which still reads it.
+        if (version < 42) {
+          const strip = (list) => (list || []).map((t) => {
+            if (!t || t.smsText === undefined) return t;
+            const { smsText: _st, ...rest } = t;
+            return rest;
+          });
+          state = { ...state, transactions: strip(state.transactions), archivedTransactions: strip(state.archivedTransactions) };
         }
 
         return state;

@@ -1185,13 +1185,8 @@ export const parseMessageDetailed = (message, opts = {}) => {
           : /credited|deposited|refunded|refund|received(?:\s+(?:in|to|from|by))?|\breceived\b|salary credited|cashback credited|amount credited|transferred\s+to\s+your\b|\bmoney\s+in\b|\bprocessed\s+into\b|\breversed\s+to\b|\breversal\b|\breturned\s+to\s+your\b|\bcredited\s+back\b|\b(?:neft|imps|rtgs|ach|upi)\b[\s:\/-]*cr\b/i.test(textSansFuture);
   const accountType = inferAccountType(`${opts.sender || ''} ${text}`);
   const defaultType = isCredit ? TRANSACTION_TYPES.CREDIT : TRANSACTION_TYPES.DEBIT;
-  // A trimmed copy of the SMS body, kept for SEARCH (Activity matches it) and for the
-  // legacy phantom-txn migrations. It is deliberately NOT `note` — `note` is the user's
-  // own note, shown as "Note" in the detail sheets and prefilled into the edit form, so
-  // dumping the bank's message in there made every SMS transaction look like the user
-  // had typed the whole SMS. (`rawSms` is the FULL body, but it's preview-build-only
-  // and stripped after RAW_SMS_RETENTION_MS, so it can't back search.)
-  const smsText = text.length > 120 ? text.slice(0, 117) + '…' : text;
+  // No copy of the SMS body goes on the transaction — parsed values only. `rawSms`
+  // (preview builds, RAW_SMS_RETENTION_MS) is the debug copy.
 
   // ── Extract: merchant ─────────────────────────────────────────────────────
   // BillPay biller wins first — its "from <account>" source would otherwise be captured
@@ -1360,7 +1355,6 @@ export const parseMessageDetailed = (message, opts = {}) => {
     bankName: getBankName(opts.sender),
     merchant: merchant || (isRefund ? 'Refund' : inferredTypeFromFirstVerb === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'),
     categoryId,
-    smsText,
     createdAt: opts.receivedAt,
     isRefund,
     counterpartyMask,
@@ -1394,7 +1388,6 @@ function buildTransaction({
   bankName,
   merchant,
   categoryId,
-  smsText,
   createdAt,
   isRefund = false,
   counterpartyMask = null,
@@ -1414,7 +1407,6 @@ function buildTransaction({
     bankName:    bankName || null,
     merchant,
     categoryId,
-    smsText,
     source:      'sms',
     isRefund:    !!isRefund,
     isSplit:     false,

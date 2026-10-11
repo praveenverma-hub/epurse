@@ -789,10 +789,9 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 }
 
 // ---------------------------------------------------------------------------
-// note vs smsText. `note` is the USER's note (rendered as "Note" in the detail
-// sheets, prefilled into the edit form); the bank message body lives in `smsText`.
-// Before Jul-31 the parser wrote the SMS into `note`, so every auto-imported
-// transaction looked like the user had typed the whole SMS.
+// note vs SMS body. `note` is the USER's note (rendered as "Note" in the detail
+// sheets, prefilled into the edit form). Before Jul-31 the parser wrote the SMS into
+// `note`; from Oct-11 (v42) no copy of the body is kept on the transaction at all.
 // ---------------------------------------------------------------------------
 {
   const S = () => useStore.getState();
@@ -802,8 +801,9 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   S().ingestMessage(body, { sender: 'HDFCBK', receivedAt: new Date().toISOString(), smsId: 'sms_note_1' });
   const t = S().transactions[0];
   check('note/smsText: ingested txn leaves `note` empty', !t.note, `note=${JSON.stringify(t.note)}`);
-  check('note/smsText: ingested txn carries the body in `smsText`',
-    !!t.smsText && t.smsText.includes('ZOMATO'), `smsText=${JSON.stringify(t.smsText)}`);
+  check('note/smsText: ingested txn keeps NO copy of the SMS body',
+    t.smsText === undefined && !JSON.stringify(t).includes('Avl Bal'), `smsText=${JSON.stringify(t.smsText)}`);
+  check('note/smsText: …but the parsed values are there', t.amount === 450 && /zomato/i.test(t.merchant || ''), t.merchant);
 
   S().addTransaction({ amount: 200, type: 'debit', merchant: 'Chai', categoryId: 'food', note: 'team offsite' });
   const m = S().transactions[0];
@@ -5223,6 +5223,11 @@ console.log('\n— Existing-user safety for the card-limit change (Oct-10-26) �
   check('v41: a REAL spend that mentions the limit is untouched', !byId('real').isIgnored);
   check('v41: a row the user already re-categorised is left alone', !byId('touched').isIgnored);
   check('v41: current data with no phantoms passes through unchanged', migrate({ accounts: [], transactions: [] }, 40).transactions.length === 0);
+  const v42 = migrate({ accounts: [], transactions: [{ id: 'a', source: 'sms', smsText: 'Rs 1 debited Avl Bal 9', note: 'mine' }],
+    archivedTransactions: [{ id: 'b', smsText: 'old body' }] }, 41);
+  check('v42: SMS body stripped from live AND archived txns, user note kept',
+    v42.transactions[0].smsText === undefined && v42.archivedTransactions[0].smsText === undefined && v42.transactions[0].note === 'mine', JSON.stringify(v42));
+  check('v42: v41 still sees the body first (phantom ignored even from a v40 store)', byId('ph').isIgnored === true && m.transactions.every((t) => t.smsText === undefined));
 
   // Old cards (no reportedAvailable / limitGroupId) compute exactly as before.
   reset();

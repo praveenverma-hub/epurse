@@ -2041,6 +2041,13 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 
 ## Analytics & Insights / Home
 
+**Planned — retention plan (Oct-11-26, REVISED same day, not built)**: keep ALL financial history by
+default; cleanup only by user choice. Step 0 = move transactions to `expo-sqlite` per month (Android
+AsyncStorage defaults to a 6 MB total DB and the store is one blob). Settled LB + groups kept until
+user cleanup; monthly totals = 10-yr rebuildable cache; pre-restore snapshot 7 d. Storage: MMKV
+(small state, encrypted) + expo-sqlite (growing financial records). SMS-text removal + allowBackup
+off are DONE (see Backup).
+
 **Open — long-range stats audit (Oct-11-26, not fixed yet)**
 - Raw-first getters (`getMonthlySpend`/`getMonthlyIncome`/`getCategoryBreakdown`, `selectMonthlyReport`
   `hasRaw`) ignore the month's aggregate if ANY raw row survives → the month crossing the 90-day
@@ -2438,6 +2445,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   restore → `refreshCategoryMaps`; (4) `preOnboarding` added to `TXN_FIELDS`; (5) notify
   dedup guards (`subscriptionHikesNotified`, `ccCycleHeadsUpNotified`, `lastMidmonthNudgeMonth`)
   now backed up. Every persisted key is now test-asserted as backed-up or `STORE_KEYS_EXCLUDED`.
+- **Oct-11-26 privacy**: (1) production stores NO SMS body — parser stopped writing `smsText`
+  (CC-bill path stored the full message), store **v42** strips it from live + archived txns,
+  Activity search matches `rawMerchant`/`transferRef`/`counterpartyName` instead; (2) **Android
+  Auto Backup OFF** (`android.allowBackup: false`, `test:drive`) — Expo's default `true` let Android's
+  cloud backup copy the whole store without the user enabling ePurse backup. Needs a rebuild.
 
 **Open**
 - **Untested against a real Google account** — phases 1-6 (manual backup+restore,
