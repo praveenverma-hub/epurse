@@ -2454,7 +2454,11 @@ off are DONE (see Backup).
 - **Oct-11-26 storage Step 0, PRs 1–2** (`docs/STORAGE_MIGRATION.md`): MMKV + nitro + expo-sqlite
   (SQLCipher) installed; `src/storage/` keys, schema, SQL/memory `RecordStore`; `test:storage` 31.
   PR 3: `hybridStorage` (reference diff, coalesced atomic flush, pre-hydration writes dropped, freeze
-  guard) — 37 checks incl. the real store across 15 actions. Release build green. Not wired yet.
+  guard) — 37 checks incl. the real store across 15 actions. Release build green.
+  **PR 4 — WIRED:** `ePurseStore` persists via `storage/appStorage.ts`; first launch copies the
+  AsyncStorage value, verifies an exact reload, then marks done (AsyncStorage copy kept as fallback).
+  Modes hybrid/legacy/unavailable; flush on background + in Delete Account. `test:storage` 85.
+  **Needs on-device checks (STORAGE_MIGRATION.md step 7) before release.**
 
 **Open**
 - **Untested against a real Google account** — phases 1-6 (manual backup+restore,

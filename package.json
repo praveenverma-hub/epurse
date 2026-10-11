@@ -49,7 +49,7 @@
     "test:contrast": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/themeContrast.test.mjs",
     "test:backup": "node --no-warnings src/utils/__tests__/backupCrypto.test.mjs",
     "test:payload": "node --no-warnings src/utils/__tests__/backupPayload.test.mjs",
-    "test:storage": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/storage.test.mjs && node --no-warnings src/utils/__tests__/storageHybrid.test.mjs",
+    "test:storage": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/storage.test.mjs && node --no-warnings src/utils/__tests__/storageHybrid.test.mjs && node --no-warnings src/utils/__tests__/storageMigration.test.mjs",
     "test:drive": "node --no-warnings src/utils/__tests__/backupDrive.test.mjs",
     "test:remoteConfig": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/remoteConfig.test.mjs",
     "test:buildVariant": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/buildVariant.test.mjs",

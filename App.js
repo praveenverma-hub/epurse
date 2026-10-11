@@ -7,6 +7,7 @@ import * as Sentry from '@sentry/react-native';
 
 import * as Notifications from 'expo-notifications';
 import { initSentry } from './src/config/sentry';
+import { flushAppStorage } from './src/storage/appStorage';
 
 // Runs once at module load, before anything else in this file — catches
 // crashes as early in boot as possible. See src/config/sentry.ts for why
@@ -273,6 +274,8 @@ function BudgetRolloverBoot() {
         replanPushes();
       } else if (state === 'background') {
         replanPushes();
+        // Don't leave the last few changes in the coalescing window if the OS kills us.
+        flushAppStorage();
       }
     });
     return () => sub.remove();

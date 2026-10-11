@@ -33,6 +33,7 @@ function spyRecords() {
   const spy = { applies: [], failNext: 0 };
   spy.store = {
     load: () => inner.load(),
+    readMeta: () => inner.readMeta(),
     wipe: () => inner.wipe(),
     apply: async (cs) => {
       if (spy.failNext > 0) { spy.failNext--; throw new Error('disk full'); }

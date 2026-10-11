@@ -1,7 +1,8 @@
 # Storage migration — AsyncStorage → SQLite + MMKV (Step 0)
 
-**Status:** Oct-11-2026 — PRs 1–3 built and tested; release build GREEN with all native libs in the
-APK. Nothing is wired into the app yet — PR 4 (migration + wiring) is the first that changes runtime.
+**Status:** Oct-11-2026 — PRs 1–4 built and tested. **The store now runs on SQLite + MMKV**
+(`storage/appStorage.ts`), migrating once from AsyncStorage on first launch. PRs 5–6 and the
+on-device checks (step 7) remain.
 **Why:** the retention plan keeps ALL financial history by default (cleanup only by user choice).
 Today's storage can't hold that. See [Retention plan](#9-what-this-unblocks).
 
@@ -143,6 +144,15 @@ On the first launch of the new build (no `storage.migratedAt` in MMKV):
 Same pattern, simpler, for `@ePurse:rewards`, `ePurse_notifications_v1` and `@ePurse:*` (utils) →
 MMKV.
 
+### Modes (`appStorage.ts`)
+| Situation | Mode | Behaviour |
+|---|---|---|
+| SQLite opens, migrated (or migrates + verifies now) | `hybrid` | normal |
+| SQLite won't open, data NOT moved yet | `legacy` | AsyncStorage exactly as before; retried next launch |
+| Migration fails to verify | `legacy` | same; half-copy wiped; Sentry `storage: migration-failed` (key names only) |
+| SQLite won't open, data HAS moved (MMKV mirror flag) | `unavailable` | memory only, so nothing is overwritten and the stale AsyncStorage copy is NOT used. PR 6 adds the restore prompt |
+| Mock-data mode | `hybrid` on memory | never touches real files |
+
 ## 7. Encryption, keys, failure modes
 
 - **SQLCipher** via expo-sqlite's config plugin (option name to confirm at install), `PRAGMA key`
@@ -206,7 +216,7 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
 | 1 ✅ | `react-native-mmkv` 4.3.2 + `react-native-nitro-modules` 0.37.1, `expo-sqlite` 57.0.4 w/ `useSQLCipher`; key manager `storage/keys.ts` (SecureStore, sync) + pure `keyFormat.ts` | **yes** |
 | 2 ✅ | `schema.ts`, `sqlDriver.ts`, `expoSqlDriver.ts`, `recordStore.ts` (SQL + memory), `test:storage` 31 checks | no |
 | 3 ✅ | `hybridStorage.ts` (diff, coalesce, atomic flush, hydration, freeze guard), `deviceKv.ts` + `mmkvDeviceKv.ts`; `storageHybrid.test.mjs` 37 incl. the REAL store under freeze across 15 actions, reload == persisted state | no |
-| 4 | One-time AsyncStorage migration + verify + fallback | no |
+| 4 ✅ | `legacyMigration.ts` (copy as-is → reload → exact-equality verify → only then mark; any failure wipes the half-copy) + `appStorage.ts` (modes hybrid / legacy / unavailable, Sentry tags only) wired into `ePurseStore`; flush on background (App.js) and in Delete Account; `_store-hook` stubs appStorage for the Node suites; `storageMigration.test.mjs` 15 incl. a real v41 store end-to-end | no |
 | 5 | Rewards, notifications, remote config, utils → MMKV (+ their migration) | no |
 | 6 | Snapshot → SQLite 7-day; delete-account wipes all engines; key-loss path + restore prompt | no |
 | 7 | **On-device checks (you):** fresh install; upgrade from the current build with real data; kill the app mid-ingest; Drive restore; delete account; start-up time with mock 20 k txns | — |

@@ -84,6 +84,17 @@ const STUBS = {
     'return s.inbox||[];};' +
     'export const subscribeToIncomingSms=(cb)=>{S().liveCb=cb;return ()=>{S().liveCb=null;};};',
   locationService: 'export const getLocationIfGranted=async()=>null;',
+  // The device storage (SQLite + MMKV) can't load in Node. Same contract as zustand's
+  // createJSONStorage over the AsyncStorage stub, so every suite behaves as before;
+  // the real storage layers are tested in storage*.test.mjs.
+  appStorage:
+    "import AsyncStorage from '@react-native-async-storage/async-storage';" +
+    'export const createAppStorage=()=>({' +
+    'getItem:async(n)=>{const s=await AsyncStorage.getItem(n);return s==null?null:JSON.parse(s);},' +
+    'setItem:(n,v)=>AsyncStorage.setItem(n,JSON.stringify(v)),' +
+    'removeItem:(n)=>AsyncStorage.removeItem(n)});' +
+    'export const flushAppStorage=async()=>{};' +
+    "export const getStorageMode=()=>'legacy';",
 };
 
 function stubFor(specifier) {
@@ -94,6 +105,7 @@ function stubFor(specifier) {
   if (specifier === 'react-native') return STUBS.reactNative;
   if (/services\/smsService$/.test(specifier)) return STUBS.smsService;
   if (/services\/locationService$/.test(specifier)) return STUBS.locationService;
+  if (/storage\/appStorage$/.test(specifier)) return STUBS.appStorage;
   return null;
 }
 

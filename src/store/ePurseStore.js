@@ -30,8 +30,8 @@
 // =============================================================================
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { persist } from 'zustand/middleware';
+import { createAppStorage } from '../storage/appStorage';
 
 import { DEFAULT_CATEGORIES, ACCOUNT_TYPES, TRANSACTION_TYPES, NON_SPEND_CATEGORY_IDS } from '../constants/categories';
 import {
@@ -7584,7 +7584,8 @@ export const useEPurseStore = create(
 
         return state;
       },
-      storage: createJSONStorage(() => AsyncStorage),
+      // SQLite + MMKV, migrated once from AsyncStorage (docs/STORAGE_MIGRATION.md).
+      storage: createAppStorage(),
       partialize: (state) => ({
         accounts: state.accounts,
         transactions: state.transactions,

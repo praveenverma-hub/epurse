@@ -36,6 +36,8 @@ export type Snapshot = {
 export interface RecordStore {
   load(): Promise<Snapshot>;
   apply(changes: ChangeSet): Promise<void>;
+  /** Bookkeeping only (store version, migration marks) — cheap, no rows loaded. */
+  readMeta(): Promise<Record<string, string>>;
   /** Delete Account: every record gone, schema kept. */
   wipe(): Promise<void>;
 }
@@ -93,6 +95,13 @@ export function createSqlRecordStore(driver: SqlDriver): RecordStore {
         snap.meta[r.key] = r.value;
       }
       return snap;
+    },
+
+    async readMeta() {
+      await init();
+      const meta: Record<string, string> = {};
+      for (const r of await driver.all<{ key: string; value: string }>('SELECT key, value FROM meta;')) meta[r.key] = r.value;
+      return meta;
     },
 
     async apply(changes) {
@@ -181,6 +190,8 @@ export function createMemoryRecordStore(): RecordStore {
       for (const [k, v] of meta) snap.meta[k] = v;
       return snap;
     },
+
+    async readMeta() { return Object.fromEntries(meta); },
 
     async apply(changes) {
       // Stage on copies and swap at the end: a throw midway leaves the store untouched.

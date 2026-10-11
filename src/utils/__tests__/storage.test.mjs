@@ -83,6 +83,7 @@ async function contract(label, store) {
   let s = await store.load();
   check(`${label}: rows come back in seq order, not insert order`, J(s.rows.transactions.map((r) => r.rid)) === J(['t1', 't2', 't3']));
   check(`${label}: a document round-trips exactly (unicode included)`, J(s.rows.transactions[0].value) === J(txn('t1', { note: 'chai ☕ — ₹' })));
+  check(`${label}: readMeta returns bookkeeping without loading rows`, J(await store.readMeta()) === J({ storeVersion: '42' }));
   check(`${label}: maps, kv and meta round-trip`,
     s.maps.monthlyAggregates['2026-07'].totalSpend === 1200 && s.kv.userName === 'Praveen'
     && s.kv.budget.perCategory.food === 8000 && s.meta.storeVersion === '42' && s.rows.lentBorrowed[0].value.amount === 750);
