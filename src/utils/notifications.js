@@ -41,6 +41,13 @@ export async function setupAndroidChannel() {
 }
 
 // Lazily request permission (call before scheduling, not at startup)
+/** For Settings' "notifications are off" banner. `canAskAgain` false = only system settings can fix it. */
+export async function getNotificationPermission() {
+  if (MOCK_DATA_ENABLED) return { granted: true, canAskAgain: true };
+  const p = await Notifications.getPermissionsAsync();
+  return { granted: p.status === 'granted', canAskAgain: p.canAskAgain !== false };
+}
+
 export async function requestNotificationPermissions() {
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === 'granted') return true;

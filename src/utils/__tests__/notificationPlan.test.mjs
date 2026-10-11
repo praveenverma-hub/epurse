@@ -105,6 +105,7 @@ r = of(base({ reviewQueue: q(6) }), 'reviewReminder');
 check('6 waiting → today 19:00, with the count', r.length === 1 && r[0].fireAt === at(OCT, 11, 19) && r[0].title.startsWith('6 ') && r[0].meta?.count === 6);
 check('2 fresh → nothing', of(base({ reviewQueue: q(2) }), 'reviewReminder').length === 0);
 check('after 19:00 → tomorrow', of(base({ now: at(OCT, 11, 20), reviewQueue: q(6) }), 'reviewReminder')[0]?.fireAt === at(OCT, 12, 19));
+check('the user\'s own time wins (08:45)', of(base({ reviewQueue: q(6), reviewAtMin: 8 * 60 + 45 }), 'reviewReminder')[0]?.fireAt === at(OCT, 12, 8, 45));
 check('inside the cooldown → nothing', of(base({ reviewQueue: q(6), reviewLast: { at: NOW - DAY, count: 5 } }), 'reviewReminder').length === 0);
 check('copy states a benefit, no pressure', /accurate/.test(r[0]?.body || '') && !/streak|RP|EPC/.test(`${r[0]?.title} ${r[0]?.body}`));
 

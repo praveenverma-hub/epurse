@@ -1463,6 +1463,10 @@ export const useEPurseStore = create(
       // The current scheduled plan ({ key, kind, at, count? }) — see `replanPushes`.
       plannedPushes: [],
       reviewReminderLast: null,
+      // Review reminder time, minutes after midnight (19:00).
+      reviewReminderAtMin: 19 * 60,
+      // The queue's one-time "want a reminder?" offer has been answered.
+      reviewReminderOffered: false,
 
       // ─── Budget plan ────────────────────────────────────────────────────────
       // `budget` is null until the user sets a plan. When set:
@@ -1744,6 +1748,17 @@ export const useEPurseStore = create(
 
       markAppOpened: () => set({ lastAppOpenAt: Date.now() }),
 
+      setReviewReminderTime: (minutes) => {
+        set({ reviewReminderAtMin: Math.max(0, Math.min(24 * 60 - 1, Math.round(Number(minutes) || 0))) });
+        get().replanPushes();
+      },
+
+      /** The queue's one-time offer, answered either way. */
+      answerReviewReminderOffer: (accept) => {
+        set({ reviewReminderOffered: true });
+        if (accept) get().setNotificationPref('reviewReminder', true);
+      },
+
       /**
        * THE way the app sends a notification it decided on itself (user-set
        * reminders don't come through here). `decide` applies the switch, dedupe,
@@ -1826,6 +1841,7 @@ export const useEPurseStore = create(
               goals,
               reviewQueue: selectUnreviewedQueue(s),
               reviewLast,
+              reviewAtMin: s.reviewReminderAtMin ?? 19 * 60,
               cards,
             });
             const accepted = planPushes(wanted, { now, prefs: s.notificationPrefs, log, lastOpenAt: s.lastAppOpenAt || 0 });
@@ -6631,6 +6647,8 @@ export const useEPurseStore = create(
           lastAppOpenAt: 0,
           plannedPushes: [],
           reviewReminderLast: null,
+          reviewReminderAtMin: 19 * 60,
+          reviewReminderOffered: false,
           budget: null,
           budgetHistory: {},
           budgetStreak: { current: 0, best: 0, lastResetMonth: null },
@@ -6733,6 +6751,8 @@ export const useEPurseStore = create(
           lastAppOpenAt: 0,
           plannedPushes: [],
           reviewReminderLast: null,
+          reviewReminderAtMin: 19 * 60,
+          reviewReminderOffered: false,
           budget: null,
           budgetHistory: {},
           lastBudgetPlan: null,
@@ -7591,6 +7611,8 @@ export const useEPurseStore = create(
         lastAppOpenAt: state.lastAppOpenAt ?? 0,
         plannedPushes: state.plannedPushes ?? [],
         reviewReminderLast: state.reviewReminderLast ?? null,
+        reviewReminderAtMin: state.reviewReminderAtMin ?? 19 * 60,
+        reviewReminderOffered: state.reviewReminderOffered ?? false,
         budget: state.budget,
         lastBudgetPlan: state.lastBudgetPlan,
         budgetHistory: state.budgetHistory,

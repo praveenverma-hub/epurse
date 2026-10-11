@@ -31,12 +31,15 @@
 // see the "Settings — rendered plain" note there before extending it further.
 // =============================================================================
 
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, ScrollView, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { useEPurseStore } from '../store/ePurseStore';
+import { CHANNELS, pushEnabled } from '../constants/notificationPolicy';
+import type { NotificationKind } from '../constants/notificationPolicy';
+import { getNotificationPermission } from '../utils/notifications';
 import { Storage } from '../utils/storage';
 import { spacing } from '../constants/theme';
 import { THEMES } from '../constants/themes';
@@ -65,12 +68,26 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const showMonthlyRecap = useEPurseStore((s: any) => s.showMonthlyRecap);
   const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
+  const notificationPrefs = useEPurseStore((s: any) => s.notificationPrefs) as Record<string, boolean>;
   const deleteAllUserData = useEPurseStore((s: any) => s.deleteAllUserData);
   const { signOut, deleteAccount } = useGoogleSession();
 
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Re-checked on return from system settings, so the hint can't go stale.
+  const [notifBlocked, setNotifBlocked] = useState(false);
+  const checkPermission = useCallback(() => {
+    getNotificationPermission().then((p) => setNotifBlocked(!p.granted)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    checkPermission();
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') checkPermission(); });
+    return () => sub.remove();
+  }, [checkPermission]);
+  const kinds = Object.keys(CHANNELS) as NotificationKind[];
+  const notifOn = kinds.filter((k) => pushEnabled(notificationPrefs, k)).length;
 
   const handleLogout = async () => {
     setConfirmLogout(false);
@@ -131,6 +148,14 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
               onPress={() => setThemeSheetOpen(true)}
             />
           ) : null}
+          {/* Notifications sits beside Monthly Recap: both decide what ePurse sends you. */}
+          <NavListRow
+            icon="notifications-outline"
+            label="Notifications"
+            hint={notifBlocked ? 'Off in phone settings' : `${notifOn} of ${kinds.length} on`}
+            hintTone={notifBlocked ? 'warn' : 'default'}
+            onPress={() => navigation.navigate('Notifications')}
+          />
           <NavListRow
             icon="document-text-outline"
             label="Monthly Recap"
@@ -155,12 +180,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             label="Categories"
             hint="Add or remove your own"
             onPress={() => navigation.navigate('Categories')}
-          />
-          <NavListRow
-            icon="notifications-outline"
-            label="Notifications"
-            hint="Automatic nudges from ePurse"
-            onPress={() => navigation.navigate('Notifications')}
           />
           {SMS_DIAGNOSTIC_ENABLED ? (
             <NavListRow
@@ -197,6 +216,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
           <NavListRow
             icon="trash-outline"
             label="Delete Account"
+            tint={theme.danger}
             chevron={false}
             onPress={() => setConfirmDelete(true)}
           />
