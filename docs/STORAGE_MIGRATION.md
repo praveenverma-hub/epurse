@@ -202,8 +202,7 @@ it's needed.
 
 The retention plan: compaction stops deleting transactions (aggregates become a rebuildable
 10-year cache), settled lent/borrowed and groups are kept until the user cleans up, and an optional
-"Clean up history older than…" is added in Settings. That's a separate step **after** Step 0 is
-verified on device.
+"Clean up history older than…" is added in Settings. Built Oct-11 (PR 8).
 
 ## 10. Tests
 
@@ -235,7 +234,7 @@ expo-sqlite and MMKV don't run in Node (and Hermes ≠ Node; see the `backup` sk
 | 5 ✅ | `appKv.ts` (one encrypted MMKV `epurse-app`) + pure `kvStateStorage.ts` (copy once, verify read-back, skip writes if AsyncStorage couldn't be read so defaults never shadow it); `useRewardStore`, `useNotificationStore`, `utils/storage` moved | no |
 | 6 ✅ | Pre-restore snapshot → SQLite meta (`writeAside`), deleted after `PRE_RESTORE_SNAPSHOT_MS` (7 d, retention.ts; checked on app start); Delete Account: `wipeAppStorage` (empty + `wal_checkpoint(TRUNCATE)` + `VACUUM`, re-mark migrated) then AsyncStorage + both MMKV; key-loss set-aside + onboarding notice | no |
 | 7 | **On-device checks (you):** fresh install; upgrade from the current build with real data; kill the app mid-ingest; Drive restore; delete account; start-up time with a large history | — |
-| 8 | Retention change (§9) | no |
+| 8 ✅ | Retention change (§9): compaction = housekeeping only (ignored rows 90 d, debug SMS text, totals > 10 yr); `planHistoryCleanup` / `cleanUpHistory` + Settings → Clean Up History (1/2/3/5+ years, whole months, confirm with counts); month readers + monthly report ADD rows and totals | no |
 
 ## 12. Open questions / risks
 

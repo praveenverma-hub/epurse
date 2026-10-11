@@ -17,16 +17,11 @@
 //   • isLoggedIn           — derived from googleAccount, NOT persisted (see setGoogleAccount);
 //                            re-synced at boot from googleAuth's SecureStore by AuthSessionBoot
 //
-// Retention rules (enforced by `compactTransactions`):
-//   • 0 – 3 months  → raw transactions (general categories only)
-//   • 3 – 24 months → only monthly aggregates per category & account
-//   • > 24 months   → dropped entirely (aggregates), raw pruned per rules below
-//   • Lent / borrow (REAL txns too — any SMS or manual row with these categoryIds):
-//       · `lent`, `borrowed` — stay raw forever; never rolled into monthly aggregates
-//         (so they are not lost when general data older than 3 months compacts away).
-//       · `lent_settled`, `borrow_repaid` — stay raw up to 2 years from when recorded,
-//         then removed; still never aggregated.
-//   • Manual IOU list (`lentBorrowed`): unsettled kept; settled rows pruned after 2 years (`recordedAt`)
+// Retention (constants/retention.ts): transactions, IOUs and groups are KEPT until
+// the user runs Settings → Clean Up History (`cleanUpHistory` / `planHistoryCleanup`),
+// which folds old months into `monthlyAggregates`. A month can then hold rows AND a
+// total — readers add both; a transaction is never in both.
+// `compactTransactions` is housekeeping only (ignored rows, debug SMS text, old totals).
 // =============================================================================
 
 import { create } from 'zustand';
@@ -43,6 +38,7 @@ import {
   findParentById,
   LB_ALL_CATS,
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
+  CREDIT_ONLY_PARENT_IDS,
 } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID, THEMES } from '../constants/themes';
 import { GOAL_COLORS, DEFAULT_GOAL_EMOJI, GOAL_MERCHANT_LIMIT } from '../constants/goals';
@@ -74,8 +70,8 @@ import {
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
 import { limitPairKey } from '../utils/cardLimit';
 import {
-  DAY_MS, RAW_RETENTION_MS, AGG_RETENTION_MS, LB_SETTLED_RETENTION_MS, COMPACT_THROTTLE,
-  GROUP_INACTIVE_PRUNE_MS, CC_PROMPT_MAX_AGE_MS, RAW_SMS_RETENTION_MS, PAYMENT_HISTORY_CAP,
+  DAY_MS, IGNORED_RETENTION_MS, AGG_RETENTION_MS, GOAL_LIVE_WINDOW_MS, COMPACT_THROTTLE,
+  CC_PROMPT_MAX_AGE_MS, RAW_SMS_RETENTION_MS, PAYMENT_HISTORY_CAP,
   SUPPRESS_SMS_CAP, ONBOARDING_QUEUE_LIMIT,
 } from '../constants/retention';
 import { isSameMonth, monthKey, formatCurrency } from '../utils/format';
@@ -115,11 +111,10 @@ import {
 // =============================================================================
 const REQUIRED_CATEGORY_IDS = ['lent', 'borrowed', 'lent_settled', 'borrow_repaid', 'self', 'cc_bill'];
 
-/** Outstanding lend/borrow categories — all matching txns (SMS/manual) skip the 3-mo→aggregate path. */
+/** Outstanding lend/borrow categories — such txns are never folded into totals. */
 const LB_OUTSTANDING_CATS = new Set(['lent', 'borrowed']);
-/** Settled categories — same; kept raw ≤ 2 yr then dropped, never merged into monthly aggregates. */
+/** Settled categories — never merged into totals; a clean-up drops them. */
 const LB_SETTLED_CATS = new Set(['lent_settled', 'borrow_repaid']);
-// Settled-IOU retention (2 yr) lives in constants/retention.ts. Measured from `recordedAt`, never the backdatable `date`.
 /**
  * When a lentBorrowed row was RECORDED, for retention/recency decisions.
  *
@@ -1226,8 +1221,8 @@ export const spendExcluded = (t, groups) => {
  * EXCLUDED from expenses. Subtract it from `agg.totalSpend` so a rule applies to
  * history too, not just the live month.
  *
- * Needed because aggregates are MATERIALISED at compaction: `getMonthlySpend` returns
- * `agg.totalSpend` verbatim for any month past RAW_RETENTION_MS, so without this a
+ * Needed because aggregates are MATERIALISED at clean-up: `getMonthlySpend` adds
+ * `agg.totalSpend` verbatim for a cleaned-up month, so without this a
  * rule set today would silently leave last year's totals counting the category — the
  * chart would contradict the rule with no explanation.
  *
@@ -1249,6 +1244,22 @@ const excludedSpendInAggregate = (agg) => {
   return sum;
 };
 
+/**
+ * A folded month's spend per legacy category under TODAY's rules. `byCategory`
+ * also holds income credits and non-spend buckets; neither was ever spend.
+ */
+const aggregateSpendByCategory = (agg) => {
+  const out = {};
+  const ex = excludedExpenseSet();
+  Object.entries(agg?.byCategory || {}).forEach(([catId, val]) => {
+    if (NON_SPEND_CATS.has(catId)) return;
+    const pid = CAT_MAPS.legacyToParentId[catId] || catId;
+    if (CREDIT_ONLY_PARENT_IDS.has(pid) || ex.has(pid)) return;
+    out[catId] = val;
+  });
+  return out;
+};
+
 // two-tier labels → legacy flat categoryId (custom-aware).
 const toLegacyCat = (parentLabel, childLabel) => twoTierToLegacyCatId(parentLabel, childLabel, CAT_MAPS);
 
@@ -1263,9 +1274,8 @@ const sumCaps = (perCategory) =>
  * from totalSpend/totalIncome so they don't skew normal expense tracking.
  *
  * `byLocation` (Jul-31) is spend keyed by the coarse place label on the transaction
- * (see locationService — city/district, never coordinates). Raw transactions are
- * dropped past RAW_RETENTION_MS, so WITHOUT this bucket every stamped location
- * vanished after 90 days and long-run "spend by place" analytics were impossible.
+ * (see locationService — city/district, never coordinates). A clean-up drops the
+ * raw rows, so WITHOUT this bucket every stamped location would vanish with them.
  * Additive + backward compatible: older aggregates simply have no `byLocation`.
  */
 const aggregate = (transactions, groups = [], accounts = []) => {
@@ -1316,6 +1326,103 @@ const aggregate = (transactions, groups = [], accounts = []) => {
   return out;
 };
 
+/** Add one month's aggregate into another (every bucket, including byLocation). */
+const mergeAggregate = (a, b) => (!a ? b : {
+  totalSpend: (a.totalSpend || 0) + b.totalSpend,
+  totalIncome: (a.totalIncome || 0) + b.totalIncome,
+  byCategory: mergeAdd(a.byCategory, b.byCategory),
+  byAccount: mergeAdd(a.byAccount, b.byAccount),
+  byLocation: mergeAdd(a.byLocation, b.byLocation),
+});
+
+const lbSign = (l) => (l.kind === 'lent' || l.kind === 'borrow_repaid' ? 1
+  : l.kind === 'borrowed' || l.kind === 'lent_settled' ? -1 : 0);
+
+/**
+ * The user-chosen "Clean up history older than…" (Settings). PURE: returns the
+ * state patch and what it removes, so the confirm dialog can show the counts.
+ *
+ * Nothing here may change a number the user sees today:
+ *   • Transactions before `cutoffMs` fold into monthly totals. Readers add a month's
+ *     rows AND its total (a transaction is never in both), so rows kept below are safe.
+ *   • Kept as rows: outstanding lent/borrowed, rows a kept IOU entry points at, and
+ *     rows of a kept group (group totals are computed from rows).
+ *   • IOU entries go only per person, only when ALL their non-group entries are old
+ *     AND net to zero — dropping one side of a pair would resurrect the debt.
+ *   • A group goes only when idle since the cutoff with nobody owing; its IOU
+ *     entries go with it (they net to zero per person, so balances hold).
+ */
+export const planHistoryCleanup = (s, people, cutoffMs) => {
+  const isOld = (iso) => { const t = new Date(iso).getTime(); return !Number.isNaN(t) && t < cutoffMs; };
+  // Backdated-but-recent entries stay: old means dated AND recorded before the cutoff.
+  const lbOld = (l) => isOld(l.date) && recordedAt(l) < cutoffMs;
+
+  const groupNet = {};
+  (s.lentBorrowed || []).forEach((l) => {
+    if (!l.groupId) return;
+    const pk = l.contactId || (l.person || '').trim().toLowerCase() || '?';
+    const g = groupNet[l.groupId] || (groupNet[l.groupId] = {});
+    g[pk] = (g[pk] || 0) + lbSign(l) * l.amount;
+  });
+  const goneGroups = new Set((s.groups || [])
+    .filter((g) => g.lastActivityAt && isOld(g.lastActivityAt)
+      && !Object.values(groupNet[g.id] || {}).some((v) => Math.abs(v) > 0.005))
+    .map((g) => g.id));
+
+  const goneLb = new Set();
+  let peopleGone = 0;
+  (people || []).forEach((p) => {
+    const solo = p.entries.filter((e) => !e.groupId);
+    if (!solo.length || !solo.every(lbOld)) return;
+    if (Math.abs(solo.reduce((n, e) => n + lbSign(e) * e.amount, 0)) > 0.005) return;
+    solo.forEach((e) => goneLb.add(e));
+    if (solo.length === p.entries.length) peopleGone += 1;
+  });
+  const lentBorrowed = (s.lentBorrowed || [])
+    .filter((l) => !goneLb.has(l) && !(l.groupId && goneGroups.has(l.groupId)));
+  const linkedTxnIds = new Set(lentBorrowed.map((l) => l.sourceTxnId).filter(Boolean));
+
+  const kept = [];
+  const fold = [];
+  let dropped = 0;
+  s.transactions.forEach((t) => {
+    if (!isOld(t.createdAt) || LB_OUTSTANDING_CATS.has(t.categoryId) || linkedTxnIds.has(t.id)
+      || (t.groupId && !goneGroups.has(t.groupId))) {
+      kept.push(t);
+    } else if (t.isIgnored || t.isGroupMemo || LB_SETTLED_CATS.has(t.categoryId)) {
+      dropped += 1; // never part of any total
+    } else {
+      fold.push(t);
+    }
+  });
+
+  const monthlyAggregates = { ...s.monthlyAggregates };
+  Object.entries(aggregate(fold, s.groups, s.accounts)).forEach(([k, v]) => {
+    monthlyAggregates[k] = mergeAggregate(monthlyAggregates[k], v);
+  });
+
+  const transactions = goneGroups.size === 0 ? kept : kept.map((t) => {
+    if (!t.groupId || !goneGroups.has(t.groupId)) return t;
+    const { groupId: _g, groupSplit: _gs, isGroupMemo: _m, ...rest } = t;
+    return rest;
+  });
+
+  return {
+    patch: {
+      transactions,
+      lentBorrowed,
+      groups: (s.groups || []).filter((g) => !goneGroups.has(g.id)),
+      monthlyAggregates,
+    },
+    removed: {
+      transactions: fold.length + dropped,
+      lentBorrowed: (s.lentBorrowed || []).length - lentBorrowed.length,
+      people: peopleGone,
+      groups: goneGroups.size,
+    },
+  };
+};
+
 // =============================================================================
 // Store
 // =============================================================================
@@ -1324,7 +1431,7 @@ export const useEPurseStore = create(
     (set, get) => ({
       // ----- state -------------------------------------------------------
       accounts: [],          // populated lazily by ingestMessage
-      transactions: [],      // raw, max 3 months — ACTIVE ledger (drives everything)
+      transactions: [],      // every row since the last clean-up — ACTIVE ledger (drives everything)
       // Historical SMS captured during the one-time onboarding sweep. Used ONLY to
       // discover accounts (at balance 0) and for read-only reference in Account
       // Details. Never feed totals/insights/budgets/balances/queue — a clean start.
@@ -1509,8 +1616,8 @@ export const useEPurseStore = create(
       //   { id, goalId, amount, date, source: 'manual' }
       goalContributions: [],
       // Closed months, snapshotted at rollover — mirrors `budgetHistory` and for
-      // the same reason: raw transactions age out at RAW_RETENTION_MS, so a
-      // lifetime total recomputed from them would silently shrink over time.
+      // the same reason: a clean-up folds old rows away, so a lifetime total
+      // recomputed from them would silently shrink.
       //   { '2026-09': { salary, perGoal: { [goalId]: { planned, funded } }, closedAt } }
       goalHistory: {},
 
@@ -2423,9 +2530,9 @@ export const useEPurseStore = create(
 
       /**
        * Month rollover. Snapshots the finished month into `goalHistory` BEFORE
-       * clearing, for the same reason the budget rollover does: raw transactions
-       * age out at RAW_RETENTION_MS, so lifetime progress computed from them
-       * alone would quietly shrink as history compacts.
+       * clearing, for the same reason the budget rollover does: a clean-up folds
+       * old rows away, so lifetime progress computed from them alone would
+       * quietly shrink.
        */
       rolloverGoalPlanIfNeeded: () =>
         set((s) => {
@@ -2822,20 +2929,19 @@ export const useEPurseStore = create(
         // the review queue afterwards SHOULD move it. Re-derive those months
         // instead of trusting the snapshot.
         //
-        // Only where the whole month is still inside the raw window: compaction
-        // drops transactions individually at `now - RAW_RETENTION_MS`, so a month
-        // straddling that line is already half gone and re-deriving it would
-        // silently UNDERCOUNT — the exact failure the snapshot exists to prevent.
-        // Beyond it the snapshot is the only record, and stays authoritative.
+        // Only for recent months (GOAL_LIVE_WINDOW_MS): a clean-up may have folded
+        // an older month's rows away, and re-deriving it would silently UNDERCOUNT —
+        // the exact failure the snapshot exists to prevent. Beyond it the snapshot
+        // stays authoritative.
         //
         // Safe only because the funding rule is frozen at creation (see
         // `updateGoal`): re-deriving can reflect corrections to the transactions,
         // never a rule the user changed since.
         const recompute = goal.duration === 'oneTime';
-        const rawCutoff = Date.now() - RAW_RETENTION_MS;
+        const liveCutoff = Date.now() - GOAL_LIVE_WINDOW_MS;
         Object.entries(s.goalHistory || {}).forEach(([mk, snap]) => {
           if (mk === thisMonth) return;
-          if (recompute && monthStartMs(mk) >= rawCutoff) {
+          if (recompute && monthStartMs(mk) >= liveCutoff) {
             total += goalFundedForMonth(s, goal, mk);
             return;
           }
@@ -3135,8 +3241,8 @@ export const useEPurseStore = create(
           // matches the parent-based budget (groceries → food).
           //
           // RAW FIRST. This used to read `monthlyAggregates[prevMonth]` only —
-          // but aggregates are written by compaction at RAW_RETENTION_MS (90
-          // days), and a month that ended yesterday is nowhere near that. So the
+          // but aggregates were written by compaction at 90 days (now only by a
+          // clean-up), and a month that ended yesterday had none. So the
           // lookup was always undefined at the moment of rollover and EVERY
           // actual snapshotted as 0. Consequences, all silent:
           //   • the month's recap/export showed caps with no spend against them
@@ -5930,10 +6036,10 @@ export const useEPurseStore = create(
 
       // ----- retention / compaction -------------------------------------
       /**
-       * Enforce the retention policy:
-       *   • General categories: txns ≥ 3 months old → aggregated, raw row dropped
-       *   • Lent/borrow categoryIds on ANY transaction: never aggregated; see LB_* branches below
-       *   • drop aggregates older than 24 months
+       * Housekeeping only — financial history is KEPT until the user cleans it up
+       * (`cleanUpHistory`). This drops ignored rows past IGNORED_RETENTION_MS, strips
+       * preview-build SMS text, deletes monthly totals past AGG_RETENTION_MS and
+       * gives legacy groups an activity clock.
        *
        * Throttled: a no-op if we ran less than COMPACT_THROTTLE ago, unless
        * `force === true`.
@@ -5944,140 +6050,47 @@ export const useEPurseStore = create(
         if (!force && now - last < COMPACT_THROTTLE) return;
 
         set((s) => {
-          const rawCutoff = now - RAW_RETENTION_MS;
+          const ignoredCutoff = now - IGNORED_RETENTION_MS;
           const aggCutoffKey = monthKey(new Date(now - AGG_RETENTION_MS));
+          // TODO: remove the rawSms strip before production
+          const rawSmsCutoff = now - RAW_SMS_RETENTION_MS;
 
-          // Split transactions into "still raw" and "to be aggregated".
-          const stillRaw = [];
-          const toAggregate = [];
+          const transactions = [];
           s.transactions.forEach((t) => {
             const ts = new Date(t.createdAt).getTime();
-            // Ignored txns never contribute to aggregates; drop once past raw retention.
-            if (t.isIgnored) {
-              if (ts >= rawCutoff) stillRaw.push(t);
-              return;
-            }
-
-            const cat = t.categoryId;
-            // Real bank/SMS/manual txns tagged settled: same rule as manual IOUs — raw ≤ 2 yr, not aggregated.
-            if (LB_SETTLED_CATS.has(cat)) {
-              if (now - ts > LB_SETTLED_RETENTION_MS) return;
-              stillRaw.push(t);
-              return;
-            }
-            // Real txns tagged lent/borrowed: bypass 3-month compaction — stay raw until user changes category.
-            if (LB_OUTSTANDING_CATS.has(cat)) {
-              stillRaw.push(t);
-              return;
-            }
-
-            // Group-memo transactions: informational only — drop without aggregating once past raw window.
-            if (t.isGroupMemo) {
-              if (ts >= rawCutoff) stillRaw.push(t);
-              return;
-            }
-
-            // Split transactions: keep raw for the full 90-day window so the
-            // lentBorrowed sourceTxnId references stay resolvable.
-            if (t.isSplit && ts >= rawCutoff) {
-              stillRaw.push(t);
-              return;
-            }
-            if (ts >= rawCutoff) stillRaw.push(t);
-            else toAggregate.push(t);
-          });
-
-          const lentBorrowedPruned = (s.lentBorrowed || []).filter((l) => {
-            // Unsettled outstanding entries (lent/borrowed) kept forever.
-            if (l.kind === 'lent' || l.kind === 'borrowed') return true;
-            // Settlement entries (lent_settled / borrow_repaid) are kept for 2 years
-            // from when they were RECORDED — never from `date`, which the user can
-            // backdate. Judging by `date` meant backdating a repayment more than a
-            // year deleted it on the very next launch: the user typed an entry, saw
-            // it, restarted, and it was gone. Legacy rows have no createdAt and fall
-            // back to `date` (their behaviour is unchanged).
-            return recordedAt(l) >= now - LB_SETTLED_RETENTION_MS;
-          });
-
-          // Merge new aggregates into the existing map.
-          const newAggs = aggregate(toAggregate, s.groups, s.accounts);
-          const merged = { ...s.monthlyAggregates };
-          Object.entries(newAggs).forEach(([k, v]) => {
-            if (!merged[k]) {
-              merged[k] = v;
-            } else {
-              merged[k] = {
-                totalSpend: (merged[k].totalSpend || 0) + v.totalSpend,
-                totalIncome: (merged[k].totalIncome || 0) + v.totalIncome,
-                byCategory: mergeAdd(merged[k].byCategory, v.byCategory),
-                byAccount: mergeAdd(merged[k].byAccount, v.byAccount),
-              };
-            }
-          });
-
-          // Prune aggregates older than 24 months.
-          Object.keys(merged).forEach((k) => {
-            if (k < aggCutoffKey) delete merged[k];
-          });
-
-          // Strip preview-only debug fields from transactions older than 3 days.
-          // TODO: remove this block before production
-          const rawSmsCutoff = now - RAW_SMS_RETENTION_MS;
-          const finalRaw = stillRaw.map((t) => {
-            if (!t.rawSms) return t;
-            if (new Date(t.createdAt).getTime() < rawSmsCutoff) {
+            if (t.isIgnored && ts < ignoredCutoff) return;
+            if (t.rawSms && ts < rawSmsCutoff) {
               const { rawSms: _rs, rawSender: _rsd, ...rest } = t;
-              return rest;
+              transactions.push(rest);
+              return;
             }
-            return t;
+            transactions.push(t);
           });
 
-          // ── Auto-prune groups untouched > 6 months AND fully settled ──
-          // Outstanding (non-zero net) debt keeps a group alive so we never silently erase money owed.
-          // Legacy groups missing lastActivityAt get a fresh clock (backfilled to now), not pruned now.
+          const monthlyAggregates = { ...s.monthlyAggregates };
+          Object.keys(monthlyAggregates).forEach((k) => {
+            if (k < aggCutoffKey) delete monthlyAggregates[k];
+          });
+
           const nowIso = new Date(now).toISOString();
-          const groupInactiveCutoff = now - GROUP_INACTIVE_PRUNE_MS;
-          const groupNet = {}; // groupId -> { personKey -> net (owed-to-me) }
-          lentBorrowedPruned.forEach((l) => {
-            if (!l.groupId) return;
-            const pk = l.contactId || (l.person || '').trim().toLowerCase() || '?';
-            const sign = l.kind === 'lent' || l.kind === 'borrow_repaid' ? 1
-                       : l.kind === 'borrowed' || l.kind === 'lent_settled' ? -1 : 0;
-            if (!groupNet[l.groupId]) groupNet[l.groupId] = {};
-            groupNet[l.groupId][pk] = (groupNet[l.groupId][pk] || 0) + sign * l.amount;
-          });
-          const groupHasOutstanding = (gid) =>
-            Object.values(groupNet[gid] || {}).some((v) => Math.abs(v) > 0.005);
-
-          const prunedGroupIds = new Set();
-          const keptGroups = (s.groups || [])
-            .filter((g) => {
-              const lastTs = new Date(g.lastActivityAt || nowIso).getTime();
-              if (lastTs < groupInactiveCutoff && !groupHasOutstanding(g.id)) {
-                prunedGroupIds.add(g.id);
-                return false;
-              }
-              return true;
-            })
-            .map((g) => (g.lastActivityAt ? g : { ...g, lastActivityAt: nowIso })); // backfill clock
-
-          const finalRawPruned = prunedGroupIds.size === 0 ? finalRaw : finalRaw.map((t) => {
-            if (!t.groupId || !prunedGroupIds.has(t.groupId)) return t;
-            const { groupId: _g, groupSplit: _gs, isGroupMemo: _m, ...rest } = t;
-            return rest;
-          });
-          const lbFinal = prunedGroupIds.size === 0
-            ? lentBorrowedPruned
-            : lentBorrowedPruned.filter((l) => !l.groupId || !prunedGroupIds.has(l.groupId));
-
           return {
-            transactions: finalRawPruned,
-            lentBorrowed: lbFinal,
-            monthlyAggregates: merged,
-            groups: keptGroups,
+            transactions,
+            monthlyAggregates,
+            groups: (s.groups || []).map((g) => (g.lastActivityAt ? g : { ...g, lastActivityAt: nowIso })),
             lastCompactedAt: now,
           };
         });
+      },
+
+      /** What `cleanUpHistory(beforeMs)` would remove — for the confirm dialog. */
+      previewHistoryCleanup: (beforeMs) =>
+        planHistoryCleanup(get(), get().getPersonBalances(), beforeMs).removed,
+
+      /** Settings → Clean Up History. See `planHistoryCleanup` for what is kept. */
+      cleanUpHistory: (beforeMs) => {
+        const { patch, removed } = planHistoryCleanup(get(), get().getPersonBalances(), beforeMs);
+        set(patch);
+        return removed;
       },
 
       // ----- derived selectors ------------------------------------------
@@ -6112,14 +6125,13 @@ export const useEPurseStore = create(
             !spendExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
-        if (txns.length > 0) {
-          return Math.max(0, txns.reduce((sum, t) => sum + spendContribution(t), 0));
-        }
-        // Historical month → materialised total, minus anything the user has since
-        // excluded (see excludedSpendInAggregate).
+        const raw = txns.reduce((sum, t) => sum + spendContribution(t), 0);
+        // A cleaned-up month's folded total, minus anything the user has since
+        // excluded (see excludedSpendInAggregate). Added, never instead: rows a
+        // clean-up kept (group, IOU-linked) sit beside it.
         const agg = get().monthlyAggregates[monthKey(date)];
-        if (!agg) return 0;
-        return Math.max(0, (agg.totalSpend || 0) - excludedSpendInAggregate(agg));
+        const folded = agg ? (agg.totalSpend || 0) - excludedSpendInAggregate(agg) : 0;
+        return Math.max(0, raw + folded);
       },
 
       // Monthly INCOME = credits that are NOT refunds (salary, interest, P2P-in).
@@ -6134,8 +6146,8 @@ export const useEPurseStore = create(
             !spendExcluded(t, groups) &&
             isSameMonth(t.createdAt, date)
         );
-        if (txns.length > 0) return txns.reduce((s, t) => s + t.amount, 0);
-        return get().monthlyAggregates[monthKey(date)]?.totalIncome || 0;
+        return txns.reduce((s, t) => s + t.amount, 0)
+          + (get().monthlyAggregates[monthKey(date)]?.totalIncome || 0);
       },
 
       // Monthly REFUNDS = sum of refund/cashback credits (isRefund) — the amount
@@ -6156,9 +6168,8 @@ export const useEPurseStore = create(
       },
 
       /**
-       * Category breakdown for a month.
-       * If raw transactions exist for that month, use them. Otherwise build
-       * the breakdown from the stored aggregate.
+       * Category breakdown for a month: its raw transactions plus, for a
+       * cleaned-up month, the stored aggregate.
        */
       getCategoryBreakdown: (date = new Date()) => {
         const cats = get().categories;
@@ -6173,34 +6184,27 @@ export const useEPurseStore = create(
             isSameMonth(t.createdAt, date)
         );
 
-        let totals;
-        let grandTotal;
-        if (raw.length > 0) {
-          totals = {};
-          // Refunds keep their (purchase) category, so they net that category down.
-          raw.forEach((t) => {
-            totals[t.categoryId] = (totals[t.categoryId] || 0) + spendContribution(t);
-          });
-          // Clamp any category that went net-negative (refunds > spend that month).
-          Object.keys(totals).forEach((k) => { if (totals[k] < 0) totals[k] = 0; });
-          grandTotal = Object.values(totals).reduce((s, v) => s + v, 0) || 1;
-        } else {
-          const agg = get().monthlyAggregates[month];
-          if (!agg) return [];
-          // byCategory may include LB entries from historical aggregation — strip them
-          totals = {};
-          const exParents = excludedExpenseSet();
-          Object.entries(agg.byCategory || {}).forEach(([catId, val]) => {
-            if (NON_SPEND_CATS.has(catId)) return;
-            // A user-excluded parent is dropped here too, or a historical month would
-            // list a category the current rules say isn't spend.
-            if (exParents.size && exParents.has(CAT_MAPS.legacyToParentId[catId] || catId)) return;
-            totals[catId] = val;
+        const totals = {};
+        // Refunds keep their (purchase) category, so they net that category down.
+        raw.forEach((t) => {
+          totals[t.categoryId] = (totals[t.categoryId] || 0) + spendContribution(t);
+        });
+        // Clamp any category that went net-negative (refunds > spend that month).
+        Object.keys(totals).forEach((k) => { if (totals[k] < 0) totals[k] = 0; });
+        let grandTotal = Object.values(totals).reduce((s, v) => s + v, 0);
+
+        const agg = get().monthlyAggregates[month];
+        if (agg) {
+          Object.entries(aggregateSpendByCategory(agg)).forEach(([catId, val]) => {
+            totals[catId] = (totals[catId] || 0) + val;
           });
           // Percentages must be rebased on the REMAINING spend, else the visible slices
           // wouldn't add up to 100%.
-          grandTotal = Math.max(0, (agg.totalSpend || 0) - excludedSpendInAggregate(agg)) || 1;
+          grandTotal += Math.max(0, (agg.totalSpend || 0) - excludedSpendInAggregate(agg));
+        } else if (raw.length === 0) {
+          return [];
         }
+        grandTotal = grandTotal || 1;
 
         return cats
           .filter((c) => !NON_SPEND_CATS.has(c.id))
@@ -6306,9 +6310,9 @@ export const useEPurseStore = create(
        * the last N months. Rolls up child legacy ids (e.g. groceries → food) so
        * the figure matches the parent-based budget. Suggests caps in the plan form.
        *
-       * Goes through `getCategoryBreakdown`, which is RAW-first with the
-       * aggregate as fallback. It used to read `monthlyAggregates` directly, and
-       * since aggregates are only written at RAW_RETENTION_MS (90 days) while
+       * Goes through `getCategoryBreakdown`, which adds raw rows and the
+       * aggregate. It used to read `monthlyAggregates` directly, and
+       * since aggregates were only written at 90 days while
        * this only ever asks for months 1–3 back, the lookup was ALWAYS undefined:
        * the suggestion returned 0 for every user, forever, not just in an edge
        * case. Never read `monthlyAggregates` for a recent month — see the
@@ -7813,8 +7817,7 @@ const periodStartMs = (key) => {
  *   • recent  — newest-first slice, capped at HOME_RECENT_LIMIT (10)
  *
  * Excludes ignored, private (isHidden), and Lent/Borrowed transactions.
- * For Year periods, also folds in monthlyAggregates beyond the raw-retention
- * cutoff so the full year is represented.
+ * For Year periods, also adds this year's monthlyAggregates (cleaned-up months).
  */
 export const selectExpenseStats = (period) => (state) => {
   const startMs = periodStartMs(period);
@@ -7842,16 +7845,15 @@ export const selectExpenseStats = (period) => (state) => {
     .filter((t) => t.type === TRANSACTION_TYPES.CREDIT && !isRefundCredit(t))
     .reduce((s, t) => s + t.amount, 0);
 
-  // Year folds in aggregates beyond the raw window. `totalSpend` is already net of
-  // refunds and `totalIncome` already excludes them (see aggregate()).
+  // Year adds this year's cleaned-up months (a transaction is never in both).
+  // `totalSpend` is already net of refunds and `totalIncome` already excludes
+  // them (see aggregate()).
   let aggSpent = 0;
   let aggReceived = 0;
   if (period === 'Y') {
     const yearStr   = String(now.getFullYear());
-    const cutoffDt  = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    const cutoffKey = `${cutoffDt.getFullYear()}-${String(cutoffDt.getMonth() + 1).padStart(2, '0')}`;
     Object.entries(state.monthlyAggregates || {}).forEach(([k, v]) => {
-      if (k.startsWith(yearStr) && k < cutoffKey) {
+      if (k.startsWith(yearStr)) {
         aggSpent    += v.totalSpend  || 0;
         aggReceived += v.totalIncome || 0;
       }
@@ -8048,8 +8050,8 @@ export const selectRecapMonths = (state, limit = 12) => {
  * month-over-month movers, daily spend series, top merchants, subscriptions,
  * payment methods, highlights, and a next-month budget suggestion for `mk`.
  *
- * Degrades gracefully: cashflow / category / budget work from aggregates for
- * months whose raw transactions have been compacted; the raw-only sections
+ * Degrades gracefully: cashflow / category / budget add the aggregate of a
+ * cleaned-up month to whatever rows it kept; the raw-only sections
  * (daily, merchants, subscriptions, payment methods) are null when no raw rows
  * survive for `mk`, so consumers can omit them.
  *
@@ -8073,12 +8075,13 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
 
   // Ignored txns are always dropped; private (isHidden) follow the toggle. When
   // raw rows survive for the month we compute EVERY section from them so figures
-  // reconcile and honor the private toggle uniformly; older months (raw pruned)
-  // fall back to the store getters/aggregates, which always include private.
+  // reconcile and honor the private toggle uniformly; a cleaned-up month's folded
+  // total (`agg`, always includes private) is added — a transaction is never in both.
   const keepHidden = (t) => includePrivate || !t.isHidden;
   const rawMonth = state.transactions.filter((t) => !t.isIgnored && monthKey(t.createdAt) === mk);
   const rawKept  = rawMonth.filter(keepHidden);
   const hasRaw   = rawKept.length > 0;
+  const agg      = state.monthlyAggregates?.[mk];
   // Counts toward SPEND math this month (expense debit or refund credit), after the
   // standard exclusions. Refunds net down via spendContribution (−amount).
   const countsHere = (t) =>
@@ -8095,6 +8098,10 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
       else if (isRefundCredit(t)) { spent -= t.amount; refunds += t.amount; }
       else if (t.type === TRANSACTION_TYPES.CREDIT) income += t.amount;
     });
+    if (agg) {
+      spent += (agg.totalSpend || 0) - excludedSpendInAggregate(agg);
+      income += agg.totalIncome || 0;
+    }
     spent = Math.max(0, spent);
   } else {
     spent = state.getMonthlySpend(monthDate);
@@ -8151,6 +8158,10 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
       curByParent[pid] = (curByParent[pid] || 0) + spendContribution(t); // refund nets its parent
     });
     Object.keys(curByParent).forEach((k) => { if (curByParent[k] < 0) curByParent[k] = 0; });
+    Object.entries(aggregateSpendByCategory(agg)).forEach(([cid, v]) => {
+      const pid = CAT_MAPS.legacyToParentId[cid] || cid;
+      curByParent[pid] = (curByParent[pid] || 0) + v;
+    });
   } else {
     curByParent = rollup(state.getCategoryBreakdown(monthDate));
   }
@@ -8319,14 +8330,14 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
   }
 
   // ── Goals: what was planned vs put aside this month ──
-  // A month still inside the raw window is recomputed live (so a later edit shows);
-  // an older one falls back to its rollover snapshot — same rule as
-  // getGoalLifetimeFunded, since the raw rows it would be derived from age out.
+  // A recent month is recomputed live (so a later edit shows); an older one falls
+  // back to its rollover snapshot — same rule as getGoalLifetimeFunded, since a
+  // clean-up may have folded the rows it would be derived from.
   let goals = [];
   if (includeGoals) {
     const snap = state.goalHistory?.[mk]?.perGoal;
     const planNow = state.goalPlan?.monthKey === mk ? state.goalPlan.allocations : null;
-    const live = isCurrent || monthStartMs(mk) >= Date.now() - RAW_RETENTION_MS;
+    const live = isCurrent || monthStartMs(mk) >= Date.now() - GOAL_LIVE_WINDOW_MS;
     goals = (state.goals || [])
       .filter((g) => !g.archivedAt)
       .map((g) => ({

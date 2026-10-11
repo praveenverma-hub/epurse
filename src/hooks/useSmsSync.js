@@ -98,7 +98,15 @@ export async function syncNow() {
   }
 
   const st = useEPurseStore.getState();
-  if (!st.smsPermissionGranted && !st.smsAutoImport) {
+  let allowed = st.smsPermissionGranted || st.smsAutoImport;
+  // After onboarding the phone's own permission decides: the flag is device-only
+  // (never in a backup), so a restored phone, or one granted from system Settings,
+  // would otherwise never capture. Before it, onboarding owns the first sweep.
+  if (!allowed && st.hasOnboarded) {
+    allowed = await hasSmsPermission();
+    if (allowed) st.setSmsPermissionGranted(true);
+  }
+  if (!allowed) {
     settleFirstSweep();
     return { status: 'no-permission', scanned: 0, added: 0 };
   }
@@ -160,9 +168,8 @@ export async function syncNow() {
       // old ones would announce "2 new transactions".
       added = Math.max(0, useEPurseStore.getState().transactions.length - before);
 
-      // Move any newly-ingested messages that are older than 90 days
-      // straight into monthly aggregates — keeps raw[] lean immediately
-      // instead of waiting for the next CompactionBoot foreground trigger.
+      // Housekeeping (ignored rows, debug SMS text) without waiting for the
+      // next CompactionBoot foreground trigger.
       useEPurseStore.getState().compactTransactions();
     }
 
@@ -256,7 +263,8 @@ export function useSmsSync() {
 
     // Re-sweep when app returns to foreground (OS may have paused the listener)
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && (permissionGranted || enabled) && Platform.OS === 'android') {
+      // Not gated on the flags: returning from system Settings is how a grant arrives.
+      if (state === 'active' && Platform.OS === 'android') {
         safeStart();
       }
     });

@@ -2041,24 +2041,43 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 
 ## Analytics & Insights / Home
 
-**Planned — retention plan (Oct-11-26, REVISED same day, not built)**: keep ALL financial history by
+**Retention plan (Oct-11-26) — BUILT (step 8, Oct-11)**: keep ALL financial history by
 default; cleanup only by user choice. Step 0 = move transactions to `expo-sqlite` per month (Android
 AsyncStorage defaults to a 6 MB total DB and the store is one blob). Settled LB + groups kept until
 user cleanup; monthly totals = 10-yr rebuildable cache; pre-restore snapshot 7 d. Storage: MMKV
 (small state, encrypted) + expo-sqlite (growing financial records). SMS-text removal + allowBackup
 off are DONE (see Backup).
 
-**Open — long-range stats audit (Oct-11-26, not fixed yet)**
-- Raw-first getters (`getMonthlySpend`/`getMonthlyIncome`/`getCategoryBreakdown`, `selectMonthlyReport`
-  `hasRaw`) ignore the month's aggregate if ANY raw row survives → the month crossing the 90-day
-  line shows only its un-compacted days; old months with a kept-raw `borrow_repaid`/`lent` row show
-  ~only that row.
-- `compactTransactions` keeps `lent`/`borrowed` LB rows forever but prunes `lent_settled`/`borrow_repaid`
-  after 2 yr → `getPersonBalances` resurrects settled debts.
-- Raw-only features go blank past 90 days: GhostLineChart, HabitLeakMatrix, per-account spend, group
-  totals/6-month chart, recap daily/merchant sections, account balance trend months 4–6.
+**Long-range stats audit (Oct-11-26) — FIXED by keep-all (Oct-11)**
+- Month readers (`getMonthlySpend`/`getMonthlyIncome`/`getCategoryBreakdown`, `selectMonthlyReport`,
+  Year `selectExpenseStats`) now ADD a month's rows and its folded total (a txn is never in both).
+  A folded month's breakdown no longer lists income (salary) as a spend slice.
+- Settled-debt resurrection gone: compaction never prunes IOUs; a clean-up removes a person's
+  entries only when all are old AND net to zero.
+- Raw-only features (GhostLineChart, HabitLeakMatrix, per-account spend, group totals, recap
+  daily/merchant sections) keep working past 90 days — rows are kept. After a user clean-up they
+  cover only the months still held as rows (a kept group's rows are never folded).
+  A month half-compacted by an older build now reads correctly too (rows + its partial total).
+- **Open:** Phase B (only ~13 months in memory) when start-up gets slow — STORAGE_MIGRATION §8.
 
 **Done**
+- Oct-11-2026: **Android keyboard covered sheets and forms.** On Android 15+ (edge-to-edge) the
+  window no longer shrinks for the keyboard, so the Manage modal's chips/actions/Done and the
+  Backup password sheet sat behind it. `AppKeyboardAvoidingView` now pads by the keyboard height
+  on Android (front window only). Verified on an API 36 emulator.
+- Oct-11-2026: **SMS permission after a restore.** Restoring from onboarding's footer link skips the
+  permission slide, and the "granted" flag is device-only (never in a backup), so capture never
+  started — even after allowing SMS in system Settings ("SMS access is off"). Once onboarded, the
+  sync now checks the phone's real permission, turns the flag on and sweeps; returning from system
+  Settings re-checks. Before onboarding finishes, onboarding still owns the first sweep. test:smsSync
+  +2; verified on the emulator (a bank SMS was captured on relaunch).
+- Oct-11-2026: **Keep all history; Clean Up History in Settings.** Compaction no longer folds or deletes
+  transactions, settled lent/borrowed or groups (only ignored rows after 90 days, preview SMS text,
+  totals after 10 years). Settings → Clean Up History: pick 1/2/3/5+ years; the confirm shows exactly
+  what goes ("Removes 1,234 transactions, 6 lent & borrowed entries… from before Oct 2021"); monthly
+  totals stay. Nothing on screen changes (spend, income, breakdown, recap, every balance) —
+  `cleanup:` + `keep-all:` tests in test:store, mutation-verified. Also fixed: compaction merging
+  into an existing month dropped its `byLocation`.
 - Behavioral Insights (GhostLineChart, HabitLeakMatrix, SubscriptionHeartbeat).
 - Refund/expense model: Spent = expenses − refunds, Received = non-refund credits, with a
   full spend-site consistency sweep.

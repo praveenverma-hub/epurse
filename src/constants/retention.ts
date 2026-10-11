@@ -3,27 +3,25 @@
 // number here and the store / backup / notification code follows; RETENTION_SUMMARY
 // below is the plain-language table (checked against these values in test:retention).
 //
-// "Raw" = the full transaction row. Older spend is folded into monthly totals
-// ("aggregates") and the raw rows are dropped, so history charts survive but
-// individual rows (and their notes, merchants, SMS text) don't.
+// Financial history is KEPT until the user chooses to clean it up (Settings →
+// Clean Up History). A clean-up folds those months into monthly totals
+// ("aggregates") and drops the rows, so charts survive but the rows don't.
 // =============================================================================
 
 export const HOUR_MS = 60 * 60 * 1000;
 export const DAY_MS = 24 * HOUR_MS;
 
 // ── Transactions ─────────────────────────────────────────────────────────────
-/** Raw transactions kept this long; older ones fold into monthly totals, then drop. */
-export const RAW_RETENTION_MS = 90 * DAY_MS;
-/** Monthly totals kept this long; older months are deleted. */
-export const AGG_RETENTION_MS = 730 * DAY_MS;
-/** Settled lent/borrow (rows and tagged transactions): kept this long from when RECORDED, never folded into totals. */
-export const LB_SETTLED_RETENTION_MS = 730 * DAY_MS;
-/** Compaction (the clean-up that applies the limits above) runs at most this often. */
+/** Transactions marked "ignored" (not real money movement) are dropped after this long. */
+export const IGNORED_RETENTION_MS = 90 * DAY_MS;
+/** Monthly totals (only written by a clean-up) kept this long; older months are deleted. */
+export const AGG_RETENTION_MS = 3650 * DAY_MS;
+/** Clean-up choices offered in Settings: "older than N years". */
+export const CLEANUP_CHOICES_YEARS = [1, 2, 3, 5];
+/** Goal figures for months older than this come from the month's rollover snapshot. */
+export const GOAL_LIVE_WINDOW_MS = 90 * DAY_MS;
+/** Compaction (ignored rows, debug SMS text, old totals) runs at most this often. */
 export const COMPACT_THROTTLE = 6 * HOUR_MS;
-
-// ── Groups ───────────────────────────────────────────────────────────────────
-/** A group untouched this long AND fully settled is removed. Anyone still owing keeps it alive. */
-export const GROUP_INACTIVE_PRUNE_MS = 180 * DAY_MS;
 
 // ── SMS bookkeeping ──────────────────────────────────────────────────────────
 /** Card-payment prompts only fire for payments this recent; older SMS are ignored outright. */
@@ -53,13 +51,12 @@ const days = (ms: number) => Math.round(ms / DAY_MS);
 
 /** Plain-language table of everything above — for docs and a quick read. */
 export const RETENTION_SUMMARY: { data: string; keeps: string; then: string }[] = [
-  { data: 'Transactions', keeps: `${days(RAW_RETENTION_MS)} days`, then: 'folded into monthly totals, row dropped' },
-  { data: 'Monthly totals', keeps: `${days(AGG_RETENTION_MS)} days`, then: 'deleted' },
-  { data: 'Ignored transactions', keeps: `${days(RAW_RETENTION_MS)} days`, then: 'dropped (never counted in totals)' },
-  { data: 'Settled lent / borrowed', keeps: `${days(LB_SETTLED_RETENTION_MS)} days`, then: 'dropped' },
+  { data: 'Transactions', keeps: 'until you clean up', then: 'folded into monthly totals, row dropped' },
+  { data: 'Monthly totals', keeps: `${days(AGG_RETENTION_MS) / 365} years`, then: 'deleted' },
+  { data: 'Ignored transactions', keeps: `${days(IGNORED_RETENTION_MS)} days`, then: 'dropped (never counted in totals)' },
+  { data: 'Settled lent / borrowed', keeps: 'until you clean up', then: 'dropped only when a person nets to zero' },
   { data: 'Outstanding lent / borrowed', keeps: 'until settled', then: 'never dropped' },
-  { data: 'Split transactions', keeps: `${days(RAW_RETENTION_MS)} days`, then: 'folded like any other' },
-  { data: 'Settled, inactive groups', keeps: `${days(GROUP_INACTIVE_PRUNE_MS)} days idle`, then: 'removed (any debt keeps a group)' },
+  { data: 'Settled groups', keeps: 'until you clean up', then: 'removed (any debt keeps a group)' },
   { data: 'Card-payment prompts', keeps: `${days(CC_PROMPT_MAX_AGE_MS)} days`, then: 'older payments ignored' },
   { data: 'Ignored SMS ids', keeps: `last ${SUPPRESS_SMS_CAP}`, then: 'oldest dropped' },
   { data: 'Card payment history', keeps: `last ${PAYMENT_HISTORY_CAP} per card`, then: 'oldest dropped' },

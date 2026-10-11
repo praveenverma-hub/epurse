@@ -812,7 +812,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 
 // ---------------------------------------------------------------------------
 // Location: coarse place labels, and `byLocation` in the monthly aggregates so the
-// data outlives RAW_RETENTION_MS (raw txns are dropped at 90 days).
+// data outlives a clean-up (which drops the raw rows).
 // ---------------------------------------------------------------------------
 {
   const loc = await import(`${PROJECT_ROOT}/src/utils/location.js`);
@@ -835,10 +835,10 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     ],
     accounts: [], monthlyAggregates: {}, groups: [],
   });
-  useStore.getState().compactTransactions(true);
+  useStore.getState().cleanUpHistory(Date.now() - 100 * 86_400_000);
   const agg = useStore.getState().monthlyAggregates;
   const byLoc = agg[Object.keys(agg)[0]].byLocation;
-  check('location: spend survives compaction in byLocation',
+  check('location: spend survives a clean-up in byLocation',
     byLoc.Pune === 800 && byLoc.Mumbai === 200, JSON.stringify(byLoc));
   check('location: income is NOT bucketed by place', !Object.values(byLoc).includes(900), JSON.stringify(byLoc));
 }
@@ -1052,55 +1052,127 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     `bal ${bal()}`);
 }
 
-// ─── LB SETTLED RETENTION runs from createdAt, not the (backdatable) date ─────
-// Regression: a borrow_repaid the user entered against an OLD date was deleted by
-// the next launch's compaction, because retention was measured from `date`. They
-// typed an entry, saw it, restarted, and it was gone. Retention must run from when
-// the row was RECORDED; `date` is the event date and is user-editable.
+// ─── KEEP-ALL: compaction never deletes financial history ────────────────────
+// Oct-11-26 retention plan: transactions, settled IOUs and groups stay until the
+// user runs Clean Up History. Compaction is housekeeping only.
 {
+  const J = JSON.stringify;
   const DAY = 86400000;
   const ago = (d) => new Date(Date.now() - d * DAY).toISOString();
-  const survives = (row) => {
-    useStore.setState({
-      transactions: [], accounts: [], groups: [], monthlyAggregates: {},
-      lastCompactedAt: 0, lentBorrowed: [{ id: 'x', kind: 'borrow_repaid', person: 'Rahul', amount: 500, ...row }],
-    });
-    useStore.getState().compactTransactions(true);
-    return useStore.getState().lentBorrowed.length === 1;
-  };
-
-  check('lb retention: a settlement backdated years but recorded TODAY survives compaction',
-    survives({ date: ago(900), createdAt: ago(0) }) === true);
-  check('lb retention: a settlement actually recorded >2yr ago is still pruned',
-    survives({ date: ago(900), createdAt: ago(900) }) === false);
-  // Window is 730 days (LB_SETTLED_RETENTION_MS) — raised from 365.
-  check('lb retention: the 2-year boundary holds (729d kept, 731d pruned)',
-    survives({ date: ago(729), createdAt: ago(729) }) === true &&
-    survives({ date: ago(731), createdAt: ago(731) }) === false);
-  check('lb retention: a row inside the OLD 1-year window is now comfortably kept',
-    survives({ date: ago(400), createdAt: ago(400) }) === true);
-  check('lb retention: legacy rows with no createdAt fall back to date',
-    survives({ date: ago(10) }) === true && survives({ date: ago(900) }) === false);
-  // NaN comparisons are all false, so the old `>= cutoff` form dropped these.
-  check('lb retention: a row with an unparseable date is KEPT, not silently deleted',
-    survives({ date: undefined }) === true && survives({ date: 'not-a-date' }) === true);
-  check('lb retention: outstanding rows are never pruned however old',
-    survives({ kind: 'borrowed', date: ago(1200), createdAt: ago(1200) }) === true);
-
-  // The writers must actually stamp it, or every guard above silently falls back.
-  useStore.setState({ transactions: [], accounts: [], lentBorrowed: [], groups: [] });
-  useStore.getState().addAlreadySettledLentBorrowed({
-    person: 'Rahul', amount: 500, kind: 'borrowed', date: ago(900), note: '', contactId: 'c1', phone: '9876543210',
+  useStore.setState({
+    accounts: [], monthlyAggregates: {}, lastCompactedAt: 0,
+    transactions: [
+      { id: 'k1', amount: 500, type: 'debit', categoryId: 'food', createdAt: ago(800) },
+      { id: 'k2', amount: 200, type: 'debit', categoryId: 'borrow_repaid', createdAt: ago(900) },
+      { id: 'k3', amount: 50, type: 'debit', categoryId: 'food', createdAt: ago(800), isGroupMemo: true, groupId: 'g1' },
+      { id: 'k4', amount: 70, type: 'debit', categoryId: 'food', createdAt: ago(200), isIgnored: true },
+    ],
+    lentBorrowed: [
+      { id: 'x1', kind: 'lent', person: 'Rahul', amount: 500, date: ago(900), createdAt: ago(900) },
+      { id: 'x2', kind: 'lent_settled', person: 'Rahul', amount: 500, date: ago(900), createdAt: ago(900) },
+    ],
+    groups: [{ id: 'g1', name: 'Goa', members: [], lastActivityAt: ago(900) }],
   });
-  const stamped = useStore.getState().lentBorrowed[0];
-  check('lb retention: addAlreadySettledLentBorrowed stamps createdAt and keeps the backdated date',
-    !!stamped.createdAt &&
-    Date.now() - new Date(stamped.createdAt).getTime() < 60_000 &&
-    stamped.date === ago(900).slice(0, 10) + stamped.date.slice(10),
-    `createdAt=${stamped.createdAt} date=${stamped.date}`);
   useStore.getState().compactTransactions(true);
-  check('lb retention: …and it survives the very next compaction',
-    useStore.getState().lentBorrowed.length === 1);
+  const st = useStore.getState();
+  check('keep-all: a 2-year-old transaction stays a row (no fold into totals)',
+    st.transactions.some((t) => t.id === 'k1') && Object.keys(st.monthlyAggregates).length === 0);
+  check('keep-all: settled-category rows and group memos are kept',
+    st.transactions.some((t) => t.id === 'k2') && st.transactions.some((t) => t.id === 'k3'));
+  check('keep-all: settled IOUs and an idle settled group are kept',
+    st.lentBorrowed.length === 2 && st.groups.length === 1);
+  check('keep-all: an ignored row past 90 days is still dropped', !st.transactions.some((t) => t.id === 'k4'));
+
+  useStore.setState({ monthlyAggregates: { '2010-01': { totalSpend: 1 }, [ago(400).slice(0, 7)]: { totalSpend: 2 } } });
+  useStore.getState().compactTransactions(true);
+  check('keep-all: monthly totals older than 10 years are deleted, younger kept',
+    J(Object.keys(useStore.getState().monthlyAggregates)) === J([ago(400).slice(0, 7)]));
+}
+
+// ─── CLEAN UP HISTORY — user-chosen, and never changes a number on screen ────
+{
+  const J = JSON.stringify;
+  const DAY = 86400000;
+  const ago = (d) => new Date(Date.now() - d * DAY).toISOString();
+  const S = () => useStore.getState();
+  const cutoff = Date.now() - 365 * DAY;
+  // A person who nets to zero may disappear; every non-zero balance must hold.
+  const bal = () => J(S().getPersonBalances().filter((p) => p.net !== 0).map((p) => [p.personKey, p.net]).sort());
+  const oldMonth = new Date(ago(500));
+  const oldMk = `${oldMonth.getFullYear()}-${String(oldMonth.getMonth() + 1).padStart(2, '0')}`;
+  const recap = () => {
+    const r = mod.selectMonthlyReport(oldMk)(S());
+    return J({ spent: r.cashflow.spent, income: r.cashflow.income, cats: r.categories.map((c) => [c.id, c.total]) });
+  };
+  const seed = () => useStore.setState({
+    accounts: [], monthlyAggregates: {}, excludedExpenseParents: [],
+    transactions: [
+      { id: 'o1', amount: 400, type: 'debit', categoryId: 'food', createdAt: ago(500) },
+      { id: 'o2', amount: 100, type: 'debit', categoryId: 'shopping', createdAt: ago(500) },
+      { id: 'o3', amount: 900, type: 'credit', categoryId: 'salary', createdAt: ago(500) },
+      { id: 'og', amount: 300, type: 'debit', categoryId: 'food', createdAt: ago(500), groupId: 'gKeep' },
+      { id: 'ol', amount: 250, type: 'debit', categoryId: 'lent', createdAt: ago(500) },
+      { id: 'os', amount: 600, type: 'debit', categoryId: 'food', createdAt: ago(500), isSplit: true },
+      { id: 'od', amount: 80, type: 'debit', categoryId: 'food', createdAt: ago(500), groupId: 'gGone' },
+      { id: 'new', amount: 700, type: 'debit', categoryId: 'food', createdAt: ago(10) },
+    ],
+    lentBorrowed: [
+      // Rahul: old and nets to zero → removed together.
+      { id: 'r1', kind: 'lent', person: 'Rahul', contactId: 'cR', amount: 500, date: ago(600), createdAt: ago(600) },
+      { id: 'r2', kind: 'lent_settled', person: 'Rahul', contactId: 'cR', amount: 500, date: ago(550), createdAt: ago(550) },
+      // Neha: old settlement but still owes → nothing removed (the 2-yr prune resurrected this).
+      { id: 'n1', kind: 'lent', person: 'Neha', contactId: 'cN', amount: 900, date: ago(600), createdAt: ago(600) },
+      { id: 'n2', kind: 'lent_settled', person: 'Neha', contactId: 'cN', amount: 400, date: ago(550), createdAt: ago(550) },
+      // Amit: settled pair, but the settlement was BACKDATED today → kept.
+      { id: 'a1', kind: 'borrowed', person: 'Amit', contactId: 'cA', amount: 200, date: ago(600), createdAt: ago(600) },
+      { id: 'a2', kind: 'borrow_repaid', person: 'Amit', contactId: 'cA', amount: 200, date: ago(590), createdAt: ago(0) },
+      // Split share pointing at `os` → the source row must stay.
+      { id: 's1', kind: 'lent', person: 'Kiran', contactId: 'cK', amount: 300, date: ago(500), createdAt: ago(500), sourceTxnId: 'os' },
+      // Group entries: gGone settled + idle, gKeep still owed.
+      { id: 'g1', kind: 'lent', person: 'Ravi', contactId: 'cV', amount: 80, date: ago(500), createdAt: ago(500), groupId: 'gGone' },
+      { id: 'g2', kind: 'lent_settled', person: 'Ravi', contactId: 'cV', amount: 80, date: ago(480), createdAt: ago(480), groupId: 'gGone' },
+      { id: 'g3', kind: 'lent', person: 'Ravi', contactId: 'cV', amount: 150, date: ago(500), createdAt: ago(500), groupId: 'gKeep' },
+    ],
+    groups: [
+      { id: 'gGone', name: 'Old trip', members: [], lastActivityAt: ago(480) },
+      { id: 'gKeep', name: 'Flat', members: [], lastActivityAt: ago(480) },
+    ],
+  });
+
+  seed();
+  const before = { spend: S().getMonthlySpend(oldMonth), income: S().getMonthlyIncome(oldMonth),
+    now: S().getMonthlySpend(new Date()), bal: bal(),
+    brk: J(S().getCategoryBreakdown(oldMonth).map((c) => [c.id, c.total])), rep: recap() };
+  const preview = S().previewHistoryCleanup(cutoff);
+  check('cleanup: the preview changes nothing', S().transactions.length === 8 && S().lentBorrowed.length === 10);
+  const removed = S().cleanUpHistory(cutoff);
+  check('cleanup: it returns exactly what the preview promised', J(removed) === J(preview), `${J(preview)} vs ${J(removed)}`);
+
+  const ids = S().transactions.map((t) => t.id).sort();
+  check('cleanup: plain old rows fold away; recent, IOU-linked, outstanding-LB and kept-group rows stay',
+    J(ids) === J(['new', 'og', 'ol', 'os']), J(ids));
+  check('cleanup: the old month\'s spend and income are unchanged (rows + total added)',
+    S().getMonthlySpend(oldMonth) === before.spend && S().getMonthlyIncome(oldMonth) === before.income,
+    `spend ${before.spend}→${S().getMonthlySpend(oldMonth)} income ${before.income}→${S().getMonthlyIncome(oldMonth)}`);
+  check('cleanup: the old month\'s category breakdown is unchanged',
+    J(S().getCategoryBreakdown(oldMonth).map((c) => [c.id, c.total])) === before.brk,
+    `${before.brk} → ${J(S().getCategoryBreakdown(oldMonth).map((c) => [c.id, c.total]))}`);
+  check('cleanup: the old month\'s recap (spend, income, categories) is unchanged',
+    recap() === before.rep, `${before.rep} → ${recap()}`);
+  check('cleanup: this month is untouched', S().getMonthlySpend(new Date()) === before.now);
+  check('cleanup: EVERY person balance is unchanged (no resurrected debt)', bal() === before.bal, `${before.bal} → ${bal()}`);
+  const lbIds = S().lentBorrowed.map((l) => l.id).sort();
+  check('cleanup: only a zero-net old person and a gone group lose IOU rows',
+    J(lbIds) === J(['a1', 'a2', 'g3', 'n1', 'n2', 's1']), J(lbIds));
+  check('cleanup: a settled idle group goes; a group with money owed stays',
+    J(S().groups.map((g) => g.id)) === J(['gKeep']));
+  check('cleanup: counts — 4 rows, 4 IOU rows, 1 person, 1 group',
+    removed.transactions === 4 && removed.lentBorrowed === 4 && removed.people === 1 && removed.groups === 1, J(removed));
+
+  // A second run is a no-op, and folding never double-counts.
+  const again = S().cleanUpHistory(cutoff);
+  check('cleanup: running it again removes nothing and the month total holds',
+    again.transactions === 0 && S().getMonthlySpend(oldMonth) === before.spend);
 }
 
 // ─── SPEND RULES — user-chosen "counts as expense" per PARENT category ────────
@@ -1176,8 +1248,8 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
     spend() === 3000, `spend ${spend()}`);
 }
 
-// ─── SPEND RULES reach COMPACTED history, not just the live month ─────────────
-// Aggregates are materialised at compaction, so getMonthlySpend returns a stored
+// ─── SPEND RULES reach CLEANED-UP history, not just the live month ────────────
+// Aggregates are materialised at clean-up, so getMonthlySpend returns a stored
 // number for old months. Without excludedSpendInAggregate a rule set today would
 // leave last year's totals counting the category — the chart contradicting the rule.
 {
@@ -1194,10 +1266,10 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   });
   addOld(3000, 'shopping', 'Shopping');
   addOld(1000, 'food', 'Food & Dining');
-  useStore.getState().compactTransactions(true);
+  useStore.getState().cleanUpHistory(Date.now() - 100 * DAY);
 
   const agg = useStore.getState().monthlyAggregates[mk];
-  check('history rules: the month really did compact to an aggregate',
+  check('history rules: the month really did fold to an aggregate',
     useStore.getState().transactions.length === 0 && agg?.totalSpend === 4000,
     `raw ${useStore.getState().transactions.length} agg ${JSON.stringify(agg?.byCategory)}`);
 
@@ -1478,7 +1550,7 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // Month rollover — the budget snapshot must capture the month's REAL spend
 // -----------------------------------------------------------------------------
 // `rolloverBudgetIfNeeded` read `monthlyAggregates[prevMonth]`, which compaction
-// only writes at RAW_RETENTION_MS (90 days). A month that ended yesterday has no
+// only wrote at 90 days (now only a clean-up does). A month that ended yesterday has no
 // aggregate, so every `actual` snapshotted as 0 — the recap/export showed caps
 // with no spend, status was always 'under', the streak incremented on a blown
 // budget, and the celebration claimed the whole cap was saved.
@@ -2737,8 +2809,8 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   }
 
   // ── rollover ─────────────────────────────────────────────────────────────
-  // Snapshot BEFORE clearing: raw transactions age out at RAW_RETENTION_MS, so
-  // a lifetime total recomputed from them later would quietly shrink.
+  // Snapshot BEFORE clearing: a clean-up folds old rows away, so a lifetime
+  // total recomputed from them later would quietly shrink.
   //
   // A goal with NO plan allocation that month — pure auto-fund, never given a
   // monthly figure — used to get NO row in this snapshot at all (the loop
@@ -3503,10 +3575,9 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
 // against a target, so a category corrected in the review queue afterwards has
 // to move it.
 //
-// Bounded by compaction, which drops transactions individually at
-// `now - RAW_RETENTION_MS` (90 days): only a month still ENTIRELY inside that
-// window can be re-derived, or the rescan silently undercounts a half-compacted
-// month — the very failure the snapshot exists to prevent.
+// Bounded by GOAL_LIVE_WINDOW_MS (90 days): only a recent month is re-derived,
+// since a clean-up may have folded an older month's rows away and the rescan
+// would silently undercount it — the very failure the snapshot exists to prevent.
 // ─────────────────────────────────────────────────────────────────────────────
 {
   const st = () => useStore.getState();

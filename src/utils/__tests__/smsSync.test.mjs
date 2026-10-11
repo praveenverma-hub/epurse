@@ -72,6 +72,21 @@ reset({ osPermission: false });
 r = await syncNow();
 check("flags on but OS permission revoked → 'no-permission'", r.status === 'no-permission', JSON.stringify(r));
 
+// Restored phone / granted from system Settings: the flag is device-only, so it's
+// off after a restore. Once onboarded, the OS permission must win.
+reset({ inbox: [msg('p1', 300, now - DAY)] });
+useEPurseStore.setState({ smsPermissionGranted: false, smsAutoImport: false, hasOnboarded: true });
+r = await syncNow();
+check("onboarded, flags off, OS permission granted → syncs and turns the flag on",
+  r.status === 'ok' && r.added === 1 && st().smsPermissionGranted === true, JSON.stringify(r));
+
+reset({ osPermission: false });
+useEPurseStore.setState({ smsPermissionGranted: false, smsAutoImport: false, hasOnboarded: true });
+r = await syncNow();
+check("onboarded, flags off, OS permission NOT granted → 'no-permission', flag stays off",
+  r.status === 'no-permission' && st().smsPermissionGranted === false, JSON.stringify(r));
+useEPurseStore.setState({ hasOnboarded: false });
+
 reset({ throwOnRead: true });
 r = await syncNow();
 check("readInbox throws → 'error', never a rejected promise", r.status === 'error', JSON.stringify(r));
@@ -100,14 +115,14 @@ r = await syncNow();
 check("junk SMS → 'ok' but added 0 (scanned 1)", r.status === 'ok' && r.scanned === 1 && r.added === 0, JSON.stringify(r));
 
 // THE mutation-sensitive case. `added` is measured before compaction on purpose:
-// compaction drops raw rows past the 90-day window, so measuring after it nets
-// the two together. Seed three rows old enough to be compacted away, sweep in
+// compaction drops ignored rows past IGNORED_RETENTION_MS, so measuring after it
+// nets the two together. Seed three rows old enough to be compacted away, sweep in
 // one new one, and the count must still be 1 — not 0.
 reset({ inbox: [msg('n1', 400, now - DAY)] });
 useEPurseStore.setState({
   transactions: [100, 120, 140].map((age, i) => ({
     id: `old${i}`, amount: 200, type: 'debit', categoryId: 'food',
-    merchant: 'OLD', accountId: null, isReviewed: true,
+    merchant: 'OLD', accountId: null, isReviewed: true, isIgnored: true,
     createdAt: new Date(now - age * DAY).toISOString(),
   })),
 });

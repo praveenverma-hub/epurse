@@ -31,8 +31,8 @@
 // see the "Settings — rendered plain" note there before extending it further.
 // =============================================================================
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, AppState } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, ScrollView, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
@@ -52,6 +52,18 @@ import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import ThemePickerSheet from '../components/ThemePickerSheet';
 import CenterModal from '../components/CenterModal';
+import { FormChipRow, FormChip } from '../components/FormField';
+import { CLEANUP_CHOICES_YEARS } from '../constants/retention';
+
+type CleanupRemoved = { transactions: number; lentBorrowed: number; people: number; groups: number };
+
+/** Start of this month, N years back — clean-ups take whole months only. */
+const cleanupCutoff = (years: number) => {
+  const d = new Date();
+  return new Date(d.getFullYear() - years, d.getMonth(), 1).getTime();
+};
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-IN')} ${n === 1 ? one : many}`;
 
 
 interface Props {
@@ -71,11 +83,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
   const notificationPrefs = useEPurseStore((s: any) => s.notificationPrefs) as Record<string, boolean>;
   const deleteAllUserData = useEPurseStore((s: any) => s.deleteAllUserData);
+  const previewHistoryCleanup = useEPurseStore((s: any) => s.previewHistoryCleanup);
+  const cleanUpHistory = useEPurseStore((s: any) => s.cleanUpHistory);
   const { signOut, deleteAccount } = useGoogleSession();
 
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupYears, setCleanupYears] = useState(CLEANUP_CHOICES_YEARS[CLEANUP_CHOICES_YEARS.length - 1]);
 
   // Re-checked on return from system settings, so the hint can't go stale.
   const [notifBlocked, setNotifBlocked] = useState(false);
@@ -113,6 +129,26 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
     // The emptied store must reach SQLite now, not after the coalescing window.
     await flushAppStorage();
     await Storage.wipeEverything();
+  };
+
+  const cutoff = cleanupCutoff(cleanupYears);
+  const cutoffLabel = new Date(cutoff).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+  const cleanupPreview = useMemo<CleanupRemoved | null>(
+    () => (cleanupOpen ? previewHistoryCleanup(cutoff) : null),
+    [cleanupOpen, cutoff, previewHistoryCleanup],
+  );
+  const cleanupParts = cleanupPreview ? [
+    cleanupPreview.transactions ? plural(cleanupPreview.transactions, 'transaction', 'transactions') : null,
+    cleanupPreview.lentBorrowed ? plural(cleanupPreview.lentBorrowed, 'lent & borrowed entry', 'lent & borrowed entries') : null,
+    cleanupPreview.groups ? plural(cleanupPreview.groups, 'settled group', 'settled groups') : null,
+  ].filter(Boolean) : [];
+  const cleanupMessage = cleanupParts.length
+    ? `Removes ${cleanupParts.join(', ')} from before ${cutoffLabel}. Monthly totals stay, so charts and recaps still cover those months. This cannot be undone.`
+    : `Nothing to remove from before ${cutoffLabel}.`;
+
+  const handleCleanup = () => {
+    setCleanupOpen(false);
+    if (cleanupParts.length) cleanUpHistory(cutoff);
   };
 
   const excludedCount = (excludedExpenseParents || []).length;
@@ -184,6 +220,12 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             hint="Add or remove your own"
             onPress={() => navigation.navigate('Categories')}
           />
+          <NavListRow
+            icon="archive-outline"
+            label="Clean Up History"
+            hint="Everything is kept until you choose"
+            onPress={() => setCleanupOpen(true)}
+          />
           {SMS_DIAGNOSTIC_ENABLED ? (
             <NavListRow
               icon="flask-outline"
@@ -244,6 +286,30 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         onSecondary={() => setConfirmLogout(false)}
         onClose={() => setConfirmLogout(false)}
       />
+
+      <CenterModal
+        visible={cleanupOpen}
+        title="Clean Up History?"
+        message={cleanupMessage}
+        primaryText={cleanupParts.length ? 'Clean Up' : 'OK'}
+        secondaryText={cleanupParts.length ? 'Cancel' : undefined}
+        destructive={cleanupParts.length > 0}
+        onPrimary={handleCleanup}
+        onSecondary={() => setCleanupOpen(false)}
+        onClose={() => setCleanupOpen(false)}
+      >
+        <FormChipRow>
+          {CLEANUP_CHOICES_YEARS.map((y) => (
+            <FormChip
+              key={y}
+              label={`${y}+ ${y === 1 ? 'Year' : 'Years'}`}
+              active={cleanupYears === y}
+              onPress={() => setCleanupYears(y)}
+              accentColor={theme.primary}
+            />
+          ))}
+        </FormChipRow>
+      </CenterModal>
 
       <CenterModal
         visible={confirmDelete}
