@@ -1,7 +1,7 @@
 # Shared Group Sync — design (phases 1–3)
 
 **Status:** phase 1 code done Oct-13-2026 (behind `sharedSync`, off; no Supabase project yet). Phases 2–3 next.
-**Schema:** `supabase/migrations/20261013000000_shared_groups.sql` (source of truth for the server).
+**Schema:** `supabase/migrations/` — `20261013000000_shared_groups.sql`, then `…120000_keep_history_on_delete.sql`, `20261014000000_checkpoints.sql` (applied in order; never edit an applied one).
 
 Live sync for SHARED groups only (trips, flats, events). Everything else — accounts, SMS
 transactions, budgets, goals, personal groups, unsynced shared groups — never leaves the phone.
@@ -18,7 +18,7 @@ transactions, budgets, goals, personal groups, unsynced shared groups — never 
 | Server tables | 4: `groups`, `group_members`, `group_invites`, `group_events` (append-only). Expenses, edits, deletes, settlements are event TYPES inside the ciphertext, not tables. |
 | Validation | The server checks structure (membership, order, size, rate). Amounts are checked on every phone by ONE shared validator; invalid events are skipped identically everywhere. |
 | Money | Integer paise on the wire. Shares are sent explicitly; receivers never recompute a split. |
-| Sharing ends | 60 days after the last activity (server-enforced). "Until settled" (settled + 7-day grace) is phase 5. Local copies are kept. |
+| Server retention | Checkpoints (§8b): after 7 quiet days (settled) or 30 (unsettled) a phone posts a checkpoint of people + who owes whom. Server deletes a group 90 days after its last activity, or 365 days after its last checkpoint. Compaction of pre-checkpoint events is built but OFF until history sharing exists. Phones always keep everything. |
 | Integrity | Users own correctness (duplicates, double-recorded payments). The app guarantees every phone computes the same totals and balances, and group history is never rewritten. See §8a. |
 | Delete Account | Membership and account are deleted; the user's events STAY as encrypted group history with the author cleared. See §10. |
 | PowerSync | No — it syncs readable rows, which E2EE rules out. |
@@ -112,31 +112,48 @@ sign-in to Supabase is **lazy** (§4): users who never share never get a server 
 Every event decrypts to JSON `{ v: 1, type, at, ...body }`. Member references are opaque
 `memberId`s (uuid) chosen inside the group — never contact ids or phone numbers.
 
+Built: `src/sync/events.ts` (format + strict parser) and `src/sync/fold.ts` (rules + balances),
+tested by `npm run test:sync`.
+
 | type | body | who may send |
 |---|---|---|
-| `group.meta` | `name, emoji, color` | admin |
+| `group.meta` | `name, emoji, color` | any member |
 | `member.add` | `memberId, name` — a person in the group, joined or not | any member |
-| `member.claim` | `memberId, userId` — "this person is me" | the user themself (`userId` = author) |
+| `member.claim` | `memberId, userId` — "this person is me" | the user themself (`userId` = author), once |
 | `member.rename` | `memberId, name` | any member |
-| `member.archive` | `memberId` — valid only when their balance is ₹0 at that point (§8a) | the member themself or an admin |
-| `expense.upsert` | `entityId, amountPaise, title, categoryId, date, paidBy, shares[{memberId, paise}]` | create: anyone; edit: the original author |
-| `expense.delete` | `entityId` | the original author or an admin |
-| `settlement.upsert` / `.delete` | `entityId, from, to, amountPaise, date` | phase 5 |
+| `member.archive` | `memberId` — only when their balance is ₹0 at that point (§8a) | any member |
+| `expense.upsert` | `entityId, amountPaise, title, categoryId, date, paidBy, shares[{memberId, paise}]` | any member (create or edit) |
+| `settlement.upsert` | `entityId, from, to, amountPaise, date` (from ≠ to) | any member (create or edit) |
+| `expense.delete` / `settlement.delete` | `entityId` | whoever created it — or anyone, once they've left the group |
+| `group.checkpoint` | `baseSeq, meta, members, activeUsers, deletedUsers, debts[{from, to, paise}]` | any member (§8b) |
+| `expense.correct` | `entityId, correctsId, title, date, debts[], expense` — an edit/delete of a frozen expense | any member (§8b) |
+
+**Edits (decided Oct-13-2026):** any member can edit; the **last edit by seq wins** on every phone,
+with no prompt (overwrite). Every version is kept with who sent it and the **server's** time
+(`versions[]` in the fold), so each expense has a full edit history that stays on every phone after
+sharing ends.
+
+Settlements are in v1 already, so phase 5's settle UI needs no format bump.
+
+**No admin in the encrypted rules.** The server's admin role isn't recorded in the event history
+in a way every phone could replay identically, so the fold never uses it. Admin matters only
+server-side (`remove_member`). Users own correctness (§8a), so the permissive rules above are fine.
 
 **Not sent:** account, card/bank, SMS text or id, location, the note, custom category ids
 (a custom category is sent as `other`).
 
-**Validator — `src/sync/validate.ts`, pure, the ONE copy every phone runs.** An event is skipped
-(identically on every phone) when:
-- it's not valid JSON or has an unknown type or version;
-- `amountPaise` isn't an integer between 1 and 10¹⁰;
-- shares don't sum to the amount;
-- `paidBy` or a share's member isn't in the group at that point in the sequence;
-- the sender isn't allowed to send it (table above);
-- text is over the input-validation caps.
+**The ONE validator every phone runs** = `parseEvent` (structure) + `foldEvents` (rules against the
+history so far). An event is skipped, identically on every phone, when:
+- it can't be decrypted, isn't valid JSON, or has an unknown type or version;
+- an amount isn't a whole number of paise between 1 and 10¹⁰ (₹10 crore);
+- shares don't sum to the amount, or list a member twice;
+- it names a member who doesn't exist, or an archived one who isn't already on that entry;
+- the sender isn't allowed to send it (table above), or isn't a member at that seq;
+- it edits a deleted entry (delete wins), or reuses an expense id as a settlement;
+- text is over the frozen v1 limits (`V1_LIMITS` — deliberately not `INPUT_LIMITS`).
 
-It may only depend on the event sequence — never on local time, local data or settings —
-otherwise phones drift apart.
+It depends only on the event sequence — never on local time, local data or settings —
+otherwise phones drift apart. Balances in the fold always sum to zero.
 
 **Server-side system events** are plaintext (`system_type`): `group_created`, `member_joined`,
 `member_left`, `member_removed`, `member_deleted`, with `system_subject` = the user id.
@@ -183,8 +200,8 @@ acknowledges the outbox row (if still present); it is not applied twice.
 
 Realtime pokes are added in phase 4.
 
-**Edits.** Only an expense's author can edit it, so conflicts come only from the same user on two
-phones: the highest `seq` wins.
+**Edits.** Any member can edit; the highest `seq` wins on every phone, and every version stays
+in the entry's history (§6).
 
 ---
 
@@ -226,6 +243,7 @@ The app guarantees two things only:
 | My offline change is invalid by the time it reaches the server (e.g. includes someone who left) | My phone shows the server's history + my unsent changes. A rejected change drops out of that view; the expense shows **Didn't Sync** with **Edit**. |
 | Edit and delete of the same expense | Delete wins, in any order. |
 | Leave the group / admin removes someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). They're **archived**: still shown in old expenses, can't be added to new ones. |
+| Someone added later belongs in an earlier expense | Allowed: edit that expense and add them (Splitwise does the same). |
 | Expense edited after someone settled | Allowed; balances recompute. |
 | Duplicate expense or settlement, overpayment | Nothing special — counted as entered. |
 | Joining a trip I already tracked on my own | Joining always creates a fresh synced group. Nothing is merged or moved; the old local group is the user's to delete. |
@@ -237,17 +255,46 @@ The app guarantees two things only:
 
 ---
 
+## 8b. Checkpoints (decided Oct-14-2026)
+
+A checkpoint is an encrypted `group.checkpoint` event: meta, members (who's who, archived),
+active/deleted users, and **who owes whom per pair** — no expenses. Built by `buildCheckpoint`
+(`fold.ts`), posted with `append_checkpoint`, which the server accepts only while its `baseSeq`
+is still the latest (so it never races a new expense).
+
+- **When:** the next phone that syncs after the group has been quiet for
+  `SHARED_CHECKPOINT_SETTLED_QUIET_MS` (7 days, everyone at ₹0) or
+  `SHARED_CHECKPOINT_UNSETTLED_QUIET_MS` (30 days). Skipped if it would exceed the 16 KB event limit.
+- **Verify or adopt.** A phone holding every event up to `baseSeq` VERIFIES it against its own
+  state; if they differ it keeps its own numbers and sets `checkpointMismatch` ("Balances
+  Disagree"). A phone missing history (late joiner, restored phone — it sees a seq gap) ADOPTS it:
+  people and per-pair debts, `historyFrom` = the checkpoint.
+- **Frozen.** Every entry before a checkpoint is frozen on every phone: kept for display, ignored
+  by the rules. A phone that never saw it is in the same rule state, so phones stay in step.
+- **Editing an old expense** still looks like a normal edit. For a frozen one the app sends an
+  `expense.correct` (`buildCorrection`): the change in who-owes-whom plus the new version for
+  display. Phones with the original show it updated in place; a late joiner sees the correction
+  as its own row. Balances are identical to a plain edit (tested).
+- **Maths unchanged.** Same split code, same rule (each sharer owes the payer). Balance = the
+  checkpoint's opening position + everything after; integers in paise, so no drift.
+- **Fresh start** after a checkpoint continues in the same group — same people, invite and key;
+  nobody re-uploads anything.
+- **Compaction** (`compact_groups`, deletes events before each checkpoint) exists but is NOT
+  scheduled until phase 5/6's history sharing lets a late joiner fetch the old expenses
+  (display-only) from another member. Until then the server keeps them for the 90/365-day timers.
+- **Switching to full history later** = leave compaction off; nothing on the phones changes.
+
+---
+
 ## 9. Sharing ends
 
-- Every new data event sets the server's `expires_at = now + 60 days`. Row-level security hides an
-  expired group immediately, and a daily `pg_cron` job deletes it (03:00 IST).
-- The app notices that its membership is gone and marks the group "Sharing Ended". Local data,
+- Every data event sets `expires_at = now + 90 days`; a checkpoint sets `now + 365 days` (it's a
+  ~1–2 KB record). Row-level security hides an expired group immediately; the daily `pg_cron`
+  job deletes it (03:00 IST). Phone-side mirrors: `SHARED_SERVER_*` in `src/constants/retention.ts`.
+- The app notices its membership is gone and marks the group "Sharing Ended". Local data,
   balances and Lent/Borrowed rows stay; the group behaves like a normal local shared group again.
-- Phase 5 adds "until settled":
-  - A phone that sees every balance at ₹0 calls `attest_settled(seq)`.
-  - The server accepts it only if `seq` is still the latest, then sets `expires_at = min(current,
-    now + 7 days)`.
-  - Any new event clears the settled mark.
+  New activity there offers **Share Again** (phase 5): a fresh server group, seeded with a
+  checkpoint of the current people and balances — no history re-uploaded.
 
 ---
 
@@ -302,8 +349,10 @@ new invite.
    memos, failed-change indicator.
 4. Realtime poke (broadcast `{groupId, seq}` from a trigger) + Expo push with generic text
    ("New activity in a shared group").
-5. Settlement events, "until settled" expiry, key rotation on removal, keys in backup verified on
-   restore.
+5. Settlement UI, Share Again, history sharing for late joiners (then schedule compaction),
+   key rotation on removal, keys in backup verified on restore. **"Settle Up" from
+   Lent/Borrowed across several synced groups** with the same person must record one
+   settlement per group — each group's balance is its own.
 
 ### Files
 
@@ -312,13 +361,12 @@ new invite.
 | `src/sync/config.ts` | ✅ projects (test/prod), `isSyncEnabled` |
 | `src/sync/client.ts` | ✅ Supabase client, session storage |
 | `src/sync/session.ts` | ✅ lazy sign-in, sign-out, `deleteSyncAccount` |
-| `src/sync/crypto.ts` | key gen, encrypt/decrypt with AAD (pure) |
-| `src/sync/events.ts` | event types (pure) |
-| `src/sync/validate.ts` | the one validator (pure) |
-| `src/sync/fold.ts` | events → local group/txn changes (pure) |
+| `src/sync/crypto.ts` | ✅ key gen, encrypt/decrypt with AAD, uuid, sha256 (pure) |
+| `src/sync/events.ts` | ✅ event types, frozen v1 limits, strict parser (pure) |
+| `src/sync/fold.ts` | ✅ events → members, entries, balances; the rules (pure) |
 | `src/sync/engine.ts` | send/pull loop, triggers, errors |
-| `src/sync/invite.ts` | build/parse invite links |
-| `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ phase 1–3 schema, ✅ delete-account) |
+| `src/sync/invite.ts` | ✅ build/parse invite links (pure) |
+| `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ schema, ✅ keep-history delete, ✅ checkpoints, ✅ delete-account) |
 
 | Changed | Why |
 |---|---|

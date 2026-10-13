@@ -47,6 +47,16 @@ export const KEEP_BACKUPS = 5;
 /** The local copy taken just before a restore (for Undo) is deleted after this long. */
 export const PRE_RESTORE_SNAPSHOT_MS = 7 * DAY_MS;
 
+// ── Shared groups on the server (docs/SHARED_GROUP_SYNC.md §8b) ──────────────
+/** A settled group with no activity this long gets a checkpoint from the next phone that syncs. */
+export const SHARED_CHECKPOINT_SETTLED_QUIET_MS = 7 * DAY_MS;
+/** Same for a group with money still owed. */
+export const SHARED_CHECKPOINT_UNSETTLED_QUIET_MS = 30 * DAY_MS;
+/** Server deletes a group this long after its last activity. Mirrors `append_events` (SQL). */
+export const SHARED_SERVER_IDLE_MS = 90 * DAY_MS;
+/** …or this long when the last thing in it is a checkpoint. Mirrors `append_checkpoint` (SQL). */
+export const SHARED_SERVER_CHECKPOINT_KEEP_MS = 365 * DAY_MS;
+
 const days = (ms: number) => Math.round(ms / DAY_MS);
 
 /** Plain-language table of everything above — for docs and a quick read. */
@@ -64,4 +74,6 @@ export const RETENTION_SUMMARY: { data: string; keeps: string; then: string }[] 
   { data: 'Drive backups', keeps: `latest ${KEEP_BACKUPS}`, then: 'older ones deleted after an upload' },
   { data: 'Pre-restore copy (for Undo)', keeps: `${days(PRE_RESTORE_SNAPSHOT_MS)} days`, then: 'deleted; Undo no longer offered' },
   { data: 'Full SMS text (preview builds)', keeps: `${days(RAW_SMS_RETENTION_MS)} days`, then: 'stripped' },
+  { data: 'Shared group on the server', keeps: `${days(SHARED_SERVER_IDLE_MS)} days after last activity`, then: 'deleted from the server; every phone keeps its copy' },
+  { data: 'Shared group checkpoint', keeps: `${days(SHARED_SERVER_CHECKPOINT_KEEP_MS)} days`, then: 'deleted from the server' },
 ];

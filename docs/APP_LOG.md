@@ -2023,7 +2023,15 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   (Oct-13)**: `src/sync/` (lazy Supabase sign-in from the Google ID token, sign-out, `syncAccount`
   backed up), `delete-account` Edge Function, Settings → Delete Account deletes the server account
   FIRST and stops with an error if it can't. Off behind `sharedSync`; no Supabase project created
-  yet (setup steps in the doc §11). Phases 2–3 next.
+  yet (setup steps in the doc §11). **Phase 2 core done (Oct-13)**: pure `src/sync/crypto.ts`
+  (XChaCha20-Poly1305 + AAD), `invite.ts`, `events.ts` (v1 format incl. settlements, frozen limits),
+  `fold.ts` (rules + balances) — `npm run test:sync` 66/66. Test project created + schema pushed.
+  **Oct-14: edits + checkpoints** — any member edits (last seq wins, every version kept), creator
+  deletes; per-pair debts tracked; `group.checkpoint` (verify if you have history, adopt if not;
+  earlier entries frozen) and `expense.correct` (edits of frozen expenses as debt deltas) —
+  test:sync 91/91. Migration `20261014000000_checkpoints.sql` (append_checkpoint; 90-day / 365-day
+  timers; `compact_groups` built but NOT scheduled). Phone timers in `retention.ts`.
+  Next: server calls, store wiring, Start Live Sharing / invite / join UI.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 
