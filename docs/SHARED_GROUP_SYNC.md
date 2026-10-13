@@ -552,6 +552,10 @@ groups therefore recover past the backup point; personal data only up to it.
 
 - Any member can invite (Splitwise-style). Admin-only invites are a one-line change in `create_invite`.
 - The note is never shared; the title (merchant) is.
-- Someone records that **I** paid: on my phone it books my "lent" rows with no account movement and
-  a prompt to link an account. Exact UI TBD in phase 3.
+- Someone records that **I** paid: on my phone it books my "lent" rows with no account movement.
+  **Built Oct-15-2026:** the detail sheet's Account row says "Not From an Account"; Edit starts on
+  that too (`AccountField` `noneLabel`) instead of the primary account, and picking an account
+  debits it (`updateGroupExpense` never auto-books a `syncOrigin: 'remote'` expense). Deleted on
+  the server after I linked it → it stays as my plain expense, like my own. Also how a restored
+  phone re-links its own expenses (§12a).
 - Max 50 members per group, 100 groups per user, 50 events per batch, 16 KB per event.

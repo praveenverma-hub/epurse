@@ -89,6 +89,7 @@ import {
   SPLIT_BLOCKED_CHILD_LABELS,
 } from '../constants/twoTierCategories';
 import { requestAndGetLocation } from '../services/locationService';
+import { LB_NO_ACCOUNT } from '../utils/lbEntryDisplay';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useRewardStore } from '../store/useRewardStore';
 import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
@@ -397,8 +398,6 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   // real default for a manual entry, not an arbitrary "first Cash account".
   const defaultAccountId = useMemo(() => pickDefaultAccountId(accounts), [accounts]);
 
-  const resolvedAccountId = accountId ?? defaultAccountId;
-
   const selectedParentDef = useMemo(
     () => categoryTree.find((p) => p.label === parentCategory) ?? null,
     [parentCategory, categoryTree],
@@ -432,6 +431,9 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const group = (groups as Group[]).find((g) => g.id === groupId) ?? null;
   const groupAllowed = canSplitHere && !editTxn?.lbLocked;
   const activeGroup = groupAllowed ? group : null;
+  // A synced expense someone else recorded as mine stays off my accounts until I pick one.
+  const unlinkedOk = editTxn?.syncOrigin === 'remote' && !!activeGroup;
+  const resolvedAccountId = accountId ?? (unlinkedOk ? null : defaultAccountId);
   const groupSplit = useGroupSplit({
     group: activeGroup,
     amount: splitAmountNum,
@@ -1285,6 +1287,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 accounts={accounts}
                 value={resolvedAccountId}
                 onChange={setAccountId}
+                noneLabel={unlinkedOk ? LB_NO_ACCOUNT : undefined}
                 accentColor={theme.primary}
               />
               ) : null}

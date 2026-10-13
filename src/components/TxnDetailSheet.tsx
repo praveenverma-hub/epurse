@@ -27,6 +27,7 @@ import { formatCurrency, formatDateTime } from '../utils/format';
 import SplitPositionView from './SplitPositionView';
 import { locationKey } from '../utils/location';
 import { CARD_CONTEXT, txnAccountLabel, txnPayerName } from '../utils/txnCardModel';
+import { LB_NO_ACCOUNT } from '../utils/lbEntryDisplay';
 import type { GroupSplit } from '../types/group';
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
@@ -63,6 +64,8 @@ interface Txn {
   groupSplit?: GroupSplit;
   /** Someone else in the group paid — no money left my account. */
   isGroupMemo?: boolean;
+  /** Came from another member's phone (shared group sync). */
+  syncOrigin?: 'remote';
   lbLocked?: boolean;
   /** Coarse place stamped at capture time (manual add or a live incoming SMS
    *  only — see services/locationService). City-level only; district/region
@@ -146,7 +149,8 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
   const showGroup = !!group && context !== CARD_CONTEXT.GROUP;
   // Someone else paid ⇒ no account of mine moved; the split list's first row names the payer.
   const account = txn.accountId ? accounts.find((a: any) => a.id === txn.accountId) : null;
-  const accountLabel = txnPayerName(txn as any, group) ? '' : txnAccountLabel(txn, account);
+  const accountLabel = txnPayerName(txn as any, group) ? ''
+    : txnAccountLabel(txn, account) || (txn.syncOrigin === 'remote' ? LB_NO_ACCOUNT : '');
   const hasSplit = !!txn.groupSplit?.shares?.length || !!txn.isSplit;
   // City-only for now (per user request) — `locationKey` already falls back to
   // district/region when the geocoder couldn't name a city, so this still shows

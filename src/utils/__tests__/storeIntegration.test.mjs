@@ -5579,6 +5579,26 @@ console.log('\n— shared-group sync: applying server expenses (Oct-14-26) —')
   S().setSharedGroupState(gid, shared, { ops: [{ kind: 'flag', txnId: 'IdM9', syncRejected: 'k' }] });
   check('a rejected change is flagged on the transaction', S().transactions.find((t) => t.id === 'IdM9').syncRejected === 'k');
 
+  // Editing that synced "I paid" expense on this phone: no account until I pick one.
+  const editArgs = (accountId) => ({ amount: 1000, merchant: 'Dinner', categoryId: 'food', paidByMemberId: 'me', paidByName: 'You', shares: split('me', 500, 500).shares, accountId });
+  S().updateGroupExpense('sync_e1', editArgs(null));
+  check('editing a synced "I paid" expense with no account picked → none booked, none created',
+    S().accounts.length === accountsBefore && !S().transactions.find((t) => t.id === 'sync_e1').accountId && bal() === 10000 - 200);
+
+  // Another synced "I paid" expense, linked to my bank, then deleted on the server.
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'create', txn: {
+    id: 'sync_e3', syncId: 'e3', syncOrigin: 'remote', type: 'debit', source: 'sync', isReviewed: true, isSplit: false, splitWith: [],
+    groupId: gid, accountId: null, amount: 400, merchant: 'Taxi', categoryId: 'travel', createdAt: new Date().toISOString(),
+    groupSplit: split('me', 200, 200) } }] });
+  S().updateGroupExpense('sync_e3', { ...editArgs('acc1'), amount: 400, merchant: 'Taxi', categoryId: 'travel', shares: split('me', 200, 200).shares });
+  check('linking it to an account debits that account', bal() === 10000 - 200 - 400 && S().transactions.find((t) => t.id === 'sync_e3').accountId === 'acc1');
+  S().updateGroupExpense('sync_e3', { ...editArgs(undefined), amount: 400, merchant: 'Taxi', categoryId: 'travel', shares: split('me', 200, 200).shares });
+  check('…a later edit that doesn\'t name an account keeps it', bal() === 10000 - 200 - 400 && S().transactions.find((t) => t.id === 'sync_e3').accountId === 'acc1');
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'remove', txnId: 'sync_e3' }] });
+  const linked = S().transactions.find((t) => t.id === 'sync_e3');
+  check('deleted on the server after I linked it → stays as my plain expense, money still out',
+    linked && !linked.groupId && !linked.syncId && !linked.syncOrigin && linked.accountId === 'acc1' && bal() === 10000 - 200 - 400);
+
   // Deleted on the server.
   S().setSharedGroupState(gid, shared, { ops: [{ kind: 'remove', txnId: 'IdM9' }, { kind: 'remove', txnId: 'sync_e1' }] });
   const mine = S().transactions.find((t) => t.id === 'IdM9');

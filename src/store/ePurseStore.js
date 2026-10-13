@@ -4139,14 +4139,14 @@ export const useEPurseStore = create(
             } else if (op.kind === 'remove') {
               lentBorrowed = lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
               totalDelta -= old.amount || 0;
-              // Someone else's expense, or a memo (no money of mine moved): it goes.
-              // My own real debit stays as a plain expense of mine.
-              if (old.syncOrigin === 'remote' || old.isGroupMemo || !old.accountId) {
+              // A memo or one on no account of mine (no money of mine moved): it goes.
+              // A real debit of mine — incl. a synced one I linked to an account — stays as a plain expense.
+              if (old.isGroupMemo || !old.accountId) {
                 removed.add(old.id);
               } else {
                 const next = { ...old };
                 delete next.groupId; delete next.groupSplit; delete next.isGroupMemo;
-                delete next.syncId; delete next.syncRejected;
+                delete next.syncId; delete next.syncRejected; delete next.syncOrigin;
                 replaced.set(old.id, next);
               }
             }
@@ -4421,10 +4421,14 @@ export const useEPurseStore = create(
         const resolvedCategoryId =
           categoryId || toLegacyCat(parentCategory, childCategory) || old.categoryId || 'other';
 
-        // Resolve the paying account (only when YOU paid).
-        let resolvedAccountId = isGroupMemo ? null : (accountId || old.accountId || null);
+        // Resolve the paying account (only when YOU paid). A synced expense someone else
+        // recorded as mine stays off my accounts until I pick one.
+        const unlinkedOk = old.syncOrigin === 'remote';
+        let resolvedAccountId = isGroupMemo ? null
+          : unlinkedOk ? (accountId !== undefined ? accountId : old.accountId) || null
+          : (accountId || old.accountId || null);
         let workingAccounts   = s.accounts;
-        if (!isGroupMemo && !resolvedAccountId) {
+        if (!isGroupMemo && !resolvedAccountId && !unlinkedOk) {
           const { accounts: ensured, account } = ensureAccountForParsed(s.accounts, { ...old, amount: newAmount });
           resolvedAccountId = account?.id || null;
           workingAccounts   = ensured;
@@ -4447,9 +4451,12 @@ export const useEPurseStore = create(
         if (isGroupMemo) {
           delete updatedTxn.accountId;
           clearAccountMeta(updatedTxn);
-        } else {
+        } else if (resolvedAccountId) {
           updatedTxn.accountId = resolvedAccountId;
           stampAccountMeta(updatedTxn, workingAccounts.find((a) => a.id === resolvedAccountId));
+        } else {
+          updatedTxn.accountId = null;
+          clearAccountMeta(updatedTxn);
         }
         if (location) updatedTxn.location = location;
 

@@ -14,26 +14,29 @@ interface AccountFieldProps {
   accounts: any[];
   /** Selected account id (already resolved to the default by the caller). */
   value: string | null;
-  onChange: (id: string) => void;
+  onChange: (id: string | null) => void;
   accentColor?: string;
   disabled?: boolean;
+  /** Allows "no account": shown when `value` is null and offered in the picker. */
+  noneLabel?: string;
 }
 
-export default function AccountField({ accounts, value, onChange, accentColor, disabled }: AccountFieldProps) {
+export default function AccountField({ accounts, value, onChange, accentColor, disabled, noneLabel }: AccountFieldProps) {
   const [open, setOpen] = useState(false);
   const selected = accounts.find((a) => a.id === value) ?? null;
-  if (!selected) return null;
+  if (!selected && !noneLabel) return null;
 
   return (
     <>
       <FormValueRow
         icon="wallet-outline"
         label="Account"
-        value={selected.name}
-        badge={selected.primary ? 'Primary' : undefined}
+        value={selected ? selected.name : noneLabel!}
+        isPlaceholder={!selected}
+        badge={selected?.primary ? 'Primary' : undefined}
         accentColor={accentColor}
         disabled={disabled}
-        onPress={accounts.length > 1 ? () => setOpen(true) : undefined}
+        onPress={accounts.length > (noneLabel ? 0 : 1) ? () => setOpen(true) : undefined}
       />
       <AccountPickerSheet
         visible={open}
@@ -46,6 +49,8 @@ export default function AccountField({ accounts, value, onChange, accentColor, d
           onChange(id);
           setOpen(false);
         }}
+        skipLabel={noneLabel}
+        onSkip={noneLabel ? () => { onChange(null); setOpen(false); } : undefined}
         onClose={() => setOpen(false)}
       />
     </>

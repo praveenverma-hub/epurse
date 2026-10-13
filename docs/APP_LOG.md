@@ -2084,6 +2084,10 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   a restore catches shared groups up from the server, but a dormant gap shows balances without
   the expenses, and own group expenses after the last backup return with no account. Fix = more
   server days and regular automatic backups.
+  **Oct-15 (7th): synced "you paid" expenses stay off your accounts** — FIXED: editing one (recorded
+  on another phone with me as payer) showed the primary account and debited it on save. Now the
+  Account row reads "Not From an Account" (detail sheet + edit, `AccountField` `noneLabel`), picking
+  one links it, and a server delete keeps a linked one as my plain expense. test:store +4.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 
