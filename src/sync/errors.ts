@@ -2,7 +2,7 @@
 export type SyncErrorCode =
   | 'DISABLED' | 'SIGN_IN_FAILED' | 'DELETE_FAILED' | 'NETWORK' | 'SERVER'
   | 'NOT_MEMBER' | 'INVITE_INVALID' | 'INVITE_USED' | 'GROUP_ENDED' | 'GROUP_FULL'
-  | 'NOT_SETTLED' | 'CLAIM_TAKEN' | 'LINK_DAMAGED';
+  | 'NOT_SETTLED' | 'CLAIM_TAKEN' | 'LINK_DAMAGED' | 'NOT_ADMIN';
 
 export class SyncError extends Error {
   code: SyncErrorCode;

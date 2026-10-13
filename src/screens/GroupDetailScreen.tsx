@@ -56,8 +56,8 @@ import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
 import type { Group } from '../types/group';
 import { useSyncEnabled } from '../sync/config';
-import { createInviteLink, flushGroup, leaveSharedGroup } from '../sync/groupSync';
-import { toRemoteMember } from '../sync/localGroup';
+import { createInviteLink, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
+import { isGroupAdmin, memberBalancePaise, toRemoteMember } from '../sync/localGroup';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any;
@@ -305,6 +305,43 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     return !!shared.fold.members[toRemoteMember(shared, memberId)]?.userId;
   };
 
+  // Live groups: the server's admin (refreshed on sync) — only they can remove someone who joined.
+  const iAmAdmin = live && isGroupAdmin(group.shared!, 'me');
+  const hasAccess = (memberId: string) => {
+    const shared = group.shared;
+    const userId = shared?.fold.members[toRemoteMember(shared, memberId)]?.userId;
+    return !!userId && !!shared?.fold.activeUsers.includes(userId);
+  };
+  const memberTag = (m: { memberId: string; isMe?: boolean; archived?: boolean }) => {
+    if (!live) return m.isMe ? 'Admin' : m.archived ? 'Left' : 'Member';
+    if (m.archived) return 'Left';
+    if (isGroupAdmin(group.shared!, m.memberId)) return 'Admin';
+    return joined(m.memberId) ? 'Joined' : 'Member';
+  };
+  // Archived but still with access = a removal whose server step failed; offering it again retries it.
+  const canRemove = (m: { memberId: string; isMe?: boolean; archived?: boolean }) =>
+    live && !m.isMe && (m.archived ? hasAccess(m.memberId) && iAmAdmin : !joined(m.memberId) || iAmAdmin);
+
+  const handleRemoveMember = (m: { memberId: string; name: string }) => {
+    const name = titleCaseName(m.name);
+    if (memberBalancePaise(group.shared!, m.memberId) !== 0) {
+      toast.info(`${name} isn't settled up`, 'Someone can be removed once their balance in this group is ₹0.');
+      return;
+    }
+    setConfirm({
+      title: `Remove ${name}?`,
+      message: `${name} stays in past expenses but can't be added to new ones`
+        + (joined(m.memberId) ? ', and stops getting this group\'s updates.' : '.'),
+      primaryText: 'Remove',
+      secondaryText: 'Cancel',
+      destructive: true,
+      onPrimary: runShared(async () => {
+        await removeSharedMember(group.id, m.memberId);
+        toast.success(`${name} removed`);
+      }, 'Couldn\'t remove'),
+    });
+  };
+
   const handleLeave = () => setConfirm({
     title: 'Leave Shared Group?',
     message: 'You\'ll stop getting updates. The group and its history stay on your phone.',
@@ -348,6 +385,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
   const renderMembers = () => (
         <View style={styles.membersScroll}>
+          {live && group.shared!.fold.checkpointMismatch != null ? (
+            <View style={[styles.mismatchNote, { borderColor: theme.warning + '66' }]}>
+              <Ionicons name="warning-outline" size={18} color={theme.warning} />
+              <Text style={styles.mismatchTxt}>
+                Balances on this phone don&apos;t match another member&apos;s. Compare with the group before settling up.
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.cardShell}>
           <View style={styles.memberListCard}>
             {(group.members || []).map((m, i) => {
@@ -370,11 +415,16 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                     </TouchableOpacity>
                   ) : (
                     <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
-                      <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>
-                        {m.isMe ? 'Admin' : m.archived ? 'Left' : live && joined(m.memberId) ? 'Joined' : 'Member'}
-                      </Text>
+                      <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>{memberTag(m)}</Text>
                     </View>
                   )}
+                  {canRemove(m) ? (
+                    <OverflowMenu
+                      style={styles.memberMenuBtn}
+                      accessibilityLabel={`More for ${displayName}`}
+                      actions={[{ key: 'remove', label: 'Remove From Group', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
+                    />
+                  ) : null}
                 </View>
               );
             })}
@@ -941,6 +991,9 @@ const styles = StyleSheet.create({
   memberRoleTagTxt: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
   // Outlined (secondary) — the row's only action, never a filled primary.
   memberInviteBtn: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 5 },
+  mismatchNote: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, marginBottom: spacing.md, borderWidth: 1, borderRadius: radius.md, backgroundColor: colors.card },
+  mismatchTxt: { ...typography.small, flex: 1, color: colors.textSecondary },
+  memberMenuBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: spacing.xs, marginRight: -spacing.xs },
   // The QR's own white quiet zone sits on the white card; the hairline shows its edge.
   qrWrap: { alignSelf: 'center', marginTop: spacing.md, padding: spacing.xs, borderRadius: radius.md, borderWidth: DIVIDER_W, borderColor: colors.divider },
   memberInviteTxt: { ...typography.small, fontWeight: '700' },

@@ -9,7 +9,7 @@ import {
 import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BASE } from '../../sync/invite.ts';
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
-import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
+import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, isGroupAdmin, memberBalancePaise } from '../../sync/localGroup.ts';
 import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend } from '../../sync/expenses.ts';
 import { checkpointDue } from '../../sync/checkpoint.ts';
 import { lbRowMember } from '../../sync/settlements.ts';
@@ -404,6 +404,11 @@ seq = 0;
     planGroupChanges({ name: 'Goa Trip', emoji: '🏖️', color: '#6366F1', members: [local[0], { ...local[1], name: 'Priya S' }] }, noColour, () => 'x').events.length === 0);
   check('metaOf drops a colour that isn\'t #rrggbb', metaOf({ name: 'G', emoji: '', color: 'rgb(1,2,3)' }).color === null && metaOf({ name: 'G', emoji: '', color: 'x' }).emoji === null);
   check('unclaimed list for "Who Are You?"', JSON.stringify(unclaimedMembers(shared).map((m) => m.name)) === JSON.stringify(['Priya S', 'Dev']));
+  const withAdmins = { ...shared, admins: [U.rahul] };
+  check('admin = the member whose user the server lists as admin (me here, not a contact)',
+    isGroupAdmin(withAdmins, 'me') && !isGroupAdmin(withAdmins, 'c_42') && !isGroupAdmin(shared, 'me'));
+  const owing = { ...shared, fold: { ...shared.fold, balances: { [M.priya]: -500 } } };
+  check('a member\'s balance by their LOCAL id', memberBalancePaise(owing, 'c_42') === -500 && memberBalancePaise(owing, 'me') === 0);
 }
 
 console.log('\n— expense sync: two phones —');

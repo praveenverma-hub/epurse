@@ -53,6 +53,8 @@ export interface GroupShared {
   status: 'pending' | 'active' | 'ended';
   /** Changes waiting to be sent, oldest first (sync/expenses.ts `planOutgoing`). */
   outbox?: OutboxItem[];
+  /** Server user ids with the admin role (only they can remove someone who joined). Refreshed on sync. */
+  admins?: string[];
   syncedAt: string | null;
 }
 

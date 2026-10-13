@@ -122,7 +122,9 @@ sign-in to Supabase is **lazy** (§4): users who never share never get a server 
     must list only the EAS upload key + Play app-signing SHA-256s** (`docs/ANDROID_RELEASE.md`
     Track D). The `epurse://` scheme can be claimed by any app too; the invite is single-use and
     expires in 48 h, which bounds that.
-- **Where keys live:** inside the local group record (`group.shared.keys`). The same SQLite file
+- **Where keys live:** inside the local group record (`group.shared.keys`). Restore is tested
+  (`test:payload`): a live group comes back with its key, history, member map and outbox (sent and
+  unsent items), plus its transactions' and settle rows' sync fields and `syncAccount`. The same SQLite file
   already holds the group's data in plaintext, so storing the key beside it adds no exposure.
   Because it's a backed-up field, keys ride the **encrypted** Drive backup — a restored phone can
   still read its groups. A lost key can always be re-shared by any member with a new invite.
@@ -316,7 +318,7 @@ The app guarantees two things only:
 |---|---|
 | My offline change is invalid by the time it reaches the server (e.g. includes someone who left) | My phone shows the server's history + my unsent changes. A rejected change drops out of that view; the expense shows **Didn't Sync** with **Edit**. |
 | Edit and delete of the same expense | Delete wins, in any order. |
-| Leave the group / admin removes someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). They're **archived**: still shown in old expenses, can't be added to new ones. |
+| Leave the group / remove someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). They're **archived**: still shown in old expenses, can't be added to new ones. **Remove (built Oct-15-2026):** Members tab → ⋮ on their row → Remove From Group (`removeSharedMember`). Anyone may remove a person who never joined; someone who joined can be removed only by the server's admin (`shared.admins`, refreshed in `syncAllSharedGroups`), which also ends their server access (`remove_member`). If that server step fails, the row keeps offering Remove so it can be retried. The Admin tag shows the real server admin, not "me". |
 | Someone added later belongs in an earlier expense | Allowed: edit that expense and add them (Splitwise does the same). |
 | Expense edited after someone settled | Allowed; balances recompute. |
 | Duplicate expense or settlement, overpayment | Nothing special — counted as entered. |
@@ -342,8 +344,9 @@ is still the latest (so it never races a new expense).
   disagreement (`checkpointDue`). Skipped if it would exceed the 16 KB event limit
   (`MAX_CIPHERTEXT_CHARS`). Built Oct-14-2026.
 - **Verify or adopt.** A phone holding every event up to `baseSeq` VERIFIES it against its own
-  state; if they differ it keeps its own numbers and sets `checkpointMismatch` ("Balances
-  Disagree"). A phone missing history (late joiner, restored phone — it sees a seq gap) ADOPTS it:
+  state; if they differ it keeps its own numbers and sets `checkpointMismatch` — the Members tab
+  then asks to compare with the group before settling up, and one Sentry warning goes out
+  (`sync/report.ts`, the seq only). A phone missing history (late joiner, restored phone — it sees a seq gap) ADOPTS it:
   people and per-pair debts, `historyFrom` = the checkpoint.
 - **Frozen.** Every entry before a checkpoint is frozen on every phone: kept for display, ignored
   by the rules. A phone that never saw it is in the same rule state, so phones stay in step.
@@ -401,13 +404,15 @@ Order in `SettingsScreen` `handleDeleteAccount`:
    - then deletes the auth user. Their events **stay** (encrypted; the author column clears
      automatically), so the group's history is the same for every member, old or newly joined.
    - Unsettled balances do NOT block Delete Account (Play requires deletion to always be
-     available); only Leave Group needs ₹0. The delete confirmation names any group where the
-     user still owes or is owed.
+     available); only Leave Group needs ₹0. With a sync account, the confirmation adds: "You
+     also leave every shared group; what you added stays in their history for the other
+     members." Push tokens go with the auth user (cascade).
 3. Then the existing steps: `deleteAccount()` (Google revoke) → `deleteAllUserData()` →
    `flushAppStorage()` → `Storage.wipeEverything()`.
 
 Other members' phones: nothing changes in the history or balances. On the marker they show that
-person as "Deleted Account"; nobody can edit their expenses any more (an admin can still delete one).
+person as "Deleted Account"; their expenses stay — any member can still edit them (§6), and
+delete them now that the author is gone.
 
 A user who restores an older backup gets those groups back as local-only copies; rejoining needs a
 new invite.
@@ -467,8 +472,10 @@ new invite.
 4. **Realtime poke + push — code DONE (Oct-15-2026), not yet tried on a device** (§7a). Needs
    `supabase db push` (migration `20261015000000_realtime_push.sql`) and, for push only, the
    Firebase steps in §11.5 + a rebuild — **Firebase PENDING**; until then push is skipped.
-5. History sharing for late joiners, key rotation on removal, keys in backup verified on
-   restore. Done: settlement sync (§7); groups never end from inactivity (§9, Oct-15).
+5. **Deferred:** history sharing for late joiners (only matters after a group goes dormant) and
+   key rotation on removal (needs per-member key pairs; the server already cuts off removed
+   members). Done: settlement sync (§7), never-ending groups (§9), remove someone (§8a), restore
+   verified (§5), mismatch notice (§8b), Delete Account wording (§10) — all Oct-15.
 
 ### Files
 
@@ -523,6 +530,23 @@ new invite.
   - `purge_user` keeps every event (history intact) and removes only memberships and invites.
 
 ---
+
+## 12a. Known limitations (accepted Oct-15-2026)
+
+Kept on purpose; each is solved by a setting, not new machinery.
+
+The Drive backup holds no server data, only what's needed to reconnect: keys, last-seen seq,
+member map, outbox and `syncAccount`. A restored phone signs in with the same Google account
+(sign-in is Google-only, so it always is) and pulls everything after the backup's seq. Shared
+groups therefore recover past the backup point; personal data only up to it.
+
+| Case | Effect | Fix when needed |
+|---|---|---|
+| Group goes dormant (90 quiet days) between a backup and its restore | The restored phone adopts the checkpoint: balances and people right, expenses added in that window never show as transactions | Raise the dormant days, or keep full history until settled (`purge_expired`) |
+| Late joiner after a group went dormant | Sees balances, not the older expenses | Same as above |
+| The user's own group expenses added after the last backup | Come back from the server as group entries with no account (`accountId: null`): group balance right, the bank account balance misses that debit | Regular automatic backups (planned: on the user's chosen time slot) |
+| Anything personal after the last backup | Lost — no server copy, by design | Regular automatic backups |
+| Bank SMS for such an expense read again after restore | Could show the spend twice (group copy + new plain transaction); group copies never match SMS | Regular backups shrink the window; matching can come later |
 
 ## 13. Defaults to confirm
 

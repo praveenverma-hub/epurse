@@ -2075,6 +2075,15 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `redeem_invite` lose the expiry check; checkpoints no longer extend retention. Also FIXED "not
   synced" detection → `skippedBySend` (sent + covered + absent), not "has a server id but isn't
   there". **Open:** `supabase db push`.
+  **Oct-15 (5th): finishing the app side** — Delete Account confirm mentions leaving shared groups
+  (only with a sync account); restore of a live group verified in `test:payload`; Members tab →
+  ⋮ → Remove From Group (₹0 only; joined people admin-only, retryable) with the real server Admin
+  tag (`shared.admins`); checkpoint mismatch → Members-tab note + one Sentry warning. Deferred:
+  late-joiner history, key rotation. test:sync 174, test:payload 40.
+  **Oct-15 (6th): restore limits listed** in `SHARED_GROUP_SYNC.md` §12a (accepted, not fixed):
+  a restore catches shared groups up from the server, but a dormant gap shows balances without
+  the expenses, and own group expenses after the last backup return with no account. Fix = more
+  server days and regular automatic backups.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 
@@ -2546,6 +2555,9 @@ off are DONE (see Backup).
 - **Untested against a real Google account** — phases 1-6 (manual backup+restore,
   onboarding restore) are done and unit-tested, but nobody has run a real sign-in +
   upload + restore round-trip on-device yet.
+- **Automatic backups on a user-chosen time slot** — planned (Oct-15-2026). Needed because a restore
+  loses everything after the last backup; shared groups lose only their account links
+  (`SHARED_GROUP_SYNC.md` §12a).
 
 ---
 

@@ -21,14 +21,15 @@ import { encodeEvent, V1_LIMITS, type SyncEvent } from './events';
 import { buildCheckpoint, emptyFold, foldEvents, type IncomingEvent, type Rejection } from './fold';
 import { checkpointDue } from './checkpoint';
 import { newInvite, buildInviteLink, parseInviteLink } from './invite';
-import { membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
+import { isGroupAdmin, memberBalancePaise, membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
 import { planIncoming, reconcileOutbox, skippedBySend, type OutboxItem } from './expenses';
 import {
   rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
-  fetchEvents, fetchMyGroupIds, type EventRow, type SealedRow,
+  rpcRemoveMember, fetchEvents, fetchGroupAdmins, fetchMyGroupIds, type EventRow, type SealedRow,
 } from './api';
 import { ensureSyncSession } from './session';
 import { SyncError } from './errors';
+import { report } from './report';
 
 const store = () => useEPurseStore.getState() as any;
 const getGroup = (id: string): Group | undefined => store().groups.find((g: Group) => g.id === id);
@@ -69,6 +70,10 @@ const toIncoming = (shared: GroupShared, r: EventRow): IncomingEvent => {
 function commit(localId: string, pulled: GroupShared, onlyIfChanged = false) {
   const group = getGroup(localId);
   if (!group) return;
+  // Every phone folds the same events, so this "can't happen" — when it does, it's a bug to hear about.
+  if (pulled.fold.checkpointMismatch != null && group.shared?.fold.checkpointMismatch == null) {
+    report('checkpoint mismatch', { seq: pulled.fold.checkpointMismatch });
+  }
   const skipped = skippedBySend(pulled);  // before reconcileOutbox drops the sent items
   const shared = { ...pulled, outbox: reconcileOutbox(pulled) };
   const next: Group = { ...group, shared, members: membersFromFold(group.members, shared) };
@@ -293,6 +298,34 @@ export async function claimMember(localId: string, memberId: string | null): Pro
   commit(localId, { ...shared, myMemberId: id, memberMap: { ...shared.memberMap, me: id } });
 }
 
+/**
+ * Remove someone — only at ₹0 (§8a). They're archived: kept in past expenses, can't be put
+ * in new ones. Someone who JOINED also loses server access, which only the admin may do.
+ */
+export async function removeSharedMember(localId: string, localMemberId: string): Promise<void> {
+  await flushGroup(localId);
+  const { shared } = requireShared(localId);
+  const memberId = toRemoteMember(shared, localMemberId);
+  const member = shared.fold.members[memberId];
+  if (!member) return;
+  // Archived but still with access = a removal whose server step failed; this retries it.
+  const hasAccess = !!member.userId && shared.fold.activeUsers.includes(member.userId);
+  if (member.archived && !hasAccess) return;
+  if (hasAccess && !(shared.myMemberId && isGroupAdmin(shared, 'me'))) {
+    throw new SyncError('NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.');
+  }
+  if (!member.archived) {
+    const notSettled = new SyncError('NOT_SETTLED', 'Settle up first — they can be removed once their balance in this group is ₹0.');
+    if (memberBalancePaise(shared, localMemberId) !== 0) throw notSettled;
+    await sendNow(localId, [{ type: 'member.archive', memberId }]);
+    if (!requireShared(localId).shared.fold.members[memberId]?.archived) throw notSettled;
+  }
+  if (hasAccess) {
+    await rpcRemoveMember(shared.remoteId, member.userId!);
+    await pullGroup(localId);  // the member_removed marker
+  }
+}
+
 /** My balance in a synced group, in paise (0 = settled). */
 export function myBalancePaise(localId: string): number {
   const { shared } = requireShared(localId);
@@ -319,10 +352,15 @@ export async function syncAllSharedGroups(): Promise<void> {
   if (!live.length) return;
   const userId = await ensureSyncSession();
   const mine = await fetchMyGroupIds(userId);
+  const admins = await fetchGroupAdmins([...mine]).catch(() => null);
   for (const g of live) {
     if (g.shared!.status === 'active' && !mine.has(g.shared!.remoteId)) {
       store().setSharedGroupState(g.id, { ...g.shared!, status: 'ended' });
       continue;
+    }
+    const nextAdmins = admins?.get(g.shared!.remoteId);
+    if (nextAdmins && JSON.stringify(nextAdmins) !== JSON.stringify(g.shared!.admins ?? [])) {
+      store().setSharedGroupState(g.id, { ...requireShared(g.id).shared, admins: nextAdmins });
     }
     await flushGroup(g.id).catch(() => {});
   }

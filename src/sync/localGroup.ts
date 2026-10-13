@@ -14,6 +14,16 @@ import { V1_LIMITS } from './events';
 export const toRemoteMember = (shared: GroupShared, localId: string): string =>
   (localId === 'me' ? shared.myMemberId : shared.memberMap[localId]) ?? localId;
 
+/** Is this person (local member id) the group's admin, as last seen on the server? */
+export function isGroupAdmin(shared: GroupShared, localMemberId: string): boolean {
+  const userId = shared.fold.members[toRemoteMember(shared, localMemberId)]?.userId;
+  return !!userId && (shared.admins ?? []).includes(userId);
+}
+
+/** A member's balance in a synced group, in paise (0 = settled). */
+export const memberBalancePaise = (shared: GroupShared, localMemberId: string): number =>
+  shared.fold.balances[toRemoteMember(shared, localMemberId)] ?? 0;
+
 export function toLocalMember(shared: GroupShared, remoteId: string): string {
   if (remoteId === shared.myMemberId) return 'me';
   for (const [local, remote] of Object.entries(shared.memberMap)) if (remote === remoteId) return local;

@@ -32,6 +32,7 @@ const KNOWN: [RegExp, SyncError['code'], string][] = [
   [/invite expired or used/, 'INVITE_USED', 'This invite link has expired or was already used. Ask for a new one.'],
   [/group has ended/, 'GROUP_ENDED', 'This group is no longer shared.'],
   [/group is full|too many groups/, 'GROUP_FULL', 'This group can\'t take more people.'],
+  [/admins only/, 'NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.'],
 ];
 
 function fail(error: { message?: string } | null): never {
@@ -75,6 +76,8 @@ export async function rpcRedeemInvite(inviteId: string, token: string) {
 }
 
 export const rpcLeaveGroup = (groupId: string) => rpc<void>('leave_group', { p_group_id: groupId });
+export const rpcRemoveMember = (groupId: string, userId: string) =>
+  rpc<void>('remove_member', { p_group_id: groupId, p_user_id: userId });
 
 export const rpcRegisterPushToken = (token: string) => rpc<void>('register_push_token', { p_token: token });
 export const rpcUnregisterPushToken = (token: string) => rpc<void>('unregister_push_token', { p_token: token });
@@ -105,4 +108,21 @@ export async function fetchMyGroupIds(userId: string): Promise<Set<string>> {
   }
   if (res.error) fail(res.error);
   return new Set((res.data ?? []).map((r: { group_id: string }) => r.group_id));
+}
+
+/** Server group id → its admins' user ids (row-level security: my groups only). */
+export async function fetchGroupAdmins(groupIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!groupIds.length) return out;
+  let res;
+  try {
+    res = await sb().from('group_members').select('group_id,user_id').eq('role', 'admin').in('group_id', groupIds);
+  } catch (e) {
+    fail(e as Error);
+  }
+  if (res.error) fail(res.error);
+  for (const r of (res.data ?? []) as { group_id: string; user_id: string }[]) {
+    out.set(r.group_id, [...(out.get(r.group_id) ?? []), r.user_id].sort());
+  }
+  return out;
 }

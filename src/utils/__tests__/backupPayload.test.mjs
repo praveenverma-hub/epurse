@@ -86,6 +86,33 @@ S().addGroupExpense(gid, { amount: 2000, merchant: 'Hotel', categoryId: 'travel'
   accountId: 'acc1', shares: [{ memberId: 'me', name: 'You', shareAmount: 1000 },
                                { memberId: 'm1', name: 'Rahul', shareAmount: 1000 }] });
 S().addLentBorrowed({ kind: 'lent', person: 'Neha', contactId: 'c-neha', amount: 750, date: new Date().toISOString() });
+
+// The group is LIVE (shared-group sync): its key, server history, member map and an outbox
+// with one sent-but-unconfirmed and one unsent change all have to come back, or a restored
+// phone can't read the group or resends/loses changes (docs/SHARED_GROUP_SYNC.md §5).
+const LIVE = {
+  remoteId: '11111111-0000-4000-8000-000000000001',
+  keys: { 1: 'q83vEjRWeJBzcqkTN5kJKqcO1yyCC2kXqv9AzS8hKlE=' },
+  keyEpoch: 1,
+  myMemberId: '11111111-0000-4000-8000-000000000002',
+  memberMap: { me: '11111111-0000-4000-8000-000000000002', m1: '11111111-0000-4000-8000-000000000003' },
+  fold: { seq: 12, meta: { name: 'Goa Trip', emoji: null, color: null }, activeUsers: ['u1', 'u2'], deletedUsers: [],
+    members: {}, memberOrder: [], entries: {}, balances: { a: 100, b: -100 }, debts: { 'a|b': 100 },
+    historyFrom: 0, lastCheckpoint: 9, checkpointMismatch: null, lastAt: '2026-10-14T10:00:00.000Z' },
+  status: 'active',
+  outbox: [
+    { eventId: 'e-sent', at: '2026-10-14T10:00:00.000Z', event: { type: 'expense.delete', entityId: 'x1' }, seq: 13 },
+    { eventId: 'e-unsent', at: '2026-10-14T10:01:00.000Z', event: { type: 'expense.delete', entityId: 'x2' } },
+  ],
+  syncedAt: '2026-10-14T10:00:00.000Z',
+};
+S().setSharedGroupState(gid, LIVE, {});
+useStore.setState({
+  syncAccount: { userId: 'u1' },
+  transactions: S().transactions.map((t) => (t.groupId === gid ? { ...t, syncId: 'x3', syncRejected: 'k' } : t)),
+  lentBorrowed: [{ id: 'lb_sync_s1', kind: 'lent_settled', person: 'Rahul', contactId: 'c-rahul', amount: 200,
+    date: new Date().toISOString(), groupId: gid, memberId: 'm1', syncId: 's1', syncOrigin: 'remote' }, ...S().lentBorrowed],
+});
 useStore.setState({ budget: { perCategory: { food: 8000, shopping: 5000 } } });
 S().addCustomParent?.({ label: 'Pets', emoji: '🐶', color: '#F59E0B' });
 useStore.setState({ excludedExpenseParents: ['shopping'], userName: 'Praveen', themeId: 'ocean' });
@@ -213,6 +240,17 @@ const envelope = sealBackup(payload, 'a-good-password', {
     && Math.round((S().ccBills?.['4021']?.amount ?? 0) * 100) === 1674865,
     J(S().ccBills));
   check('restore: historical AGGREGATES are identical', J(after.aggregates) === J(before.aggregates));
+  const liveAfter = S().groups.find((g) => g.id === gid)?.shared;
+  check('restore: a LIVE shared group comes back whole — key, history, member map, outbox (sent + unsent)',
+    J(liveAfter) === J(LIVE), J(liveAfter));
+  const groupTxn = S().transactions.find((t) => t.groupId === gid);
+  check('restore: its transactions keep their server id and NOT SYNCED flag',
+    groupTxn?.syncId === 'x3' && groupTxn?.syncRejected === 'k');
+  const settleRow = S().lentBorrowed.find((l) => l.id === 'lb_sync_s1');
+  check('restore: its settle rows keep server id, origin and member',
+    settleRow?.syncId === 's1' && settleRow?.syncOrigin === 'remote' && settleRow?.memberId === 'm1');
+  check('restore: the shared-group account record comes back (Delete Account can still find it)',
+    S().syncAccount?.userId === 'u1');
   check('restore: spend-rule exclusions survive', J(S().excludedExpenseParents) === J(['shopping']));
   check('restore: profile + theme survive', S().userName === 'Praveen' && S().themeId === 'ocean');
   check('restore: dedup ids survive (a re-scan will not duplicate)',

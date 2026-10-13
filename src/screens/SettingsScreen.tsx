@@ -91,6 +91,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const hasSyncAccount = useEPurseStore((s: any) => !!s.syncAccount);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupYears, setCleanupYears] = useState(CLEANUP_CHOICES_YEARS[CLEANUP_CHOICES_YEARS.length - 1]);
@@ -323,7 +324,10 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
       <CenterModal
         visible={confirmDelete}
         title="Delete Account?"
-        message="This permanently erases every transaction, account, budget, goal, and reminder on this device, and disconnects your Google account. This does not delete a Drive backup — see epurse.co.in/delete-account for that. This cannot be undone."
+        message={'This permanently erases every transaction, account, budget, goal, and reminder on this device, and disconnects your Google account. '
+          // A shared-group account exists only for people who shared or joined a group (sync/session.ts).
+          + (hasSyncAccount ? 'You also leave every shared group; what you added stays in their history for the other members. ' : '')
+          + 'This does not delete a Drive backup — see epurse.co.in/delete-account for that. This cannot be undone.'}
         primaryText="Delete"
         secondaryText="Cancel"
         destructive
