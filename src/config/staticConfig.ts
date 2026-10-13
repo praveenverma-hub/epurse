@@ -176,10 +176,19 @@ export const STATIC_CONFIG = {
     enabled: false,
   },
 
+  /** Live shared-group sync (`src/sync/`, docs/SHARED_GROUP_SYNC.md). */
+  sharedSync: {
+    /**
+     * false until phases 1–3 ship. Delete Account still clears a server account
+     * that already exists, whatever this says (`deleteSyncAccount`).
+     */
+    enabled: false,
+  },
+
   /**
    * `config/remoteConfig.ts` — the one thing in the app that can change after it
    * ships: a public JSON file on our domain carrying a minimum supported version
-   * and an override for the four SECTION switches above.
+   * and an override for the SECTION switches above.
    */
   remoteConfig: {
     /**

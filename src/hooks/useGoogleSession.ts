@@ -10,6 +10,7 @@
 import { useCallback, useState } from 'react';
 
 import * as googleAuth from '../backup/googleAuth';
+import { signOutSync } from '../sync/session';
 import { useEPurseStore } from '../store/ePurseStore';
 import { suppressAppLockOnce } from '../utils/appLockSuppress';
 import { IS_DEV_BUILD } from '../constants/buildVariant';
@@ -47,6 +48,7 @@ export function useGoogleSession() {
   }, [setGoogleAccount, setSessionExpired, setJustDeletedAccount]);
 
   const signOut = useCallback(async () => {
+    await signOutSync().catch(() => {});
     await googleAuth.signOut();
     setGoogleAccount(null);
   }, [setGoogleAccount]);

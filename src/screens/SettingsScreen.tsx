@@ -48,6 +48,7 @@ import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import { APP_VERSION } from '../constants/appMeta';
 import { useTheme } from '../hooks/useTheme';
 import { useGoogleSession } from '../hooks/useGoogleSession';
+import { deleteSyncAccount } from '../sync/session';
 import NavListRow from '../components/NavListRow';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import ThemePickerSheet from '../components/ThemePickerSheet';
@@ -90,6 +91,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const [themeSheetOpen, setThemeSheetOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupYears, setCleanupYears] = useState(CLEANUP_CHOICES_YEARS[CLEANUP_CHOICES_YEARS.length - 1]);
 
@@ -124,6 +126,13 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
    */
   const handleDeleteAccount = async () => {
     setConfirmDelete(false);
+    // Server first and NOT best-effort: once this phone is wiped, nothing can retry it.
+    try {
+      await deleteSyncAccount();
+    } catch (e) {
+      setDeleteError((e as Error).message);
+      return;
+    }
     await deleteAccount();
     deleteAllUserData();
     // The emptied store must reach SQLite now, not after the coalescing window.
@@ -321,6 +330,17 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         onPrimary={handleDeleteAccount}
         onSecondary={() => setConfirmDelete(false)}
         onClose={() => setConfirmDelete(false)}
+      />
+
+      <CenterModal
+        visible={!!deleteError}
+        title="Couldn't Delete Account"
+        message={deleteError ?? ''}
+        primaryText="OK"
+        secondaryText={undefined}
+        onSecondary={undefined}
+        onPrimary={() => setDeleteError(null)}
+        onClose={() => setDeleteError(null)}
       />
     </SafeAreaView>
   );

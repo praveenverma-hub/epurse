@@ -2016,8 +2016,16 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   group is now a pencil icon on the card itself, right beside the trash icon.
 
 **Open**
-- None currently tracked (spend-exclusion cross-cutting checklist lives in the groups skill
-  — re-audit it whenever a new spend-summing surface is added).
+- **Live shared-group sync (planned Oct-13-2026, not built)**: Supabase (Mumbai), end-to-end
+  encrypted, 4-table event log, local outbox + per-group cursor, 60-day inactivity expiry,
+  Delete Account removes membership + account but KEEPS the user's events as group history (revised Oct-13; integrity rules in doc §8a). Design `docs/SHARED_GROUP_SYNC.md`,
+  schema `supabase/migrations/20261013000000_shared_groups.sql`. **Phase 1 code done
+  (Oct-13)**: `src/sync/` (lazy Supabase sign-in from the Google ID token, sign-out, `syncAccount`
+  backed up), `delete-account` Edge Function, Settings → Delete Account deletes the server account
+  FIRST and stops with an error if it can't. Off behind `sharedSync`; no Supabase project created
+  yet (setup steps in the doc §11). Phases 2–3 next.
+- Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
+  new spend-summing surface is added.
 
 ---
 

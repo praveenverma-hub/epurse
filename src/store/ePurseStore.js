@@ -1477,6 +1477,9 @@ export const useEPurseStore = create(
       isLoggedIn: false,
       googleAccount: null,   // { email, name, picture } | null — persisted, for instant display
       sessionExpired: false, // true = was logged in, got kicked out mid-session (vs. never signed in)
+      // Shared-group sync: { userId } once a Supabase account exists (src/sync/session.ts).
+      // Backed up, so Delete Account on a restored phone still deletes the server account.
+      syncAccount: null,
       // Transient, not persisted: true for exactly one LoginGate render, right
       // after deleteAllUserData() — a THIRD message distinct from sessionExpired
       // ("your Google session expired") since nothing expired here, the user
@@ -1698,6 +1701,7 @@ export const useEPurseStore = create(
       /** The ONE setter for Google identity — isLoggedIn always derives from it, can't desync. */
       setGoogleAccount: (account) => set({ googleAccount: account || null, isLoggedIn: !!account }),
       setSessionExpired: (v) => set({ sessionExpired: !!v }),
+      setSyncAccount: (account) => set({ syncAccount: account || null }),
       setJustDeletedAccount: (v) => set({ justDeletedAccount: !!v }),
       setAuthChecked: () => set({ authChecked: true }),
 
@@ -6747,6 +6751,7 @@ export const useEPurseStore = create(
           googleAccount: null,
           sessionExpired: false,
           justDeletedAccount: true,
+          syncAccount: null,
           themeId: DEFAULT_THEME_ID,
           darkMode: false,
           appLockEnabled: false,
@@ -7610,6 +7615,7 @@ export const useEPurseStore = create(
         userOnboardedAt: state.userOnboardedAt,
         hasOnboarded: state.hasOnboarded,
         googleAccount: state.googleAccount,
+        syncAccount: state.syncAccount ?? null,
         smsPermissionGranted: state.smsPermissionGranted,
         contactsPermissionGranted: state.contactsPermissionGranted,
         themeId: state.themeId,

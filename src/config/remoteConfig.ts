@@ -20,9 +20,9 @@
 //
 // ── Why a static JSON file and not a service ──
 // ePurse makes exactly ONE other network call in its entire lifetime (Google
-// Drive backup). That is the privacy claim, and it is worth protecting: this is
-// a plain GET of a public file on our own domain, with no body, no identifiers
-// and no cookies. Firebase Remote Config would do the same job and cost us that
+// Drive backup), plus Supabase only for users who share a group. That is the
+// privacy claim, and it is worth protecting: this is a plain GET of a public
+// file on our own domain, with no body, no identifiers and no cookies. Firebase Remote Config would do the same job and cost us that
 // sentence, so it was not used.
 //
 // ── The rules this module is built around ──
@@ -113,7 +113,7 @@ export const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 /**
  * The `STATIC_CONFIG` switches a remote file may override, and nothing else.
  *
- * All four are SECTIONS — a whole feature the user can reach or cannot. Each is
+ * All of them are SECTIONS — a whole feature the user can reach or cannot. Each is
  * read through `useFeatureFlag`, so flipping one re-renders the screens that
  * show it, and turning one off removes an entry point rather than changing the
  * shape of something already on screen.
@@ -125,7 +125,7 @@ export const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
  * them. Listing one here would produce a switch that silently does nothing —
  * which is worse than not having it.
  */
-export const REMOTE_FLAG_KEYS = ['shop', 'inviteEarn', 'rating', 'smsDiagnostic', 'themePicker'] as const;
+export const REMOTE_FLAG_KEYS = ['shop', 'inviteEarn', 'rating', 'smsDiagnostic', 'themePicker', 'sharedSync'] as const;
 
 export type RemoteFlagKey = (typeof REMOTE_FLAG_KEYS)[number];
 

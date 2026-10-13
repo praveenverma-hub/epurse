@@ -132,6 +132,8 @@ export const STORE_KEYS = [
   'welcomeReviewSeen', 'planBannerDismissed', 'reviewReminderOffered',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',
   'declinedAccountLinks', 'declinedLimitLinks', 'activeGroupZoneId', 'userCustomRules',
+  // shared-group sync: which server account Delete Account must clear
+  'syncAccount',
 ] as const;
 
 /**

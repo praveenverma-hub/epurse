@@ -36,7 +36,7 @@ const DISCOVERY: AuthSession.DiscoveryDocument = {
 };
 
 export class AuthError extends Error {
-  code: 'NOT_CONFIGURED' | 'CANCELLED' | 'FAILED' | 'NO_GRANT';
+  code: 'NOT_CONFIGURED' | 'CANCELLED' | 'FAILED' | 'NO_GRANT' | 'NO_ID_TOKEN';
   constructor(code: AuthError['code'], message: string) {
     super(message);
     this.name = 'AuthError';
@@ -169,6 +169,32 @@ export async function getAccessToken(): Promise<string> {
     await signOut();
     throw new AuthError('NO_GRANT', 'Google access has expired. Sign in again to back up.');
   }
+}
+
+/**
+ * A fresh Google ID token, for signing in to Supabase (shared-group sync). Google
+ * returns one on refresh because sign-in granted `openid`. A failure here does NOT
+ * sign the user out (unlike getAccessToken): sync is optional, the login isn't.
+ */
+export async function getIdToken(): Promise<string> {
+  const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+  if (!refreshToken) throw new AuthError('NO_GRANT', 'Not signed in to Google.');
+
+  let token: AuthSession.TokenResponse;
+  try {
+    token = await AuthSession.refreshAsync(
+      { clientId: clientId(), refreshToken, scopes: [DRIVE_SCOPE, 'openid', 'email', 'profile'] },
+      DISCOVERY,
+    );
+  } catch {
+    throw new AuthError('FAILED', 'Could not reach Google. Check your connection and try again.');
+  }
+  accessToken = token.accessToken;
+  accessTokenExpiry = Date.now() + (token.expiresIn ?? 3600) * 1000;
+  if (token.refreshToken) await SecureStore.setItemAsync(REFRESH_KEY, token.refreshToken);
+
+  if (!token.idToken) throw new AuthError('NO_ID_TOKEN', 'Sign in to Google again to use shared groups.');
+  return token.idToken;
 }
 
 /** Forget the grant locally. Backups already in Drive are untouched. */
