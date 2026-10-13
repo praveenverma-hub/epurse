@@ -2043,7 +2043,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   hydration) queues every change to a live group's expenses; pulls apply server expenses in ONE write
   (`setSharedGroupState` ops: memo/no-account creates, in-place edits, delete rules); outbox on
   `group.shared`; NOT SYNCED chip for changes the rules skipped. test:sync 130, test:store +14.
-  **Open:** settling up in a live group is local-only until phase 5; checkpoint posting not automatic.
+  **Open:** checkpoint posting not automatic.
+  **Oct-14 (4th): settlement sync** — group settle rows (Lent/Borrowed, `memberId`) ⇄
+  `settlement.upsert/delete` via the same subscription (`sync/settlements.ts`); incoming ones that
+  involve me become rows, others change nothing locally. Lent/Borrowed "Settle" splits off each live
+  group's part as its own row. So "Leave at ₹0" now works after settling. test:sync 142, test:store +9.
+  **Open:** a skipped settlement is flagged on its row but no chip shows it.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

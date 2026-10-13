@@ -4058,7 +4058,7 @@ export const useEPurseStore = create(
        * Never auto-creates an account (unlike updateGroupExpense): "Rahul says you paid"
        * moves no balance of yours.
        */
-      setSharedGroupState: (id, shared, { members, meta, syncIds, ops = [] } = {}) => {
+      setSharedGroupState: (id, shared, { members, meta, syncIds, lbSyncIds, ops = [] } = {}) => {
         set((s) => {
           let groups = s.groups.map((g) => {
             if (g.id !== id) return g;
@@ -4075,10 +4075,12 @@ export const useEPurseStore = create(
           let transactions = syncIds && Object.keys(syncIds).length
             ? s.transactions.map((t) => (syncIds[t.id] ? { ...t, syncId: syncIds[t.id] } : t))
             : s.transactions;
-          if (!group || !ops.length) return syncIds ? { groups, transactions } : { groups };
+          let lentBorrowed = lbSyncIds && Object.keys(lbSyncIds).length
+            ? s.lentBorrowed.map((l) => (lbSyncIds[l.id] ? { ...l, syncId: lbSyncIds[l.id] } : l))
+            : s.lentBorrowed;
+          if (!group || !ops.length) return { groups, transactions, lentBorrowed };
 
           let accounts = s.accounts;
-          let lentBorrowed = s.lentBorrowed;
           let totalDelta = 0;
           const byId = new Map(transactions.map((t) => [t.id, t]));
           const removed = new Set();
@@ -4086,6 +4088,25 @@ export const useEPurseStore = create(
           const created = [];
 
           for (const op of ops) {
+            // A settlement involving me = one group-tagged settle row (sync/settlements.ts).
+            if (op.kind === 'lbCreate') {
+              if (!lentBorrowed.some((l) => l.id === op.row.id)) lentBorrowed = [op.row, ...lentBorrowed];
+              continue;
+            }
+            if (op.kind === 'lbUpdate' || op.kind === 'lbFlag') {
+              lentBorrowed = lentBorrowed.map((l) => {
+                if (l.id !== op.rowId) return l;
+                if (op.kind === 'lbUpdate') return { ...l, ...op.fields };
+                const next = { ...l };
+                if (op.syncRejected) next.syncRejected = op.syncRejected; else delete next.syncRejected;
+                return next;
+              });
+              continue;
+            }
+            if (op.kind === 'lbRemove') {
+              lentBorrowed = lentBorrowed.filter((l) => l.id !== op.rowId);
+              continue;
+            }
             if (op.kind === 'create') {
               if (byId.has(op.txn.id)) continue;
               created.push(op.txn);
@@ -4507,6 +4528,8 @@ export const useEPurseStore = create(
           date: now,
           createdAt: new Date().toISOString(),
           groupId,
+          // Which member — a live group sends it as a settlement with them (sync/settlements.ts).
+          memberId: groupEntries.find((e) => e.memberId)?.memberId || null,
           ...(booked ? { sourceTxnId: booked.txnId } : {}),
         };
         set((s) => ({
@@ -5862,6 +5885,7 @@ export const useEPurseStore = create(
           note: entry.note || null,
           date,
           createdAt: nowIso,
+          ...(entry.groupId ? { groupId: entry.groupId, memberId: entry.memberId || null } : {}),
         };
         const accountId = opts.accountId && s.accounts.some((a) => a.id === opts.accountId) ? opts.accountId : null;
         if (!accountId) {
@@ -6107,15 +6131,29 @@ export const useEPurseStore = create(
       settlePersonBalance: (personKey, opts = {}) => {
         const person = get().getPersonBalances().find((p) => p.personKey === personKey);
         if (!person || person.net === 0) return null;
-        // One entry for the full net, through the chosen account — either direction
-        // since Oct-10-26 (a lent settle used to move no account at all).
-        return get().recordLbEntry({
-          kind: person.net < 0 ? 'borrow_repaid' : 'lent_settled',
-          person: person.person,
-          phone: person.phone,
-          contactId: person.contactId,
-          amount: Math.abs(person.net),
+        const who = { person: person.person, phone: person.phone, contactId: person.contactId };
+        const record = (amount, extra = {}) => get().recordLbEntry({
+          kind: amount < 0 ? 'borrow_repaid' : 'lent_settled', ...who, amount: Math.abs(amount), ...extra,
         }, { accountId: opts.accountId });
+
+        // A LIVE shared group's part is its own settlement — the other phones only see that
+        // group's history, and each group's balance is its own (docs/SHARED_GROUP_SYNC.md §12).
+        let rest = person.net;
+        let res = null;
+        for (const g of get().groups) {
+          if (!g.shared || g.shared.status === 'ended') continue;
+          const rows = person.entries.filter((e) => e.groupId === g.id);
+          const part = Math.round(rows.reduce((acc, e) => acc + lbSign(e) * e.amount, 0) * 100) / 100;
+          if (Math.abs(part) < 0.005) continue;
+          res = record(part, {
+            groupId: g.id, memberId: rows.find((e) => e.memberId)?.memberId || null, note: `Group settle · ${g.name}`,
+          }) || res;
+          rest -= part;
+        }
+        // The rest — or the full net, with no live group — is one entry, through the chosen
+        // account, either direction since Oct-10-26 (a lent settle used to move no account at all).
+        if (Math.abs(rest) >= 0.005) res = record(Math.round(rest * 100) / 100) || res;
+        return res;
       },
 
       // ----- SMS sync flags ---------------------------------------------

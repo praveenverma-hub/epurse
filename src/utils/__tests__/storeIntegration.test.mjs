@@ -5589,5 +5589,50 @@ console.log('\n— shared-group sync: applying server expenses (Oct-14-26) —')
   check('the shared state was written alongside', S().groups.find((g) => g.id === gid).shared?.remoteId === 'r1');
 }
 
+console.log('\n— shared-group sync: settlements (Oct-14-26) —');
+{
+  reset();
+  const S = () => useStore.getState();
+  useStore.setState({ accounts: [{ id: 'acc1', type: 'Bank', bankName: 'HDFC', mask: '1111', balance: 10000, aliasMasks: [] }] });
+  const gid = S().createGroup({ name: 'Goa', type: 'shared', members: [{ memberId: 'c_42', name: 'Priya', contactId: '42' }] });
+  const shared = { remoteId: 'r1', keys: {}, keyEpoch: 1, myMemberId: 'm-me', memberMap: { me: 'm-me', c_42: 'm-priya' },
+    fold: { seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {}, balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null },
+    status: 'active', syncedAt: null, outbox: [] };
+  S().setSharedGroupState(gid, shared, {});
+  // I paid ₹1,000 for both of us (Priya owes ₹500); and, outside the group, she owes me ₹200.
+  S().addGroupExpense(gid, { amount: 1000, merchant: 'Dinner', categoryId: 'food', paidByMemberId: 'me',
+    shares: [{ memberId: 'me', name: 'You', shareAmount: 500 }, { memberId: 'c_42', name: 'Priya', shareAmount: 500 }], accountId: 'acc1' });
+  S().recordLbEntry({ kind: 'lent', person: 'Priya', contactId: '42', amount: 200 });
+  const grpRow = S().lentBorrowed.find((l) => l.groupId === gid && l.kind === 'lent');
+  check('a group Lent/Borrowed row carries its member id', grpRow?.memberId === 'c_42', JSON.stringify(grpRow));
+
+  const key = S().getPersonBalances().find((p) => p.contactId === '42').personKey;
+  S().settlePersonBalance(key);
+  const settles = S().lentBorrowed.filter((l) => l.kind === 'lent_settled');
+  const inGroup = settles.find((l) => l.groupId === gid);
+  const outside = settles.find((l) => !l.groupId);
+  check('settling from Lent/Borrowed splits off the live group\'s part', inGroup?.amount === 500 && inGroup.memberId === 'c_42' && outside?.amount === 200,
+    JSON.stringify(settles));
+  check('…and the person is fully settled', Math.abs(S().getPersonBalances().find((p) => p.contactId === '42').net) < 0.005);
+
+  // The server says Priya also paid ME ₹100 in this group (recorded on her phone).
+  S().setSharedGroupState(gid, shared, { lbSyncIds: { [inGroup.id]: 's1' }, ops: [{ kind: 'lbCreate', row: {
+    id: 'lb_sync_s2', kind: 'lent_settled', memberId: 'c_42', person: 'Priya', contactId: '42', amount: 100, date: new Date().toISOString(),
+    groupId: gid, syncId: 's2', syncOrigin: 'remote' } }] });
+  check('a server settlement lands as one settle row; my row gets its server id',
+    S().lentBorrowed.some((l) => l.id === 'lb_sync_s2') && S().lentBorrowed.find((l) => l.id === inGroup.id).syncId === 's1');
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'lbUpdate', rowId: 'lb_sync_s2', fields: { amount: 150 } }, { kind: 'lbFlag', rowId: inGroup.id, syncRejected: 'k' }] });
+  check('edits and flags apply to the rows', S().lentBorrowed.find((l) => l.id === 'lb_sync_s2').amount === 150 && S().lentBorrowed.find((l) => l.id === inGroup.id).syncRejected === 'k');
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'lbRemove', rowId: 'lb_sync_s2' }] });
+  check('a deleted settlement removes its row', !S().lentBorrowed.some((l) => l.id === 'lb_sync_s2'));
+
+  // A group that ISN'T live keeps the old single-row settle.
+  S().setSharedGroupState(gid, { ...shared, status: 'ended' }, {});
+  S().recordLbEntry({ kind: 'lent', person: 'Priya', contactId: '42', amount: 50 });
+  const before = S().lentBorrowed.length;
+  S().settlePersonBalance(S().getPersonBalances().find((p) => p.contactId === '42').personKey);
+  check('no live group → one settle row, as before', S().lentBorrowed.length === before + 1 && !S().lentBorrowed[0].groupId);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

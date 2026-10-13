@@ -11,6 +11,7 @@ import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
 import { projectExpense, planOutgoing, planIncoming } from '../../sync/expenses.ts';
+import { lbRowMember } from '../../sync/settlements.ts';
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -400,9 +401,15 @@ seq = 0;
   };
   const pull = (phone) => {
     const fold = foldEvents(phone.group.shared.fold, log).fold;
-    phone.group = { ...phone.group, shared: { ...phone.group.shared, fold } };
-    const ops = planIncoming(phone.group, phone.txns, BUILT);
+    const shared = { ...phone.group.shared, fold };
+    // As groupSync's commit: members follow the server.
+    phone.group = { ...phone.group, shared, members: [phone.group.members[0], ...membersFromFold(phone.group.members, shared)] };
+    const ops = planIncoming(phone.group, phone.txns, BUILT, phone.lb);
     for (const op of ops) {
+      if (op.kind === 'lbCreate') phone.lb = [op.row, ...phone.lb];
+      if (op.kind === 'lbUpdate') phone.lb = phone.lb.map((l) => (l.id === op.rowId ? { ...l, ...op.fields } : l));
+      if (op.kind === 'lbRemove') phone.lb = phone.lb.filter((l) => l.id !== op.rowId);
+      if (op.kind === 'lbFlag') phone.lb = phone.lb.map((l) => (l.id === op.rowId ? { ...l, syncRejected: op.syncRejected ?? undefined } : l));
       if (op.kind === 'create') phone.txns = [op.txn, ...phone.txns];
       if (op.kind === 'update') phone.txns = phone.txns.map((t) => (t.id === op.txnId ? { ...t, ...op.fields } : t));
       if (op.kind === 'remove') phone.txns = phone.txns.filter((t) => t.id !== op.txnId);
@@ -411,15 +418,16 @@ seq = 0;
     return ops;
   };
   const queue = (phone) => {
-    const plan = planOutgoing(phone.group, phone.txns, nid, BUILT, AT);
+    const plan = planOutgoing(phone.group, phone.txns, nid, BUILT, AT, phone.lb);
     if (!plan) return null;
     phone.group = { ...phone.group, shared: plan.shared };
     phone.txns = phone.txns.map((t) => (plan.syncIds[t.id] ? { ...t, syncId: plan.syncIds[t.id] } : t));
+    phone.lb = phone.lb.map((l) => (plan.lbSyncIds[l.id] ? { ...l, syncId: plan.lbSyncIds[l.id] } : l));
     return plan;
   };
   const sharedFor = (me, map) => ({ remoteId: 'r', keys: {}, keyEpoch: 1, myMemberId: me, memberMap: map, fold: emptyFold(), status: 'active', syncedAt: null, outbox: [] });
-  const A = { group: { id: 'gA', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }, { memberId: 'c_42', name: 'Priya', contactId: '42' }], shared: sharedFor(M.rahul, { me: M.rahul, c_42: M.priya }) }, txns: [] };
-  const B = { group: { id: 'gB', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }], shared: sharedFor(M.priya, { me: M.priya }) }, txns: [] };
+  const A = { group: { id: 'gA', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }, { memberId: 'c_42', name: 'Priya', contactId: '42' }], shared: sharedFor(M.rahul, { me: M.rahul, c_42: M.priya }) }, txns: [], lb: [] };
+  const B = { group: { id: 'gB', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }], shared: sharedFor(M.priya, { me: M.priya }) }, txns: [], lb: [] };
   pull(A); pull(B);
   check('both phones start in step (nothing to send)', queue(A) === null && queue(B) === null);
 
@@ -497,6 +505,51 @@ seq = 0;
   const opsDel = pull(B);
   check('Priya\'s copy (someone else\'s expense) is removed', opsDel.some((o) => o.kind === 'remove') && !B.txns.some((t) => t.syncId === dinner));
   check('both phones end with nothing left to send', queue(A) === null && queue(B) === null);
+
+  // ── Settlements. Left: the ₹300 cab Rahul paid; Priya owes ₹150. She settles on her phone.
+  const owed = () => A.group.shared.fold.balances[M.priya] ?? 0;
+  check('before settling, the server says Priya owes ₹150', owed() === -15000, String(owed()));
+  B.lb = [{ id: 'lbB1', kind: 'borrow_repaid', person: 'Rahul', memberId: M.rahul, amount: 150, date: AT, groupId: 'gB', note: 'Group settle · Goa Trip' }];
+  const ps = queue(B);
+  const sev = ps?.shared.outbox[0]?.event;
+  check('a settle row queues one settlement, Priya → Rahul', ps && ps.shared.outbox.length === 1 && sev.type === 'settlement.upsert'
+    && sev.from === M.priya && sev.to === M.rahul && sev.amountPaise === 15000, JSON.stringify(sev));
+  check('…and gives the row its server id', B.lb[0].syncId === sev.entityId);
+  check('queuing again adds nothing', queue(B) === null);
+  upload(B, U.priya); pull(B); pull(A);
+  const recv = A.lb.find((l) => l.syncId === sev.entityId);
+  check('Rahul\'s phone gets a "received" row for Priya, in this group',
+    recv && recv.kind === 'lent_settled' && recv.amount === 150 && recv.groupId === 'gA' && recv.memberId === 'c_42' && recv.contactId === '42' && recv.syncOrigin === 'remote', JSON.stringify(recv));
+  check('…the server balance is ₹0, so either can leave', owed() === 0 && (A.group.shared.fold.balances[M.rahul] ?? 0) === 0);
+  check('…and nothing echoes back', queue(A) === null && queue(B) === null && pull(A).length === 0);
+
+  // An older settle row without memberId still finds its member.
+  check('a row without memberId matches by contact, then by a unique name',
+    lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, contactId: '42' }) === 'c_42'
+    && lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, person: ' priya s ' }) === 'c_42'
+    && lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, person: 'Nobody' }) === null);
+
+  // Settlements between two OTHER people change nothing on this phone.
+  log.push(data(U.rahul, { type: 'member.add', memberId: M.amit, name: 'Amit' }));
+  log.push(data(U.priya, { type: 'settlement.upsert', entityId: nid(), from: M.amit, to: M.rahul, amountPaise: 5000, date: AT }));
+  pull(A); pull(B);
+  check('Amit → Rahul is on Rahul\'s phone, not on Priya\'s', A.lb.length === 2 && B.lb.length === 1 && queue(B) === null && queue(A) === null);
+
+  // Priya deletes her Repayment transaction, which drops its settle row.
+  B.lb = B.lb.filter((l) => l.id !== 'lbB1');
+  const pdel = queue(B);
+  check('a settle row that\'s gone queues settlement.delete', pdel && pdel.shared.outbox.some((o) => o.event.type === 'settlement.delete' && o.event.entityId === sev.entityId));
+  upload(B, U.priya); pull(B); pull(A);
+  check('Rahul\'s "received" row goes too, and Priya owes ₹150 again',
+    !A.lb.some((l) => l.syncId === sev.entityId) && owed() === -15000 && queue(A) === null && queue(B) === null);
+
+  // Rahul can't delete a settlement Priya made (creator only) → it comes back.
+  B.lb = [{ id: 'lbB2', kind: 'borrow_repaid', person: 'Rahul', memberId: M.rahul, amount: 150, date: AT, groupId: 'gB' }];
+  queue(B); upload(B, U.priya); pull(B); pull(A);
+  const second = A.lb.find((l) => l.kind === 'lent_settled' && l.memberId === 'c_42');
+  A.lb = A.lb.filter((l) => l !== second);
+  queue(A); upload(A, U.rahul); pull(A);
+  check('a delete by someone else is skipped and the row is restored', A.lb.some((l) => l.syncId === second.syncId) && owed() === 0);
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);

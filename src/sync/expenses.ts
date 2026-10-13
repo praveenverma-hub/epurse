@@ -19,6 +19,9 @@ import type { Group, GroupShared } from '../types/group';
 import { isUuid } from './crypto';
 import { V1_LIMITS, type ExpenseBody, type SyncEvent } from './events';
 import { planGroupChanges, toLocalMember, toRemoteMember } from './localGroup';
+import {
+  groupSettleRows, planIncomingSettlements, projectSettlement, settlementsWithMe, type LbOp, type SyncLbRow,
+} from './settlements';
 
 export type OutboxItem = { eventId: string; at: string; event: SyncEvent };
 
@@ -87,8 +90,8 @@ const sameMap = (a: Record<string, string>, b: Record<string, string>) =>
  * server id the first time they can be sent; `shared.outbox` has the new events appended.
  */
 export function planOutgoing(
-  group: Group, txns: SyncTxn[], newId: () => string, builtIns: Set<string>, at: string,
-): { shared: GroupShared; syncIds: Record<string, string> } | null {
+  group: Group, txns: SyncTxn[], newId: () => string, builtIns: Set<string>, at: string, lb: SyncLbRow[] = [],
+): { shared: GroupShared; syncIds: Record<string, string>; lbSyncIds: Record<string, string> } | null {
   const shared = group.shared;
   if (!shared || shared.status === 'ended' || !shared.myMemberId) return null;
   const outbox = shared.outbox ?? [];
@@ -125,10 +128,34 @@ export function planOutgoing(
     if (e.kind === 'expense' && !e.frozen && !e.deleted && !here.has(id)) push({ type: 'expense.delete', entityId: id });
   }
 
-  if (!events.length && !Object.keys(syncIds).length && sameMap(people.memberMap, shared.memberMap)) return null;
+  // Settlements: the group's settle rows in Lent/Borrowed (sync/settlements.ts).
+  const lbSyncIds: Record<string, string> = {};
+  const settled = new Set<string>();
+  for (const r of groupSettleRows(group, lb)) {
+    const syncId = r.syncId ?? newId();
+    const body = projectSettlement(r, syncId, group, mapped);
+    if (!body) continue;
+    if (!r.syncId) lbSyncIds[r.id] = syncId;
+    settled.add(syncId);
+
+    const entry = shared.fold.entries[syncId];
+    if (entry && (entry.frozen || entry.deleted || entry.kind !== 'settlement')) continue;
+    const key = JSON.stringify(body);
+    if (entry && JSON.stringify(entry.data) === key) continue;
+    if (r.syncRejected === key) continue;
+    push({ type: 'settlement.upsert', ...body });
+  }
+  // Gone here (e.g. its Repayment transaction was deleted). Ones between other people never live here.
+  for (const [id, d] of settlementsWithMe(shared)) {
+    if (!shared.fold.entries[id].deleted && !settled.has(id)) push({ type: 'settlement.delete', entityId: id });
+  }
+
+  if (!events.length && !Object.keys(syncIds).length && !Object.keys(lbSyncIds).length
+    && sameMap(people.memberMap, shared.memberMap)) return null;
   return {
     shared: { ...mapped, outbox: [...outbox, ...events.map((event) => ({ eventId: newId(), at, event }))] },
     syncIds,
+    lbSyncIds,
   };
 }
 
@@ -138,7 +165,8 @@ export type IncomingOp =
   | { kind: 'create'; txn: SyncTxn }
   | { kind: 'update'; txnId: string; fields: Partial<SyncTxn> }
   | { kind: 'remove'; txnId: string }
-  | { kind: 'flag'; txnId: string; syncRejected: string | null };
+  | { kind: 'flag'; txnId: string; syncRejected: string | null }
+  | LbOp;
 
 /** The local shape of a server expense, given who is who on this phone. */
 function localFields(body: ExpenseBody, shared: GroupShared) {
@@ -165,8 +193,8 @@ const localKey = (t: Pick<SyncTxn, 'amount' | 'createdAt' | 'groupSplit'>, title
     t.groupSplit?.paidByMemberId, (t.groupSplit?.shares ?? []).map((s) => [s.memberId, Math.round(s.shareAmount * 100)]),
   ]);
 
-/** What to do to this phone's transactions so they match the server history. */
-export function planIncoming(group: Group, txns: SyncTxn[], builtIns: Set<string>): IncomingOp[] {
+/** What to do to this phone's transactions and settle rows so they match the server history. */
+export function planIncoming(group: Group, txns: SyncTxn[], builtIns: Set<string>, lb: SyncLbRow[] = []): IncomingOp[] {
   const shared = group.shared;
   if (!shared) return [];
   const pendingIds = new Set((shared.outbox ?? []).flatMap((o) => ('entityId' in o.event ? [o.event.entityId] : [])));
@@ -211,5 +239,5 @@ export function planIncoming(group: Group, txns: SyncTxn[], builtIns: Set<string
     const key = body ? JSON.stringify(body) : null;
     if (key && t.syncRejected !== key) ops.push({ kind: 'flag', txnId: t.id, syncRejected: key });
   }
-  return ops;
+  return [...ops, ...planIncomingSettlements(group, lb, pendingIds)];
 }

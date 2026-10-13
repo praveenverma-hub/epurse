@@ -212,6 +212,7 @@ export function buildGroupLbRows(group, txn) {
           date: txn.createdAt,
           sourceTxnId: txn.id,
           groupId: group.id,
+          memberId: sh.memberId,
         };
       });
   }
@@ -232,6 +233,7 @@ export function buildGroupLbRows(group, txn) {
     date: txn.createdAt,
     sourceTxnId: txn.id,
     groupId: group.id,
+    memberId: paidByMemberId,
   }];
 }
 

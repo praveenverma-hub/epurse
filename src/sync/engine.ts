@@ -1,6 +1,6 @@
 // =============================================================================
 // The sync engine: one store subscription that turns ANY change to a live group's
-// expenses or people into queued events (sync/expenses.ts planOutgoing), and the
+// expenses, settlements or people into queued events (sync/expenses.ts planOutgoing), and the
 // timers that send them. Installed once by SharedSyncBoot (App.js) AFTER the store
 // has loaded — before that, transactions read as empty, and every server expense
 // would look deleted.
@@ -32,15 +32,16 @@ export function installSharedSync(): void {
 
   let busy = false;
   const check = (s: any, prev: any) => {
-    if (busy || (s.transactions === prev?.transactions && s.groups === prev?.groups)) return;
+    if (busy || (s.transactions === prev?.transactions && s.groups === prev?.groups && s.lentBorrowed === prev?.lentBorrowed)) return;
     busy = true;
     try {
       const at = new Date().toISOString();
       for (const g of s.groups as Group[]) {
         if (!g.shared || g.shared.status === 'ended') continue;
-        const plan = planOutgoing(g, useEPurseStore.getState().transactions, newSyncId, BUILT_IN_CATEGORIES, at);
+        const now = useEPurseStore.getState() as any;
+        const plan = planOutgoing(g, now.transactions, newSyncId, BUILT_IN_CATEGORIES, at, now.lentBorrowed);
         if (!plan) continue;
-        (useEPurseStore.getState() as any).setSharedGroupState(g.id, plan.shared, { syncIds: plan.syncIds });
+        now.setSharedGroupState(g.id, plan.shared, { syncIds: plan.syncIds, lbSyncIds: plan.lbSyncIds });
         if ((plan.shared.outbox ?? []).length) scheduleFlush(g.id);
       }
     } finally {

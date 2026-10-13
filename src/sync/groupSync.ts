@@ -72,7 +72,7 @@ function commit(localId: string, shared: GroupShared) {
   store().setSharedGroupState(localId, shared, {
     members: next.members,
     meta: shared.fold.meta ?? undefined,
-    ops: planIncoming(next, store().transactions, BUILT_IN_CATEGORIES),
+    ops: planIncoming(next, store().transactions, BUILT_IN_CATEGORIES, store().lentBorrowed),
   });
 }
 

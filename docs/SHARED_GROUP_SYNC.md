@@ -1,4 +1,4 @@
-# Shared Group Sync — design (phases 1–3)
+# Shared Group Sync — design (phases 1–3 + settlements)
 
 **Status:** phase 1 code done Oct-13-2026 (behind `sharedSync`, off; no Supabase project yet). Phases 2–3 next.
 **Schema:** `supabase/migrations/` — `20261013000000_shared_groups.sql`, then `…120000_keep_history_on_delete.sql`, `20261014000000_checkpoints.sql` (applied in order; never edit an applied one).
@@ -197,10 +197,19 @@ flagged `syncRejected` (card chip **NOT SYNCED**) and not re-sent until it chang
 **Triggers:** a change (debounced), opening a group, the Groups tab, app start and foreground.
 Realtime pokes are phase 4.
 
-**Not yet (phase 5):** settling up in a live group is still LOCAL ONLY (the existing settle
-writes Lent/Borrowed rows; no `settlement.upsert` is sent), so other phones don't see it and the
-server balance that "Leave at ₹0" checks doesn't move. Checkpoint posting and `expense.correct`
-for frozen expenses aren't triggered automatically yet either.
+**Settlements (built Oct-14-2026, `src/sync/settlements.ts`).** A settle in a live group is a
+group-tagged Lent/Borrowed row (`lent_settled` = they paid me, `borrow_repaid` = I paid them,
+`memberId` = who). The same subscription sends each one as `settlement.upsert`, and a removed row
+(its Repayment transaction deleted) as `settlement.delete`. Coming in, only settlements that
+involve me become rows (`lb_sync_<id>`); one between two other people changes nothing here.
+**Settle from Lent/Borrowed** (`settlePersonBalance`) records each LIVE group's part as that
+group's own row, then one row for the rest — each group's balance is its own. Group Lent/Borrowed
+rows now carry `memberId` (`buildGroupLbRows`); an older row is matched by contact, then by a
+unique name (`lbRowMember`). A settlement the rules skip is flagged on its row (`syncRejected`)
+and not re-sent until it changes; no chip shows it yet.
+
+**Not yet:** checkpoint posting and `expense.correct` for frozen expenses aren't triggered
+automatically.
 
 **Edits.** Any member can edit; the highest `seq` wins on every phone, and every version stays
 in the entry's history (§6).
@@ -359,14 +368,13 @@ new invite.
    `assetlinks.json` on epurse.co.in + an App Links intent filter) — until then, paste the link.
    Removing a person who's already on the server isn't offered in Edit Group (they leave at ₹0).
 3. **Expense sync + offline — code DONE (Oct-14-2026), not yet tried on a device.** §7: one
-   check point out, one write in, outbox on the group, NOT SYNCED chip. Settlements still local
-   (phase 5).
+   check point out, one write in, outbox on the group, NOT SYNCED chip. **Settlement sync —
+   code DONE (Oct-14-2026)**, pulled forward from phase 5 (§7 Settlements).
 4. Realtime poke (broadcast `{groupId, seq}` from a trigger) + Expo push with generic text
    ("New activity in a shared group").
-5. Settlement UI, Share Again, history sharing for late joiners (then schedule compaction),
-   key rotation on removal, keys in backup verified on restore. **"Settle Up" from
-   Lent/Borrowed across several synced groups** with the same person must record one
-   settlement per group — each group's balance is its own.
+5. Share Again, history sharing for late joiners (then schedule compaction), key rotation on
+   removal, keys in backup verified on restore. (Settlement sync, incl. one settlement per group
+   from Lent/Borrowed, is done — §7.)
 
 ### Files
 
@@ -384,6 +392,7 @@ new invite.
 | `src/sync/groupSync.ts` | ✅ phase 2 actions (start, invite, join, claim, pull, leave, push edits) |
 | `src/screens/JoinGroupScreen.tsx` | ✅ paste link → "Who Are You?" |
 | `src/sync/expenses.ts` | ✅ `projectExpense`, `planOutgoing`, `planIncoming` (pure) |
+| `src/sync/settlements.ts` | ✅ settle rows ⇄ `settlement.*` events, `lbRowMember` (pure) |
 | `src/sync/engine.ts` | ✅ the store subscription + debounced send + foreground sync |
 | `src/sync/invite.ts` | ✅ build/parse invite links (pure) |
 | `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ schema, ✅ keep-history delete, ✅ checkpoints, ✅ delete-account) |
