@@ -1,4 +1,4 @@
-# Shared Group Sync — design (phases 1–3, settlements, checkpoints)
+# Shared Group Sync — design (phases 1–4, settlements, checkpoints)
 
 **Status:** phase 1 code done Oct-13-2026 (behind `sharedSync`, off; no Supabase project yet). Phases 2–3 next.
 **Schema:** `supabase/migrations/` — `20261013000000_shared_groups.sql`, then `…120000_keep_history_on_delete.sql`, `20261014000000_checkpoints.sql` (applied in order; never edit an applied one).
@@ -230,6 +230,31 @@ an empty pull still reconciles. To undo it, settle the other way.
 **Edits.** Any member can edit; the highest `seq` wins on every phone, and every version stays
 in the entry's history (§6).
 
+## 7a. Live updates and push (phase 4, built Oct-15-2026)
+
+One trigger on `groups.last_seq` (migration `20261015000000_realtime_push.sql`) runs after every
+new event (data, system or checkpoint):
+
+- **Realtime poke.** `realtime.send({ seq }, 'poke', 'group:<id>', private)`. Only members can
+  listen (policy on `realtime.messages` via `is_member`); phones can't broadcast. While the app is
+  open, `src/sync/realtime.ts` holds one channel per live group and pulls (debounced 400 ms) when a
+  poke's seq is ahead of the fold — my own writes are ignored that way. Closed on background.
+- **Push.** Expo's push service, called from Postgres with `pg_net` (no Edge Function, no secret):
+  title "New Group Activity", body "Someone updated a group you share.", `data { type:
+  'shared_group', groupId }` (the server id — already known to the server). At most one per group
+  per 10 minutes (`groups.last_push_at`), never for a checkpoint, never to the author. Expo learns a
+  device token and that generic text; nothing else.
+- **Never fails a write:** both sends are wrapped and swallow their errors.
+- **Tokens:** `push_tokens` (≤ 5 per user, functions only). `src/sync/push.ts` registers this phone
+  only while sharing is on, Settings → Notifications → **Shared Group Activity** is on (kind
+  `sharedGroupActivity`, default on), it has a live group, notification permission is already
+  granted (never asked for here) and a session exists; otherwise it removes the token. Re-registered
+  daily; a token unseen for 60 days is pruned by cron. Sign-out removes it; Delete Account cascades.
+- **On the phone:** channel `shared-groups` ("Shared Groups"); with the app open the push isn't
+  shown (realtime already pulled); a tap opens that group (`NotificationTapBoot`).
+- **Builds without Firebase** (no `google-services.json`) can't get a token — push is skipped
+  quietly; realtime still works. Server pushes ignore the app's quiet hours and daily cap.
+
 ---
 
 ## 8. Mapping into the existing model
@@ -366,6 +391,17 @@ new invite.
    `supabase functions deploy delete-account`.
 4. Project Settings → API: copy the **Project URL** and the **anon / publishable** key into
    `SUPABASE_PROJECTS` in `src/sync/config.ts`. The service-role / secret key never goes in the app.
+5. **Push (phase 4), once for all variants — PENDING (Oct-15-26: creds added later).** Android
+   push tokens come from Firebase Cloud Messaging, even though the server talks to Expo. Free
+   (FCM on the Spark plan; Expo push is free too):
+   - console.firebase.google.com → Add project (Analytics off) → Add app → Android, once per
+     package: `com.epurse.app`, `com.epurse.app.dtest`, `com.epurse.app.dprod`,
+     `com.epurse.app.stest` → download **`google-services.json`** (one file covers all four) into
+     the repo root. `app.config.js` picks it up only if it exists.
+   - Firebase → Project settings → Service accounts → **Generate new private key** (JSON) →
+     expo.dev → project `epurse` → Credentials → Android → each package → **FCM V1 service
+     account key** → upload. That key stays on expo.dev; never commit it.
+   - Rebuild the app (native change).
 
 ## 12. Phases
 
@@ -389,8 +425,9 @@ new invite.
 3. **Expense sync + offline — code DONE (Oct-14-2026), not yet tried on a device.** §7: one
    check point out, one write in, outbox on the group, NOT SYNCED chip. **Settlement sync —
    code DONE (Oct-14-2026)**, pulled forward from phase 5 (§7 Settlements).
-4. Realtime poke (broadcast `{groupId, seq}` from a trigger) + Expo push with generic text
-   ("New activity in a shared group").
+4. **Realtime poke + push — code DONE (Oct-15-2026), not yet tried on a device** (§7a). Needs
+   `supabase db push` (migration `20261015000000_realtime_push.sql`) and, for push only, the
+   Firebase steps in §11.5 + a rebuild — **Firebase PENDING**; until then push is skipped.
 5. Share Again, history sharing for late joiners (then schedule compaction), key rotation on
    removal, keys in backup verified on restore. (Settlement sync, incl. one settlement per group
    from Lent/Borrowed, is done — §7.)
@@ -413,6 +450,8 @@ new invite.
 | `src/sync/expenses.ts` | ✅ `projectExpense`, `planOutgoing`, `planIncoming` (pure) |
 | `src/sync/settlements.ts` | ✅ settle rows ⇄ `settlement.*` events, `lbRowMember` (pure) |
 | `src/sync/checkpoint.ts` | ✅ `checkpointDue` — when a phone posts one (pure) |
+| `src/sync/realtime.ts` | ✅ private `group:<id>` channels while open; poke → pull |
+| `src/sync/push.ts` | ✅ register / remove this phone's Expo push token |
 | `src/sync/engine.ts` | ✅ the store subscription + debounced send + foreground sync |
 | `src/sync/invite.ts` | ✅ build/parse invite links (pure) |
 | `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ schema, ✅ keep-history delete, ✅ checkpoints, ✅ delete-account) |

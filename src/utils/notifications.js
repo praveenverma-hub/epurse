@@ -8,14 +8,28 @@ export const CHANNEL_ID = 'payment_reminders_v2';
 // Separate channel for budget alerts so users can mute one without the other.
 export const BUDGET_CHANNEL_ID = 'budget_alerts';
 
+// Shared-group activity pushes from the server (sync/push.ts). Its own channel, so it
+// can be muted in Android settings without touching reminders. MUST match the SQL trigger.
+export const SHARED_GROUP_CHANNEL_ID = 'shared-groups';
+
 // Call once at app startup — no permission required
 export function configureNotificationHandler() {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    // Open app: a shared-group push is old news — realtime has already pulled the change.
+    handleNotification: async (n) => {
+      const show = n?.request?.content?.data?.type !== 'shared_group';
+      return { shouldShowAlert: show, shouldPlaySound: show, shouldSetBadge: false };
+    },
+  });
+}
+
+export async function setupSharedGroupChannel() {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(SHARED_GROUP_CHANNEL_ID, {
+    name: 'Shared Groups',
+    description: 'When someone changes a group you share',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    showBadge: true,
   });
 }
 

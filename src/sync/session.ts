@@ -11,6 +11,7 @@ import * as googleAuth from '../backup/googleAuth';
 import { useEPurseStore } from '../store/ePurseStore';
 import { isSyncConfigured, isSyncEnabled } from './config';
 import { SyncError } from './errors';
+import { unregisterPush } from './push';
 import type * as TClient from './client';
 
 // Loaded on first use, so supabase-js and its URL polyfill never load for users who don't share.
@@ -47,6 +48,7 @@ export async function ensureSyncSession(): Promise<string> {
 /** Ends the Supabase session on this phone. The server account and `syncAccount` stay. */
 export async function signOutSync(): Promise<void> {
   if (!isSyncConfigured() || !store().syncAccount) return;
+  await unregisterPush();  // while the session can still tell the server
   try {
     await client().getSupabase().auth.signOut({ scope: 'local' });
   } finally {

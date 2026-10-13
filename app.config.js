@@ -20,7 +20,16 @@
 // VARIANT_KEY = null and every override below is skipped — app.base.json's
 // own values pass through untouched.
 // =============================================================================
-const base = require('./app.base.json');
+const fs = require('fs');
+const path = require('path');
+const baseJson = require('./app.base.json');
+
+// Push for shared groups (docs/SHARED_GROUP_SYNC.md §11) needs Firebase's
+// google-services.json; until it's dropped in the repo root, builds go without it.
+const GOOGLE_SERVICES = './google-services.json';
+const base = fs.existsSync(path.join(__dirname, GOOGLE_SERVICES))
+  ? { ...baseJson, expo: { ...baseJson.expo, android: { ...baseJson.expo.android, googleServicesFile: GOOGLE_SERVICES } } }
+  : baseJson;
 
 const APP_VARIANT = process.env.EXPO_PUBLIC_APP_VARIANT; // undefined | 'development' | 'stage' | 'production'
 const BUILD_KIND = process.env.EXPO_PUBLIC_BUILD_KIND;   // undefined | 'test' | 'prod'

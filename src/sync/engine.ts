@@ -11,6 +11,8 @@ import { useEPurseStore } from '../store/ePurseStore';
 import type { Group } from '../types/group';
 import { planOutgoing } from './expenses';
 import { BUILT_IN_CATEGORIES, flushGroup, newSyncId, syncAllSharedGroups } from './groupSync';
+import { reconcileRealtime, setRealtimeOpen } from './realtime';
+import { syncPushRegistration } from './push';
 
 /** Wait this long after a change before sending, so a burst (an edit, SMS ingest) goes as one. */
 const SEND_DEBOUNCE_MS = 1500;
@@ -52,8 +54,28 @@ export function installSharedSync(): void {
   useEPurseStore.subscribe(check);
   check(useEPurseStore.getState(), null);  // anything queued while the app was closed
 
+  // Realtime channels + push token follow the SET of live groups and the push switch —
+  // not every sync write, which also replaces `groups`.
+  let liveKey = '';
+  const followLive = (s: any) => {
+    const key = (s.groups as Group[])
+      .filter((g) => g.shared && g.shared.status === 'active' && g.shared.myMemberId)
+      .map((g) => g.shared!.remoteId).sort().join(',') + `|${s.notificationPrefs?.sharedGroupActivity}`;
+    if (key === liveKey) return;
+    liveKey = key;
+    void reconcileRealtime();
+    void syncPushRegistration();
+  };
+  useEPurseStore.subscribe(followLive);
+
+  const pull = (localId: string) => { flushGroup(localId).catch(() => {}); };
+  void setRealtimeOpen(AppState.currentState === 'active', pull);
+  followLive(useEPurseStore.getState());
   syncAllSharedGroups().catch(() => {});
   AppState.addEventListener('change', (state) => {
-    if (state === 'active') syncAllSharedGroups().catch(() => {});
+    void setRealtimeOpen(state === 'active');
+    if (state !== 'active') return;
+    syncAllSharedGroups().catch(() => {});
+    void syncPushRegistration();  // daily refresh, and permission may have just been granted
   });
 }

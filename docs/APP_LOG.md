@@ -2056,6 +2056,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   of a newly frozen expense into a correction); flush pulls first. `StatusChip` extracted from
   TransactionItem; a skipped settlement shows NOT SYNCED on its Lent/Borrowed group line.
   test:sync 167.
+  **Oct-15: phase 4 live updates + push** — migration `20261015000000_realtime_push.sql`: one trigger on
+  `groups.last_seq` → private realtime poke `group:<id>` + generic Expo push via `pg_net` (≤1 per group
+  per 10 min, not to the author, not for checkpoints); `push_tokens` + register/unregister RPCs.
+  `sync/realtime.ts` (channels while open), `sync/push.ts` (token while the new **Shared Group
+  Activity** switch is on), channel `shared-groups`, tap → that group. **Open:** needs `supabase db
+  push`; push needs Firebase `google-services.json` + FCM key on expo.dev + rebuild.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

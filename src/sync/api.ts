@@ -76,6 +76,12 @@ export async function rpcRedeemInvite(inviteId: string, token: string) {
 
 export const rpcLeaveGroup = (groupId: string) => rpc<void>('leave_group', { p_group_id: groupId });
 
+export const rpcRegisterPushToken = (token: string) => rpc<void>('register_push_token', { p_token: token });
+export const rpcUnregisterPushToken = (token: string) => rpc<void>('unregister_push_token', { p_token: token });
+
+/** A session already on this phone — never signs in (for background work like push and realtime). */
+export const hasSyncSession = async (): Promise<boolean> => !!(await sb().auth.getSession()).data.session;
+
 export async function fetchEvents(groupId: string, afterSeq: number, limit = 500): Promise<EventRow[]> {
   let res;
   try {

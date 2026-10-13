@@ -247,11 +247,14 @@ console.log('\n── notifications ──');
   // `notify({ kind })` — notificationPolicy's `decide` reads the switch by kind —
   // or, for a push only ever scheduled ahead, `req('<kind>'` in notificationPlan.
   const plan = read('analytics/notificationPlan.ts');
+  const pushReg = read('sync/push.ts');
   const rowKeys = [...notifs.matchAll(/\{ key: '([A-Za-z]+)'/g)].map((m) => m[1]);
   check(`the screen lists several nudges (${rowKeys.length})`, rowKeys.length >= 5, rowKeys.join(','));
   for (const key of rowKeys) {
     check(`"${key}" is actually gated in the store`,
-      new RegExp(`notify\\(\\{\\s*kind: '${key}'`).test(store) || new RegExp(`req\\('${key}'`).test(plan),
+      new RegExp(`notify\\(\\{\\s*kind: '${key}'`).test(store) || new RegExp(`req\\('${key}'`).test(plan)
+        // Server-sent: the switch decides whether this phone's push token is registered.
+        || new RegExp(`pushEnabled\\([^)]*'${key}'\\)`).test(pushReg),
       'a switch with no gate at the fire site moves nothing');
   }
 

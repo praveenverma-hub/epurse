@@ -24,7 +24,7 @@ import { useStoreHydrated } from './src/hooks/useStoreHydrated';
 import AndroidSafeViewport from './src/components/AndroidSafeViewport';
 import { useSmsSync } from './src/hooks/useSmsSync';
 import { useEPurseStore } from './src/store/ePurseStore';
-import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChannel } from './src/utils/notifications';
+import { configureNotificationHandler, setupAndroidChannel, setupBudgetAlertChannel, setupSharedGroupChannel } from './src/utils/notifications';
 import { ToastProvider } from './src/components/Toast';
 import AppLockGate from './src/components/AppLockGate';
 import LoginGate from './src/components/LoginGate';
@@ -53,6 +53,7 @@ function NotificationBoot() {
     configureNotificationHandler();
     setupAndroidChannel();
     setupBudgetAlertChannel();
+    setupSharedGroupChannel();
   }, []);
   return null;
 }
@@ -95,6 +96,11 @@ function NotificationTapBoot() {
         goal_behind: typeof data?.goalId === 'string' ? ['GoalDetail', { goalId: data.goalId }] : ['Goals'],
         review_reminder: ['Main', { screen: 'Dashboard' }],
       };
+      // Server push for a shared group (sync/push.ts): its server id → this phone's group.
+      if (data?.type === 'shared_group') {
+        const group = useEPurseStore.getState().groups.find((g) => g.shared?.remoteId === data.groupId);
+        routeByType.shared_group = group ? ['GroupDetail', { groupId: group.id }] : ['Main', { screen: 'Groups' }];
+      }
       const route = routeByType[data?.type];
       if (route) {
         usePresentationSession.getState().requestRoute(route[0], route[1]);

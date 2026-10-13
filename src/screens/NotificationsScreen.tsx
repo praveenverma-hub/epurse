@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { pushEnabled } from '../constants/notificationPolicy';
+import { useSyncEnabled } from '../sync/config';
 import { getNotificationPermission, requestNotificationPermissions } from '../utils/notifications';
 import { radius, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
@@ -79,6 +80,14 @@ const GROUPS = [
       { key: 'weeklyRecap',      icon: 'calendar-number-outline', label: 'Weekly Recap',          hint: 'Mondays, last week at a glance' },
     ],
   },
+  {
+    // Shown only while sharing is available (useSyncEnabled).
+    title: 'Shared Groups',
+    icon: 'people-outline',
+    rows: [
+      { key: 'sharedGroupActivity', icon: 'people-outline',      label: 'Shared Group Activity',  hint: 'When someone changes a group you share' },
+    ],
+  },
 ] as const;
 
 interface Props {
@@ -92,6 +101,7 @@ const NotificationsScreen: React.FC<Props> = ({ navigation }) => {
   const setNotificationPref = useEPurseStore((s: any) => s.setNotificationPref);
   const reviewAtMin = useEPurseStore((s: any) => s.reviewReminderAtMin) as number;
   const setReviewReminderTime = useEPurseStore((s: any) => s.setReviewReminderTime);
+  const syncOn = useSyncEnabled();
 
   const [permission, setPermission] = useState<{ granted: boolean; canAskAgain: boolean } | null>(null);
   const checkPermission = useCallback(() => {
@@ -147,10 +157,10 @@ const NotificationsScreen: React.FC<Props> = ({ navigation }) => {
         ) : null}
 
         <Text style={[styles.hint, { color: theme.textSecondary }]}>
-          Quiet between 9:30 PM and 8:30 AM, and never more than 2 a day — card bills excepted.
+          Quiet between 9:30 PM and 8:30 AM, and never more than 2 a day — card bills and shared groups excepted.
         </Text>
 
-        {GROUPS.map((group) => (
+        {GROUPS.filter((group) => syncOn || group.title !== 'Shared Groups').map((group) => (
           <View key={group.title} style={styles.group}>
             <SectionHeader
               icon={group.icon}

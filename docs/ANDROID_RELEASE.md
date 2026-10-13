@@ -226,6 +226,8 @@ Start the slow ones today; two of them have multi-week lead times.
 | **Expo / EAS account** | Free tier works | Done | Owner `13pvn`, project id already in `app.json` |
 | **Email on `epurse.co.in`** | ~₹125/user/mo | Same day | `support@epurse.co.in` — see §2.1 |
 | **Web hosting for `epurse.co.in`** | Free tier fine | Same day | Privacy policy, terms, deletion page — see §2.2 |
+| **Supabase** (shared-group sync) | Free to test; **Pro $25/mo** for prod | Same day | Free projects pause after ~1 week idle — that would stop sync for everyone. Test project exists; prod not created |
+| **Firebase** (push only — FCM) | Free (Spark plan, no card) | Same day | **PENDING** — creds added later. Use FCM only; never enable Blaze. Steps: `docs/SHARED_GROUP_SYNC.md` §11.5 |
 
 ### 1.1 Play Developer account — register as an **organisation**, not an individual
 
@@ -589,6 +591,15 @@ paperwork and store submission, plus device QA.
     (`Sharing.shareAsync`, no permission needed) → THEN the WhatsApp text link opens,
     with a short confirm step in between explaining the two-part hand-off. Not yet
     exercised on a device with WhatsApp installed.
+
+**Track D — shared-group sync, only if it ships at launch (`STATIC_CONFIG.sharedSync`)**
+- **PENDING (Oct-15-26, user's call): Firebase creds for push.** Code is done and skips push
+  quietly without them (live updates still work). To finish: Firebase project → 4 Android apps
+  (`com.epurse.app`, `.dtest`, `.dprod`, `.stest`) → `google-services.json` in the repo root →
+  FCM V1 service-account key on expo.dev → rebuild (`docs/SHARED_GROUP_SYNC.md` §11.5).
+- Prod Supabase project (Mumbai, Pro plan) → `supabase db push` + deploy `delete-account` → prod
+  URL/key into `src/sync/config.ts` (§11.1–4 there).
+- Two-phone device test of invite → join → expenses → settle → leave, plus push.
 
 **Then, in order (each depends on the one before)**
 14. ~~**`eas credentials`** → generate the upload keystore; record its SHA-1 (§3.1).~~

@@ -19,7 +19,8 @@ export type NotificationKind =
   | 'weeklyRecap'
   | 'midmonthNudge'
   | 'ccCycleHeadsUp'
-  | 'ccPayment';
+  | 'ccPayment'
+  | 'sharedGroupActivity';
 
 interface ChannelRule {
   /** Writes an entry to the in-app bell feed (never silenced by the push switch). */
@@ -44,6 +45,9 @@ export const CHANNELS: Record<NotificationKind, ChannelRule> = {
   ccCycleHeadsUp:   { bell: true,  push: true, defaultOn: true },
   // The payment prompt already writes its own `cc_payment_review` bell entry.
   ccPayment:        { bell: false, push: true, defaultOn: true },
+  // Sent by the SERVER (sync/push.ts registers this phone for it), so no daily cap or
+  // quiet hours here — the server sends at most one per group every 10 minutes.
+  sharedGroupActivity: { bell: false, push: true, defaultOn: true },
 };
 
 /**
@@ -63,6 +67,7 @@ export const PUSH_PRIORITY: NotificationKind[] = [
   'midmonthNudge',
   'ccCycleHeadsUp',
   'ccPayment',
+  'sharedGroupActivity',
 ];
 
 /** The homeCards.js card a kind shares a subject with, where one exists. */
