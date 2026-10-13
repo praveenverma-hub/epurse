@@ -4,6 +4,7 @@
 // =============================================================================
 
 import type { GroupFold } from '../sync/fold';
+import type { OutboxItem } from '../sync/expenses';
 
 export type GroupType = 'personal' | 'shared';
 
@@ -45,8 +46,13 @@ export interface GroupShared {
   memberMap: Record<string, string>;
   /** The replayed server history (see sync/fold.ts). */
   fold: GroupFold;
-  /** 'ended' = no longer on the server (left, or expired); local data stays. */
-  status: 'active' | 'ended';
+  /**
+   * 'pending' = live here, not yet created on the server (first invite offline);
+   * 'ended' = no longer on the server (left, or expired) — local data stays.
+   */
+  status: 'pending' | 'active' | 'ended';
+  /** Changes waiting to be sent, oldest first (sync/expenses.ts `planOutgoing`). */
+  outbox?: OutboxItem[];
   syncedAt: string | null;
 }
 

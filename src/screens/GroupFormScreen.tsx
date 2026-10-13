@@ -37,7 +37,6 @@ import { firstName } from '../utils/format';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember, GroupType } from '../types/group';
-import { pushGroupChanges } from '../sync/groupSync';
 
 const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string;
@@ -148,9 +147,6 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
       if (isEdit && groupId) {
         updateGroup(groupId, data);
         toast.success('Group updated');
-        if (group?.shared?.status === 'active') {
-          pushGroupChanges(groupId).catch((e: Error) => toast.error('Couldn\'t update the shared group', e.message));
-        }
         navigation.goBack();
       } else {
         const id = createGroup(data);

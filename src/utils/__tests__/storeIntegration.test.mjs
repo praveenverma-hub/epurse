@@ -5537,5 +5537,57 @@ console.log('\n— selectExpenseStats.biggest: Home Transactions subtitle (Oct-1
   check('no spend in the period → null', mod.selectExpenseStats('M')(useStore.getState()).biggest === null);
 }
 
+console.log('\n— shared-group sync: applying server expenses (Oct-14-26) —');
+{
+  reset();
+  const S = () => useStore.getState();
+  useStore.setState({ accounts: [{ id: 'acc1', type: 'Bank', bankName: 'HDFC', mask: '1111', balance: 10000, aliasMasks: [] }] });
+  const gid = S().createGroup({ name: 'Goa', type: 'shared', members: [{ memberId: 'c_42', name: 'Priya', contactId: '42' }] });
+  const shared = { remoteId: 'r1', keys: {}, keyEpoch: 1, myMemberId: 'm-me', memberMap: { me: 'm-me', c_42: 'm-priya' },
+    fold: { seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {}, balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null },
+    status: 'active', syncedAt: null, outbox: [] };
+  const split = (payer, a, b) => ({ paidByMemberId: payer, paidByName: payer, shares: [{ memberId: 'me', name: 'You', shareAmount: a }, { memberId: 'c_42', name: 'Priya', shareAmount: b }] });
+  const bal = () => S().accounts.find((a) => a.id === 'acc1').balance;
+  const total = () => S().groups.find((g) => g.id === gid).totalSpend;
+
+  // Priya paid ₹1,000 on her phone, split equally.
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'create', txn: {
+    id: 'sync_e1', syncId: 'e1', syncOrigin: 'remote', type: 'debit', source: 'sync', isReviewed: true, isSplit: false, splitWith: [],
+    groupId: gid, accountId: null, amount: 1000, merchant: 'Dinner', categoryId: 'food', createdAt: new Date().toISOString(),
+    groupSplit: split('c_42', 500, 500), isGroupMemo: true } }] });
+  const memo = S().transactions.find((t) => t.id === 'sync_e1');
+  const owe = S().lentBorrowed.filter((l) => l.sourceTxnId === 'sync_e1');
+  check('server expense lands as a memo: no account, no balance moved', memo?.isGroupMemo && !memo.accountId && bal() === 10000);
+  check('…with my "borrowed ₹500" Lent/Borrowed row, linked to Priya\'s contact', owe.length === 1 && owe[0].kind === 'borrowed' && owe[0].amount === 500 && owe[0].contactId === '42');
+  check('…and counts in the group total', total() === 1000);
+  check('…but not in my spend (memo)', isGroupExcluded(memo, S().groups));
+
+  // "Rahul says YOU paid" for a remote expense: must not invent an account.
+  const accountsBefore = S().accounts.length;
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'update', txnId: 'sync_e1', fields: { groupSplit: split('me', 500, 500), isGroupMemo: false } }] });
+  const flipped = S().transactions.find((t) => t.id === 'sync_e1');
+  check('payer flipped to me remotely → no account auto-created, no balance moved', S().accounts.length === accountsBefore && !flipped.accountId && bal() === 10000 && !flipped.isGroupMemo);
+  check('…and the Lent/Borrowed rows are rebuilt (Priya now owes me)', S().lentBorrowed.filter((l) => l.sourceTxnId === 'sync_e1').every((l) => l.kind === 'lent'));
+
+  // My own bank expense in the group, edited on another phone to ₹1,200.
+  useStore.setState({ transactions: [{ id: 'IdM9', type: 'debit', amount: 1000, merchant: 'Hotel', categoryId: 'travel', createdAt: new Date().toISOString(),
+    accountId: 'acc1', groupId: gid, syncId: 'e2', groupSplit: split('me', 500, 500) }, ...S().transactions] });
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'update', txnId: 'IdM9', fields: { amount: 1200, groupSplit: split('me', 600, 600), isGroupMemo: false } }] });
+  check('remote edit of my bank expense: account moves by the difference only', bal() === 10000 - 200 && S().transactions.find((t) => t.id === 'IdM9').accountId === 'acc1');
+  check('…group total moves by the difference', total() === 1000 + 200);
+
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'flag', txnId: 'IdM9', syncRejected: 'k' }] });
+  check('a rejected change is flagged on the transaction', S().transactions.find((t) => t.id === 'IdM9').syncRejected === 'k');
+
+  // Deleted on the server.
+  S().setSharedGroupState(gid, shared, { ops: [{ kind: 'remove', txnId: 'IdM9' }, { kind: 'remove', txnId: 'sync_e1' }] });
+  const mine = S().transactions.find((t) => t.id === 'IdM9');
+  check('my own bank expense stays as a plain expense of mine (money did leave)', mine && !mine.groupId && !mine.groupSplit && !mine.syncId && mine.accountId === 'acc1');
+  check('someone else\'s expense goes entirely', !S().transactions.some((t) => t.id === 'sync_e1'));
+  check('…and all their Lent/Borrowed rows go with them', !S().lentBorrowed.some((l) => l.sourceTxnId === 'IdM9' || l.sourceTxnId === 'sync_e1'));
+  check('group total back to zero', total() === 0);
+  check('the shared state was written alongside', S().groups.find((g) => g.id === gid).shared?.remoteId === 'r1');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

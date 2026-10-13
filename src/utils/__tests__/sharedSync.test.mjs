@@ -10,6 +10,7 @@ import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE } from '../../
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
+import { projectExpense, planOutgoing, planIncoming } from '../../sync/expenses.ts';
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -371,8 +372,131 @@ seq = 0;
   check('edit plan: rename of a remote-only member', plan.events.some((e) => e.type === 'member.rename' && e.memberId === DEV && e.name === 'Dev K'));
   const same = planGroupChanges({ name: 'Goa Trip', emoji: '🏖️', color: '#7C3AED', members: [local[0], { ...local[1], name: 'Priya S' }] }, shared, () => 'x');
   check('nothing changed → nothing sent', same.events.length === 0);
+  const noColour = { ...shared, fold: { ...shared.fold, meta: { name: 'Goa Trip', emoji: '🏖️', color: null } } };
+  check('server has no colour → this phone\'s default isn\'t sent as an edit',
+    planGroupChanges({ name: 'Goa Trip', emoji: '🏖️', color: '#6366F1', members: [local[0], { ...local[1], name: 'Priya S' }] }, noColour, () => 'x').events.length === 0);
   check('metaOf drops a colour that isn\'t #rrggbb', metaOf({ name: 'G', emoji: '', color: 'rgb(1,2,3)' }).color === null && metaOf({ name: 'G', emoji: '', color: 'x' }).emoji === null);
   check('unclaimed list for "Who Are You?"', JSON.stringify(unclaimedMembers(shared).map((m) => m.name)) === JSON.stringify(['Priya S', 'Dev']));
+}
+
+console.log('\n— expense sync: two phones —');
+seq = 0;
+{
+  const BUILT = new Set(['food', 'travel', 'other']);
+  const AT = '2026-10-14T09:00:00.000Z';
+  let idn = 0;
+  const nid = () => `aaaaaaaa-0000-4000-8000-${String(++idn).padStart(12, '0')}`;
+  // The server: every queued event becomes the next seq, authored by that phone's user.
+  let log = [sys('group_created', U.rahul),
+    data(U.rahul, { type: 'group.meta', name: 'Goa Trip', emoji: null, color: null }),
+    data(U.rahul, { type: 'member.add', memberId: M.rahul, name: 'Rahul' }),
+    data(U.rahul, { type: 'member.claim', memberId: M.rahul, userId: U.rahul }),
+    data(U.rahul, { type: 'member.add', memberId: M.priya, name: 'Priya' }),
+    sys('member_joined', U.priya),
+    data(U.priya, { type: 'member.claim', memberId: M.priya, userId: U.priya })];
+  const upload = (phone, user) => {
+    for (const o of phone.group.shared.outbox ?? []) log.push(data(user, o.event));
+    phone.group = { ...phone.group, shared: { ...phone.group.shared, outbox: [] } };
+  };
+  const pull = (phone) => {
+    const fold = foldEvents(phone.group.shared.fold, log).fold;
+    phone.group = { ...phone.group, shared: { ...phone.group.shared, fold } };
+    const ops = planIncoming(phone.group, phone.txns, BUILT);
+    for (const op of ops) {
+      if (op.kind === 'create') phone.txns = [op.txn, ...phone.txns];
+      if (op.kind === 'update') phone.txns = phone.txns.map((t) => (t.id === op.txnId ? { ...t, ...op.fields } : t));
+      if (op.kind === 'remove') phone.txns = phone.txns.filter((t) => t.id !== op.txnId);
+      if (op.kind === 'flag') phone.txns = phone.txns.map((t) => (t.id === op.txnId ? { ...t, syncRejected: op.syncRejected ?? undefined } : t));
+    }
+    return ops;
+  };
+  const queue = (phone) => {
+    const plan = planOutgoing(phone.group, phone.txns, nid, BUILT, AT);
+    if (!plan) return null;
+    phone.group = { ...phone.group, shared: plan.shared };
+    phone.txns = phone.txns.map((t) => (plan.syncIds[t.id] ? { ...t, syncId: plan.syncIds[t.id] } : t));
+    return plan;
+  };
+  const sharedFor = (me, map) => ({ remoteId: 'r', keys: {}, keyEpoch: 1, myMemberId: me, memberMap: map, fold: emptyFold(), status: 'active', syncedAt: null, outbox: [] });
+  const A = { group: { id: 'gA', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }, { memberId: 'c_42', name: 'Priya', contactId: '42' }], shared: sharedFor(M.rahul, { me: M.rahul, c_42: M.priya }) }, txns: [] };
+  const B = { group: { id: 'gB', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }], shared: sharedFor(M.priya, { me: M.priya }) }, txns: [] };
+  pull(A); pull(B);
+  check('both phones start in step (nothing to send)', queue(A) === null && queue(B) === null);
+
+  // Rahul pays ₹1,000 from his bank, split equally with Priya.
+  A.txns = [{ id: 'IdM0001', type: 'debit', amount: 1000, merchant: 'Shack Dinner', categoryId: 'food', createdAt: '2026-10-14T20:00:00.000Z', accountId: 'acc1', groupId: 'gA',
+    groupSplit: { paidByMemberId: 'me', paidByName: 'You', shares: [{ memberId: 'me', name: 'You', shareAmount: 500 }, { memberId: 'c_42', name: 'Priya', shareAmount: 500 }] } }];
+  const p1 = queue(A);
+  const ev = p1?.shared.outbox[0]?.event;
+  check('a new expense queues one upsert, in server terms', p1 && p1.shared.outbox.length === 1 && ev.type === 'expense.upsert'
+    && ev.paidBy === M.rahul && ev.shares[1].memberId === M.priya && ev.amountPaise === 100000, JSON.stringify(ev));
+  check('…and gives the transaction its server id', A.txns[0].syncId === ev.entityId);
+  check('queuing again adds nothing (no duplicates)', queue(A) === null);
+  const dinner = ev.entityId;
+  upload(A, U.rahul);
+  check('Rahul\'s own expense comes back with no changes', pull(A).length === 0);
+  const opsB = pull(B);
+  const got = B.txns[0];
+  check('Priya\'s phone creates it as a memo she owes on',
+    opsB.length === 1 && got.syncOrigin === 'remote' && got.isGroupMemo === true && !got.accountId && got.amount === 1000
+    && got.groupSplit.paidByMemberId === M.rahul && got.groupSplit.shares.some((s) => s.memberId === 'me' && s.shareAmount === 500), JSON.stringify(got));
+  check('…and has nothing to send back', queue(B) === null);
+
+  // Priya edits it: the bill was ₹1,200.
+  B.txns = B.txns.map((t) => ({ ...t, amount: 1200, groupSplit: { ...t.groupSplit, shares: t.groupSplit.shares.map((s) => ({ ...s, shareAmount: 600 })) } }));
+  const p2 = queue(B);
+  check('an edit queues an upsert of the same expense', p2 && p2.shared.outbox[0].event.entityId === dinner && p2.shared.outbox[0].event.amountPaise === 120000);
+  upload(B, U.priya);
+  const opsA = pull(A);
+  check('Rahul\'s phone takes the edit in place (same transaction, account kept)',
+    opsA.length === 1 && opsA[0].kind === 'update' && A.txns[0].id === 'IdM0001' && A.txns[0].amount === 1200 && A.txns[0].accountId === 'acc1');
+  check('…without echoing it back', queue(A) === null && pull(B).length === 0);
+
+  // Paisa rounding: ₹100 three ways.
+  A.group = { ...A.group, members: [...A.group.members] };
+  const odd = projectExpense({ id: 'x', type: 'debit', amount: 100, merchant: 'Tea', categoryId: 'food', createdAt: AT,
+    groupSplit: { paidByMemberId: 'me', shares: [{ memberId: 'me', shareAmount: 33.33 }, { memberId: 'c_42', shareAmount: 33.33 }, { memberId: 'me2', shareAmount: 33.34 }] } }, 'e', A.group.shared, BUILT);
+  check('a member not on the server yet → not sendable', odd === null);
+  const tea = projectExpense({ id: 'x', type: 'debit', amount: 100, merchant: 'Tea', categoryId: 'custom_x', createdAt: AT,
+    groupSplit: { paidByMemberId: 'c_42', shares: [{ memberId: 'me', shareAmount: 33.33 }, { memberId: 'c_42', shareAmount: 33.33 }] } }, 'e', A.group.shared, BUILT);
+  check('rupee shares that miss the total by a paisa: the payer absorbs it', tea && tea.shares[1].paise === 6667 && tea.shares[0].paise + tea.shares[1].paise === 10000, JSON.stringify(tea));
+  check('a custom category goes out as "other"', tea.categoryId === 'other');
+
+  // A pending change is never overwritten by the server's older copy.
+  A.txns = A.txns.map((t) => ({ ...t, merchant: 'Shack Dinner + Drinks' }));
+  queue(A);
+  log.push(data(U.priya, { type: 'member.rename', memberId: M.priya, name: 'Priya S' }));
+  const opsPending = pull(A);
+  check('pull skips an expense with an unsent change', opsPending.length === 0 && A.txns[0].merchant === 'Shack Dinner + Drinks');
+  upload(A, U.rahul); pull(A); pull(B);
+  check('…which lands everywhere once sent', B.txns[0].merchant === 'Shack Dinner + Drinks');
+
+  // Rejected: Rahul adds an expense naming someone the server doesn't know.
+  const GHOST = 'bbbbbbbb-0000-4000-8000-000000000001';
+  A.group = { ...A.group, shared: { ...A.group.shared, memberMap: { ...A.group.shared.memberMap, c_9: GHOST } } };
+  A.txns = [{ id: 'IdM0002', type: 'debit', amount: 300, merchant: 'Cab', categoryId: 'travel', createdAt: AT, accountId: 'acc1', groupId: 'gA',
+    groupSplit: { paidByMemberId: 'me', shares: [{ memberId: 'me', shareAmount: 150 }, { memberId: 'c_9', shareAmount: 150 }] } }, ...A.txns];
+  const pr = queue(A);
+  check('it is queued like any other', pr && pr.shared.outbox.some((o) => o.event.type === 'expense.upsert' && o.event.title === 'Cab'));
+  upload(A, U.rahul);
+  pull(A);
+  const cab = A.txns.find((t) => t.id === 'IdM0002');
+  check('the rules skip it → marked as not synced', !!cab.syncRejected && !B.txns.some((t) => t.merchant === 'Cab'));
+  check('…and it is not re-sent while unchanged', queue(A) === null);
+  A.txns = A.txns.map((t) => (t.id === 'IdM0002' ? { ...t, groupSplit: { paidByMemberId: 'me', shares: [{ memberId: 'me', shareAmount: 150 }, { memberId: 'c_42', shareAmount: 150 }] } } : t));
+  const retry = queue(A);
+  upload(A, U.rahul); pull(A); pull(B);
+  check('fixing it sends it again; it syncs and the flag clears', retry && !A.txns.find((t) => t.id === 'IdM0002').syncRejected && B.txns.some((t) => t.merchant === 'Cab'));
+
+  // Rahul removes the dinner from the group (or ignores/deletes it).
+  A.txns = A.txns.map((t) => (t.id === 'IdM0001' ? { ...t, isIgnored: true } : t));
+  const pd = queue(A);
+  check('ignoring a synced expense queues a delete', pd && pd.shared.outbox.some((o) => o.event.type === 'expense.delete' && o.event.entityId === dinner));
+  upload(A, U.rahul);
+  pull(A);
+  const opsDel = pull(B);
+  check('Priya\'s copy (someone else\'s expense) is removed', opsDel.some((o) => o.kind === 'remove') && !B.txns.some((t) => t.syncId === dinner));
+  check('both phones end with nothing left to send', queue(A) === null && queue(B) === null);
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);

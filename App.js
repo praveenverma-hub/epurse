@@ -18,6 +18,7 @@ initSentry();
 import AppNavigator from './src/navigation/AppNavigator';
 import AppKeyboardAvoidingView from './src/components/AppKeyboardAvoidingView';
 import AwareRunBoot from './src/components/AwareRunBoot';
+import { installSharedSync } from './src/sync/engine';
 import { usePresentationSession } from './src/store/usePresentationSession';
 import { useStoreHydrated } from './src/hooks/useStoreHydrated';
 import AndroidSafeViewport from './src/components/AndroidSafeViewport';
@@ -187,6 +188,15 @@ function CompactionBoot() {
   return null;
 }
 
+/** Shared-group sync: starts once the store has loaded, and only does work for live groups. */
+function SharedSyncBoot() {
+  const hydrated = useStoreHydrated();
+  useEffect(() => {
+    if (hydrated) installSharedSync();
+  }, [hydrated]);
+  return null;
+}
+
 // AppNavigator reads hasOnboarded ONCE, at mount, to pick its first screen. Mounted
 // before the store loads it saw the default (false) and opened Onboarding for an
 // onboarded user — visible once SQLite made loading slower. ROOT_BG shows meanwhile.
@@ -323,6 +333,7 @@ function App() {
             <AppUpdateNudgeBoot />
             <SmsSyncBoot />
             <CompactionBoot />
+            <SharedSyncBoot />
             <BudgetRolloverBoot />
             <AwareRunBoot />
             <AuthSessionBoot />

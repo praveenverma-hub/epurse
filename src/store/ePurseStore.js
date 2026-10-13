@@ -4047,13 +4047,20 @@ export const useEPurseStore = create(
       },
 
       /**
-       * Shared-group sync writes here (src/sync/groupSync.ts): the group's `shared` state,
-       * plus — when the server history says so — its members and name/emoji/colour.
+       * Shared-group sync writes here (src/sync/), always in ONE set():
+       *   • `shared` — the group's sync state (server history, outbox, …)
+       *   • `members` / `meta` — when the server history says so
+       *   • `syncIds` — server ids given to transactions the first time they're sent
+       *   • `ops` — the server history applied to transactions (sync/expenses.ts planIncoming)
+       * One write matters: with the history updated but the transactions not yet, the
+       * outgoing check would read a remote edit as a local one and send it back.
        * Doesn't bump lastActivityAt: a background sync isn't the user's activity.
+       * Never auto-creates an account (unlike updateGroupExpense): "Rahul says you paid"
+       * moves no balance of yours.
        */
-      setSharedGroupState: (id, shared, { members, meta } = {}) => {
-        set((s) => ({
-          groups: s.groups.map((g) => {
+      setSharedGroupState: (id, shared, { members, meta, syncIds, ops = [] } = {}) => {
+        set((s) => {
+          let groups = s.groups.map((g) => {
             if (g.id !== id) return g;
             const next = { ...g, shared };
             if (meta) {
@@ -4063,8 +4070,74 @@ export const useEPurseStore = create(
             }
             if (members) next.members = ensureSelfMember('shared', members);
             return next;
-          }),
-        }));
+          });
+          const group = groups.find((g) => g.id === id);
+          let transactions = syncIds && Object.keys(syncIds).length
+            ? s.transactions.map((t) => (syncIds[t.id] ? { ...t, syncId: syncIds[t.id] } : t))
+            : s.transactions;
+          if (!group || !ops.length) return syncIds ? { groups, transactions } : { groups };
+
+          let accounts = s.accounts;
+          let lentBorrowed = s.lentBorrowed;
+          let totalDelta = 0;
+          const byId = new Map(transactions.map((t) => [t.id, t]));
+          const removed = new Set();
+          const replaced = new Map();
+          const created = [];
+
+          for (const op of ops) {
+            if (op.kind === 'create') {
+              if (byId.has(op.txn.id)) continue;
+              created.push(op.txn);
+              lentBorrowed = [...buildGroupLbRows(group, op.txn), ...lentBorrowed];
+              totalDelta += op.txn.amount;
+              continue;
+            }
+            const old = replaced.get(op.txnId) || byId.get(op.txnId);
+            if (!old) continue;
+            if (op.kind === 'flag') {
+              const next = { ...old };
+              if (op.syncRejected) next.syncRejected = op.syncRejected; else delete next.syncRejected;
+              replaced.set(old.id, next);
+            } else if (op.kind === 'update') {
+              const next = { ...old, ...op.fields };
+              if (!op.fields.isGroupMemo) delete next.isGroupMemo;
+              // Same account handling as updateGroupExpense, minus creating one.
+              if (!old.isGroupMemo && old.accountId) {
+                accounts = applyDelta(accounts, old.accountId, { ...old, type: TRANSACTION_TYPES.CREDIT });
+              }
+              if (next.isGroupMemo) {
+                delete next.accountId;
+                clearAccountMeta(next);
+              } else if (next.accountId) {
+                accounts = applyDelta(accounts, next.accountId, next);
+              }
+              lentBorrowed = [...buildGroupLbRows(group, next), ...lentBorrowed.filter((l) => l.sourceTxnId !== old.id)];
+              totalDelta += (next.amount || 0) - (old.amount || 0);
+              replaced.set(old.id, next);
+            } else if (op.kind === 'remove') {
+              lentBorrowed = lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
+              totalDelta -= old.amount || 0;
+              // Someone else's expense, or a memo (no money of mine moved): it goes.
+              // My own real debit stays as a plain expense of mine.
+              if (old.syncOrigin === 'remote' || old.isGroupMemo || !old.accountId) {
+                removed.add(old.id);
+              } else {
+                const next = { ...old };
+                delete next.groupId; delete next.groupSplit; delete next.isGroupMemo;
+                delete next.syncId; delete next.syncRejected;
+                replaced.set(old.id, next);
+              }
+            }
+          }
+
+          transactions = [
+            ...created,
+            ...transactions.filter((t) => !removed.has(t.id)).map((t) => replaced.get(t.id) || t),
+          ];
+          groups = adjustGroupTotal(groups, id, totalDelta);
+          return { groups, transactions, lentBorrowed, accounts };
+        });
       },
 
       /** Turn a group zone on (groupId) or off (null). Exclusive — one zone at a time. */

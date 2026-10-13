@@ -70,7 +70,9 @@ export function planGroupChanges(
   const { fold } = shared;
 
   const meta = metaOf(group);
-  if (meta.name && (!fold.meta || fold.meta.name !== meta.name || fold.meta.emoji !== meta.emoji || fold.meta.color !== meta.color)) {
+  // No colour on the server: the colour here is just this phone's default, not an edit.
+  const colorChanged = fold.meta?.color != null && fold.meta.color !== meta.color;
+  if (meta.name && (!fold.meta || fold.meta.name !== meta.name || fold.meta.emoji !== meta.emoji || colorChanged)) {
     events.push(meta);
   }
 

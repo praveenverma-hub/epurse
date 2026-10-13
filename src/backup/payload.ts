@@ -58,6 +58,8 @@ export const TXN_FIELDS = [
   'isSplit', 'splitWith', 'myShareAmount', 'myPercent', 'isSplitMemo', 'splitPaidBy', 'memoAccountId',
   // groups
   'groupId', 'groupSplit', 'isGroupMemo',
+  // live shared groups: server id, "came from another member", and a change the server rejected
+  'syncId', 'syncOrigin', 'syncRejected',
   // self-transfer hints — still needed AFTER a restore, because ingesting new SMS
   // re-checks earlier transactions against the grown mask set.
   'counterpartyMask', 'counterpartyPhone', 'counterpartyName', 'transferRef', 'selfDualLeg',

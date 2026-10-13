@@ -54,7 +54,7 @@ import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
 import type { Group } from '../types/group';
 import { useSyncEnabled } from '../sync/config';
-import { createInviteLink, leaveSharedGroup, pullGroup } from '../sync/groupSync';
+import { createInviteLink, flushGroup, leaveSharedGroup } from '../sync/groupSync';
 import { toRemoteMember } from '../sync/localGroup';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -129,11 +129,11 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [ccBillTxn, setCcBillTxn] = useState<any | null>(null);
 
   const syncOn = useSyncEnabled();
-  const live = group?.shared?.status === 'active';
-  // Catch up whenever the screen comes back into view; failures stay quiet (offline is normal).
+  const live = !!group?.shared && group.shared.status !== 'ended';
+  // Send anything queued and catch up whenever the screen comes into view; offline stays quiet.
   useEffect(() => {
     if (!live || !groupId) return undefined;
-    const refresh = () => { pullGroup(groupId).catch(() => {}); };
+    const refresh = () => { flushGroup(groupId).catch(() => {}); };
     refresh();
     return navigation.addListener('focus', refresh);
   }, [live, groupId, navigation]);

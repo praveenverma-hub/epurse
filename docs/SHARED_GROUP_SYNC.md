@@ -46,7 +46,7 @@ sign-in to Supabase is **lazy** (§4): users who never share never get a server 
   ┌─────────────────────────────────────────┐
   │ zustand store → hybridStorage → SQLite  │  personal data: stays here
   │   transactions, lentBorrowed, groups,   │
-  │   syncOutbox  (same flush transaction)  │
+  │   group.shared.outbox (same flush)      │
   │            │                 ▲          │
   │      encrypt + send     decrypt+validate│
   │            ▼             + fold         │
@@ -162,43 +162,45 @@ otherwise phones drift apart. Balances in the fold always sum to zero.
 
 ## 7. Client sync engine (`src/sync/`)
 
-**Outbox.** A new store row collection `syncOutbox` → SQLite table `sync_outbox`
-(`SCHEMA_VERSION` 2). A store action that changes a synced group's expense writes the txn AND the
-outbox row in **one `set()`**, so `hybridStorage` flushes both in one SQLite transaction — a crash
-loses both or neither. It's in the backup payload (`STORE_KEYS`); replay is safe because event ids
-are idempotent on the server.
+Built Oct-14-2026: `expenses.ts` (pure), `engine.ts`, `groupSync.ts`. Tested by `test:sync`
+(two-phone simulation) and `test:store` ("shared-group sync: applying server expenses").
 
-Each row stores:
-- `eventId`
-- `groupId`
-- `payload` (plaintext JSON — encrypted at send time with the current epoch)
-- `createdAt`
-- `attempts`
-- `state`: `pending` or `failed`
+**One check point, going out.** `engine.ts` installs ONE store subscription (`SharedSyncBoot` in
+`App.js`, only AFTER hydration — before it, transactions read as empty and every server expense
+would look deleted). On any change to `transactions` or `groups`, `planOutgoing` compares each live
+group's expenses with the server history (`fold.entries`) and queues the difference: new/edited →
+`expense.upsert`, gone from the group (deleted, ignored, untagged) → `expense.delete`, plus
+name/emoji/colour/people via `planGroupChanges`. No store action "sends" anything itself. An event
+already waiting in the outbox is never queued twice. Transactions get a `syncId` (server id) the
+first time they can be sent; one with no split yet isn't sent until it has one.
 
-**Send.** Per group, oldest first, ≤ 50 per `append_events` call. On success the row is deleted.
-- **Network error:** retry with backoff.
-- **Rejected** (validation or stale epoch): mark `failed` and show "1 change didn't sync" on the
-  group.
-- **Not a member / expired:** mark the group's sharing as ended.
+**Outbox** = `group.shared.outbox` (not a separate table): it lives on the group record, so the
+expense change and its outbox entry reach SQLite in the same coalesced flush. Backed up with the
+group; a resend is safe because each item's `eventId` is fixed when queued.
 
-**Pull.** `group_events where group_id = ? and seq > cursor order by seq limit 500`, repeated
-until empty. Each event goes through decrypt → validate → fold into the store. The cursor is
-saved in the same `set()`.
+**Send** (`flushGroup`): per group, one at a time; a `pending` group is created on the server
+first; ≤ 50 per `append_events`; sent items leave the outbox; then pull. Not a member / ended →
+the group is marked ended. Offline → stays queued. Debounced 1.5 s after a change.
 
-The cursor lives on the group record (backed up). A restored snapshot already contains every event
-up to its cursor, so resuming from it is correct.
+**Pull** (`pullGroup`): `seq > cursor`, 500 at a time → decrypt → `foldEvents` → `planIncoming`
+→ ONE `setSharedGroupState` write with the new history, members, name AND the transaction changes.
+One write matters: in between, the outgoing check would read a remote edit as a local one.
 
-**Echo.** An incoming event whose `eventId` is one of ours that's already applied locally just
-acknowledges the outbox row (if still present); it is not applied twice.
+**Incoming rules** (`planIncoming` + the store): an expense with an unsent local change is left
+alone until it's sent. New from someone else → a transaction `sync_<id>` (`syncOrigin: 'remote'`,
+no account; a memo if someone else paid) with Lent/Borrowed rows via `buildGroupLbRows`. Edited →
+updated in place (my own bank expense keeps its account; the balance moves by the difference;
+never auto-creates an account). Deleted → someone else's or a memo goes; my own bank expense stays
+as a plain expense of mine. Mine, sent, but absent from the history → the rules skipped it:
+flagged `syncRejected` (card chip **NOT SYNCED**) and not re-sent until it changes.
 
-**Triggers** (phase 3):
-- app foreground
-- opening a synced group
-- after an enqueue (debounced)
-- a retry timer
+**Triggers:** a change (debounced), opening a group, the Groups tab, app start and foreground.
+Realtime pokes are phase 4.
 
-Realtime pokes are added in phase 4.
+**Not yet (phase 5):** settling up in a live group is still LOCAL ONLY (the existing settle
+writes Lent/Borrowed rows; no `settlement.upsert` is sent), so other phones don't see it and the
+server balance that "Leave at ₹0" checks doesn't move. Checkpoint posting and `expense.correct`
+for frozen expenses aren't triggered automatically yet either.
 
 **Edits.** Any member can edit; the highest `seq` wins on every phone, and every version stays
 in the entry's history (§6).
@@ -356,8 +358,9 @@ new invite.
    — that's phase 3. Not built: QR code, and invite links opening the app directly (needs
    `assetlinks.json` on epurse.co.in + an App Links intent filter) — until then, paste the link.
    Removing a person who's already on the server isn't offered in Edit Group (they leave at ₹0).
-3. **Encrypted event log + offline.** Outbox, send, pull, validator, fold, echo, remote txns as
-   memos, failed-change indicator.
+3. **Expense sync + offline — code DONE (Oct-14-2026), not yet tried on a device.** §7: one
+   check point out, one write in, outbox on the group, NOT SYNCED chip. Settlements still local
+   (phase 5).
 4. Realtime poke (broadcast `{groupId, seq}` from a trigger) + Expo push with generic text
    ("New activity in a shared group").
 5. Settlement UI, Share Again, history sharing for late joiners (then schedule compaction),
@@ -380,15 +383,16 @@ new invite.
 | `src/sync/localGroup.ts` | ✅ server ⇄ local members (`memberMap`, `'me'`), edit planning (pure) |
 | `src/sync/groupSync.ts` | ✅ phase 2 actions (start, invite, join, claim, pull, leave, push edits) |
 | `src/screens/JoinGroupScreen.tsx` | ✅ paste link → "Who Are You?" |
-| `src/sync/engine.ts` | phase 3: outbox send/pull loop, triggers |
+| `src/sync/expenses.ts` | ✅ `projectExpense`, `planOutgoing`, `planIncoming` (pure) |
+| `src/sync/engine.ts` | ✅ the store subscription + debounced send + foreground sync |
 | `src/sync/invite.ts` | ✅ build/parse invite links (pure) |
 | `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ schema, ✅ keep-history delete, ✅ checkpoints, ✅ delete-account) |
 
 | Changed | Why |
 |---|---|
-| `src/storage/schema.ts` | `syncOutbox` row table, `SCHEMA_VERSION` 2 |
-| `src/store/ePurseStore.js` | enqueue in group txn actions; apply folded changes; store version + `backupService` STORE_VERSION |
-| `src/backup/payload.ts` | ✅ `syncAccount` in `STORE_KEYS`; phase 3: `syncOutbox` in `STORE_KEYS`, `syncOrigin` in `TXN_FIELDS` |
+| `src/store/ePurseStore.js` | ✅ `setSharedGroupState` applies server changes in one write (no store version bump: new fields are optional) |
+| `src/backup/payload.ts` | ✅ `syncAccount` in `STORE_KEYS`; `syncId`/`syncOrigin`/`syncRejected` in `TXN_FIELDS` |
+| `src/utils/txnCardModel.ts` | ✅ NOT SYNCED chip |
 | `src/types/group.ts` | ✅ `Group.shared?: GroupShared` (remoteId, keys, keyEpoch, myMemberId, memberMap, fold, status) + `GroupMember.archived` |
 | `src/backup/googleAuth.ts` | ✅ `getIdToken()` |
 | `src/screens/SettingsScreen.tsx` | ✅ Delete Account order (§10) + error modal |

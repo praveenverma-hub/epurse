@@ -2039,6 +2039,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   **Oct-14 (2nd): live on first invite** — "Start Live Sharing" removed; the first invite makes a
   group live. Members tab: per-person **Invite** (link carries that person, auto-claimed on join),
   Joined / Left tags. test:sync 107/107.
+  **Oct-14 (3rd): phase 3 expense sync** — one store subscription (`sync/engine.ts`, installed after
+  hydration) queues every change to a live group's expenses; pulls apply server expenses in ONE write
+  (`setSharedGroupState` ops: memo/no-account creates, in-place edits, delete rules); outbox on
+  `group.shared`; NOT SYNCED chip for changes the rules skipped. test:sync 130, test:store +14.
+  **Open:** settling up in a live group is local-only until phase 5; checkpoint posting not automatic.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

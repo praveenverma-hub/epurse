@@ -40,6 +40,8 @@ export interface CardTxn {
   groupId?: string;
   groupSplit?: GroupSplit;
   isGroupMemo?: boolean;
+  /** Live shared group: the server's rules skipped this change (sync/expenses.ts). */
+  syncRejected?: string;
 }
 /** Only the members matter here — resolves payer / share names. */
 export interface CardGroup { members?: GroupMember[] }
@@ -80,6 +82,7 @@ export const MAX_CHIPS = 2;
 
 // Highest first. The first two that apply are shown.
 const CHIP: Record<string, CardChip> = {
+  notSynced: { kind: 'notSynced', label: 'NOT SYNCED', tone: 'warning' },
   ignored:  { kind: 'ignored',  label: 'IGNORED',  tone: 'warning' },
   refund:   { kind: 'refund',   label: 'REFUND',   tone: 'income' },
   excluded: { kind: 'excluded', label: 'EXCLUDED', tone: 'warning' },
@@ -201,6 +204,7 @@ export function buildTxnCard(
   // Paid + kept a share: the lent part is shown nowhere else → "LENT ₹600".
   const lent = lbKind ? 0 : lentOnBill(txn);
   const candidates = [
+    !!txn.syncRejected && CHIP.notSynced,
     txn.isIgnored && CHIP.ignored,
     isCredit && txn.isRefund && CHIP.refund,
     !isCredit && isExcluded && CHIP.excluded,

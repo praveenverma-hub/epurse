@@ -1,8 +1,11 @@
 // =============================================================================
-// Shared groups — invite, join, claim, pull, leave (docs/SHARED_GROUP_SYNC.md
-// phase 2). A shared group goes live on its FIRST invite: until someone is invited
-// nothing leaves the phone. These are online actions called straight from screens;
-// expense sync with the offline outbox is phase 3.
+// Shared groups — invite, join, claim, send, pull, leave (docs/SHARED_GROUP_SYNC.md).
+//
+// A shared group goes live on its FIRST invite; until someone is invited nothing
+// leaves the phone. Expense changes never call anything here directly: the store
+// subscription in sync/engine.ts queues them (sync/expenses.ts planOutgoing) and
+// asks `flushGroup` to send. `flushGroup` sends the outbox, then pulls; one group
+// at a time, so a send and a pull of the same group never interleave.
 //
 // Order that matters: a new group's key is saved to the store BEFORE anything is
 // sent, so a crash mid-way can never leave a server group nobody holds the key to.
@@ -11,12 +14,14 @@
 import { useEPurseStore } from '../store/ePurseStore';
 import { randomBytes } from '../backup/random';
 import { bytesToBase64, base64ToBytes } from '../backup/envelope';
+import { DEFAULT_CATEGORIES } from '../constants/categories';
 import type { Group, GroupShared } from '../types/group';
 import { generateGroupKey, randomUuid, sealEvent, openEvent } from './crypto';
 import { encodeEvent, V1_LIMITS, type SyncEvent } from './events';
 import { emptyFold, foldEvents, type IncomingEvent, type Rejection } from './fold';
 import { newInvite, buildInviteLink, parseInviteLink } from './invite';
-import { membersFromFold, metaOf, planGroupChanges, toRemoteMember, unclaimedMembers } from './localGroup';
+import { membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
+import { planIncoming, type OutboxItem } from './expenses';
 import {
   rpcCreateGroup, rpcAppendEvents, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
   fetchEvents, fetchMyGroupIds, type EventRow, type SealedRow,
@@ -26,6 +31,8 @@ import { SyncError } from './errors';
 
 const store = () => useEPurseStore.getState() as any;
 const getGroup = (id: string): Group | undefined => store().groups.find((g: Group) => g.id === id);
+export const BUILT_IN_CATEGORIES = new Set<string>(DEFAULT_CATEGORIES.map((c: { id: string }) => c.id));
+export const newSyncId = () => randomUuid(randomBytes);
 
 function requireShared(id: string): { group: Group; shared: GroupShared } {
   const group = getGroup(id);
@@ -54,42 +61,86 @@ const toIncoming = (shared: GroupShared, r: EventRow): IncomingEvent => {
   };
 };
 
-function save(localId: string, shared: GroupShared) {
+/**
+ * Writes `shared` and everything that follows from it — members, name, and the
+ * server's expenses applied to this phone's transactions — in ONE store write.
+ */
+function commit(localId: string, shared: GroupShared) {
   const group = getGroup(localId);
-  const meta = shared.fold.meta ?? undefined;
+  if (!group) return;
+  const next: Group = { ...group, shared, members: membersFromFold(group.members, shared) };
   store().setSharedGroupState(localId, shared, {
-    members: group ? membersFromFold(group.members, shared) : undefined,
-    meta,
+    members: next.members,
+    meta: shared.fold.meta ?? undefined,
+    ops: planIncoming(next, store().transactions, BUILT_IN_CATEGORIES),
   });
 }
 
 /** Pulls everything new for one group and applies it. Returns what the rules skipped. */
 export async function pullGroup(localId: string): Promise<Rejection[]> {
-  let { shared } = requireShared(localId);
   const rejected: Rejection[] = [];
   for (;;) {
+    const { shared } = requireShared(localId);
     const rows = await fetchEvents(shared.remoteId, shared.fold.seq);
     if (!rows.length) break;
-    const res = foldEvents(shared.fold, rows.map((r) => toIncoming(shared, r)));
+    // Re-read: the outbox may have grown while we were waiting.
+    const latest = requireShared(localId).shared;
+    const res = foldEvents(latest.fold, rows.map((r) => toIncoming(latest, r)));
     rejected.push(...res.rejected);
-    shared = { ...shared, fold: res.fold, syncedAt: new Date().toISOString() };
-    save(localId, shared);
+    commit(localId, { ...latest, fold: res.fold, syncedAt: new Date().toISOString() });
     if (rows.length < 500) break;
   }
   return rejected;
 }
 
-async function send(localId: string, events: SyncEvent[]) {
-  const { shared } = requireShared(localId);
+const sealRows = (shared: GroupShared, items: OutboxItem[]): SealedRow[] => {
   const key = keyFor(shared, shared.keyEpoch);
   if (!key) throw new SyncError('LINK_DAMAGED', 'This group\'s key is missing on this phone.');
-  const at = new Date().toISOString();
-  const rows: SealedRow[] = events.map((ev) => {
-    const eventId = randomUuid(randomBytes);
-    return { event_id: eventId, key_epoch: shared.keyEpoch, ...sealEvent(key, shared.remoteId, eventId, shared.keyEpoch, encodeEvent(ev, at), randomBytes) };
-  });
-  for (let i = 0; i < rows.length; i += 50) await rpcAppendEvents(shared.remoteId, rows.slice(i, i + 50));
+  // The eventId was fixed when queued, so a resend is recognised by the server, not doubled.
+  return items.map((o) => ({
+    event_id: o.eventId,
+    key_epoch: shared.keyEpoch,
+    ...sealEvent(key, shared.remoteId, o.eventId, shared.keyEpoch, encodeEvent(o.event, o.at), randomBytes),
+  }));
+};
+
+async function doFlush(localId: string) {
+  let { shared } = requireShared(localId);
+  if (shared.status === 'ended') return;
+  await ensureSyncSession();
+
+  if (shared.status === 'pending') {
+    await rpcCreateGroup(shared.remoteId);  // safe to repeat
+    shared = { ...requireShared(localId).shared, status: 'active' };
+    store().setSharedGroupState(localId, shared);
+  }
+
+  for (;;) {
+    const batch = (requireShared(localId).shared.outbox ?? []).slice(0, 50);
+    if (!batch.length) break;
+    try {
+      await rpcAppendEvents(shared.remoteId, sealRows(requireShared(localId).shared, batch));
+    } catch (e) {
+      if (e instanceof SyncError && (e.code === 'NOT_MEMBER' || e.code === 'GROUP_ENDED')) {
+        commit(localId, { ...requireShared(localId).shared, status: 'ended' });
+      }
+      throw e;
+    }
+    const sent = new Set(batch.map((o) => o.eventId));
+    const cur = requireShared(localId).shared;
+    store().setSharedGroupState(localId, { ...cur, outbox: (cur.outbox ?? []).filter((o) => !sent.has(o.eventId)) });
+  }
   await pullGroup(localId);
+}
+
+const chains = new Map<string, Promise<void>>();
+
+/** Sends this group's queued changes, then pulls. Calls for one group run one after another. */
+export function flushGroup(localId: string): Promise<void> {
+  const prev = chains.get(localId) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(() => doFlush(localId));
+  chains.set(localId, next);
+  return next;
 }
 
 /** Turns a local shared group into a live one, with me as its first member. Run by the first invite. */
@@ -98,29 +149,31 @@ async function startSharing(localId: string): Promise<void> {
   const group = getGroup(localId);
   if (!group || group.type !== 'shared' || group.shared) return;
 
-  const memberMap: Record<string, string> = { me: randomUuid(randomBytes) };
-  for (const m of group.members) if (m.memberId !== 'me' && !m.isMe) memberMap[m.memberId] = randomUuid(randomBytes);
+  const memberMap: Record<string, string> = { me: newSyncId() };
+  for (const m of group.members) if (m.memberId !== 'me' && !m.isMe) memberMap[m.memberId] = newSyncId();
+  const at = new Date().toISOString();
+  const others = group.members.filter((m) => m.memberId !== 'me' && !m.isMe);
+  const first: SyncEvent[] = [
+    metaOf(group),
+    { type: 'member.add', memberId: memberMap.me, name: myName() },
+    { type: 'member.claim', memberId: memberMap.me, userId },
+    ...others.map((m): SyncEvent => ({ type: 'member.add', memberId: memberMap[m.memberId], name: m.name.trim().slice(0, V1_LIMITS.NAME_MAX) || 'Member' })),
+  ];
 
-  const shared: GroupShared = {
-    remoteId: randomUuid(randomBytes),
+  // Queued, not sent: the store subscription then appends the group's existing
+  // expenses AFTER these, so people always exist on the server before their expenses.
+  store().setSharedGroupState(localId, {
+    remoteId: newSyncId(),
     keys: { '1': bytesToBase64(generateGroupKey(randomBytes)) },
     keyEpoch: 1,
     myMemberId: memberMap.me,
     memberMap,
     fold: emptyFold(),
-    status: 'active',
+    status: 'pending',
     syncedAt: null,
-  };
-  store().setSharedGroupState(localId, shared);
-  await rpcCreateGroup(shared.remoteId);
-
-  const others = group.members.filter((m) => m.memberId !== 'me' && !m.isMe);
-  await send(localId, [
-    metaOf(group),
-    { type: 'member.add', memberId: memberMap.me, name: myName() },
-    { type: 'member.claim', memberId: memberMap.me, userId },
-    ...others.map((m): SyncEvent => ({ type: 'member.add', memberId: memberMap[m.memberId], name: m.name.trim().slice(0, V1_LIMITS.NAME_MAX) || 'Member' })),
-  ]);
+    outbox: first.map((event) => ({ eventId: newSyncId(), at, event })),
+  } satisfies GroupShared);
+  await flushGroup(localId);
 }
 
 /**
@@ -133,8 +186,8 @@ export async function createInviteLink(localId: string, forMember?: string): Pro
   const group = getGroup(localId);
   if (!group || group.type !== 'shared') throw new SyncError('NOT_MEMBER', 'Only shared groups can be shared.');
   if (!group.shared) await startSharing(localId);
-  else if (group.shared.status !== 'active') throw new SyncError('GROUP_ENDED', 'This group is no longer shared.');
-  else await pushGroupChanges(localId);  // people added here since — the link may be for one of them
+  else if (group.shared.status === 'ended') throw new SyncError('GROUP_ENDED', 'This group is no longer shared.');
+  else await flushGroup(localId);  // people added here since — the link may be for one of them
 
   const { shared } = requireShared(localId);
   const key = keyFor(shared, shared.keyEpoch);
@@ -174,6 +227,7 @@ export async function joinFromLink(link: string): Promise<{ groupId: string; for
     fold: emptyFold(),
     status: 'active',
     syncedAt: null,
+    outbox: [],
   } satisfies GroupShared);
 
   const rejected = await pullGroup(localId);
@@ -188,11 +242,19 @@ export async function joinFromLink(link: string): Promise<{ groupId: string; for
 
 export const getUnclaimedMembers = (localId: string) => unclaimedMembers(requireShared(localId).shared);
 
+// For one-off actions that need the server's answer now (claim, leave) — not the outbox.
+async function sendNow(localId: string, events: SyncEvent[]) {
+  const { shared } = requireShared(localId);
+  const at = new Date().toISOString();
+  await rpcAppendEvents(shared.remoteId, sealRows(shared, events.map((event) => ({ eventId: newSyncId(), at, event }))));
+  await pullGroup(localId);
+}
+
 /** "This one is me" — or, with no memberId, adds me under my own name. */
 export async function claimMember(localId: string, memberId: string | null): Promise<void> {
   const userId = await ensureSyncSession();
-  const id = memberId ?? randomUuid(randomBytes);
-  await send(localId, [
+  const id = memberId ?? newSyncId();
+  await sendNow(localId, [
     ...(memberId ? [] : [{ type: 'member.add', memberId: id, name: myName() } as SyncEvent]),
     { type: 'member.claim', memberId: id, userId },
   ]);
@@ -200,17 +262,8 @@ export async function claimMember(localId: string, memberId: string | null): Pro
   if (shared.fold.members[id]?.userId !== userId) {
     throw new SyncError('CLAIM_TAKEN', 'Someone else just picked that name. Choose again.');
   }
-  save(localId, { ...shared, myMemberId: id, memberMap: { ...shared.memberMap, me: id } });
-}
-
-/** Sends local edits of a synced group (name, emoji, colour, new people, renames). */
-export async function pushGroupChanges(localId: string): Promise<void> {
-  const { group, shared } = requireShared(localId);
-  if (shared.status !== 'active') return;
-  const plan = planGroupChanges(group, shared, () => randomUuid(randomBytes));
-  if (!plan.events.length) return;
-  store().setSharedGroupState(localId, { ...shared, memberMap: plan.memberMap });
-  await send(localId, plan.events);
+  // Re-applies every expense with this name as 'me' — mine now show as mine.
+  commit(localId, { ...shared, myMemberId: id, memberMap: { ...shared.memberMap, me: id } });
 }
 
 /** My balance in a synced group, in paise (0 = settled). */
@@ -221,30 +274,29 @@ export function myBalancePaise(localId: string): number {
 
 /** Leave: only at ₹0. History stays on every phone; this one keeps its copy as a local group. */
 export async function leaveSharedGroup(localId: string): Promise<void> {
-  await ensureSyncSession();
-  await pullGroup(localId);
+  await flushGroup(localId);
   if (myBalancePaise(localId) !== 0) {
     throw new SyncError('NOT_SETTLED', 'Settle up first — you can leave once your balance in this group is ₹0.');
   }
   const { shared } = requireShared(localId);
   if (shared.myMemberId && !shared.fold.members[shared.myMemberId]?.archived) {
-    await send(localId, [{ type: 'member.archive', memberId: shared.myMemberId }]);
+    await sendNow(localId, [{ type: 'member.archive', memberId: shared.myMemberId }]);
   }
   await rpcLeaveGroup(shared.remoteId);
-  save(localId, { ...requireShared(localId).shared, status: 'ended' });
+  store().setSharedGroupState(localId, { ...requireShared(localId).shared, status: 'ended', outbox: [] });
 }
 
-/** Pulls every live group and marks the ones the server no longer has me in as ended. */
+/** Sends and pulls every live group; groups the server no longer has me in are marked ended. */
 export async function syncAllSharedGroups(): Promise<void> {
-  const live = store().groups.filter((g: Group) => g.shared?.status === 'active');
+  const live = store().groups.filter((g: Group) => g.shared && g.shared.status !== 'ended');
   if (!live.length) return;
   const userId = await ensureSyncSession();
   const mine = await fetchMyGroupIds(userId);
   for (const g of live) {
-    if (!mine.has(g.shared!.remoteId)) {
-      save(g.id, { ...g.shared!, status: 'ended' });
+    if (g.shared!.status === 'active' && !mine.has(g.shared!.remoteId)) {
+      store().setSharedGroupState(g.id, { ...g.shared!, status: 'ended' });
       continue;
     }
-    await pullGroup(g.id).catch(() => {});
+    await flushGroup(g.id).catch(() => {});
   }
 }

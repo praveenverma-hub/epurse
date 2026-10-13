@@ -178,7 +178,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   const openCreate = () => navigation.navigate('GroupForm');
 
   const syncOn = useSyncEnabled();
-  const hasLiveGroups = useEPurseStore((s: any) => s.groups.some((g: Group) => g.shared?.status === 'active')) as boolean;
+  const hasLiveGroups = useEPurseStore((s: any) => s.groups.some((g: Group) => !!g.shared && g.shared.status !== 'ended')) as boolean;
   // Catch up on every live group when the tab comes into view; offline failures stay quiet.
   useEffect(() => {
     if (!hasLiveGroups) return undefined;
