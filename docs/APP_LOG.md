@@ -2048,7 +2048,14 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `settlement.upsert/delete` via the same subscription (`sync/settlements.ts`); incoming ones that
   involve me become rows, others change nothing locally. Lent/Borrowed "Settle" splits off each live
   group's part as its own row. So "Leave at ₹0" now works after settling. test:sync 142, test:store +9.
-  **Open:** a skipped settlement is flagged on its row but no chip shows it.
+  **Oct-14 (5th): checkpoints + corrections + NOT SYNCED on Lent/Borrowed** — phones post a checkpoint
+  after 7/30 quiet days (`sync/checkpoint.ts`); edits/deletes of frozen expenses go as
+  `expense.correct` and update the same transaction in place elsewhere. FIXED a latent double-queue:
+  sent outbox items were dropped before the pull folded them in, so the subscription could re-queue
+  them — now kept with their `seq` until folded (`reconcileOutbox`, which also turns an unsent edit
+  of a newly frozen expense into a correction); flush pulls first. `StatusChip` extracted from
+  TransactionItem; a skipped settlement shows NOT SYNCED on its Lent/Borrowed group line.
+  test:sync 167.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

@@ -41,6 +41,7 @@ import LbEntryForm from '../components/LbEntryForm';
 import AccountPickerSheet from '../components/AccountPickerSheet';
 import LbEntryDetailSheet, { lbToneInk } from '../components/LbEntryDetailSheet';
 import TxnDetailSheet from '../components/TxnDetailSheet';
+import StatusChip from '../components/StatusChip';
 import {
   LB_NO_ACCOUNT, lbAccountFieldLabel, lbEffectiveKind, lbEntryMeta, lbEntrySign, lbEntryTitle,
   lbEntryTone, lbLinkedLine, lbMoneyOut, lbNoteText, lbToastTitle,
@@ -120,12 +121,14 @@ const LbPersonScreen = ({ route, navigation }) => {
         const g = groupAcc[e.groupId];
         g.net += isPositiveEntry(e.kind) ? e.amount : -e.amount;
         if (new Date(e.date) > new Date(g.date)) g.date = e.date;
+        if (e.syncRejected) g.syncRejected = true;
       } else {
         singles.push(e);
       }
     });
     const groupLines = Object.values(groupAcc)
-      .filter((g) => Math.abs(g.net) > 0.005)
+      // Settled here but a settlement didn't sync: keep the line, so its NOT SYNCED shows.
+      .filter((g) => Math.abs(g.net) > 0.005 || g.syncRejected)
       .map((g) => ({
         id: `grp_${g.groupId}`,
         isGroupLine: true,
@@ -134,6 +137,7 @@ const LbPersonScreen = ({ route, navigation }) => {
         kind: g.net > 0 ? 'lent' : 'borrowed',
         amount: Math.abs(g.net),
         date: g.date,
+        syncRejected: !!g.syncRejected,
       }));
     return [...groupLines, ...singles].sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [person, groupNameById]);
@@ -271,7 +275,11 @@ const LbPersonScreen = ({ route, navigation }) => {
         </View>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
           <Text style={styles.entryTitle} numberOfLines={1}>{lbEntryTitle(entry)}</Text>
-          <Text style={styles.entrySub} numberOfLines={1}>{lbEntryMeta(entry)}</Text>
+          <View style={styles.entrySubRow}>
+            <Text style={[styles.entrySub, styles.entrySubText]} numberOfLines={1}>{lbEntryMeta(entry)}</Text>
+            {/* A live group's settlement the server's rules skipped (sync/settlements.ts). */}
+            {entry.syncRejected ? <StatusChip tone="warning" label="NOT SYNCED" /> : null}
+          </View>
         </View>
         <Text style={[styles.entryAmt, { color: entryColor }]} numberOfLines={1}>
           {lbEntrySign(entry)} {formatCurrency(entry.amount)}
@@ -817,6 +825,8 @@ const styles = StyleSheet.create({
   },
   entryTitle: { ...typography.bodyBold, color: colors.textPrimary },
   entrySub:   { ...typography.tiny, color: colors.textSecondary, marginTop: 2 },
+  entrySubRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 2 },
+  entrySubText: { flexShrink: 1, marginTop: 0 },
   entryAmt:   { ...typography.bodyBold, fontWeight: '800', flexShrink: 0 },
   entryChevron: { marginLeft: spacing.xs },
 

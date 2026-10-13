@@ -34,6 +34,8 @@ const aad = (groupId: string, eventId: string, keyEpoch: number) =>
   utf8ToBytes(`epurse.grp.v1|${groupId}|${eventId}|${keyEpoch}`);
 
 export type SealedEvent = { nonce: string; ciphertext: string };
+/** The server's `group_events` check (~16 KB of plaintext). */
+export const MAX_CIPHERTEXT_CHARS = 21848;
 
 export function sealEvent(
   key: Uint8Array, groupId: string, eventId: string, keyEpoch: number, plaintext: string, rand: RandomBytes,

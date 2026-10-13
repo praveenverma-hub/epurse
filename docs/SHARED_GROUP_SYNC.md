@@ -1,4 +1,4 @@
-# Shared Group Sync — design (phases 1–3 + settlements)
+# Shared Group Sync — design (phases 1–3, settlements, checkpoints)
 
 **Status:** phase 1 code done Oct-13-2026 (behind `sharedSync`, off; no Supabase project yet). Phases 2–3 next.
 **Schema:** `supabase/migrations/` — `20261013000000_shared_groups.sql`, then `…120000_keep_history_on_delete.sql`, `20261014000000_checkpoints.sql` (applied in order; never edit an applied one).
@@ -208,8 +208,24 @@ rows now carry `memberId` (`buildGroupLbRows`); an older row is matched by conta
 unique name (`lbRowMember`). A settlement the rules skip is flagged on its row (`syncRejected`)
 and not re-sent until it changes; no chip shows it yet.
 
-**Not yet:** checkpoint posting and `expense.correct` for frozen expenses aren't triggered
-automatically.
+**Checkpoints + corrections (built Oct-14-2026).** `flushGroup` = pull → send → pull → post a
+checkpoint if `checkpointDue` (`src/sync/checkpoint.ts`; quiet time from `fold.lastAt`, the server
+time of the last event). An edit or delete of a frozen expense goes out as `expense.correct`
+(`planOutgoing`), built on the version the outbox's own pending corrections reached, so two quick
+edits never count the old share twice. Incoming, frozen expenses and settlements are mirrored like
+live ones, so a correction updates the SAME local transaction in place (or removes it).
+
+**Sent ≠ done.** A sent outbox item keeps its server `seq` and stays until a pull folds past it
+(`reconcileOutbox`). Dropping it at send time let the store subscription see the change as unsent
+for a moment and queue it again — harmless for an edit, double-counting for a correction. The same
+step turns an UNSENT edit/delete of an expense that a checkpoint has since frozen into a
+correction (same eventId) — sent as an edit it would land as a second, new expense on every phone.
+Pulling before sending keeps that window to milliseconds; it can't be closed fully without the
+server reading amounts.
+
+**Frozen settlements can't be deleted** (the rules don't see them). If a settle row is removed
+here (its Repayment transaction deleted), nothing is sent and the next pull puts the row back —
+an empty pull still reconciles. To undo it, settle the other way.
 
 **Edits.** Any member can edit; the highest `seq` wins on every phone, and every version stays
 in the entry's history (§6).
@@ -275,7 +291,9 @@ is still the latest (so it never races a new expense).
 
 - **When:** the next phone that syncs after the group has been quiet for
   `SHARED_CHECKPOINT_SETTLED_QUIET_MS` (7 days, everyone at ₹0) or
-  `SHARED_CHECKPOINT_UNSETTLED_QUIET_MS` (30 days). Skipped if it would exceed the 16 KB event limit.
+  `SHARED_CHECKPOINT_UNSETTLED_QUIET_MS` (30 days), with nothing waiting to send and no earlier
+  disagreement (`checkpointDue`). Skipped if it would exceed the 16 KB event limit
+  (`MAX_CIPHERTEXT_CHARS`). Built Oct-14-2026.
 - **Verify or adopt.** A phone holding every event up to `baseSeq` VERIFIES it against its own
   state; if they differ it keeps its own numbers and sets `checkpointMismatch` ("Balances
   Disagree"). A phone missing history (late joiner, restored phone — it sees a seq gap) ADOPTS it:
@@ -284,8 +302,9 @@ is still the latest (so it never races a new expense).
   by the rules. A phone that never saw it is in the same rule state, so phones stay in step.
 - **Editing an old expense** still looks like a normal edit. For a frozen one the app sends an
   `expense.correct` (`buildCorrection`): the change in who-owes-whom plus the new version for
-  display. Phones with the original show it updated in place; a late joiner sees the correction
-  as its own row. Balances are identical to a plain edit (tested).
+  display. Phones with the original update that same transaction in place and add the version
+  to its edit history; a late joiner only sees its balances move. Balances are identical to a
+  plain edit (tested, incl. a late joiner).
 - **Maths unchanged.** Same split code, same rule (each sharer owes the payer). Balance = the
   checkpoint's opening position + everything after; integers in paise, so no drift.
 - **Fresh start** after a checkpoint continues in the same group — same people, invite and key;
@@ -393,6 +412,7 @@ new invite.
 | `src/screens/JoinGroupScreen.tsx` | ✅ paste link → "Who Are You?" |
 | `src/sync/expenses.ts` | ✅ `projectExpense`, `planOutgoing`, `planIncoming` (pure) |
 | `src/sync/settlements.ts` | ✅ settle rows ⇄ `settlement.*` events, `lbRowMember` (pure) |
+| `src/sync/checkpoint.ts` | ✅ `checkpointDue` — when a phone posts one (pure) |
 | `src/sync/engine.ts` | ✅ the store subscription + debounced send + foreground sync |
 | `src/sync/invite.ts` | ✅ build/parse invite links (pure) |
 | `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ schema, ✅ keep-history delete, ✅ checkpoints, ✅ delete-account) |

@@ -10,7 +10,8 @@ import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE } from '../../
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
-import { projectExpense, planOutgoing, planIncoming } from '../../sync/expenses.ts';
+import { projectExpense, planOutgoing, planIncoming, reconcileOutbox } from '../../sync/expenses.ts';
+import { checkpointDue } from '../../sync/checkpoint.ts';
 import { lbRowMember } from '../../sync/settlements.ts';
 
 let pass = 0, fail = 0;
@@ -550,6 +551,94 @@ seq = 0;
   A.lb = A.lb.filter((l) => l !== second);
   queue(A); upload(A, U.rahul); pull(A);
   check('a delete by someone else is skipped and the row is restored', A.lb.some((l) => l.syncId === second.syncId) && owed() === 0);
+
+  // ── Checkpoints + corrections. Amit owes nothing; Rahul owes Amit ₹50 → unsettled.
+  const DAY = 86400000;
+  const lastAt = Date.parse(A.group.shared.fold.lastAt);
+  const due = (sh, days) => checkpointDue(sh, lastAt + days * DAY);
+  check('fold keeps the server time of the last event', A.group.shared.fold.lastAt === log[log.length - 1].createdAt);
+  check('unsettled: no checkpoint at 29 quiet days, one at 30', !due(A.group.shared, 29) && due(A.group.shared, 30));
+  const settledSh = { ...A.group.shared, fold: { ...A.group.shared.fold, balances: {} } };
+  check('settled: one at 7 quiet days', !due(settledSh, 6) && due(settledSh, 7));
+  check('…not with something waiting to send, nor after disagreeing with one',
+    !due({ ...A.group.shared, outbox: [{ eventId: 'x', at: AT, event: { type: 'expense.delete', entityId: dinner } }] }, 60)
+    && !due({ ...A.group.shared, fold: { ...A.group.shared.fold, checkpointMismatch: 3 } }, 60));
+  check('an older saved fold (no lastAt) falls back to the newest entry version',
+    due({ ...A.group.shared, fold: { ...A.group.shared.fold, lastAt: undefined } }, 400));
+
+  // Rahul's phone posts one.
+  log.push(data(U.rahul, { type: 'group.checkpoint', ...buildCheckpoint(A.group.shared.fold) }));
+  const cpSeq = seq;
+  pull(A); pull(B);
+  check('both phones accept it and freeze the expenses before it',
+    A.group.shared.fold.lastCheckpoint === cpSeq && B.group.shared.fold.lastCheckpoint === cpSeq
+    && A.group.shared.fold.entries[cab.syncId].frozen && !A.group.shared.fold.checkpointMismatch);
+  check('…nothing is due right after it', !checkpointDue(A.group.shared, lastAt + 400 * DAY));
+  check('…and nothing changes on either phone', queue(A) === null && queue(B) === null);
+
+  // Priya edits the frozen cab: ₹300 → ₹400, then (before it's sent) → ₹500.
+  const cabOn = (P) => P.txns.find((t) => t.syncId === cab.syncId);
+  const cabTo = (P, amt) => { P.txns = P.txns.map((t) => (t.syncId === cab.syncId ? { ...t, amount: amt, groupSplit: { ...t.groupSplit, shares: t.groupSplit.shares.map((x) => ({ ...x, shareAmount: amt / 2 })) } } : t)); };
+  cabTo(B, 400);
+  const pc = queue(B);
+  const corr = pc?.shared.outbox[0]?.event;
+  check('an edit of a frozen expense goes as a correction, not an edit',
+    pc && pc.shared.outbox.length === 1 && corr.type === 'expense.correct' && corr.correctsId === cab.syncId
+    && JSON.stringify(corr.debts) === JSON.stringify([{ from: M.priya, to: M.rahul, paise: 5000 }]), JSON.stringify(corr));
+  check('…queued once', queue(B) === null);
+  cabTo(B, 500);
+  const pc2 = queue(B);
+  check('a second edit builds on the first (only the extra ₹100 share)',
+    pc2 && pc2.shared.outbox.length === 2 && JSON.stringify(pc2.shared.outbox[1].event.debts) === JSON.stringify([{ from: M.priya, to: M.rahul, paise: 5000 }]));
+  upload(B, U.priya); pull(B); pull(A);
+  check('Rahul\'s phone updates the same transaction in place', cabOn(A).id === 'IdM0002' && cabOn(A).amount === 500 && cabOn(A).accountId === 'acc1');
+  check('…its edit history gains both versions', A.group.shared.fold.entries[cab.syncId].versions.length === 3, String(A.group.shared.fold.entries[cab.syncId].versions.length));
+  check('…Priya owes ₹100 more than she paid back (₹250 share − ₹150)', owed() === -10000, String(owed()));
+  check('…and nothing echoes', queue(A) === null && queue(B) === null);
+
+  // A late joiner (history from the checkpoint only) computes the same balances.
+  const late = foldEvents(emptyFold(), log.filter((e) => e.seq >= cpSeq)).fold;
+  check('a late joiner adopts the checkpoint and agrees on every balance',
+    JSON.stringify(late.balances) === JSON.stringify(A.group.shared.fold.balances) && JSON.stringify(late.debts) === JSON.stringify(B.group.shared.fold.debts),
+    JSON.stringify([late.balances, A.group.shared.fold.balances]));
+  check('…without holding the old expense', !late.entries[cab.syncId] && late.historyFrom === cpSeq);
+
+  // Rahul deletes the frozen cab.
+  A.txns = A.txns.filter((t) => t.syncId !== cab.syncId);
+  const pdc = queue(A);
+  check('deleting a frozen expense sends a correction with no expense',
+    pdc && pdc.shared.outbox.some((o) => o.event.type === 'expense.correct' && o.event.expense === null && o.event.correctsId === cab.syncId));
+  upload(A, U.rahul); pull(A); pull(B);
+  check('Priya\'s copy goes; she\'s now owed her ₹150 back', !cabOn(B) && owed() === 15000, String(owed()));
+  const late2 = foldEvents(emptyFold(), log.filter((e) => e.seq >= cpSeq)).fold;
+  check('…the late joiner agrees', JSON.stringify(late2.balances) === JSON.stringify(A.group.shared.fold.balances));
+
+  // Offline edit queued BEFORE a checkpoint landed: it must not go as a plain edit.
+  A.txns = [{ id: 'IdM0003', type: 'debit', amount: 200, merchant: 'Snacks', categoryId: 'food', createdAt: AT, accountId: 'acc1', groupId: 'gA',
+    groupSplit: { paidByMemberId: 'me', shares: [{ memberId: 'me', shareAmount: 100 }, { memberId: 'c_42', shareAmount: 100 }] } }, ...A.txns];
+  queue(A); upload(A, U.rahul); pull(A); pull(B);
+  const snack = A.txns[0].syncId;
+  A.txns = A.txns.map((t) => (t.id === 'IdM0003' ? { ...t, merchant: 'Snacks + Water' } : t));
+  queue(A);
+  log.push(data(U.priya, { type: 'group.checkpoint', ...buildCheckpoint(B.group.shared.fold) }));
+  A.group = { ...A.group, shared: { ...A.group.shared, fold: foldEvents(A.group.shared.fold, log).fold } };
+  const fixed = reconcileOutbox(A.group.shared);
+  check('after a pull, an unsent edit of a now-frozen expense becomes a correction (same event id)',
+    fixed.length === 1 && fixed[0].event.type === 'expense.correct' && fixed[0].event.expense.title === 'Snacks + Water'
+    && fixed[0].eventId === A.group.shared.outbox[0].eventId && fixed[0].event.debts.length === 0, JSON.stringify(fixed));
+  check('…and sent items are dropped once the history has them',
+    reconcileOutbox({ ...A.group.shared, outbox: [{ ...fixed[0], seq: 1 }] }).length === 0
+    && reconcileOutbox({ ...A.group.shared, outbox: [{ ...fixed[0], seq: seq + 5 }] }).length === 1);
+  A.group = { ...A.group, shared: { ...A.group.shared, outbox: fixed } };
+  upload(A, U.rahul); pull(A); pull(B);
+  check('…which lands as the new title everywhere', B.txns.find((t) => t.syncId === snack)?.merchant === 'Snacks + Water');
+
+  // A frozen settlement's row deleted here can't be deleted on the server: it comes back.
+  const frozenRow = A.lb.find((l) => l.syncId === second.syncId);
+  A.lb = A.lb.filter((l) => l !== frozenRow);
+  check('a frozen settlement sends no delete', queue(A) === null);
+  pull(A);
+  check('…and the pull puts its row back', A.lb.some((l) => l.syncId === second.syncId));
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);

@@ -70,13 +70,13 @@ const involvesMe = (d: SettlementBody, me: string) => d.from === me || d.to === 
 export const groupSettleRows = (group: Group, lb: SyncLbRow[]) =>
   lb.filter((r) => r.groupId === group.id && SETTLE_KINDS.has(r.kind));
 
-/** Server settlements involving me (deleted ones too; frozen ones are history). */
+/** Server settlements involving me — deleted and frozen ones too. */
 export function settlementsWithMe(shared: GroupShared): [string, SettlementBody][] {
   const me = shared.myMemberId;
   if (!me) return [];
   const out: [string, SettlementBody][] = [];
   for (const [id, e] of Object.entries(shared.fold.entries)) {
-    if (e.kind === 'settlement' && !e.frozen && involvesMe(e.data, me)) out.push([id, e.data]);
+    if (e.kind === 'settlement' && involvesMe(e.data, me)) out.push([id, e.data]);
   }
   return out;
 }

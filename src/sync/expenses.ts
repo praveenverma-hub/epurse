@@ -18,12 +18,48 @@
 import type { Group, GroupShared } from '../types/group';
 import { isUuid } from './crypto';
 import { V1_LIMITS, type ExpenseBody, type SyncEvent } from './events';
+import { buildCorrection } from './fold';
 import { planGroupChanges, toLocalMember, toRemoteMember } from './localGroup';
 import {
   groupSettleRows, planIncomingSettlements, projectSettlement, settlementsWithMe, type LbOp, type SyncLbRow,
 } from './settlements';
 
-export type OutboxItem = { eventId: string; at: string; event: SyncEvent };
+/** `seq` = sent, the server's seq for it; kept until a pull folds past it, so it can't be queued twice. */
+export type OutboxItem = { eventId: string; at: string; event: SyncEvent; seq?: number };
+
+/** The ids an outbox item is about — a correction is about the expense it corrects. */
+const itemIds = (o: OutboxItem): string[] =>
+  o.event.type === 'expense.correct' ? [o.event.entityId, o.event.correctsId]
+    : 'entityId' in o.event ? [o.event.entityId] : [];
+
+/** The version a frozen expense is at once the outbox's corrections land (undefined = none pending; null = deleted). */
+function pendingVersion(outbox: OutboxItem[], id: string): ExpenseBody | null | undefined {
+  let v: ExpenseBody | null | undefined;
+  for (const o of outbox) if (o.event.type === 'expense.correct' && o.event.correctsId === id) v = o.event.expense;
+  return v;
+}
+
+/**
+ * After a pull: drop what the history now has, and turn an UNSENT edit or delete of an
+ * expense that a checkpoint has since frozen into a correction — sent as a plain edit, it
+ * would count as a second, new expense. Same eventId, so a send already under way can't double it.
+ */
+export function reconcileOutbox(shared: GroupShared): OutboxItem[] {
+  const f = shared.fold;
+  const out: OutboxItem[] = [];
+  for (const o of (shared.outbox ?? []).filter((x) => !(x.seq && x.seq <= f.seq))) {
+    const ev = o.event;
+    const id = (ev.type === 'expense.upsert' || ev.type === 'expense.delete') && !o.seq ? ev.entityId : null;
+    const entry = id ? f.entries[id] : undefined;
+    if (!id || !entry || !entry.frozen || entry.kind !== 'expense') { out.push(o); continue; }
+    const from = pendingVersion(out, id);
+    if (from === null || entry.deleted) continue;
+    const next = ev.type === 'expense.upsert' ? (({ type: _t, ...body }) => body)(ev) : null;
+    const c = buildCorrection(f, o.eventId, id, next, from);
+    if (c) out.push({ ...o, event: { type: 'expense.correct', ...c } });
+  }
+  return out;
+}
 
 /** The bits of a local transaction this needs (the store's txn is a superset). */
 export type SyncTxn = {
@@ -106,6 +142,21 @@ export function planOutgoing(
   people.events.forEach(push);
   const mapped: GroupShared = { ...shared, memberMap: people.memberMap };
 
+  // An edit/delete of an expense from before the last checkpoint goes as a correction,
+  // built on the version the outbox's own corrections have already reached.
+  const queued: OutboxItem[] = [...outbox];
+  const correct = (id: string, next: ExpenseBody | null) => {
+    const from = pendingVersion(queued, id);
+    if (from === null) return;
+    const base = from ?? (shared.fold.entries[id].data as ExpenseBody);
+    if (next && JSON.stringify(base) === JSON.stringify(next)) return;
+    const c = buildCorrection(shared.fold, newId(), id, next, from);
+    if (!c) return;
+    const ev: SyncEvent = { type: 'expense.correct', ...c };
+    events.push(ev);
+    queued.push({ eventId: '', at, event: ev });
+  };
+
   const syncIds: Record<string, string> = {};
   const here = new Set<string>();
   for (const t of txns) {
@@ -117,15 +168,18 @@ export function planOutgoing(
     here.add(syncId);
 
     const entry = shared.fold.entries[syncId];
-    if (entry && (entry.frozen || entry.deleted || entry.kind !== 'expense')) continue;
+    if (entry && (entry.deleted || entry.kind !== 'expense')) continue;
     const key = JSON.stringify(body);
+    if (entry?.frozen) { correct(syncId, body); continue; }
     if (entry && JSON.stringify(entry.data) === key) continue;
     if (t.syncRejected === key) continue;
     push({ type: 'expense.upsert', ...body });
   }
   // On the server but no longer an expense of this group here: deleted, untagged or ignored.
   for (const [id, e] of Object.entries(shared.fold.entries)) {
-    if (e.kind === 'expense' && !e.frozen && !e.deleted && !here.has(id)) push({ type: 'expense.delete', entityId: id });
+    if (e.kind !== 'expense' || e.deleted || here.has(id)) continue;
+    if (e.frozen) correct(id, null);
+    else push({ type: 'expense.delete', entityId: id });
   }
 
   // Settlements: the group's settle rows in Lent/Borrowed (sync/settlements.ts).
@@ -146,8 +200,10 @@ export function planOutgoing(
     push({ type: 'settlement.upsert', ...body });
   }
   // Gone here (e.g. its Repayment transaction was deleted). Ones between other people never live here.
-  for (const [id, d] of settlementsWithMe(shared)) {
-    if (!shared.fold.entries[id].deleted && !settled.has(id)) push({ type: 'settlement.delete', entityId: id });
+  // A frozen one can't be deleted: the pull puts its row back, and settling the other way undoes it.
+  for (const [id] of settlementsWithMe(shared)) {
+    const e = shared.fold.entries[id];
+    if (!e.deleted && !e.frozen && !settled.has(id)) push({ type: 'settlement.delete', entityId: id });
   }
 
   if (!events.length && !Object.keys(syncIds).length && !Object.keys(lbSyncIds).length
@@ -197,12 +253,13 @@ const localKey = (t: Pick<SyncTxn, 'amount' | 'createdAt' | 'groupSplit'>, title
 export function planIncoming(group: Group, txns: SyncTxn[], builtIns: Set<string>, lb: SyncLbRow[] = []): IncomingOp[] {
   const shared = group.shared;
   if (!shared) return [];
-  const pendingIds = new Set((shared.outbox ?? []).flatMap((o) => ('entityId' in o.event ? [o.event.entityId] : [])));
+  const pendingIds = new Set((shared.outbox ?? []).flatMap(itemIds));
   const bySyncId = new Map(txns.filter((t) => t.groupId === group.id && t.syncId).map((t) => [t.syncId!, t]));
   const ops: IncomingOp[] = [];
 
   for (const [id, entry] of Object.entries(shared.fold.entries)) {
-    if (entry.kind !== 'expense' || entry.frozen || pendingIds.has(id)) continue;
+    // Frozen ones too: a phone that has them keeps them up to date from corrections.
+    if (entry.kind !== 'expense' || pendingIds.has(id)) continue;
     const local = bySyncId.get(id);
     if (entry.deleted) {
       if (local) ops.push({ kind: 'remove', txnId: local.id });

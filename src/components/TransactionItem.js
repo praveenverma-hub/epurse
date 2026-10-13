@@ -10,6 +10,7 @@ import { colors, radius, readableOn, spacing, typography, shadows } from '../con
 import { formatCurrency, formatDateTime } from '../utils/format';
 import { buildTxnCard, CARD_CONTEXT } from '../utils/txnCardModel';
 import CategoryIcon from './CategoryIcon';
+import StatusChip from './StatusChip';
 
 /**
  * The ONE transaction card for every list. WHAT it says (meta line, amount tone,
@@ -82,15 +83,9 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
               accessibilityLabel="Has a note" />
           ) : null}
           {card.chips.map((c) => (
-            <View key={c.kind} style={[styles.chip, { backgroundColor: CHIP_TONE[c.tone].bg }]}>
-              <Text style={[styles.chipText, { color: CHIP_TONE[c.tone].ink }]}>{c.amount ? `${c.label} ${formatCurrency(c.amount)}` : c.label}</Text>
-            </View>
+            <StatusChip key={c.kind} tone={c.tone} label={c.amount ? `${c.label} ${formatCurrency(c.amount)}` : c.label} />
           ))}
-          {card.overflow > 0 ? (
-            <View style={[styles.chip, { backgroundColor: CHIP_TONE.neutral.bg }]}>
-              <Text style={[styles.chipText, { color: CHIP_TONE.neutral.ink }]}>+{card.overflow}</Text>
-            </View>
-          ) : null}
+          {card.overflow > 0 ? <StatusChip tone="neutral" label={`+${card.overflow}`} /> : null}
         </View>
       </View>
 
@@ -145,16 +140,6 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
 // Amount ink by meaning. Muted = no money of mine moved (memo) or ignored.
 const AMOUNT_INK = { income: colors.income, expense: colors.textPrimary, muted: colors.textMuted };
 
-// One tinted-fill chip style; the ink is MEASURED against the card so amber/green stay
-// legible (raw warning amber is ~2:1 on white).
-const tone = (hue, bg) => ({ bg: bg || hue + '1F', ink: readableOn(colors.card, hue) });
-const CHIP_TONE = {
-  warning:  tone(colors.warning),
-  income:   tone(colors.income),
-  lent:     tone(colors.lent, colors.lentSoft),
-  borrowed: tone(colors.borrowed, colors.borrowedSoft),
-  neutral:  { bg: colors.textMuted + '1F', ink: colors.textSecondary },
-};
 const SPLIT_INK = readableOn(colors.card, colors.info);
 
 const styles = StyleSheet.create({
@@ -191,8 +176,6 @@ const styles = StyleSheet.create({
   footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: spacing.xs },
   time: { ...typography.tiny, color: colors.textMuted, flexShrink: 1 },
   noteMark: { marginLeft: -2 },
-  chip: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm, flexShrink: 0 },
-  chipText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
   right: { alignItems: 'flex-end', maxWidth: '42%' },
   // The ribbon hangs 26px from the top-right edge: start the column just below it, so a
   // lone amount (personal group) sits exactly where a shared card's amount does.

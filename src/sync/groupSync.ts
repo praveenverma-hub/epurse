@@ -4,8 +4,8 @@
 // A shared group goes live on its FIRST invite; until someone is invited nothing
 // leaves the phone. Expense changes never call anything here directly: the store
 // subscription in sync/engine.ts queues them (sync/expenses.ts planOutgoing) and
-// asks `flushGroup` to send. `flushGroup` sends the outbox, then pulls; one group
-// at a time, so a send and a pull of the same group never interleave.
+// asks `flushGroup` to send. `flushGroup` pulls, sends the outbox, pulls, then posts a
+// checkpoint if one is due; one group at a time, so a send and a pull never interleave.
 //
 // Order that matters: a new group's key is saved to the store BEFORE anything is
 // sent, so a crash mid-way can never leave a server group nobody holds the key to.
@@ -16,14 +16,15 @@ import { randomBytes } from '../backup/random';
 import { bytesToBase64, base64ToBytes } from '../backup/envelope';
 import { DEFAULT_CATEGORIES } from '../constants/categories';
 import type { Group, GroupShared } from '../types/group';
-import { generateGroupKey, randomUuid, sealEvent, openEvent } from './crypto';
+import { generateGroupKey, randomUuid, sealEvent, openEvent, MAX_CIPHERTEXT_CHARS } from './crypto';
 import { encodeEvent, V1_LIMITS, type SyncEvent } from './events';
-import { emptyFold, foldEvents, type IncomingEvent, type Rejection } from './fold';
+import { buildCheckpoint, emptyFold, foldEvents, type IncomingEvent, type Rejection } from './fold';
+import { checkpointDue } from './checkpoint';
 import { newInvite, buildInviteLink, parseInviteLink } from './invite';
 import { membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
-import { planIncoming, type OutboxItem } from './expenses';
+import { planIncoming, reconcileOutbox, type OutboxItem } from './expenses';
 import {
-  rpcCreateGroup, rpcAppendEvents, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
+  rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
   fetchEvents, fetchMyGroupIds, type EventRow, type SealedRow,
 } from './api';
 import { ensureSyncSession } from './session';
@@ -65,24 +66,30 @@ const toIncoming = (shared: GroupShared, r: EventRow): IncomingEvent => {
  * Writes `shared` and everything that follows from it — members, name, and the
  * server's expenses applied to this phone's transactions — in ONE store write.
  */
-function commit(localId: string, shared: GroupShared) {
+function commit(localId: string, pulled: GroupShared, onlyIfChanged = false) {
   const group = getGroup(localId);
   if (!group) return;
+  const shared = { ...pulled, outbox: reconcileOutbox(pulled) };
   const next: Group = { ...group, shared, members: membersFromFold(group.members, shared) };
-  store().setSharedGroupState(localId, shared, {
-    members: next.members,
-    meta: shared.fold.meta ?? undefined,
-    ops: planIncoming(next, store().transactions, BUILT_IN_CATEGORIES, store().lentBorrowed),
-  });
+  const ops = planIncoming(next, store().transactions, BUILT_IN_CATEGORIES, store().lentBorrowed);
+  const before = pulled.outbox ?? [];
+  const sameOutbox = shared.outbox.length === before.length && shared.outbox.every((o, i) => o === before[i]);
+  if (onlyIfChanged && !ops.length && sameOutbox) return;
+  store().setSharedGroupState(localId, shared, { members: next.members, meta: shared.fold.meta ?? undefined, ops });
 }
 
 /** Pulls everything new for one group and applies it. Returns what the rules skipped. */
 export async function pullGroup(localId: string): Promise<Rejection[]> {
   const rejected: Rejection[] = [];
-  for (;;) {
+  for (let page = 0; ; page++) {
     const { shared } = requireShared(localId);
     const rows = await fetchEvents(shared.remoteId, shared.fold.seq);
-    if (!rows.length) break;
+    if (!rows.length) {
+      // Nothing new — still put back anything this phone has drifted from (e.g. a row of a
+      // frozen settlement whose Repayment was deleted here).
+      if (!page) commit(localId, shared, true);
+      break;
+    }
     // Re-read: the outbox may have grown while we were waiting.
     const latest = requireShared(localId).shared;
     const res = foldEvents(latest.fold, rows.map((r) => toIncoming(latest, r)));
@@ -113,24 +120,43 @@ async function doFlush(localId: string) {
     await rpcCreateGroup(shared.remoteId);  // safe to repeat
     shared = { ...requireShared(localId).shared, status: 'active' };
     store().setSharedGroupState(localId, shared);
+  } else {
+    // Pull first: an edit of an expense that a checkpoint has frozen meanwhile must go as a correction.
+    await pullGroup(localId);
   }
 
   for (;;) {
-    const batch = (requireShared(localId).shared.outbox ?? []).slice(0, 50);
+    const batch = (requireShared(localId).shared.outbox ?? []).filter((o) => !o.seq).slice(0, 50);
     if (!batch.length) break;
+    let res;
     try {
-      await rpcAppendEvents(shared.remoteId, sealRows(requireShared(localId).shared, batch));
+      res = await rpcAppendEvents(shared.remoteId, sealRows(requireShared(localId).shared, batch));
     } catch (e) {
       if (e instanceof SyncError && (e.code === 'NOT_MEMBER' || e.code === 'GROUP_ENDED')) {
         commit(localId, { ...requireShared(localId).shared, status: 'ended' });
       }
       throw e;
     }
-    const sent = new Set(batch.map((o) => o.eventId));
+    // Sent items stay (with their seq) until the pull folds them in: dropped now, the store
+    // subscription would see the change as unsent and queue it again.
+    const seqs = new Map((res ?? []).map((r) => [r.r_event_id, Number(r.r_seq)]));
     const cur = requireShared(localId).shared;
-    store().setSharedGroupState(localId, { ...cur, outbox: (cur.outbox ?? []).filter((o) => !sent.has(o.eventId)) });
+    store().setSharedGroupState(localId, { ...cur, outbox: (cur.outbox ?? []).map((o) => (seqs.has(o.eventId) ? { ...o, seq: seqs.get(o.eventId) } : o)) });
+    if (!batch.some((o) => seqs.has(o.eventId))) break;
   }
   await pullGroup(localId);
+  await postCheckpointIfDue(localId).catch(() => {});  // retried on the next sync
+}
+
+async function postCheckpointIfDue(localId: string) {
+  const { shared } = requireShared(localId);
+  if (!checkpointDue(shared, Date.now())) return;
+  const cp = buildCheckpoint(shared.fold);
+  const item: OutboxItem = { eventId: newSyncId(), at: new Date().toISOString(), event: { type: 'group.checkpoint', ...cp } };
+  const row = sealRows(shared, [item])[0];
+  if (row.ciphertext.length > MAX_CIPHERTEXT_CHARS) return;  // too many people/debts for one event: the server keeps the history
+  // false = something landed first; the next quiet spell tries again.
+  if (await rpcAppendCheckpoint(shared.remoteId, cp.baseSeq, row)) await pullGroup(localId);
 }
 
 const chains = new Map<string, Promise<void>>();

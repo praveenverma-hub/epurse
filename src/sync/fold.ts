@@ -65,6 +65,8 @@ export type GroupFold = {
   lastCheckpoint: number;
   /** A checkpoint that disagreed with this phone's history — show "Balances Disagree". */
   checkpointMismatch: number | null;
+  /** Server time of the last event — when the group went quiet (absent on folds saved before Oct-14-26). */
+  lastAt?: string | null;
 };
 
 /** A row of `group_events`, with the ciphertext already opened (null = couldn't be). */
@@ -85,7 +87,7 @@ export const MAX_MEMBERS = 100;
 
 export const emptyFold = (): GroupFold => ({
   seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {},
-  balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null,
+  balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null, lastAt: null,
 });
 
 // Maps and arrays are copied once per fold; member/entry objects are replaced, never mutated.
@@ -182,20 +184,21 @@ const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
 /**
  * An edit (or delete, `next` null) of a FROZEN expense, as the change in who-owes-whom.
  * null when this phone doesn't hold that frozen expense — the UI only offers Edit when it does.
+ * `from` = the version it changes, when a correction not yet in the history already changed it.
  */
 export function buildCorrection(
-  f: GroupFold, correctionId: string, correctsId: string, next: ExpenseBody | null,
+  f: GroupFold, correctionId: string, correctsId: string, next: ExpenseBody | null, from?: ExpenseBody,
 ): CorrectionBody | null {
   const old = f.entries[correctsId];
   if (!old || !old.frozen || old.kind !== 'expense' || old.deleted) return null;
   const pairs: Record<string, number> = {};
-  for (const d of expenseDebts(old.data)) addDebt(pairs, d.from, d.to, -d.paise);
+  for (const d of expenseDebts(from ?? old.data)) addDebt(pairs, d.from, d.to, -d.paise);
   if (next) for (const d of expenseDebts(next)) addDebt(pairs, d.from, d.to, d.paise);
   return {
     entityId: correctionId,
     correctsId,
-    title: (next ?? old.data).title,
-    date: (next ?? old.data).date,
+    title: (next ?? from ?? old.data).title,
+    date: (next ?? from ?? old.data).date,
     debts: debtList(pairs),
     expense: next,
   };
@@ -384,6 +387,7 @@ function applyMut(f: GroupFold, e: IncomingEvent): string | null {
   // Seqs are contiguous on the server; a jump means events before it were compacted away.
   const missingHistory = e.seq > f.seq + 1;
   f.seq = e.seq;
+  f.lastAt = e.createdAt;
 
   if (e.systemType) return applySystem(f, e.systemType, e.systemSubject);
 
