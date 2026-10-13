@@ -249,8 +249,27 @@ const localKey = (t: Pick<SyncTxn, 'amount' | 'createdAt' | 'groupSplit'>, title
     t.groupSplit?.paidByMemberId, (t.groupSplit?.shares ?? []).map((s) => [s.memberId, Math.round(s.shareAmount * 100)]),
   ]);
 
+/**
+ * Entities whose change was SENT, is now inside the history's seq range, and isn't in it:
+ * the rules skipped it on every phone. Read from the outbox BEFORE `reconcileOutbox` drops
+ * those items. Exact, unlike "has a server id but isn't on the server", which also catches
+ * anything that simply wasn't sent yet.
+ */
+export function skippedBySend(shared: GroupShared): Set<string> {
+  const f = shared.fold;
+  const out = new Set<string>();
+  for (const o of shared.outbox ?? []) {
+    const ev = o.event;
+    if (!o.seq || o.seq > f.seq) continue;
+    if ((ev.type === 'expense.upsert' || ev.type === 'settlement.upsert') && !f.entries[ev.entityId]) out.add(ev.entityId);
+  }
+  return out;
+}
+
 /** What to do to this phone's transactions and settle rows so they match the server history. */
-export function planIncoming(group: Group, txns: SyncTxn[], builtIns: Set<string>, lb: SyncLbRow[] = []): IncomingOp[] {
+export function planIncoming(
+  group: Group, txns: SyncTxn[], builtIns: Set<string>, lb: SyncLbRow[] = [], skipped: Set<string> = new Set(),
+): IncomingOp[] {
   const shared = group.shared;
   if (!shared) return [];
   const pendingIds = new Set((shared.outbox ?? []).flatMap(itemIds));
@@ -289,12 +308,12 @@ export function planIncoming(group: Group, txns: SyncTxn[], builtIns: Set<string
     if (local.syncRejected) ops.push({ kind: 'flag', txnId: local.id, syncRejected: null });
   }
 
-  // Mine, sent, and still not in the history: the rules skipped it on every phone.
+  // Mine, sent, and skipped by the rules on every phone.
   for (const t of bySyncId.values()) {
-    if (t.syncOrigin === 'remote' || pendingIds.has(t.syncId!) || shared.fold.entries[t.syncId!]) continue;
+    if (!skipped.has(t.syncId!) || pendingIds.has(t.syncId!)) continue;
     const body = projectExpense(t, t.syncId!, shared, builtIns);
     const key = body ? JSON.stringify(body) : null;
     if (key && t.syncRejected !== key) ops.push({ kind: 'flag', txnId: t.id, syncRejected: key });
   }
-  return [...ops, ...planIncomingSettlements(group, lb, pendingIds)];
+  return [...ops, ...planIncomingSettlements(group, lb, pendingIds, skipped)];
 }

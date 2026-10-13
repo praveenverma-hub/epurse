@@ -10,7 +10,7 @@ import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BA
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
-import { projectExpense, planOutgoing, planIncoming, reconcileOutbox } from '../../sync/expenses.ts';
+import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend } from '../../sync/expenses.ts';
 import { checkpointDue } from '../../sync/checkpoint.ts';
 import { lbRowMember } from '../../sync/settlements.ts';
 
@@ -421,16 +421,23 @@ seq = 0;
     data(U.rahul, { type: 'member.add', memberId: M.priya, name: 'Priya' }),
     sys('member_joined', U.priya),
     data(U.priya, { type: 'member.claim', memberId: M.priya, userId: U.priya })];
+  // As append_events: each unsent item becomes the next seq; it stays (with that seq) until a pull folds it.
   const upload = (phone, user) => {
-    for (const o of phone.group.shared.outbox ?? []) log.push(data(user, o.event));
-    phone.group = { ...phone.group, shared: { ...phone.group.shared, outbox: [] } };
+    const outbox = (phone.group.shared.outbox ?? []).map((o) => {
+      if (o.seq) return o;
+      log.push(data(user, o.event));
+      return { ...o, seq };
+    });
+    phone.group = { ...phone.group, shared: { ...phone.group.shared, outbox } };
   };
   const pull = (phone) => {
     const fold = foldEvents(phone.group.shared.fold, log).fold;
-    const shared = { ...phone.group.shared, fold };
-    // As groupSync's commit: members follow the server.
+    const pulled = { ...phone.group.shared, fold };
+    // As groupSync's commit: skipped sends read first, then the outbox reconciled; members follow the server.
+    const skipped = skippedBySend(pulled);
+    const shared = { ...pulled, outbox: reconcileOutbox(pulled) };
     phone.group = { ...phone.group, shared, members: [phone.group.members[0], ...membersFromFold(phone.group.members, shared)] };
-    const ops = planIncoming(phone.group, phone.txns, BUILT, phone.lb);
+    const ops = planIncoming(phone.group, phone.txns, BUILT, phone.lb, skipped);
     for (const op of ops) {
       if (op.kind === 'lbCreate') phone.lb = [op.row, ...phone.lb];
       if (op.kind === 'lbUpdate') phone.lb = phone.lb.map((l) => (l.id === op.rowId ? { ...l, ...op.fields } : l));

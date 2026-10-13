@@ -2069,6 +2069,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   **Oct-15 (3rd): QR invite** — Create Invite → centered `InfoSheet` with the link as a QR + Share
   Link. `InfoSheet` gained `content` + `onCtaPress`. QR encoder = `toqr` vendored into `utils/qr/`
   (upstream needs `TextEncoder`, which Hermes lacks). No new dependency, no native change.
+  **Oct-15 (4th): groups never end from inactivity** (user's call — no manual "Share Again"):
+  migration `20261016000000_dormant_groups.sql` — after 90 quiet days a group goes DORMANT (server keeps
+  group, members, latest checkpoint; older events dropped); the next change wakes it. `is_member` /
+  `redeem_invite` lose the expiry check; checkpoints no longer extend retention. Also FIXED "not
+  synced" detection → `skippedBySend` (sent + covered + absent), not "has a server id but isn't
+  there". **Open:** `supabase db push`.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

@@ -18,7 +18,7 @@ transactions, budgets, goals, personal groups, unsynced shared groups — never 
 | Server tables | 4: `groups`, `group_members`, `group_invites`, `group_events` (append-only). Expenses, edits, deletes, settlements are event TYPES inside the ciphertext, not tables. |
 | Validation | The server checks structure (membership, order, size, rate). Amounts are checked on every phone by ONE shared validator; invalid events are skipped identically everywhere. |
 | Money | Integer paise on the wire. Shares are sent explicitly; receivers never recompute a split. |
-| Server retention | Checkpoints (§8b): after 7 quiet days (settled) or 30 (unsettled) a phone posts a checkpoint of people + who owes whom. Server deletes a group 90 days after its last activity, or 365 days after its last checkpoint. Compaction of pre-checkpoint events is built but OFF until history sharing exists. Phones always keep everything. |
+| Server retention | **Groups never end from inactivity (Oct-15-2026).** After 7 quiet days (settled) or 30 (unsettled) a phone posts a checkpoint of people + who owes whom. After 90 quiet days the group goes DORMANT: the server keeps the group, its members and the latest checkpoint and drops older events; the next change wakes it with no action from anyone (§9). Phones always keep everything. |
 | Integrity | Users own correctness (duplicates, double-recorded payments). The app guarantees every phone computes the same totals and balances, and group history is never rewritten. See §8a. |
 | Delete Account | Membership and account are deleted; the user's events STAY as encrypted group history with the author cleared. See §10. |
 | PowerSync | No — it syncs readable rows, which E2EE rules out. |
@@ -356,22 +356,34 @@ is still the latest (so it never races a new expense).
   checkpoint's opening position + everything after; integers in paise, so no drift.
 - **Fresh start** after a checkpoint continues in the same group — same people, invite and key;
   nobody re-uploads anything.
-- **Compaction** (`compact_groups`, deletes events before each checkpoint) exists but is NOT
-  scheduled until phase 5/6's history sharing lets a late joiner fetch the old expenses
-  (display-only) from another member. Until then the server keeps them for the 90/365-day timers.
-- **Switching to full history later** = leave compaction off; nothing on the phones changes.
+- **Compaction** runs only on DORMANT groups (90 quiet days, §9): events before the latest
+  checkpoint are dropped. `compact_groups` (all groups at once) stays unscheduled. A late joiner
+  after that gets balances, not the older expenses, until history sharing (phase 5) exists.
+- **Keeping full history instead** = remove the `delete from group_events` in `purge_expired`;
+  nothing on the phones changes.
 
 ---
 
-## 9. Sharing ends
+## 9. Sharing ends — only when people leave
 
-- Every data event sets `expires_at = now + 90 days`; a checkpoint sets `now + 365 days` (it's a
-  ~1–2 KB record). Row-level security hides an expired group immediately; the daily `pg_cron`
-  job deletes it (03:00 IST). Phone-side mirrors: `SHARED_SERVER_*` in `src/constants/retention.ts`.
-- The app notices its membership is gone and marks the group "Sharing Ended". Local data,
-  balances and Lent/Borrowed rows stay; the group behaves like a normal local shared group again.
-  New activity there offers **Share Again** (phase 5): a fresh server group, seeded with a
-  checkpoint of the current people and balances — no history re-uploaded.
+**Decided Oct-15-2026: a group never ends from inactivity**, and there is no "Share Again" —
+it would have meant new invites for everyone. Migration `20261016000000_dormant_groups.sql`:
+
+- Every data event sets `expires_at = now + 90 days` (a checkpoint doesn't — it isn't activity).
+- Daily `pg_cron` (`purge_expired`, 03:00 IST): a group past `expires_at` goes **dormant** —
+  if it has a checkpoint, events before it are deleted and `expires_at = infinity` until the next
+  change; without one it keeps its events and is looked at again the next day. Cost: the group
+  row, its members and a ~1–2 KB checkpoint.
+- **The next change wakes it**: `append_events` clears `dormant_at` and resets the 90 days. Nothing
+  changes for the phones — same group, same key, same members; a phone that was offline through
+  it sees a seq gap and adopts the checkpoint (§8b).
+- `is_member` no longer looks at expiry, so nothing is hidden.
+- A group ends only when people go: Leave (₹0), removed by an admin, Delete Account — or the
+  last member leaving (the server deletes it). Then the app marks it "Sharing Ended"; local
+  data, balances and Lent/Borrowed rows stay, and it behaves like a local shared group.
+- Phone-side mirror: `SHARED_SERVER_IDLE_MS` in `src/constants/retention.ts`.
+- **"Not synced" is exact:** a change is flagged only if it was SENT (its outbox item has a seq),
+  the history now covers that seq, and the entity isn't there (`skippedBySend`).
 
 ---
 
@@ -455,9 +467,8 @@ new invite.
 4. **Realtime poke + push — code DONE (Oct-15-2026), not yet tried on a device** (§7a). Needs
    `supabase db push` (migration `20261015000000_realtime_push.sql`) and, for push only, the
    Firebase steps in §11.5 + a rebuild — **Firebase PENDING**; until then push is skipped.
-5. Share Again, history sharing for late joiners (then schedule compaction), key rotation on
-   removal, keys in backup verified on restore. (Settlement sync, incl. one settlement per group
-   from Lent/Borrowed, is done — §7.)
+5. History sharing for late joiners, key rotation on removal, keys in backup verified on
+   restore. Done: settlement sync (§7); groups never end from inactivity (§9, Oct-15).
 
 ### Files
 

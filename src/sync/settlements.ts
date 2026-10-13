@@ -98,7 +98,7 @@ function localRowFields(group: Group, shared: GroupShared, d: SettlementBody) {
 }
 
 /** What to do to this phone's Lent/Borrowed rows so they match the server's settlements. */
-export function planIncomingSettlements(group: Group, lb: SyncLbRow[], pendingIds: Set<string>): LbOp[] {
+export function planIncomingSettlements(group: Group, lb: SyncLbRow[], pendingIds: Set<string>, skipped: Set<string> = new Set()): LbOp[] {
   const shared = group.shared;
   if (!shared?.myMemberId) return [];
   const rows = groupSettleRows(group, lb);
@@ -130,9 +130,9 @@ export function planIncomingSettlements(group: Group, lb: SyncLbRow[], pendingId
     if (local.syncRejected) ops.push({ kind: 'lbFlag', rowId: local.id, syncRejected: null });
   }
 
-  // Mine, sent, and still not in the history: the rules skipped it on every phone.
+  // Mine, sent, and skipped by the rules on every phone (expenses.ts `skippedBySend`).
   for (const r of bySyncId.values()) {
-    if (r.syncOrigin === 'remote' || pendingIds.has(r.syncId!) || shared.fold.entries[r.syncId!]) continue;
+    if (!skipped.has(r.syncId!) || pendingIds.has(r.syncId!)) continue;
     const body = projectSettlement(r, r.syncId!, group, shared);
     const key = body ? JSON.stringify(body) : null;
     if (key && r.syncRejected !== key) ops.push({ kind: 'lbFlag', rowId: r.id, syncRejected: key });

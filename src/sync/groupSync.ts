@@ -22,7 +22,7 @@ import { buildCheckpoint, emptyFold, foldEvents, type IncomingEvent, type Reject
 import { checkpointDue } from './checkpoint';
 import { newInvite, buildInviteLink, parseInviteLink } from './invite';
 import { membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
-import { planIncoming, reconcileOutbox, type OutboxItem } from './expenses';
+import { planIncoming, reconcileOutbox, skippedBySend, type OutboxItem } from './expenses';
 import {
   rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
   fetchEvents, fetchMyGroupIds, type EventRow, type SealedRow,
@@ -69,9 +69,10 @@ const toIncoming = (shared: GroupShared, r: EventRow): IncomingEvent => {
 function commit(localId: string, pulled: GroupShared, onlyIfChanged = false) {
   const group = getGroup(localId);
   if (!group) return;
+  const skipped = skippedBySend(pulled);  // before reconcileOutbox drops the sent items
   const shared = { ...pulled, outbox: reconcileOutbox(pulled) };
   const next: Group = { ...group, shared, members: membersFromFold(group.members, shared) };
-  const ops = planIncoming(next, store().transactions, BUILT_IN_CATEGORIES, store().lentBorrowed);
+  const ops = planIncoming(next, store().transactions, BUILT_IN_CATEGORIES, store().lentBorrowed, skipped);
   const before = pulled.outbox ?? [];
   const sameOutbox = shared.outbox.length === before.length && shared.outbox.every((o, i) => o === before[i]);
   if (onlyIfChanged && !ops.length && sameOutbox) return;
