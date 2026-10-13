@@ -13,6 +13,7 @@ import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
 import SplitEditorScreen from '../screens/SplitEditorScreen';
 import GroupDetailScreen from '../screens/GroupDetailScreen';
 import GroupFormScreen from '../screens/GroupFormScreen';
+import JoinGroupScreen from '../screens/JoinGroupScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
 import SecuritySettingsScreen from '../screens/SecuritySettingsScreen';
@@ -101,6 +102,7 @@ export default function AppNavigator() {
         <Stack.Screen name="SplitEditor"     component={SplitEditorScreen} />
         <Stack.Screen name="GroupDetail"     component={GroupDetailScreen} />
         <Stack.Screen name="GroupForm"       component={GroupFormScreen} />
+        <Stack.Screen name="JoinGroup"       component={JoinGroupScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />
         <Stack.Screen name="Settings"       component={SettingsScreen} />
         <Stack.Screen name="Security"       component={SecuritySettingsScreen} />

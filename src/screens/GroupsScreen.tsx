@@ -6,7 +6,7 @@
 // Summary tabs). The FAB creates a new group — adding an EXPENSE now lives
 // inside a group's own detail screen.
 // =============================================================================
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,8 @@ import InfoIcon from '../components/InfoIcon';
 import SectionHeader from '../components/SectionHeader';
 import StatSplitRow from '../components/StatSplitRow';
 import type { Group } from '../types/group';
+import { useSyncEnabled } from '../sync/config';
+import { syncAllSharedGroups } from '../sync/groupSync';
 
 type Filter = 'all' | 'owed' | 'owe';
 
@@ -175,6 +177,16 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
 
   const openCreate = () => navigation.navigate('GroupForm');
 
+  const syncOn = useSyncEnabled();
+  const hasLiveGroups = useEPurseStore((s: any) => s.groups.some((g: Group) => g.shared?.status === 'active')) as boolean;
+  // Catch up on every live group when the tab comes into view; offline failures stay quiet.
+  useEffect(() => {
+    if (!hasLiveGroups) return undefined;
+    const refresh = () => { syncAllSharedGroups().catch(() => {}); };
+    refresh();
+    return navigation.addListener('focus', refresh);
+  }, [hasLiveGroups, navigation]);
+
   const CHIPS: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'owed', label: 'Owed to You' },
@@ -194,6 +206,17 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
       >
         Groups
       </Text>
+      {syncOn && (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('JoinGroup')}
+          hitSlop={10}
+          style={styles.infoBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Join a group with an invite link"
+        >
+          <Ionicons name="enter-outline" size={22} color={onLight ? colors.textSecondary : '#FFFFFFCC'} />
+        </TouchableOpacity>
+      )}
       <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
         <InfoIcon size={22} color={onLight ? colors.textSecondary : '#FFFFFFCC'} />
       </TouchableOpacity>

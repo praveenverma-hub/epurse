@@ -10,19 +10,13 @@
 import * as googleAuth from '../backup/googleAuth';
 import { useEPurseStore } from '../store/ePurseStore';
 import { isSyncConfigured, isSyncEnabled } from './config';
+import { SyncError } from './errors';
 import type * as TClient from './client';
 
 // Loaded on first use, so supabase-js and its URL polyfill never load for users who don't share.
 const client = () => require('./client') as typeof TClient;
 
-export class SyncError extends Error {
-  code: 'DISABLED' | 'SIGN_IN_FAILED' | 'DELETE_FAILED';
-  constructor(code: SyncError['code'], message: string) {
-    super(message);
-    this.name = 'SyncError';
-    this.code = code;
-  }
-}
+export { SyncError } from './errors';
 
 const store = () => useEPurseStore.getState() as any;
 

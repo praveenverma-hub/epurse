@@ -1,7 +1,7 @@
 // =============================================================================
 // Shared-group sync — Supabase projects (docs/SHARED_GROUP_SYNC.md).
 //
-// Both values per project are PUBLIC by design: the anon key reaches only what
+// Both values per project are PUBLIC by design: the anon (publishable) key reaches only what
 // row-level security allows. The service-role key lives only in the
 // delete-account Edge Function's secrets — never in the app or in git.
 //
@@ -10,10 +10,10 @@
 // =============================================================================
 
 import { REMOTE_CONFIG_ENV, type RemoteConfigEnv } from '../config/remoteConfig';
-import { getFeatureFlag } from '../hooks/useFeatureFlag';
+import { getFeatureFlag, useFeatureFlag } from '../hooks/useFeatureFlag';
 
 const SUPABASE_PROJECTS: Record<RemoteConfigEnv, { url: string; anonKey: string }> = {
-  test: { url: '', anonKey: '' },
+  test: { url: 'https://gkhoqghkmuzqzndytngb.supabase.co', anonKey: 'sb_publishable_HWF4EEplS9rdRW5l4x8OAA_pCsiPeNt' },
   prod: { url: '', anonKey: '' },
 };
 
@@ -22,5 +22,12 @@ export const SUPABASE_ANON_KEY = SUPABASE_PROJECTS[REMOTE_CONFIG_ENV].anonKey;
 
 export const isSyncConfigured = (): boolean => !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
 
+// Test builds can only reach the test project, so sharing is always on there; prod
+// builds follow the `sharedSync` switch (STATIC_CONFIG + remote override).
+const onFor = (flag: boolean) => (flag || REMOTE_CONFIG_ENV === 'test') && isSyncConfigured();
+
 /** Whether new sharing may start. Deleting an existing server account ignores this. */
-export const isSyncEnabled = (): boolean => getFeatureFlag('sharedSync') && isSyncConfigured();
+export const isSyncEnabled = (): boolean => onFor(getFeatureFlag('sharedSync'));
+
+/** Same answer for a render: re-renders when the remote switch changes. */
+export const useSyncEnabled = (): boolean => onFor(useFeatureFlag('sharedSync'));

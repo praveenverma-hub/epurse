@@ -7,10 +7,11 @@
 // toggle, then three text tabs (Transactions / Members / Summary — Members is
 // skipped for a personal group, which has no split).
 // =============================================================================
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -52,6 +53,9 @@ import WhatsAppIcon from '../components/WhatsAppIcon';
 import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
 import type { Group } from '../types/group';
+import { useSyncEnabled } from '../sync/config';
+import { createInviteLink, leaveSharedGroup, pullGroup } from '../sync/groupSync';
+import { toRemoteMember } from '../sync/localGroup';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any;
@@ -63,7 +67,7 @@ const TransactionItem = TransactionItemRaw as React.ComponentType<{
 interface GroupBalanceRow { personKey: string; person: string; phone?: string | null; net: number }
 interface ConfirmState {
   title?: string; message?: string; primaryText?: string; secondaryText?: string;
-  destructive?: boolean; onPrimary?: () => void; onSecondary?: () => void;
+  destructive?: boolean; onPrimary?: () => void | Promise<void>; onSecondary?: () => void;
 }
 
 const MONTH_LABEL = (d: Date) => d.toLocaleDateString('en-IN', { month: 'short' });
@@ -123,6 +127,16 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
   const [ccBillTxn, setCcBillTxn] = useState<any | null>(null);
+
+  const syncOn = useSyncEnabled();
+  const live = group?.shared?.status === 'active';
+  // Catch up whenever the screen comes back into view; failures stay quiet (offline is normal).
+  useEffect(() => {
+    if (!live || !groupId) return undefined;
+    const refresh = () => { pullGroup(groupId).catch(() => {}); };
+    refresh();
+    return navigation.addListener('focus', refresh);
+  }, [live, groupId, navigation]);
 
   const groupTxns = useMemo(
     () => transactions
@@ -253,6 +267,51 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     });
   };
 
+  // Sharing actions run inside the confirm modal, which shows its own spinner while they work.
+  const runShared = (task: () => Promise<void>, failTitle: string) => async () => {
+    try {
+      await task();
+      setConfirm(null);
+    } catch (e) {
+      setConfirm(null);
+      toast.error(failTitle, (e as Error).message);
+    }
+  };
+
+  // Inviting is how a group goes live: the first invite puts it on the server.
+  const canInvite = isShared && syncOn && (live || !group.shared);
+  const handleInvite = (forMember?: { memberId: string; name: string }) => setConfirm({
+    title: forMember ? `Invite ${titleCaseName(forMember.name)}` : 'Invite People',
+    message: (live ? '' : 'Inviting makes this group live: people you invite see its expenses and balances, and add their own. Everything else stays on your phone.\n\n')
+      + `The link works once, for 48 hours. Send it only to ${forMember ? titleCaseName(forMember.name) : 'the person you\'re inviting'}.`,
+    primaryText: 'Share Link',
+    secondaryText: 'Cancel',
+    onPrimary: runShared(async () => {
+      const link = await createInviteLink(group.id, forMember?.memberId);
+      setConfirm(null);
+      await Share.share({ message: `Join "${group.name}" on ePurse: ${link}` });
+    }, 'Couldn\'t create the link'),
+  });
+
+  // Live groups: has this person opened the group on their own phone yet?
+  const joined = (memberId: string) => {
+    const shared = group.shared;
+    if (!shared) return false;
+    return !!shared.fold.members[toRemoteMember(shared, memberId)]?.userId;
+  };
+
+  const handleLeave = () => setConfirm({
+    title: 'Leave Shared Group?',
+    message: 'You\'ll stop getting updates. The group and its history stay on your phone.',
+    primaryText: 'Leave',
+    secondaryText: 'Cancel',
+    destructive: true,
+    onPrimary: runShared(async () => {
+      await leaveSharedGroup(group.id);
+      toast.success('You left the group');
+    }, 'Couldn\'t leave'),
+  });
+
   const handleSettle = (pb: GroupBalanceRow) => {
     if (pb.net < 0) { setSettleTarget(pb); return; }
     setConfirm({
@@ -294,11 +353,23 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                     <Text style={[styles.avatarTxt, { color: theme.primary }]}>{displayName.charAt(0).toUpperCase()}</Text>
                   </View>
                   <Text style={styles.memberRowName} numberOfLines={1}>{displayName}</Text>
-                  <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
-                    <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>
-                      {m.isMe ? 'Admin' : 'Member'}
-                    </Text>
-                  </View>
+                  {canInvite && !m.isMe && !m.archived && !joined(m.memberId) ? (
+                    <TouchableOpacity
+                      style={[styles.memberInviteBtn, { borderColor: theme.primary }]}
+                      onPress={() => handleInvite({ memberId: m.memberId, name: m.name })}
+                      activeOpacity={0.8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Invite ${displayName}`}
+                    >
+                      <Text style={[styles.memberInviteTxt, { color: theme.primary }]}>Invite</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
+                      <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>
+                        {m.isMe ? 'Admin' : m.archived ? 'Left' : live && joined(m.memberId) ? 'Joined' : 'Member'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -564,6 +635,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                   <Text style={styles.cardName} numberOfLines={1}>{group.name}</Text>
                   <Text style={styles.cardMeta} numberOfLines={1}>
                     {isShared ? memberNamesLabel : 'Personal group'}
+                    {live ? ' · Live' : group.shared ? ' · Sharing Ended' : ''}
                     {group.excludeFromTotals ? ' · Excluded from totals' : ''}
                   </Text>
                 </View>
@@ -574,7 +646,13 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                   actions={[
                     { key: 'add', label: 'Add Expense', icon: 'add-circle-outline', onPress: () => navigation.navigate('AddGroupExpense', { groupId: group.id }) },
                     { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
-                    { key: 'delete', label: 'Delete Group', icon: 'trash-outline', destructive: true, onPress: handleDeleteGroup },
+                    ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: () => handleInvite() }] : []),
+                    ...(live && !group.shared?.myMemberId
+                      ? [{ key: 'claim', label: 'Choose Who You Are', icon: 'person-circle-outline' as const, onPress: () => navigation.navigate('JoinGroup', { claimGroupId: group.id }) }] : []),
+                    // A live group is left (₹0 only), not deleted; once ended it's a normal local group.
+                    live
+                      ? { key: 'leave', label: 'Leave Shared Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }
+                      : { key: 'delete', label: 'Delete Group', icon: 'trash-outline' as const, destructive: true, onPress: handleDeleteGroup },
                   ]}
                 />
               </View>
@@ -841,6 +919,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider,
   },
   memberRoleTagTxt: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
+  // Outlined (secondary) — the row's only action, never a filled primary.
+  memberInviteBtn: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 5 },
+  memberInviteTxt: { ...typography.small, fontWeight: '700' },
   memberRowName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },
   // Light fill, no border — an inline affordance, not an outlined CTA.
   addMemberBtn: {

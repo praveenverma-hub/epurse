@@ -60,8 +60,8 @@ sign-in to Supabase is **lazy** (§4): users who never share never get a server 
 
 ## 4. Identity and sign-in
 
-- **Lazy:** the app signs in to Supabase only when the user first starts or joins a shared
-  group (`ensureSyncSession`, `src/sync/session.ts`). supabase-js and its URL polyfill are
+- **Lazy:** the app signs in to Supabase only when the user first invites someone to, or joins, a
+  shared group (`ensureSyncSession`, `src/sync/session.ts`). supabase-js and its URL polyfill are
   `require`d on first use, so they never load for users who don't share.
 - `syncAccount { userId }` in the store records that a server account exists. It is **backed
   up**, so Delete Account on a restored phone still deletes the server account.
@@ -343,8 +343,19 @@ new invite.
    sign-out, the `delete-account` Edge Function and the Delete Account change (§10), feature
    flag. Not yet exercised against a real project: there's no entry point until phase 2's
    Start Live Sharing.
-2. **Groups, invites, keys.** `create_group`, invite link + QR, `redeem_invite`, claim a member,
-   leave / remove, key storage, Start Live Sharing.
+2. **Groups, invites, keys — code DONE (Oct-14-2026), not yet tried on a device.**
+   `src/sync/groupSync.ts`. **A shared group goes live on its FIRST invite** (decided Oct-14 —
+   no "Start Live Sharing" step; until someone is invited nothing leaves the phone). Invite:
+   ⋮ → Invite People (generic link) or Members tab → **Invite** next to anyone not joined yet
+   (link made for that person: `&m=<memberId>` in the fragment, so their phone claims the name
+   without asking). Members tab shows Joined / Invite / Left. Join (Groups tab header →
+   `JoinGroupScreen`, paste the link), "Who Are You?" only for generic links or a taken name, Leave Shared Group (₹0 only; replaces Delete while live), Edit Group →
+   `pushGroupChanges` (name/emoji/colour, new people, renames). Pull on GroupDetail focus and
+   on Groups tab focus (`syncAllSharedGroups`, which also marks groups the server dropped as
+   "Sharing Ended"). Test builds have sharing ON (`useSyncEnabled`). **Expenses don't sync yet**
+   — that's phase 3. Not built: QR code, and invite links opening the app directly (needs
+   `assetlinks.json` on epurse.co.in + an App Links intent filter) — until then, paste the link.
+   Removing a person who's already on the server isn't offered in Edit Group (they leave at ₹0).
 3. **Encrypted event log + offline.** Outbox, send, pull, validator, fold, echo, remote txns as
    memos, failed-change indicator.
 4. Realtime poke (broadcast `{groupId, seq}` from a trigger) + Expo push with generic text
@@ -364,7 +375,12 @@ new invite.
 | `src/sync/crypto.ts` | ✅ key gen, encrypt/decrypt with AAD, uuid, sha256 (pure) |
 | `src/sync/events.ts` | ✅ event types, frozen v1 limits, strict parser (pure) |
 | `src/sync/fold.ts` | ✅ events → members, entries, balances; the rules (pure) |
-| `src/sync/engine.ts` | send/pull loop, triggers, errors |
+| `src/sync/api.ts` | ✅ one function per RPC + event/member reads; server errors → `SyncError` |
+| `src/sync/errors.ts` | ✅ `SyncError` codes + user-facing messages |
+| `src/sync/localGroup.ts` | ✅ server ⇄ local members (`memberMap`, `'me'`), edit planning (pure) |
+| `src/sync/groupSync.ts` | ✅ phase 2 actions (start, invite, join, claim, pull, leave, push edits) |
+| `src/screens/JoinGroupScreen.tsx` | ✅ paste link → "Who Are You?" |
+| `src/sync/engine.ts` | phase 3: outbox send/pull loop, triggers |
 | `src/sync/invite.ts` | ✅ build/parse invite links (pure) |
 | `supabase/migrations/*`, `supabase/functions/delete-account/` | server (✅ schema, ✅ keep-history delete, ✅ checkpoints, ✅ delete-account) |
 
@@ -373,7 +389,7 @@ new invite.
 | `src/storage/schema.ts` | `syncOutbox` row table, `SCHEMA_VERSION` 2 |
 | `src/store/ePurseStore.js` | enqueue in group txn actions; apply folded changes; store version + `backupService` STORE_VERSION |
 | `src/backup/payload.ts` | ✅ `syncAccount` in `STORE_KEYS`; phase 3: `syncOutbox` in `STORE_KEYS`, `syncOrigin` in `TXN_FIELDS` |
-| `src/types/group.ts` | `Group.shared?` (remote id, myMemberId, keys, epoch, cursor, status) |
+| `src/types/group.ts` | ✅ `Group.shared?: GroupShared` (remoteId, keys, keyEpoch, myMemberId, memberMap, fold, status) + `GroupMember.archived` |
 | `src/backup/googleAuth.ts` | ✅ `getIdToken()` |
 | `src/screens/SettingsScreen.tsx` | ✅ Delete Account order (§10) + error modal |
 

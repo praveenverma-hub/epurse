@@ -9,6 +9,7 @@ import {
 import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE } from '../../sync/invite.ts';
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
+import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -74,6 +75,12 @@ console.log('\n— invite links —');
   check('bad invite id → rejected', parseInviteLink(link.replace(/i=[^&]+/, 'i=not-a-uuid')) === null);
   check('missing token → rejected', parseInviteLink(link.replace(/&t=[^&]+/, '')) === null);
   check('not a string → rejected', parseInviteLink(undefined) === null);
+  check('a generic link has no person', parsed.memberId === null);
+  const forPriya = randomUuid(rand);
+  const personal = parseInviteLink(buildInviteLink(inv.inviteId, inv.token, key, forPriya));
+  check('a link made for one person carries who', personal?.memberId === forPriya && personal.inviteId === inv.inviteId);
+  check('…in the fragment, never the part a server sees', !buildInviteLink(inv.inviteId, inv.token, key, forPriya).split('#')[0].includes(forPriya));
+  check('a malformed person id → rejected', parseInviteLink(`${link}&m=not-a-uuid`) === null);
 }
 
 // ── fold scenario: Goa trip, Rahul (admin), Priya, Amit ──
@@ -324,6 +331,48 @@ const checkpointEvent = (author, fold) => data(author, { type: 'group.checkpoint
   check('a checkpoint not based on the latest seq is rejected', rs.rejected[0]?.reason === 'bad_checkpoint');
   const outsiderCp = data(U.outsider, { type: 'group.checkpoint', ...buildCheckpoint(rs.fold) });
   check('a non-member\'s checkpoint is rejected by a phone with history', foldEvents(rs.fold, [outsiderCp]).rejected[0]?.reason === 'not_member');
+}
+
+console.log('\n— local group mapping —');
+seq = 0;
+{
+  // Rahul's phone: Priya existed as a contact before sharing; Dev joined from his own phone.
+  const DEV = randomUuid(rand);
+  const fold = foldEvents(emptyFold(), [
+    sys('group_created', U.rahul),
+    data(U.rahul, { type: 'group.meta', name: 'Goa Trip', emoji: '🏖️', color: '#7C3AED' }),
+    data(U.rahul, { type: 'member.add', memberId: M.rahul, name: 'Rahul' }),
+    data(U.rahul, { type: 'member.claim', memberId: M.rahul, userId: U.rahul }),
+    data(U.rahul, { type: 'member.add', memberId: M.priya, name: 'Priya S' }),
+    sys('member_joined', U.amit),
+    data(U.amit, { type: 'member.add', memberId: DEV, name: 'Dev' }),
+  ]).fold;
+  const shared = { remoteId: randomUuid(rand), keys: {}, keyEpoch: 1, myMemberId: M.rahul, memberMap: { me: M.rahul, c_42: M.priya }, fold, status: 'active', syncedAt: null };
+  const local = [{ memberId: 'me', name: 'You', isMe: true }, { memberId: 'c_42', name: 'Priya', contactId: '42', phone: '98765' }, { memberId: 'c_77', name: 'Zoya', contactId: '77' }];
+
+  check('my server member is "me" here, and back', toLocalMember(shared, M.rahul) === 'me' && toRemoteMember(shared, 'me') === M.rahul);
+  check('a pre-existing contact keeps its local id', toLocalMember(shared, M.priya) === 'c_42' && toRemoteMember(shared, 'c_42') === M.priya);
+  check('someone who joined elsewhere uses the server id', toLocalMember(shared, DEV) === DEV && toRemoteMember(shared, DEV) === DEV);
+  const members = membersFromFold(local, shared);
+  check('members follow the server: names, order, contact kept',
+    JSON.stringify(members.map((m) => [m.memberId, m.name, m.contactId ?? null])) === JSON.stringify([['c_42', 'Priya S', '42'], [DEV, 'Dev', null], ['c_77', 'Zoya', '77']]),
+    JSON.stringify(members));
+  check('"me" is left for the store to add', !members.some((m) => m.memberId === 'me'));
+
+  let n = 0;
+  const plan = planGroupChanges(
+    { name: 'Goa Trip 2026', emoji: '🏖️', color: '#7C3AED', members: [...local, { memberId: DEV, name: 'Dev K' }] },
+    shared, () => `00000000-0000-4000-8000-00000000000${++n}`,
+  );
+  const types = plan.events.map((e) => e.type);
+  check('edit plan: new name → group.meta', types[0] === 'group.meta' && plan.events[0].name === 'Goa Trip 2026');
+  check('edit plan: renamed contact → member.rename on its server id', plan.events.some((e) => e.type === 'member.rename' && e.memberId === M.priya && e.name === 'Priya'));
+  check('edit plan: new person → member.add + mapped', plan.events.some((e) => e.type === 'member.add' && e.name === 'Zoya') && plan.memberMap.c_77 === '00000000-0000-4000-8000-000000000001');
+  check('edit plan: rename of a remote-only member', plan.events.some((e) => e.type === 'member.rename' && e.memberId === DEV && e.name === 'Dev K'));
+  const same = planGroupChanges({ name: 'Goa Trip', emoji: '🏖️', color: '#7C3AED', members: [local[0], { ...local[1], name: 'Priya S' }] }, shared, () => 'x');
+  check('nothing changed → nothing sent', same.events.length === 0);
+  check('metaOf drops a colour that isn\'t #rrggbb', metaOf({ name: 'G', emoji: '', color: 'rgb(1,2,3)' }).color === null && metaOf({ name: 'G', emoji: '', color: 'x' }).emoji === null);
+  check('unclaimed list for "Who Are You?"', JSON.stringify(unclaimedMembers(shared).map((m) => m.name)) === JSON.stringify(['Priya S', 'Dev']));
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);

@@ -3,6 +3,8 @@
 // these are the canonical shapes the screens/components/utils type against).
 // =============================================================================
 
+import type { GroupFold } from '../sync/fold';
+
 export type GroupType = 'personal' | 'shared';
 
 export interface GroupMember {
@@ -12,6 +14,8 @@ export interface GroupMember {
   isMe?: boolean;
   contactId?: string | null;
   phone?: string | null;
+  /** Synced groups: left at ₹0 — still in old expenses, can't join new ones. */
+  archived?: boolean;
 }
 
 export interface GroupShare {
@@ -28,6 +32,24 @@ export interface GroupSplit {
   shares: GroupShare[];
 }
 
+/** A shared group that syncs live (src/sync/, docs/SHARED_GROUP_SYNC.md). */
+export interface GroupShared {
+  /** Server group id (uuid) — the local `Group.id` stays as it was. */
+  remoteId: string;
+  /** base64 group key per key epoch. Backed up with the group (inside the encrypted backup). */
+  keys: Record<string, string>;
+  keyEpoch: number;
+  /** My member in the group; null until I've said which one I am. */
+  myMemberId: string | null;
+  /** Local memberId → remote memberId, for members that existed here before syncing. */
+  memberMap: Record<string, string>;
+  /** The replayed server history (see sync/fold.ts). */
+  fold: GroupFold;
+  /** 'ended' = no longer on the server (left, or expired); local data stays. */
+  status: 'active' | 'ended';
+  syncedAt: string | null;
+}
+
 export interface Group {
   id: string;
   name: string;
@@ -41,6 +63,7 @@ export interface Group {
   lastActivityAt?: string;
   /** Vestigial — superseded by the LB ledger; kept for back-compat reads. */
   settlements?: unknown[];
+  shared?: GroupShared;
 }
 
 /** Minimal transaction shape the group utils need (the store txn is a superset). */

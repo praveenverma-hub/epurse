@@ -2031,7 +2031,14 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   earlier entries frozen) and `expense.correct` (edits of frozen expenses as debt deltas) —
   test:sync 91/91. Migration `20261014000000_checkpoints.sql` (append_checkpoint; 90-day / 365-day
   timers; `compact_groups` built but NOT scheduled). Phone timers in `retention.ts`.
-  Next: server calls, store wiring, Start Live Sharing / invite / join UI.
+  **Oct-14: phase 2 UI + server calls** — test project connected (all RPCs verified); Start Live
+  Sharing / Invite People / Leave Shared Group in GroupDetail's ⋮, Join from the Groups tab header
+  (`JoinGroupScreen`: paste link → "Who Are You?"), Edit Group pushes changes. BUG fixed on the way:
+  GroupForm removed members by contactId — every member without one (all remote joiners) would be
+  removed at once; now by memberId. test:sync 103/103. NOT yet tried on a device; expenses sync in phase 3.
+  **Oct-14 (2nd): live on first invite** — "Start Live Sharing" removed; the first invite makes a
+  group live. Members tab: per-person **Invite** (link carries that person, auto-claimed on join),
+  Joined / Left tags. test:sync 107/107.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

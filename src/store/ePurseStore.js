@@ -4046,6 +4046,27 @@ export const useEPurseStore = create(
         }));
       },
 
+      /**
+       * Shared-group sync writes here (src/sync/groupSync.ts): the group's `shared` state,
+       * plus — when the server history says so — its members and name/emoji/colour.
+       * Doesn't bump lastActivityAt: a background sync isn't the user's activity.
+       */
+      setSharedGroupState: (id, shared, { members, meta } = {}) => {
+        set((s) => ({
+          groups: s.groups.map((g) => {
+            if (g.id !== id) return g;
+            const next = { ...g, shared };
+            if (meta) {
+              next.name = meta.name;
+              next.emoji = meta.emoji || '';
+              if (meta.color) next.color = meta.color;
+            }
+            if (members) next.members = ensureSelfMember('shared', members);
+            return next;
+          }),
+        }));
+      },
+
       /** Turn a group zone on (groupId) or off (null). Exclusive — one zone at a time. */
       setGroupZone: (groupId) => set({ activeGroupZoneId: groupId || null }),
 

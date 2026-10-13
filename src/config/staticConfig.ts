@@ -179,8 +179,9 @@ export const STATIC_CONFIG = {
   /** Live shared-group sync (`src/sync/`, docs/SHARED_GROUP_SYNC.md). */
   sharedSync: {
     /**
-     * false until phases 1–3 ship. Delete Account still clears a server account
-     * that already exists, whatever this says (`deleteSyncAccount`).
+     * PROD builds: false until phases 1–3 ship. Test builds are always on
+     * (`src/sync/config.ts`). Delete Account clears an existing server account
+     * whatever this says (`deleteSyncAccount`).
      */
     enabled: false,
   },

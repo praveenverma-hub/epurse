@@ -37,6 +37,7 @@ import { firstName } from '../utils/format';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember, GroupType } from '../types/group';
+import { pushGroupChanges } from '../sync/groupSync';
 
 const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string;
@@ -130,8 +131,12 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
     setQuery('');
   };
 
-  const removeMember = (contactId: string | null | undefined) =>
-    setMembers((prev) => prev.filter((m) => m.contactId !== contactId));
+  // By memberId: people who joined a live group from their own phone have no contactId.
+  const removeMember = (memberId: string) =>
+    setMembers((prev) => prev.filter((m) => m.memberId !== memberId));
+  // On a live group, people already on the server leave via Leave (at ₹0), not here.
+  const onServer = (memberId: string) =>
+    !!group?.shared && (!!group.shared.memberMap[memberId] || !!group.shared.fold.members[memberId]);
 
   const { submit, submitting } = useSubmitGuard();
 
@@ -143,6 +148,9 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
       if (isEdit && groupId) {
         updateGroup(groupId, data);
         toast.success('Group updated');
+        if (group?.shared?.status === 'active') {
+          pushGroupChanges(groupId).catch((e: Error) => toast.error('Couldn\'t update the shared group', e.message));
+        }
         navigation.goBack();
       } else {
         const id = createGroup(data);
@@ -310,7 +318,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
                     <Text style={styles.memberAvatarName} numberOfLines={1}>You</Text>
                   </View>
                   {members.map((m) => (
-                    <View key={m.contactId} style={styles.memberAvatarTile}>
+                    <View key={m.memberId} style={styles.memberAvatarTile}>
                       {/* Exactly avatar-sized, so the badge's absolute corner
                           anchors to the CIRCLE, not the wider tile (which also
                           has the name below it). */}
@@ -320,15 +328,17 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
                             {m.name.charAt(0).toUpperCase()}
                           </Text>
                         </View>
-                        <TouchableOpacity
-                          onPress={() => removeMember(m.contactId)}
-                          hitSlop={8}
-                          style={styles.memberRemoveBadge}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Remove ${m.name}`}
-                        >
-                          <Ionicons name="close" size={10} color="#fff" />
-                        </TouchableOpacity>
+                        {!onServer(m.memberId) && (
+                          <TouchableOpacity
+                            onPress={() => removeMember(m.memberId)}
+                            hitSlop={8}
+                            style={styles.memberRemoveBadge}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${m.name}`}
+                          >
+                            <Ionicons name="close" size={10} color="#fff" />
+                          </TouchableOpacity>
+                        )}
                       </View>
                       <Text style={styles.memberAvatarName} numberOfLines={1}>{firstName(m.name)}</Text>
                     </View>

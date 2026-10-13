@@ -1,11 +1,12 @@
 // =============================================================================
 // Invite links (docs/SHARED_GROUP_SYNC.md §5). PURE.
 //
-//   https://epurse.co.in/join#i=<inviteId>&t=<token>&k=<groupKey>
+//   https://epurse.co.in/join#i=<inviteId>&t=<token>&k=<groupKey>[&m=<memberId>]
 //
 // Everything sits in the #fragment, which is never sent to a web server. The app
 // sends only `i` + `t` to Supabase (`redeem_invite`); `k` never leaves the phone.
-// The key epoch isn't in the link: redeem_invite returns it.
+// The key epoch isn't in the link: redeem_invite returns it. `m` (optional) is the
+// person the link was made for — their phone claims that name without asking.
 // =============================================================================
 
 import {
@@ -16,15 +17,15 @@ export const INVITE_BASE = 'https://epurse.co.in/join';
 const TOKEN_BYTES = 32;
 
 export type NewInvite = { inviteId: string; token: string; tokenHashHex: string };
-export type ParsedInvite = { inviteId: string; token: string; key: Uint8Array };
+export type ParsedInvite = { inviteId: string; token: string; key: Uint8Array; memberId: string | null };
 
 export function newInvite(rand: RandomBytes): NewInvite {
   const token = toBase64Url(rand(TOKEN_BYTES));
   return { inviteId: randomUuid(rand), token, tokenHashHex: sha256Hex(token) };
 }
 
-export const buildInviteLink = (inviteId: string, token: string, key: Uint8Array): string =>
-  `${INVITE_BASE}#i=${inviteId}&t=${token}&k=${toBase64Url(key)}`;
+export const buildInviteLink = (inviteId: string, token: string, key: Uint8Array, memberId?: string | null): string =>
+  `${INVITE_BASE}#i=${inviteId}&t=${token}&k=${toBase64Url(key)}${memberId ? `&m=${memberId}` : ''}`;
 
 /** null for anything that isn't a well-formed ePurse invite. */
 export function parseInviteLink(url: string): ParsedInvite | null {
@@ -37,11 +38,11 @@ export function parseInviteLink(url: string): ParsedInvite | null {
     const eq = part.indexOf('=');
     if (eq > 0) params[part.slice(0, eq)] = part.slice(eq + 1);
   }
-  const { i, t, k } = params;
-  if (!isUuid(i) || !t || !k) return null;
+  const { i, t, k, m } = params;
+  if (!isUuid(i) || !t || !k || (m !== undefined && !isUuid(m))) return null;
 
   const tokenBytes = fromBase64Url(t);
   const key = fromBase64Url(k);
   if (!tokenBytes || tokenBytes.length !== TOKEN_BYTES || !key || key.length !== GROUP_KEY_BYTES) return null;
-  return { inviteId: i, token: t, key };
+  return { inviteId: i, token: t, key, memberId: m ?? null };
 }
