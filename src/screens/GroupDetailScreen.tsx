@@ -43,6 +43,8 @@ import CategoryPickerModal from '../components/CategoryPickerModal';
 import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
+import InfoSheet from '../components/InfoSheet';
+import QrCode from '../components/QrCode';
 import EditIcon from '../components/EditIcon';
 import OverflowMenu from '../components/OverflowMenu';
 import ReminderBell from '../components/ReminderBell';
@@ -123,6 +125,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const scrollY = useRef(0);
   const [headerH, setHeaderH] = useState(0);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [invite, setInvite] = useState<{ link: string; title: string } | null>(null);
   const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
@@ -283,15 +286,17 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const handleInvite = (forMember?: { memberId: string; name: string }) => setConfirm({
     title: forMember ? `Invite ${titleCaseName(forMember.name)}` : 'Invite People',
     message: (live ? '' : 'Inviting makes this group live: people you invite see its expenses and balances, and add their own. Everything else stays on your phone.\n\n')
-      + `The link works once, for 48 hours. Send it only to ${forMember ? titleCaseName(forMember.name) : 'the person you\'re inviting'}.`,
-    primaryText: 'Share Link',
+      + `The invite works once, for 48 hours. Share it only with ${forMember ? titleCaseName(forMember.name) : 'the person you\'re inviting'}.`,
+    primaryText: 'Create Invite',
     secondaryText: 'Cancel',
     onPrimary: runShared(async () => {
       const link = await createInviteLink(group.id, forMember?.memberId);
       setConfirm(null);
-      await Share.share({ message: `Join "${group.name}" on ePurse: ${link}` });
-    }, 'Couldn\'t create the link'),
+      setInvite({ link, title: forMember ? `Invite ${titleCaseName(forMember.name)}` : 'Invite People' });
+    }, 'Couldn\'t create the invite'),
   });
+  // In person: they scan the QR (it holds the same link). Remote: Share Link.
+  const shareInvite = (link: string) => { void Share.share({ message: `Join "${group.name}" on ePurse: ${link}` }); };
 
   // Live groups: has this person opened the group on their own phone yet?
   const joined = (memberId: string) => {
@@ -799,6 +804,21 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         onClose={() => setConfirm(null)}
       />
 
+      <InfoSheet
+        visible={!!invite}
+        variant="center"
+        title={invite?.title ?? ''}
+        body="Let them scan this with their phone's camera, or share the link instead."
+        content={invite ? (
+          <View style={styles.qrWrap}>
+            <QrCode value={invite.link} size={232} accessibilityLabel="Invite QR code" />
+          </View>
+        ) : null}
+        ctaText="Share Link"
+        onCtaPress={() => { if (invite) shareInvite(invite.link); }}
+        onClose={() => setInvite(null)}
+      />
+
       <AccountPickerSheet
         visible={!!settleTarget}
         title="Repay from which account?"
@@ -921,6 +941,8 @@ const styles = StyleSheet.create({
   memberRoleTagTxt: { ...typography.tiny, color: colors.textSecondary, fontWeight: '700' },
   // Outlined (secondary) — the row's only action, never a filled primary.
   memberInviteBtn: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 5 },
+  // The QR's own white quiet zone sits on the white card; the hairline shows its edge.
+  qrWrap: { alignSelf: 'center', marginTop: spacing.md, padding: spacing.xs, borderRadius: radius.md, borderWidth: DIVIDER_W, borderColor: colors.divider },
   memberInviteTxt: { ...typography.small, fontWeight: '700' },
   memberRowName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },
   // Light fill, no border — an inline affordance, not an outlined CTA.

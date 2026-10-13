@@ -107,6 +107,23 @@
         "android.permission.USE_EXACT_ALARM",
         "android.permission.READ_MEDIA_AUDIO",
         "android.permission.READ_MEDIA_VIDEO"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "epurse.co.in",
+              "pathPrefix": "/join"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {

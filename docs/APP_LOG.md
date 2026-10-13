@@ -2062,6 +2062,13 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   `sync/realtime.ts` (channels while open), `sync/push.ts` (token while the new **Shared Group
   Activity** switch is on), channel `shared-groups`, tap → that group. **Open:** needs `supabase db
   push`; push needs Firebase `google-services.json` + FCM key on expo.dev + rebuild.
+  **Oct-15 (2nd): invite links open the app** — App Links intent filter for `epurse.co.in/join`,
+  `/join` fallback page + `.well-known/assetlinks.json` in the **epurse-web** repo (page hands the
+  fragment to `epurse://join#…`; debug fingerprint — swap for release keys before launch),
+  `InviteLinkBoot` → Join Group prefilled (user still taps Join). **Open:** deploy the site; rebuild.
+  **Oct-15 (3rd): QR invite** — Create Invite → centered `InfoSheet` with the link as a QR + Share
+  Link. `InfoSheet` gained `content` + `onCtaPress`. QR encoder = `toqr` vendored into `utils/qr/`
+  (upstream needs `TextEncoder`, which Hermes lacks). No new dependency, no native change.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

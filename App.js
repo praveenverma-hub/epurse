@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState } from 'react-native';
+import { AppState, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Sentry from '@sentry/react-native';
@@ -19,6 +19,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import AppKeyboardAvoidingView from './src/components/AppKeyboardAvoidingView';
 import AwareRunBoot from './src/components/AwareRunBoot';
 import { installSharedSync } from './src/sync/engine';
+import { INVITE_BASE, parseInviteLink } from './src/sync/invite';
 import { usePresentationSession } from './src/store/usePresentationSession';
 import { useStoreHydrated } from './src/hooks/useStoreHydrated';
 import AndroidSafeViewport from './src/components/AndroidSafeViewport';
@@ -111,6 +112,26 @@ function NotificationTapBoot() {
       if (response) handle(response);
     });
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
+    return () => sub.remove();
+  }, []);
+  return null;
+}
+
+/**
+ * A shared-group invite link tapped anywhere (WhatsApp, the /join web page) opens
+ * Join Group with it filled in — the user still taps Join, so a link can't add them
+ * to a group by itself. Either form (https or epurse://) arrives as the https one.
+ */
+function InviteLinkBoot() {
+  useEffect(() => {
+    let last;
+    const open = (url) => {
+      if (!url || url === last || !parseInviteLink(url)) return;
+      last = url;
+      usePresentationSession.getState().requestRoute('JoinGroup', { link: INVITE_BASE + url.slice(url.indexOf('#')) });
+    };
+    Linking.getInitialURL().then(open).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => open(url));
     return () => sub.remove();
   }, []);
   return null;
@@ -335,6 +356,7 @@ function App() {
             <StatusBar style="light" />
             <NotificationBoot />
             <NotificationTapBoot />
+            <InviteLinkBoot />
             <RemoteConfigBoot />
             <AppUpdateNudgeBoot />
             <SmsSyncBoot />

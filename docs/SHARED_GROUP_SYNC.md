@@ -100,6 +100,28 @@ sign-in to Supabase is **lazy** (§4): users who never share never get a server 
   - The server stores `sha256(token)`. Invites are **single-use** and expire after **48 hours**.
     Anyone holding an unused link can join and read the group, so share it privately
     (WhatsApp to the person, or a QR code shown in person).
+- **Opening the app from a link (built Oct-15-2026):**
+  - **App Links:** an `https://epurse.co.in/join…` intent filter with `autoVerify`
+    (`app.base.json`) + `/.well-known/assetlinks.json` on the domain (source: the `epurse-web` repo,
+    `web/public/.well-known/assetlinks.json`).
+    Verified → Android opens ePurse straight from WhatsApp; the fragment comes along.
+  - **Fallback page** `epurse.co.in/join` (source: `epurse-web` repo, `web/src/app/join/`): reads the fragment in
+    the browser and opens `epurse://join#…` (same invite, the app's scheme), with an Open in
+    ePurse button and a Play link. Self-contained on purpose — no analytics or external scripts,
+    since anything loaded there could read the key.
+  - **QR code:** the invite sheet shows the same https link as a QR (`components/QrCode`). Any
+    camera app or Lens opens it → App Link / `/join` page, exactly like a tapped link. The encoder
+    is `toqr` 0.1.1 VENDORED into `src/utils/qr/` (MIT) — upstream builds a `TextEncoder` on
+    import, which Hermes lacks; the copy takes bytes only (tested without `TextEncoder`, and
+    module-for-module against upstream).
+  - In the app, `InviteLinkBoot` (`App.js`) opens Join Group with the link filled in; the user
+    still taps Join, so a link alone never joins anyone. `parseInviteLink` accepts both forms.
+  - **Fingerprints:** `assetlinks.json` currently lists the PUBLIC React Native debug keystore
+    (SHA-256 `FA:C6:17:45:…:3B:9C`) for all four packages, for testing. Any app signed with that key
+    under our package names would be verified for invite links — **before launch, `com.epurse.app`
+    must list only the EAS upload key + Play app-signing SHA-256s** (`docs/ANDROID_RELEASE.md`
+    Track D). The `epurse://` scheme can be claimed by any app too; the invite is single-use and
+    expires in 48 h, which bounds that.
 - **Where keys live:** inside the local group record (`group.shared.keys`). The same SQLite file
   already holds the group's data in plaintext, so storing the key beside it adds no exposure.
   Because it's a backed-up field, keys ride the **encrypted** Drive backup — a restored phone can
@@ -402,6 +424,10 @@ new invite.
      expo.dev → project `epurse` → Credentials → Android → each package → **FCM V1 service
      account key** → upload. That key stays on expo.dev; never commit it.
    - Rebuild the app (native change).
+6. **Invite links open the app** — deploy the `epurse-web` site (it has the `/join` route and
+   `public/.well-known/assetlinks.json`; the host must serve that as `application/json` with no
+   redirect, and `/join` → `join.html`), then rebuild the app (new intent filter). Check with
+   `adb shell pm get-app-links com.epurse.app.dtest` → `epurse.co.in: verified`.
 
 ## 12. Phases
 
@@ -419,8 +445,9 @@ new invite.
    `pushGroupChanges` (name/emoji/colour, new people, renames). Pull on GroupDetail focus and
    on Groups tab focus (`syncAllSharedGroups`, which also marks groups the server dropped as
    "Sharing Ended"). Test builds have sharing ON (`useSyncEnabled`). **Expenses don't sync yet**
-   — that's phase 3. Not built: QR code, and invite links opening the app directly (needs
-   `assetlinks.json` on epurse.co.in + an App Links intent filter) — until then, paste the link.
+   — that's phase 3. Invite links open the app since Oct-15 (§5). **QR invite (Oct-15):** Create
+   Invite opens a sheet with the link as a QR code (scan with the phone's camera — no in-app
+   scanner, no camera permission) + Share Link (`components/QrCode`, vendored `utils/qr/toqr.js`).
    Removing a person who's already on the server isn't offered in Edit Group (they leave at ₹0).
 3. **Expense sync + offline — code DONE (Oct-14-2026), not yet tried on a device.** §7: one
    check point out, one write in, outbox on the group, NOT SYNCED chip. **Settlement sync —

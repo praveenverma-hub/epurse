@@ -77,6 +77,13 @@ export interface InfoSheetProps {
   icon?:      ReactNode;
   /** Override the CTA button label. Default: "Got it". */
   ctaText?:   string;
+  /**
+   * What the CTA does — runs as the sheet closes. Default: just close. For a sheet
+   * whose button is an action (Share Link), not an acknowledgement.
+   */
+  onCtaPress?: () => void;
+  /** Custom block below the body and bullets (e.g. a QR code). */
+  content?:   ReactNode;
   /** Bottom sheet (default) or centered modal. */
   variant?:   InfoSheetVariant;
   /** Optional override for the host wrapper (rarely needed). */
@@ -103,6 +110,8 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
   bullets,
   icon,
   ctaText = 'Got it',
+  onCtaPress,
+  content,
   variant = 'sheet',
   style,
 }) => {
@@ -132,6 +141,11 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
         if (finished) runOnJS(onClose)();
       },
     );
+  };
+
+  const handleCta = (): void => {
+    handleDismiss();
+    onCtaPress?.();
   };
 
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
@@ -191,9 +205,10 @@ const InfoSheet: React.FC<InfoSheetProps> = ({
                 ))}
               </View>
             ) : null}
+            {content}
           </ScrollView>
 
-          <PrimaryButton title={ctaText} onPress={handleDismiss} style={styles.cta} />
+          <PrimaryButton title={ctaText} onPress={handleCta} style={styles.cta} />
         </Animated.View>
       </Animated.View>
     </Modal>

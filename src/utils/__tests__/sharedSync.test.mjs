@@ -6,7 +6,7 @@
 import {
   generateGroupKey, randomUuid, isUuid, sealEvent, openEvent, sha256Hex, toBase64Url, fromBase64Url,
 } from '../../sync/crypto.ts';
-import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE } from '../../sync/invite.ts';
+import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BASE } from '../../sync/invite.ts';
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf } from '../../sync/localGroup.ts';
@@ -73,6 +73,9 @@ console.log('\n— invite links —');
   check('everything secret is after the #', link.startsWith(`${INVITE_BASE}#`) && !link.slice(0, link.indexOf('#')).includes(inv.token));
   check('token hash is what the server compares', inv.tokenHashHex === sha256Hex(inv.token) && inv.tokenHashHex.length === 64);
   check('another host → rejected', parseInviteLink(link.replace('epurse.co.in', 'epurse.co.evil')) === null);
+  const appForm = APP_INVITE_BASE + link.slice(link.indexOf('#'));
+  check('the app-scheme form (from the /join page) parses the same', JSON.stringify(parseInviteLink(appForm)) === JSON.stringify(parsed));
+  check('…but not another scheme or path', parseInviteLink(appForm.replace('epurse://', 'evil://')) === null && parseInviteLink(appForm.replace('://join', '://joinx')) === null);
   check('query string instead of fragment → rejected', parseInviteLink(link.replace('#', '?')) === null);
   check('short key → rejected', parseInviteLink(link.replace(/k=[^&]+/, 'k=AAAA')) === null);
   check('bad invite id → rejected', parseInviteLink(link.replace(/i=[^&]+/, 'i=not-a-uuid')) === null);
@@ -105,6 +108,28 @@ const data = (author, event) => {
 const expense = (entityId, amountPaise, paidBy, shares, title = 'Dinner') =>
   ({ type: 'expense.upsert', entityId, amountPaise, title, categoryId: 'food', date: '2026-10-13', paidBy, shares });
 const equal3 = (amount) => [M.rahul, M.priya, M.amit].map((m, i) => ({ memberId: m, paise: Math.floor(amount / 3) + (i < amount % 3 ? 1 : 0) }));
+
+console.log('\n— invite QR code —');
+{
+  // Hermes has no TextEncoder: the vendored encoder must load and run without it.
+  const TE = globalThis.TextEncoder;
+  delete globalThis.TextEncoder;
+  let qr;
+  try {
+    qr = (await import('../../utils/qr/index.ts')).qrMatrix;
+    const link = buildInviteLink(randomUuid(rand), toBase64Url(rand(32)), generateGroupKey(rand), randomUuid(rand));
+    const m = qr(link);
+    check('encodes an invite link without TextEncoder (57×57 at level M)', m.size === 57 && m.modules.length === 57 * 57, String(m.size));
+    const dark = (x, y) => m.modules[y * m.size + x] === 1;
+    const finder = (ox, oy) => [0, 6].every((i) => [0, 1, 2, 3, 4, 5, 6].every((j) => dark(ox + i, oy + j) && dark(ox + j, oy + i))) && dark(ox + 3, oy + 3) && !dark(ox + 1, oy + 1);
+    check('…with the three finder squares in place', finder(0, 0) && finder(m.size - 7, 0) && finder(0, m.size - 7));
+    globalThis.TextEncoder = TE;
+    const original = (await import('toqr')).toQR(link, 0);
+    check('…module-for-module the same as upstream toqr', original.length === m.modules.length && original.every((v, i) => v === m.modules[i]));
+  } finally {
+    globalThis.TextEncoder = TE;
+  }
+}
 
 console.log('\n— event parsing —');
 {

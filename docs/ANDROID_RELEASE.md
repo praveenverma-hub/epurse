@@ -599,6 +599,11 @@ paperwork and store submission, plus device QA.
   FCM V1 service-account key on expo.dev → rebuild (`docs/SHARED_GROUP_SYNC.md` §11.5).
 - Prod Supabase project (Mumbai, Pro plan) → `supabase db push` + deploy `delete-account` → prod
   URL/key into `src/sync/config.ts` (§11.1–4 there).
+- **`assetlinks.json` fingerprints (security):** it lists the PUBLIC RN debug keystore for testing.
+  Before launch, `com.epurse.app` must list only the EAS upload key + Play app-signing **SHA-256**
+  (`eas credentials`; Play Console → App integrity) — else any debug-signed app with our package
+  name could receive invite links (they carry group keys). Source: `epurse-web` repo,
+  `web/public/.well-known/assetlinks.json`.
 - Two-phone device test of invite → join → expenses → settle → leave, plus push.
 
 **Then, in order (each depends on the one before)**

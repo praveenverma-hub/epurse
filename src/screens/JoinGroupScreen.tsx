@@ -1,10 +1,10 @@
 // =============================================================================
 // JoinGroupScreen — join a live shared group from an invite link, then say which
 // person in it you are (src/sync/groupSync.ts). Route params:
-//   { link? }          — prefilled link (deep link, later)
+//   { link? }          — prefilled link (a tapped invite — App.js InviteLinkBoot)
 //   { claimGroupId }   — skip straight to "Who Are You?" for a group already joined
 // =============================================================================
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -41,6 +41,12 @@ export default function JoinGroupScreen({ navigation, route }: { navigation: any
   const [link, setLink] = useState<string>(route?.params?.link ?? '');
   const [choices, setChoices] = useState<Choice[] | null>(() => (claimGroupId ? getUnclaimedMembers(claimGroupId) : null));
   const [picked, setPicked] = useState<string | null>(null);
+
+  // Another invite tapped while this screen is open arrives as new params, not a new screen.
+  const paramLink = route?.params?.link as string | undefined;
+  useEffect(() => {
+    if (paramLink && !claimGroupId) setLink(paramLink);
+  }, [paramLink, claimGroupId]);
 
   const linkOk = !!parseInviteLink(link.trim());
   const open = (id: string) => navigation.replace('GroupDetail', { groupId: id });
