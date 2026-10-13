@@ -31,7 +31,8 @@ const KNOWN: [RegExp, SyncError['code'], string][] = [
   [/invalid invite/, 'INVITE_INVALID', 'This invite link isn\'t valid.'],
   [/invite expired or used/, 'INVITE_USED', 'This invite link has expired or was already used. Ask for a new one.'],
   [/group has ended/, 'GROUP_ENDED', 'This group is no longer shared.'],
-  [/group is full|too many groups/, 'GROUP_FULL', 'This group can\'t take more people.'],
+  [/group is full/, 'GROUP_FULL', 'This group can\'t take more people.'],
+  [/too many groups/, 'GROUP_FULL', 'You\'re in the most shared groups allowed (100). Leave one first.'],
   [/admins only/, 'NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.'],
 ];
 

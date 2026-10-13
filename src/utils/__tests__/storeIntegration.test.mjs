@@ -1173,6 +1173,18 @@ check('getMonthlyRefunds: 300', Math.round(useStore.getState().getMonthlyRefunds
   const again = S().cleanUpHistory(cutoff);
   check('cleanup: running it again removes nothing and the month total holds',
     again.transactions === 0 && S().getMonthlySpend(oldMonth) === before.spend);
+
+  // A settled, idle group that is still LIVE-shared stays (I'm still a member on the server);
+  // once sharing has ended it can go like any other.
+  seed();
+  useStore.setState({ groups: S().groups.map((g) => (g.id === 'gGone' ? { ...g, shared: { status: 'active' } } : g)) });
+  S().cleanUpHistory(cutoff);
+  check('cleanup: a settled idle LIVE shared group stays, with its rows',
+    S().groups.some((g) => g.id === 'gGone') && S().transactions.some((t) => t.id === 'od' && t.groupId === 'gGone'));
+  seed();
+  useStore.setState({ groups: S().groups.map((g) => (g.id === 'gGone' ? { ...g, shared: { status: 'ended' } } : g)) });
+  S().cleanUpHistory(cutoff);
+  check('cleanup: …but one whose sharing ended goes', !S().groups.some((g) => g.id === 'gGone'));
 }
 
 // ─── SPEND RULES — user-chosen "counts as expense" per PARENT category ────────

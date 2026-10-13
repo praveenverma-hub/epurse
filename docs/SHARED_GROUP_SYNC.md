@@ -300,8 +300,11 @@ new event (data, system or checkpoint):
   - tag into a synced group;
   - untag (→ `expense.delete`; locally the split stays per the existing untag rule);
   - ignore (already strips a shared group's tag → `expense.delete`).
-- **Remote txns are not bank txns:** they never get an account, never match SMS, and the backup
-  `TXN_FIELDS` allow-list gains `syncOrigin`.
+- **Remote txns are not bank txns:** they never get an account by themselves (one recorded as
+  mine can be linked by hand, §13), never match SMS, and the backup `TXN_FIELDS` allow-list gains
+  `syncOrigin`.
+- **Clean Up History** never removes a live shared group (I'd still be a member on the server);
+  once sharing has ended it can go like any other group.
 
 ---
 
@@ -323,11 +326,11 @@ The app guarantees two things only:
 | Expense edited after someone settled | Allowed; balances recompute. |
 | Duplicate expense or settlement, overpayment | Nothing special — counted as entered. |
 | Joining a trip I already tracked on my own | Joining always creates a fresh synced group. Nothing is merged or moved; the old local group is the user's to delete. |
-| Other parts of the app change a synced expense (ignore, untag, SMS refund, cleanup…) | ONE check point, not per action: after every store write, diff the synced groups' shared fields against what was last sent and queue events from the difference. Other people's expenses have their shared fields locked; my category and note for them are local only. |
+| Other parts of the app change a synced expense (ignore, untag, SMS refund, cleanup…) | ONE check point, not per action: after every store write, diff the synced groups' shared fields against what was last sent and queue events from the difference. Any member can edit any expense (§6); a custom category reads as "other" to the others, and the note stays local. |
 | App update changes a validation rule | Rules are frozen per event `v`. New rules → new `v` + `minSupportedVersion` bump in remote config, so no two live versions disagree. |
 | One bad event in a batch | The server rejects the whole batch; resend one by one and mark only the bad one failed. |
 | Someone is removed | V1: server access ends (row-level security). No key rotation yet; `key_epoch` is reserved for it. |
-| Offline past expiry with unsent changes | "Sharing ended before N changes synced"; local data stays. |
+| Unsent changes when sharing ends (I left, was removed, or everyone else left) — groups no longer end from inactivity (§9) | The group shows Sharing Ended; local data stays. |
 
 ---
 
@@ -469,8 +472,8 @@ new invite.
 3. **Expense sync + offline — code DONE (Oct-14-2026), not yet tried on a device.** §7: one
    check point out, one write in, outbox on the group, NOT SYNCED chip. **Settlement sync —
    code DONE (Oct-14-2026)**, pulled forward from phase 5 (§7 Settlements).
-4. **Realtime poke + push — code DONE (Oct-15-2026), not yet tried on a device** (§7a). Needs
-   `supabase db push` (migration `20261015000000_realtime_push.sql`) and, for push only, the
+4. **Realtime poke + push — code DONE (Oct-15-2026), not yet tried on a device** (§7a). Migrations
+   are on the test project (Oct-15); prod needs `supabase db push`. For push only, the
    Firebase steps in §11.5 + a rebuild — **Firebase PENDING**; until then push is skipped.
 5. **Deferred:** history sharing for late joiners (only matters after a group goes dormant) and
    key rotation on removal (needs per-member key pairs; the server already cuts off removed

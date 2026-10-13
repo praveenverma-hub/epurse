@@ -1351,6 +1351,7 @@ const lbSign = (l) => (l.kind === 'lent' || l.kind === 'borrow_repaid' ? 1
  *     AND net to zero — dropping one side of a pair would resurrect the debt.
  *   • A group goes only when idle since the cutoff with nobody owing; its IOU
  *     entries go with it (they net to zero per person, so balances hold).
+ *     Never a live shared group: I'd still be a member on the server.
  */
 export const planHistoryCleanup = (s, people, cutoffMs) => {
   const isOld = (iso) => { const t = new Date(iso).getTime(); return !Number.isNaN(t) && t < cutoffMs; };
@@ -1365,7 +1366,7 @@ export const planHistoryCleanup = (s, people, cutoffMs) => {
     g[pk] = (g[pk] || 0) + lbSign(l) * l.amount;
   });
   const goneGroups = new Set((s.groups || [])
-    .filter((g) => g.lastActivityAt && isOld(g.lastActivityAt)
+    .filter((g) => g.lastActivityAt && isOld(g.lastActivityAt) && !(g.shared && g.shared.status !== 'ended')
       && !Object.values(groupNet[g.id] || {}).some((v) => Math.abs(v) > 0.005))
     .map((g) => g.id));
 

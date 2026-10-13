@@ -2074,7 +2074,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   group, members, latest checkpoint; older events dropped); the next change wakes it. `is_member` /
   `redeem_invite` lose the expiry check; checkpoints no longer extend retention. Also FIXED "not
   synced" detection → `skippedBySend` (sent + covered + absent), not "has a server id but isn't
-  there". **Open:** `supabase db push`.
+  there". All 5 migrations are on the TEST project (checked Oct-15: `migration list` up to date).
   **Oct-15 (5th): finishing the app side** — Delete Account confirm mentions leaving shared groups
   (only with a sync account); restore of a live group verified in `test:payload`; Members tab →
   ⋮ → Remove From Group (₹0 only; joined people admin-only, retryable) with the real server Admin
@@ -2088,6 +2088,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   on another phone with me as payer) showed the primary account and debited it on save. Now the
   Account row reads "Not From an Account" (detail sheet + edit, `AccountField` `noneLabel`), picking
   one links it, and a server delete keeps a linked one as my plain expense. test:store +4.
+  **Oct-15 (8th): Clean Up History kept off live shared groups** — FIXED: a settled, idle live group
+  was removed from this phone while I stayed a member on the server (pushes for a group I could no
+  longer see). `planHistoryCleanup` skips groups whose sharing hasn't ended. Also corrected stale
+  doc rules (§8 remote txns + cleanup, §8a "locked" fields → any member edits, expiry row). test:store +2.
+  Joining while already in 100 groups now says so (was "This group can't take more people").
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 
