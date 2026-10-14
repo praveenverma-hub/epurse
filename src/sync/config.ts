@@ -14,7 +14,7 @@ import { getFeatureFlag, useFeatureFlag } from '../hooks/useFeatureFlag';
 
 const SUPABASE_PROJECTS: Record<RemoteConfigEnv, { url: string; anonKey: string }> = {
   test: { url: 'https://gkhoqghkmuzqzndytngb.supabase.co', anonKey: 'sb_publishable_HWF4EEplS9rdRW5l4x8OAA_pCsiPeNt' },
-  prod: { url: '', anonKey: '' },
+  prod:{ url: 'https://gkhoqghkmuzqzndytngb.supabase.co', anonKey: 'sb_publishable_HWF4EEplS9rdRW5l4x8OAA_pCsiPeNt' },
 };
 
 export const SUPABASE_URL = SUPABASE_PROJECTS[REMOTE_CONFIG_ENV].url;

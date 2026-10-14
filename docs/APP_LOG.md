@@ -2093,6 +2093,26 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   longer see). `planHistoryCleanup` skips groups whose sharing hasn't ended. Also corrected stale
   doc rules (§8 remote txns + cleanup, §8a "locked" fields → any member edits, expiry row). test:store +2.
   Joining while already in 100 groups now says so (was "This group can't take more people").
+  **Oct-15 (9th): pasting the whole invite message works** — FIXED: Join Group accepted only the bare
+  link, but WhatsApp's Copy takes the whole `Join "Goa" on ePurse: https://…` message. `parseInviteLink`
+  now finds the link inside any text. test:sync 177.
+  **Oct-15 (10th): device-test fixes** — (1) FIXED: after "Who Are You?" the joiner saw themselves twice
+  ("You" + the admin's name for them, 3 people): `membersFromFold` kept the pre-claim copy. (2) FIXED,
+  caused by (1): the joiner's expenses never reached others — the default split had both copies, which
+  map to ONE server member, so `projectExpense` dropped it silently; same-person shares now merge (stuck
+  expenses send on the next sync and correct themselves). (3) FIXED: rejoining after leaving/removal
+  failed ("someone else picked that name") — `member_joined` now un-archives that user's old member, and
+  `joinFromLink` resumes it (and re-activates a local "Sharing Ended" copy). test:sync 181.
+  **Oct-15 (11th): past members + Add Back + NOT SYNCED for unsendable** — confirmed: people who leave stay
+  in history. Members tab: collapsed **Past Members**; admin ⋮ **Add Back to Group** (`readd_member`,
+  migration `20261017000000_add_back.sql`, pushed to TEST) — no link, their phone resumes on its next
+  Groups sync. A "Sharing Ended" copy is read-only (no Add Expense/Edit/Zone/Add Member, not in pickers,
+  zone off — `isGroupClosed` in split.js). An expense that can't be sent shows NOT SYNCED (`UNSENDABLE`).
+  test:sync 184, test:store +2.
+  **Oct-15 (12th): someone who left can't have their balance moved** (user's call) — an expense they're in keeps
+  its amount/split/group and can't be deleted or ignored (fold `past_member` + `pastMemberIn` guards in the
+  form, review card, Manage sheet, store). Fixes the stuck case where a later edit gave a past member a
+  balance nobody could settle. Add Back unlocks it. test:sync 187, test:store +3.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

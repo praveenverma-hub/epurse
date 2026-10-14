@@ -226,6 +226,18 @@ function badMembers(f: GroupFold, ids: string[], prev: EntryState | undefined): 
   return null;
 }
 
+/** Someone who has left settled at ₹0 and isn't here to see changes: nothing may move their balance. */
+function movesPastMember(f: GroupFold, before: Debt[], after: Debt[]): boolean {
+  const net: Record<string, number> = {};
+  for (const [debts, sign] of [[before, -1], [after, 1]] as const) {
+    for (const d of debts) {
+      net[d.from] = (net[d.from] ?? 0) - sign * d.paise;
+      net[d.to] = (net[d.to] ?? 0) + sign * d.paise;
+    }
+  }
+  return Object.entries(net).some(([id, n]) => n !== 0 && f.members[id]?.archived);
+}
+
 function applySystem(f: GroupFold, type: string, subject: string | null): string | null {
   if (!subject) return 'bad_system';
   switch (type) {
@@ -233,6 +245,10 @@ function applySystem(f: GroupFold, type: string, subject: string | null): string
     case 'member_joined':
       if (!f.activeUsers.includes(subject)) f.activeUsers.push(subject);
       f.deletedUsers = f.deletedUsers.filter((u) => u !== subject);
+      // Back after leaving or being removed: they're their old self again, in new expenses too.
+      for (const [id, m] of Object.entries(f.members)) {
+        if (m.userId === subject && m.archived) f.members[id] = { ...m, archived: false };
+      }
       return null;
     case 'member_left':
     case 'member_removed':
@@ -336,6 +352,7 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       } as EntryState;
       const bad = badMembers(f, [...involved(next)], prev);
       if (bad) return bad;
+      if (prev && movesPastMember(f, entryDebts(prev), entryDebts(next))) return 'past_member';
 
       if (prev) applyDebts(f, entryDebts(prev), -1);
       applyDebts(f, entryDebts(next), 1);
@@ -350,6 +367,7 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       if (!prev || prev.kind !== kind || prev.deleted) return 'unknown_entry';
       // The creator's call — unless they've left, so nothing would be stuck forever.
       if (prev.createdBy !== author && f.activeUsers.includes(prev.createdBy)) return 'not_creator';
+      if (movesPastMember(f, entryDebts(prev), [])) return 'past_member';
       applyDebts(f, entryDebts(prev), -1);
       f.entries[ev.entityId] = { ...prev, deleted: { by: author, at } } as EntryState;
       return null;
@@ -364,6 +382,7 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
         kind: 'correction', createdBy: author, data, versions: [{ seq, by: author, at, data }], deleted: null, frozen: false,
       };
       for (const d of data.debts) if (!f.members[d.from] || !f.members[d.to]) return 'unknown_member';
+      if (movesPastMember(f, [], data.debts)) return 'past_member';
       applyDebts(f, data.debts, 1);
       f.entries[ev.entityId] = entry;
 

@@ -5621,6 +5621,32 @@ console.log('\n— shared-group sync: applying server expenses (Oct-14-26) —')
   check('the shared state was written alongside', S().groups.find((g) => g.id === gid).shared?.remoteId === 'r1');
 }
 
+console.log('\n— shared-group sync: someone in it has left (Oct-15-26) —');
+{
+  reset();
+  const S = () => useStore.getState();
+  useStore.setState({ accounts: [{ id: 'acc1', type: 'Bank', bankName: 'HDFC', mask: '1111', balance: 10000, aliasMasks: [] }] });
+  const gid = S().createGroup({ name: 'Goa', type: 'shared', members: [{ memberId: 'c_42', name: 'Priya', contactId: '42' }] });
+  const shared = { remoteId: 'r1', keys: {}, keyEpoch: 1, myMemberId: 'm-me', memberMap: { me: 'm-me', c_42: 'm-priya' },
+    fold: { seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {}, balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null },
+    status: 'active', syncedAt: null, outbox: [] };
+  S().setSharedGroupState(gid, shared, { members: [{ memberId: 'c_42', name: 'Priya', contactId: '42', archived: true }] });
+  const split = { paidByMemberId: 'me', paidByName: 'You', shares: [{ memberId: 'me', name: 'You', shareAmount: 500 }, { memberId: 'c_42', name: 'Priya', shareAmount: 500 }] };
+  useStore.setState({ transactions: [{ id: 'IdP1', type: 'debit', amount: 1000, merchant: 'Hotel', categoryId: 'travel', createdAt: new Date().toISOString(),
+    accountId: 'acc1', groupId: gid, syncId: 'e9', groupSplit: split }] });
+  const t = () => S().transactions.find((x) => x.id === 'IdP1');
+  S().deleteTransaction('IdP1');
+  S().ignoreTransaction('IdP1');
+  S().untagTransactionFromGroup('IdP1');
+  check('Priya left: her expense can\'t be deleted, ignored or taken out of the group', !!t() && !t().isIgnored && t().groupId === gid);
+  S().updateGroupExpense('IdP1', { amount: 1500, merchant: 'Hotel Sea View', categoryId: 'travel', paidByMemberId: 'me', paidByName: 'You',
+    shares: [{ memberId: 'me', name: 'You', shareAmount: 750 }, { memberId: 'c_42', name: 'Priya', shareAmount: 750 }], accountId: 'acc1' });
+  check('…an edit keeps its money as it was, the rest changes', t().amount === 1000 && t().groupSplit.shares[1].shareAmount === 500 && t().merchant === 'Hotel Sea View');
+  S().setSharedGroupState(gid, { ...shared, status: 'ended' }, {});
+  S().deleteTransaction('IdP1');
+  check('once sharing has ended it\'s a local group again: delete works', !t());
+}
+
 console.log('\n— shared-group sync: settlements (Oct-14-26) —');
 {
   reset();
@@ -5659,7 +5685,13 @@ console.log('\n— shared-group sync: settlements (Oct-14-26) —');
   check('a deleted settlement removes its row', !S().lentBorrowed.some((l) => l.id === 'lb_sync_s2'));
 
   // A group that ISN'T live keeps the old single-row settle.
+  S().setGroupZone(gid);
   S().setSharedGroupState(gid, { ...shared, status: 'ended' }, {});
+  check('sharing ended → its Group Zone turns off', S().activeGroupZoneId === null);
+  useStore.setState({ activeGroupZoneId: gid });
+  S().addTransaction({ type: 'debit', amount: 90, merchant: 'Chai', categoryId: 'food', accountId: 'acc1' });
+  check('…and nothing new is auto-tagged into it', !S().transactions.find((t) => t.merchant === 'Chai')?.groupId);
+  useStore.setState({ activeGroupZoneId: null });
   S().recordLbEntry({ kind: 'lent', person: 'Priya', contactId: '42', amount: 50 });
   const before = S().lentBorrowed.length;
   S().settlePersonBalance(S().getPersonBalances().find((p) => p.contactId === '42').personKey);

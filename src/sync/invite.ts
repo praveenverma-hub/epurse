@@ -32,9 +32,14 @@ export function newInvite(rand: RandomBytes): NewInvite {
 export const buildInviteLink = (inviteId: string, token: string, key: Uint8Array, memberId?: string | null): string =>
   `${INVITE_BASE}#i=${inviteId}&t=${token}&k=${toBase64Url(key)}${memberId ? `&m=${memberId}` : ''}`;
 
-/** null for anything that isn't a well-formed ePurse invite (either form). */
-export function parseInviteLink(url: string): ParsedInvite | null {
-  if (typeof url !== 'string') return null;
+// The link inside whatever was pasted — usually the whole shared message, not just the link.
+const LINK_IN_TEXT = /(?:https:\/\/epurse\.co\.in|epurse:\/)\/join\/*#[A-Za-z0-9_\-=&]+/;
+
+/** null for anything that doesn't hold a well-formed ePurse invite (either form). */
+export function parseInviteLink(text: string): ParsedInvite | null {
+  if (typeof text !== 'string') return null;
+  const url = text.match(LINK_IN_TEXT)?.[0];
+  if (!url) return null;
   const hash = url.indexOf('#');
   const base = hash < 0 ? '' : url.slice(0, hash).replace(/\/+$/, '');
   if (base !== INVITE_BASE && base !== APP_INVITE_BASE) return null;

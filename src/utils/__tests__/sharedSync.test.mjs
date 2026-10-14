@@ -10,7 +10,7 @@ import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BA
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, isGroupAdmin, memberBalancePaise } from '../../sync/localGroup.ts';
-import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend } from '../../sync/expenses.ts';
+import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend, UNSENDABLE } from '../../sync/expenses.ts';
 import { checkpointDue } from '../../sync/checkpoint.ts';
 import { lbRowMember } from '../../sync/settlements.ts';
 
@@ -81,6 +81,10 @@ console.log('\n— invite links —');
   check('bad invite id → rejected', parseInviteLink(link.replace(/i=[^&]+/, 'i=not-a-uuid')) === null);
   check('missing token → rejected', parseInviteLink(link.replace(/&t=[^&]+/, '')) === null);
   check('not a string → rejected', parseInviteLink(undefined) === null);
+  const same = (x) => JSON.stringify(parseInviteLink(x)) === JSON.stringify(parsed);
+  check('the whole shared message pasted (not just the link) parses the same', same(`Join "Goa" on ePurse: ${link}`));
+  check('…with text, a full stop or a newline after it too', same(`Join here: ${link}. See you!`) && same(`${link}\nThanks`));
+  check('a link on another host inside a message → rejected', parseInviteLink(`Join: ${link.replace('epurse.co.in', 'epurse.co.evil')}`) === null);
   check('a generic link has no person', parsed.memberId === null);
   const forPriya = randomUuid(rand);
   const personal = parseInviteLink(buildInviteLink(inv.inviteId, inv.token, key, forPriya));
@@ -228,9 +232,22 @@ const snapshot = () => JSON.stringify(f.balances);
   const b = snapshot();
   check('…but the OLD dinner still lists them and can be edited', step(data(U.rahul, expense(dinner, 330000, M.rahul, equal3(330000), 'Dinner at Thalassa'))) === null
     && snapshot() === b && f.entries[dinner].data.shares.some((s) => s.memberId === M.amit));
+  check('…but not its amount: that would move a balance of someone who left',
+    step(data(U.rahul, expense(dinner, 360000, M.rahul, equal3(360000), 'Dinner at Thalassa'))) === 'past_member' && snapshot() === b);
+  check('…nor can it be deleted', step(data(U.rahul, { type: 'expense.delete', entityId: dinner })) === 'past_member' && snapshot() === b);
+  const fix = buildCorrection({ ...f, entries: { ...f.entries, [dinner]: { ...f.entries[dinner], frozen: true } } }, randomUuid(rand), dinner,
+    { ...f.entries[dinner].data, amountPaise: 360000, shares: equal3(360000) });
+  check('…nor corrected once frozen', fix && fix.debts.some((d) => d.from === M.amit || d.to === M.amit)
+    && foldEvents({ ...f, entries: { ...f.entries, [dinner]: { ...f.entries[dinner], frozen: true } } }, [data(U.rahul, { type: "expense.correct", ...fix })]).rejected[0]?.reason === 'past_member');
   step(sys('member_left', U.amit));
   check('history keeps Amit after he leaves', f.members[M.amit].name === 'Amit' && !f.activeUsers.includes(U.amit));
   check('a member who left can\'t send events', step(data(U.amit, { type: 'member.rename', memberId: M.amit, name: 'A' })) === 'not_member');
+  // Amit comes back with a new invite (a copy of the fold — later tests need him gone).
+  const back = foldEvents(f, [sys('member_joined', U.amit)]);
+  check('rejoining: the same member again, un-archived, in the group',
+    back.rejected.length === 0 && !back.fold.members[M.amit].archived && back.fold.members[M.amit].userId === U.amit && back.fold.activeUsers.includes(U.amit));
+  const again = foldEvents(back.fold, [data(U.rahul, expense(randomUuid(rand), 300, M.rahul, equal3(300)))]);
+  check('…and can be put in new expenses again', again.rejected.length === 0);
 }
 
 {
@@ -386,6 +403,15 @@ seq = 0;
     JSON.stringify(members.map((m) => [m.memberId, m.name, m.contactId ?? null])) === JSON.stringify([['c_42', 'Priya S', '42'], [DEV, 'Dev', null], ['c_77', 'Zoya', '77']]),
     JSON.stringify(members));
   check('"me" is left for the store to add', !members.some((m) => m.memberId === 'me'));
+  // Dev's phone after "Who Are You? → Dev": the list still holds Dev under his server id from before the claim.
+  const devShared = { ...shared, myMemberId: DEV, memberMap: { me: DEV } };
+  const devLocal = [{ memberId: 'me', name: 'You', isMe: true }, { memberId: M.rahul, name: 'Rahul' }, { memberId: M.priya, name: 'Priya S' }, { memberId: DEV, name: 'Dev' }];
+  check('after claiming, I\'m not listed a second time under the admin\'s name',
+    JSON.stringify(membersFromFold(devLocal, devShared).map((m) => m.memberId)) === JSON.stringify([M.rahul, M.priya]));
+  const twice = projectExpense({ id: 'x', type: 'debit', amount: 300, merchant: 'Cab', categoryId: 'travel', createdAt: '2026-10-15T00:00:00.000Z',
+    groupSplit: { paidByMemberId: 'me', paidByName: 'You', shares: [{ memberId: 'me', shareAmount: 100 }, { memberId: DEV, shareAmount: 100 }, { memberId: M.rahul, shareAmount: 100 }] } }, 'e-x', devShared, new Set(['travel']));
+  check('…and an expense split with both of those sends as ONE share of mine (it used to never send)',
+    twice && JSON.stringify(twice.shares) === JSON.stringify([{ memberId: DEV, paise: 20000 }, { memberId: M.rahul, paise: 10000 }]), JSON.stringify(twice));
 
   let n = 0;
   const plan = planGroupChanges(
@@ -461,6 +487,7 @@ seq = 0;
     phone.group = { ...phone.group, shared: plan.shared };
     phone.txns = phone.txns.map((t) => (plan.syncIds[t.id] ? { ...t, syncId: plan.syncIds[t.id] } : t));
     phone.lb = phone.lb.map((l) => (plan.lbSyncIds[l.id] ? { ...l, syncId: plan.lbSyncIds[l.id] } : l));
+    phone.txns = phone.txns.map((t) => (t.id in plan.flags ? { ...t, syncRejected: plan.flags[t.id] ?? undefined } : t));
     return plan;
   };
   const sharedFor = (me, map) => ({ remoteId: 'r', keys: {}, keyEpoch: 1, myMemberId: me, memberMap: map, fold: emptyFold(), status: 'active', syncedAt: null, outbox: [] });
@@ -497,6 +524,19 @@ seq = 0;
   check('Rahul\'s phone takes the edit in place (same transaction, account kept)',
     opsA.length === 1 && opsA[0].kind === 'update' && A.txns[0].id === 'IdM0001' && A.txns[0].amount === 1200 && A.txns[0].accountId === 'acc1');
   check('…without echoing it back', queue(A) === null && pull(B).length === 0);
+
+  // An expense in the group with no split can't go to the server: it says so instead of staying silent.
+  A.txns = [{ id: 'IdM0002', type: 'debit', amount: 250, merchant: 'Snacks', categoryId: 'food', createdAt: AT, accountId: 'acc1', groupId: 'gA' }, ...A.txns];
+  const p3 = queue(A);
+  check('unsendable (no split) → flagged NOT SYNCED, nothing queued', p3 && p3.flags.IdM0002 === UNSENDABLE && p3.shared.outbox.length === 0
+    && A.txns[0].syncRejected === UNSENDABLE);
+  check('…once, not on every check', queue(A) === null);
+  A.txns = A.txns.map((t) => (t.id === 'IdM0002' ? { ...t, groupSplit: { paidByMemberId: 'me', paidByName: 'You', shares: [{ memberId: 'me', shareAmount: 125 }, { memberId: 'c_42', shareAmount: 125 }] } } : t));
+  const p4 = queue(A);
+  check('…given a split: the flag clears and it goes out', p4 && p4.flags.IdM0002 === null && p4.shared.outbox.some((o) => o.event.type === 'expense.upsert' && o.event.amountPaise === 25000)
+    && !A.txns.find((t) => t.id === 'IdM0002').syncRejected);
+  A.txns = A.txns.filter((t) => t.id !== 'IdM0002');
+  A.group = { ...A.group, shared: { ...A.group.shared, outbox: A.group.shared.outbox.filter((o) => o.event.amountPaise !== 25000) } };
 
   // Paisa rounding: ₹100 three ways.
   A.group = { ...A.group, members: [...A.group.members] };

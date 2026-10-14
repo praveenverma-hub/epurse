@@ -32,6 +32,8 @@ const KNOWN: [RegExp, SyncError['code'], string][] = [
   [/invite expired or used/, 'INVITE_USED', 'This invite link has expired or was already used. Ask for a new one.'],
   [/group has ended/, 'GROUP_ENDED', 'This group is no longer shared.'],
   [/group is full/, 'GROUP_FULL', 'This group can\'t take more people.'],
+  [/member has too many groups/, 'GROUP_FULL', 'They\'re already in the most shared groups allowed (100).'],
+  [/not a former member/, 'NOT_MEMBER', 'Couldn\'t add them back. Send them a new invite instead.'],
   [/too many groups/, 'GROUP_FULL', 'You\'re in the most shared groups allowed (100). Leave one first.'],
   [/admins only/, 'NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.'],
 ];
@@ -79,6 +81,9 @@ export async function rpcRedeemInvite(inviteId: string, token: string) {
 export const rpcLeaveGroup = (groupId: string) => rpc<void>('leave_group', { p_group_id: groupId });
 export const rpcRemoveMember = (groupId: string, userId: string) =>
   rpc<void>('remove_member', { p_group_id: groupId, p_user_id: userId });
+
+export const rpcReaddMember = (groupId: string, userId: string) =>
+  rpc<void>('readd_member', { p_group_id: groupId, p_user_id: userId });
 
 export const rpcRegisterPushToken = (token: string) => rpc<void>('register_push_token', { p_token: token });
 export const rpcUnregisterPushToken = (token: string) => rpc<void>('unregister_push_token', { p_token: token });

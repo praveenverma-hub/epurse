@@ -54,9 +54,9 @@ import MonthDivider from '../components/MonthDivider';
 import WhatsAppIcon from '../components/WhatsAppIcon';
 import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
-import type { Group } from '../types/group';
+import type { Group, GroupMember } from '../types/group';
 import { useSyncEnabled } from '../sync/config';
-import { createInviteLink, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
+import { addBackMember, createInviteLink, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
 import { isGroupAdmin, memberBalancePaise, toRemoteMember } from '../sync/localGroup';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -121,6 +121,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [sceneH, setSceneH] = useState<Record<string, number>>({});
   const [viewportH, setViewportH] = useState(0);
   const [tabBarH, setTabBarH] = useState(0);
+  const [pastOpen, setPastOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(0);
   const [headerH, setHeaderH] = useState(0);
@@ -133,6 +134,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
   const syncOn = useSyncEnabled();
   const live = !!group?.shared && group.shared.status !== 'ended';
+  // Sharing ended: a read-only record — new entries here would never reach anyone.
+  const closed = !!group?.shared && !live;
   // Send anything queued and catch up whenever the screen comes into view; offline stays quiet.
   useEffect(() => {
     if (!live || !groupId) return undefined;
@@ -321,6 +324,26 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   // Archived but still with access = a removal whose server step failed; offering it again retries it.
   const canRemove = (m: { memberId: string; isMe?: boolean; archived?: boolean }) =>
     live && !m.isMe && (m.archived ? hasAccess(m.memberId) && iAmAdmin : !joined(m.memberId) || iAmAdmin);
+  // Someone who joined, then left or was removed (not a deleted account): the admin can add them back.
+  const canAddBack = (m: { memberId: string; isMe?: boolean; archived?: boolean }) => {
+    if (!iAmAdmin || m.isMe || !m.archived || hasAccess(m.memberId)) return false;
+    const userId = group.shared!.fold.members[toRemoteMember(group.shared!, m.memberId)]?.userId;
+    return !!userId && !group.shared!.fold.deletedUsers.includes(userId);
+  };
+
+  const handleAddBack = (m: { memberId: string; name: string }) => {
+    const name = titleCaseName(m.name);
+    setConfirm({
+      title: `Add ${name} Back?`,
+      message: `${name} sees this group again, including what was added meanwhile, and can be in new expenses.`,
+      primaryText: 'Add Back',
+      secondaryText: 'Cancel',
+      onPrimary: runShared(async () => {
+        await addBackMember(group.id, m.memberId);
+        toast.success(`${name} added back`);
+      }, 'Couldn\'t add them back'),
+    });
+  };
 
   const handleRemoveMember = (m: { memberId: string; name: string }) => {
     const name = titleCaseName(m.name);
@@ -383,6 +406,45 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
   const TABS = isShared ? SHARED_TABS : PERSONAL_TABS;
 
+  // People who left or were removed sit under "Past Members", out of the way of the active list.
+  const currentMembers = (group.members || []).filter((m) => !m.archived);
+  const pastMembers = (group.members || []).filter((m) => m.archived);
+  const renderMemberRow = (m: GroupMember, i: number) => {
+    const displayName = m.isMe ? 'You' : titleCaseName(m.name);
+    return (
+      <View key={m.memberId} style={[styles.memberRow, i > 0 && styles.pendingRowDivider]}>
+        <View style={[styles.avatar, { backgroundColor: theme.primary + '22', marginRight: 0 }]}>
+          <Text style={[styles.avatarTxt, { color: theme.primary }]}>{displayName.charAt(0).toUpperCase()}</Text>
+        </View>
+        <Text style={styles.memberRowName} numberOfLines={1}>{displayName}</Text>
+        {canInvite && !m.isMe && !m.archived && !joined(m.memberId) ? (
+          <TouchableOpacity
+            style={[styles.memberInviteBtn, { borderColor: theme.primary }]}
+            onPress={() => handleInvite({ memberId: m.memberId, name: m.name })}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Invite ${displayName}`}
+          >
+            <Text style={[styles.memberInviteTxt, { color: theme.primary }]}>Invite</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
+            <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>{memberTag(m)}</Text>
+          </View>
+        )}
+        {canRemove(m) || canAddBack(m) ? (
+          <OverflowMenu
+            style={styles.memberMenuBtn}
+            accessibilityLabel={`More for ${displayName}`}
+            actions={canAddBack(m)
+              ? [{ key: 'addBack', label: 'Add Back to Group', icon: 'person-add-outline', onPress: () => handleAddBack(m) }]
+              : [{ key: 'remove', label: 'Remove From Group', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
+          />
+        ) : null}
+      </View>
+    );
+  };
+
   const renderMembers = () => (
         <View style={styles.membersScroll}>
           {live && group.shared!.fold.checkpointMismatch != null ? (
@@ -395,41 +457,23 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           ) : null}
           <View style={styles.cardShell}>
           <View style={styles.memberListCard}>
-            {(group.members || []).map((m, i) => {
-              const displayName = m.isMe ? 'You' : titleCaseName(m.name);
-              return (
-                <View key={m.memberId} style={[styles.memberRow, i > 0 && styles.pendingRowDivider]}>
-                  <View style={[styles.avatar, { backgroundColor: theme.primary + '22', marginRight: 0 }]}>
-                    <Text style={[styles.avatarTxt, { color: theme.primary }]}>{displayName.charAt(0).toUpperCase()}</Text>
-                  </View>
-                  <Text style={styles.memberRowName} numberOfLines={1}>{displayName}</Text>
-                  {canInvite && !m.isMe && !m.archived && !joined(m.memberId) ? (
-                    <TouchableOpacity
-                      style={[styles.memberInviteBtn, { borderColor: theme.primary }]}
-                      onPress={() => handleInvite({ memberId: m.memberId, name: m.name })}
-                      activeOpacity={0.8}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Invite ${displayName}`}
-                    >
-                      <Text style={[styles.memberInviteTxt, { color: theme.primary }]}>Invite</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
-                      <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>{memberTag(m)}</Text>
-                    </View>
-                  )}
-                  {canRemove(m) ? (
-                    <OverflowMenu
-                      style={styles.memberMenuBtn}
-                      accessibilityLabel={`More for ${displayName}`}
-                      actions={[{ key: 'remove', label: 'Remove From Group', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
-                    />
-                  ) : null}
-                </View>
-              );
-            })}
+            {currentMembers.map(renderMemberRow)}
+            {pastMembers.length ? (
+              <TouchableOpacity
+                style={[styles.memberRow, styles.pendingRowDivider]}
+                onPress={() => setPastOpen((o) => !o)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: pastOpen }}
+              >
+                <Text style={[styles.memberRowName, styles.pastToggleTxt]}>Past Members · {pastMembers.length}</Text>
+                <Ionicons name={pastOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
+            {pastOpen ? pastMembers.map((m) => renderMemberRow(m, 1)) : null}
           </View>
           </View>
+          {closed ? null : (
           <TouchableOpacity
             style={[styles.addMemberBtn, { backgroundColor: theme.primary + '14' }]}
             onPress={() => navigation.navigate('GroupForm', { groupId: group.id })}
@@ -438,6 +482,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             <Ionicons name="person-add-outline" size={16} color={theme.primary} />
             <Text style={[styles.addMemberTxt, { color: theme.primary }]}>Add Member</Text>
           </TouchableOpacity>
+          )}
 
           <SectionHeader
             icon="swap-horizontal-outline"
@@ -699,8 +744,10 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                 <OverflowMenu
                   style={[styles.cardActionBtn, { backgroundColor: withAlpha(colors.textSecondary, 0.12) }]}
                   actions={[
-                    { key: 'add', label: 'Add Expense', icon: 'add-circle-outline', onPress: () => navigation.navigate('AddGroupExpense', { groupId: group.id }) },
-                    { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
+                    ...(closed ? [] : [
+                      { key: 'add', label: 'Add Expense', icon: 'add-circle-outline' as const, onPress: () => navigation.navigate('AddGroupExpense', { groupId: group.id }) },
+                      { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
+                    ]),
                     ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: () => handleInvite() }] : []),
                     ...(live && !group.shared?.myMemberId
                       ? [{ key: 'claim', label: 'Choose Who You Are', icon: 'person-circle-outline' as const, onPress: () => navigation.navigate('JoinGroup', { claimGroupId: group.id }) }] : []),
@@ -753,6 +800,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             </View>
 
             {/* Group Zone — full-width tile under the card (Add Expense lives in the ⋮). */}
+            {closed ? null : (
             <View style={styles.zoneRow}>
               <View style={[styles.zoneIcon, { backgroundColor: withAlpha(accent, 0.12) }]}>
                 <Ionicons name="compass-outline" size={18} color={accent} />
@@ -769,6 +817,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                 ios_backgroundColor="#D1D5DB"
               />
             </View>
+            )}
           </View>
           <View onLayout={(e) => setTabBarH(e.nativeEvent.layout.height)}>
             <UnderlineTabBar
@@ -998,6 +1047,7 @@ const styles = StyleSheet.create({
   qrWrap: { alignSelf: 'center', marginTop: spacing.md, padding: spacing.xs, borderRadius: radius.md, borderWidth: DIVIDER_W, borderColor: colors.divider },
   memberInviteTxt: { ...typography.small, fontWeight: '700' },
   memberRowName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },
+  pastToggleTxt: { color: colors.textSecondary },
   // Light fill, no border — an inline affordance, not an outlined CTA.
   addMemberBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,

@@ -104,6 +104,8 @@ import {
   countsForSpend,
   buildGroupLbRows,
   defaultGroupSplit,
+  isGroupClosed,
+  pastMemberIn,
 } from '../utils/split';
 
 // =============================================================================
@@ -3979,7 +3981,7 @@ export const useEPurseStore = create(
             !newTxn.isSplit &&
             newTxn.type === TRANSACTION_TYPES.DEBIT &&
             !NON_SPEND_CATS.has(newTxn.categoryId) &&
-            s.groups.some((g) => g.id === zoneId)
+            s.groups.some((g) => g.id === zoneId && !isGroupClosed(g))
           ) {
             newTxn.groupId = zoneId;
             const zoneGroup = s.groups.find((g) => g.id === zoneId);
@@ -4073,13 +4075,15 @@ export const useEPurseStore = create(
             return next;
           });
           const group = groups.find((g) => g.id === id);
+          // Sharing ended: the zone would keep tagging into a group nobody else sees.
+          const zone = isGroupClosed(group) && s.activeGroupZoneId === id ? { activeGroupZoneId: null } : {};
           let transactions = syncIds && Object.keys(syncIds).length
             ? s.transactions.map((t) => (syncIds[t.id] ? { ...t, syncId: syncIds[t.id] } : t))
             : s.transactions;
           let lentBorrowed = lbSyncIds && Object.keys(lbSyncIds).length
             ? s.lentBorrowed.map((l) => (lbSyncIds[l.id] ? { ...l, syncId: lbSyncIds[l.id] } : l))
             : s.lentBorrowed;
-          if (!group || !ops.length) return { groups, transactions, lentBorrowed };
+          if (!group || !ops.length) return { groups, transactions, lentBorrowed, ...zone };
 
           let accounts = s.accounts;
           let totalDelta = 0;
@@ -4158,7 +4162,7 @@ export const useEPurseStore = create(
             ...transactions.filter((t) => !removed.has(t.id)).map((t) => replaced.get(t.id) || t),
           ];
           groups = adjustGroupTotal(groups, id, totalDelta);
-          return { groups, transactions, lentBorrowed, accounts };
+          return { groups, transactions, lentBorrowed, accounts, ...zone };
         });
       },
 
@@ -4189,6 +4193,8 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === txnId);
           if (!txn) return s;
+          // Moving it out of a live group deletes it there — not while someone in it has left.
+          if (txn.groupId && txn.groupId !== groupId && pastMemberIn(txn, s.groups)) return s;
           // LB-linked transactions (lent/borrowed/lent_settled/borrow_repaid) live in
           // their own ledger, not in groups. Without this guard, rebuilding this txn's
           // LB rows below (buildGroupLbRows) would silently DELETE its existing
@@ -4259,7 +4265,7 @@ export const useEPurseStore = create(
       untagTransactionFromGroup: (txnId) => {
         set((s) => {
           const txn = s.transactions.find((t) => t.id === txnId);
-          if (!txn || !txn.groupId) return s;
+          if (!txn || !txn.groupId || pastMemberIn(txn, s.groups)) return s;
           const amount = Number(txn.amount) || 0;
           const groupId = txn.groupId;
           const group = s.groups.find((g) => g.id === groupId);
@@ -4410,6 +4416,13 @@ export const useEPurseStore = create(
         if (!old || !old.groupId) return null;
         const group = s.groups.find((g) => g.id === old.groupId);
         if (!group) return null;
+        // Someone in it has left: its money stays as it is (pastMemberIn); the rest still edits.
+        if (pastMemberIn(old, s.groups)) {
+          amount = old.amount;
+          paidByMemberId = old.groupSplit.paidByMemberId;
+          paidByName = old.groupSplit.paidByName;
+          shares = old.groupSplit.shares;
+        }
 
         const newAmount = Number(amount) || 0;
         if (newAmount <= 0 || newAmount > MAX_ALLOWED_AMOUNT) return null;
@@ -5216,7 +5229,7 @@ export const useEPurseStore = create(
         // income, self/LB, splits, and already-tagged rows. (Onboarding's archived
         // sweep never reaches here — those rows aren't in `added`.)
         const zoneId = get().activeGroupZoneId;
-        if (zoneId && added.length && get().groups.some((g) => g.id === zoneId)) {
+        if (zoneId && added.length && get().groups.some((g) => g.id === zoneId && !isGroupClosed(g))) {
           added.forEach((t) => {
             if (
               t.type === TRANSACTION_TYPES.DEBIT &&
@@ -5247,7 +5260,7 @@ export const useEPurseStore = create(
       deleteTransaction: (id) =>
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
-          if (!txn) return s;
+          if (!txn || pastMemberIn(txn, s.groups)) return s;
           // A combined self-transfer's synthetic counterpart leg (derivedFromTxnId)
           // rides along — drop it too and reverse its balance, else the mirror credit
           // lingers and net worth drifts. Children have no groupId / LB rows.
@@ -5299,7 +5312,7 @@ export const useEPurseStore = create(
       ignoreTransaction: (id) =>
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
-          if (!txn || txn.isIgnored) return s;
+          if (!txn || txn.isIgnored || pastMemberIn(txn, s.groups)) return s;
           // Cascade to the synthetic self-transfer counterpart leg so both balances
           // back out together (keeps the transfer net-zero across ignore/unignore).
           const children = s.transactions.filter((t) => t.derivedFromTxnId === id && !t.isIgnored);

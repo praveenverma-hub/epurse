@@ -179,11 +179,12 @@ export const STATIC_CONFIG = {
   /** Live shared-group sync (`src/sync/`, docs/SHARED_GROUP_SYNC.md). */
   sharedSync: {
     /**
-     * PROD builds: false until phases 1–3 ship. Test builds are always on
-     * (`src/sync/config.ts`). Delete Account clears an existing server account
-     * whatever this says (`deleteSyncAccount`).
+     * PROD builds only; test builds are always on (`src/sync/config.ts`). TEMPORARILY
+     * true (Oct-15-2026) so stage-prod can be tried while prod points at the TEST
+     * project — decide before launch (docs/ANDROID_RELEASE.md Track D). Delete Account
+     * clears an existing server account whatever this says (`deleteSyncAccount`).
      */
-    enabled: false,
+    enabled: true,
   },
 
   /**

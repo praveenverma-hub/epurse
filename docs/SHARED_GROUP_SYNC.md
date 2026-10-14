@@ -300,6 +300,10 @@ new event (data, system or checkpoint):
   - tag into a synced group;
   - untag (→ `expense.delete`; locally the split stays per the existing untag rule);
   - ignore (already strips a shared group's tag → `expense.delete`).
+- **NOT SYNCED for what can't be sent (Oct-15-2026):** an expense in a live group that was never on
+  the server and can't be projected (e.g. no split) gets `syncRejected = UNSENDABLE` from
+  `planOutgoing` — same chip as a skipped one — and clears when it becomes sendable. Before this it
+  stayed on the phone silently (how the duplicate-self bug hid).
 - **Remote txns are not bank txns:** they never get an account by themselves (one recorded as
   mine can be linked by hand, §13), never match SMS, and the backup `TXN_FIELDS` allow-list gains
   `syncOrigin`.
@@ -322,8 +326,12 @@ The app guarantees two things only:
 | My offline change is invalid by the time it reaches the server (e.g. includes someone who left) | My phone shows the server's history + my unsent changes. A rejected change drops out of that view; the expense shows **Didn't Sync** with **Edit**. |
 | Edit and delete of the same expense | Delete wins, in any order. |
 | Leave the group / remove someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). They're **archived**: still shown in old expenses, can't be added to new ones. **Remove (built Oct-15-2026):** Members tab → ⋮ on their row → Remove From Group (`removeSharedMember`). Anyone may remove a person who never joined; someone who joined can be removed only by the server's admin (`shared.admins`, refreshed in `syncAllSharedGroups`), which also ends their server access (`remove_member`). If that server step fails, the row keeps offering Remove so it can be retried. The Admin tag shows the real server admin, not "me". |
+| Someone left or was removed — what others see (confirmed Oct-15-2026) | They stay in the group's history: every past expense and settlement keeps them (balances must still add up, and every phone must compute the same from the same history). Members tab lists them under a collapsed **Past Members**. Their own phone keeps a read-only copy (**Sharing Ended**: no Add Expense / Edit Group / Group Zone / Add Member, hidden from group pickers, zone turned off) they can delete. |
+| **Add Back** (built Oct-15-2026) | The admin, from Past Members → ⋮ → Add Back to Group: `readd_member` (migration `20261017000000_add_back.sql`) re-adds a FORMER member (their leave/removal marker must be in the history — after dormant compaction it may not be → new invite). No link: their phone still has the key and `syncAllSharedGroups` re-activates its ended copy when the server lists them again. Not for deleted accounts. Becomes per-user-key work once key rotation exists. |
+| Someone who left or was removed comes back (new invite) | They're their OLD member again: `member_joined` un-archives the member that user had claimed, on every phone; their phone resumes it without "Who Are You?" and a "Sharing Ended" copy goes live again (Oct-15-2026). |
 | Someone added later belongs in an earlier expense | Allowed: edit that expense and add them (Splitwise does the same). |
-| Expense edited after someone settled | Allowed; balances recompute. |
+| Expense edited after someone settled | Allowed; balances recompute — **unless someone in it has left** (below). |
+| Expense or settlement involving someone who has LEFT (decided Oct-15-2026) | Nothing may move their balance: they left at ₹0 and aren't there to see it. Fold rule `movesPastMember` → `past_member` for an edit, delete or correction that changes their net. Title, category, date and note still edit. The app enforces it first (`pastMemberIn` in split.js): the edit form locks amount/split/group with a reason, the review card hides Ignore/Delete/group change, and the store refuses delete/ignore/untag/move and keeps the money in `updateGroupExpense`. **Add Back** unlocks it. Once sharing has ended on this phone it's a local group again. Replaces "settle with someone who left" — that case can no longer arise. |
 | Duplicate expense or settlement, overpayment | Nothing special — counted as entered. |
 | Joining a trip I already tracked on my own | Joining always creates a fresh synced group. Nothing is merged or moved; the old local group is the user's to delete. |
 | Other parts of the app change a synced expense (ignore, untag, SMS refund, cleanup…) | ONE check point, not per action: after every store write, diff the synced groups' shared fields against what was last sent and queue events from the difference. Any member can edit any expense (§6); a custom category reads as "other" to the others, and the note stays local. |
@@ -461,7 +469,7 @@ new invite.
    ⋮ → Invite People (generic link) or Members tab → **Invite** next to anyone not joined yet
    (link made for that person: `&m=<memberId>` in the fragment, so their phone claims the name
    without asking). Members tab shows Joined / Invite / Left. Join (Groups tab header →
-   `JoinGroupScreen`, paste the link), "Who Are You?" only for generic links or a taken name, Leave Shared Group (₹0 only; replaces Delete while live), Edit Group →
+   `JoinGroupScreen`, paste the link — or the whole shared message; `parseInviteLink` finds the link in it), "Who Are You?" only for generic links or a taken name, Leave Shared Group (₹0 only; replaces Delete while live), Edit Group →
    `pushGroupChanges` (name/emoji/colour, new people, renames). Pull on GroupDetail focus and
    on Groups tab focus (`syncAllSharedGroups`, which also marks groups the server dropped as
    "Sharing Ended"). Test builds have sharing ON (`useSyncEnabled`). **Expenses don't sync yet**

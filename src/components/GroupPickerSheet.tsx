@@ -16,7 +16,7 @@ import SheetCloseButton from './SheetCloseButton';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, monthKey } from '../utils/format';
-import { countsForSpend, spendContribution } from '../utils/split';
+import { countsForSpend, isGroupClosed, spendContribution } from '../utils/split';
 import type { Group } from '../types/group';
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
@@ -47,8 +47,10 @@ interface GroupPickerListProps {
 /** The picker's rows, unwrapped — shared by this sheet and Manage's in-sheet Select Group panel. */
 export function GroupPickerList({ selectedId, onPick, onCreateNew, onClear }: GroupPickerListProps) {
   const theme = useTheme();
-  const groups = useEPurseStore((s: any) => s.groups) as Group[];
+  const allGroups = useEPurseStore((s: any) => s.groups) as Group[];
   const transactions = useEPurseStore((s: any) => s.transactions) as any[];
+  // A group whose sharing ended takes nothing new — unless it's the one already picked.
+  const groups = useMemo(() => allGroups.filter((g) => !isGroupClosed(g) || g.id === selectedId), [allGroups, selectedId]);
 
   // Current-month total per group (your share) — personal groups track monthly,
   // so the subtitle must match the Groups tab's "this month" figure, not all-time.

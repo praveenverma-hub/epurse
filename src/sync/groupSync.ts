@@ -25,7 +25,7 @@ import { isGroupAdmin, memberBalancePaise, membersFromFold, metaOf, toRemoteMemb
 import { planIncoming, reconcileOutbox, skippedBySend, type OutboxItem } from './expenses';
 import {
   rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
-  rpcRemoveMember, fetchEvents, fetchGroupAdmins, fetchMyGroupIds, type EventRow, type SealedRow,
+  rpcRemoveMember, rpcReaddMember, fetchEvents, fetchGroupAdmins, fetchMyGroupIds, type EventRow, type SealedRow,
 } from './api';
 import { ensureSyncSession } from './session';
 import { SyncError } from './errors';
@@ -240,12 +240,15 @@ export async function createInviteLink(localId: string, forMember?: string): Pro
 export async function joinFromLink(link: string): Promise<{ groupId: string; forMember: string | null }> {
   const parsed = parseInviteLink(link.trim());
   if (!parsed) throw new SyncError('INVITE_INVALID', 'That isn\'t an ePurse invite link.');
-  await ensureSyncSession();
+  const userId = await ensureSyncSession();
   const redeemed = await rpcRedeemInvite(parsed.inviteId, parsed.token);
 
   const existing = store().groups.find((g: Group) => g.shared?.remoteId === redeemed.groupId);
   if (existing) {
+    // Back in a group this phone still has (left or removed earlier): it's live again.
+    if (existing.shared!.status === 'ended') store().setSharedGroupState(existing.id, { ...existing.shared!, status: 'active' });
     await pullGroup(existing.id);
+    resumeMyMember(existing.id, userId);
     return { groupId: existing.id, forMember: parsed.memberId };
   }
 
@@ -269,7 +272,16 @@ export async function joinFromLink(link: string): Promise<{ groupId: string; for
     store().deleteGroup(localId);
     throw new SyncError('LINK_DAMAGED', 'This invite link is damaged. Ask for a new one.');
   }
+  resumeMyMember(localId, userId);
   return { groupId: localId, forMember: parsed.memberId };
+}
+
+/** Rejoining: I'm already someone in this group's history — that's me again, no "Who Are You?". */
+function resumeMyMember(localId: string, userId: string) {
+  const { shared } = requireShared(localId);
+  if (shared.myMemberId) return;
+  const mine = shared.fold.memberOrder.find((id) => shared.fold.members[id].userId === userId);
+  if (mine) commit(localId, { ...shared, myMemberId: mine, memberMap: { ...shared.memberMap, me: mine } });
 }
 
 export const getUnclaimedMembers = (localId: string) => unclaimedMembers(requireShared(localId).shared);
@@ -326,6 +338,22 @@ export async function removeSharedMember(localId: string, localMemberId: string)
   }
 }
 
+/**
+ * Add Back — the admin re-adds someone who left or was removed, with no new invite: their
+ * phone still has the key and resumes the group on its next sync (`syncAllSharedGroups`).
+ */
+export async function addBackMember(localId: string, localMemberId: string): Promise<void> {
+  await flushGroup(localId);
+  const { shared } = requireShared(localId);
+  const member = shared.fold.members[toRemoteMember(shared, localMemberId)];
+  if (!member?.userId || shared.fold.deletedUsers.includes(member.userId)) return;
+  if (!isGroupAdmin(shared, 'me')) {
+    throw new SyncError('NOT_ADMIN', 'Only the group\'s admin can add someone back.');
+  }
+  await rpcReaddMember(shared.remoteId, member.userId);
+  await pullGroup(localId);  // the member_joined marker un-archives them
+}
+
 /** My balance in a synced group, in paise (0 = settled). */
 export function myBalancePaise(localId: string): number {
   const { shared } = requireShared(localId);
@@ -346,12 +374,21 @@ export async function leaveSharedGroup(localId: string): Promise<void> {
   store().setSharedGroupState(localId, { ...requireShared(localId).shared, status: 'ended', outbox: [] });
 }
 
-/** Sends and pulls every live group; groups the server no longer has me in are marked ended. */
+/**
+ * Sends and pulls every live group; groups the server no longer has me in are marked ended,
+ * and an ended one the server has me in again (Add Back) goes live again.
+ */
 export async function syncAllSharedGroups(): Promise<void> {
-  const live = store().groups.filter((g: Group) => g.shared && g.shared.status !== 'ended');
-  if (!live.length) return;
+  const shared = store().groups.filter((g: Group) => g.shared && (g.shared.status !== 'ended' || g.shared.myMemberId));
+  if (!shared.length) return;
   const userId = await ensureSyncSession();
   const mine = await fetchMyGroupIds(userId);
+  for (const g of shared) {
+    if (g.shared!.status === 'ended' && mine.has(g.shared!.remoteId)) {
+      store().setSharedGroupState(g.id, { ...g.shared!, status: 'active' });
+    }
+  }
+  const live = store().groups.filter((g: Group) => g.shared && g.shared.status !== 'ended');
   const admins = await fetchGroupAdmins([...mine]).catch(() => null);
   for (const g of live) {
     if (g.shared!.status === 'active' && !mine.has(g.shared!.remoteId)) {

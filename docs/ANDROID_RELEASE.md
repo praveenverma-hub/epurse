@@ -597,6 +597,9 @@ paperwork and store submission, plus device QA.
   quietly without them (live updates still work). To finish: Firebase project → 4 Android apps
   (`com.epurse.app`, `.dtest`, `.dprod`, `.stest`) → `google-services.json` in the repo root →
   FCM V1 service-account key on expo.dev → rebuild (`docs/SHARED_GROUP_SYNC.md` §11.5).
+- **TEMPORARY (Oct-15-26, for stage-prod testing):** `SUPABASE_PROJECTS.prod` points at the TEST
+  project and `STATIC_CONFIG.sharedSync.enabled` is `true`. Before launch: replace prod with the real
+  project and decide the flag (ship `false` + flip remotely is the safe path).
 - Prod Supabase project (Mumbai, Pro plan) → `supabase db push` + deploy `delete-account` → prod
   URL/key into `src/sync/config.ts` (§11.1–4 there).
 - **`assetlinks.json` fingerprints (security):** it lists the PUBLIC RN debug keystore for testing.

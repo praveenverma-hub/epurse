@@ -79,8 +79,8 @@ import CenterModal from '../components/CenterModal';
 import AppSwitch from '../components/AppSwitch';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
-import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe } from '../utils/split';
-import { formatCurrency } from '../utils/format';
+import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe, pastMemberIn } from '../utils/split';
+import { formatCurrency, titleCaseName } from '../utils/format';
 import {
   ParentCat,
   ChildCat,
@@ -278,6 +278,12 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const amountLocked = isEdit && editTxn?.source !== 'manual';
   // Same bank-verified rule as the amount: the bank said debit/credit.
   const typeLocked = amountLocked;
+  // Someone in this live-group expense has left the group: its money stays as it is.
+  const pastMember = isEdit ? pastMemberIn(editTxn, groups) : null;
+  const showPastLock = () => toast.info(
+    `${titleCaseName(pastMember!.name)} has left this group`,
+    'Its amount, split and group can\'t change now. Add them back to change it.',
+  );
   // Add: swipeable tabs; manual edit: tap-only; bank-parsed edit: no switch.
   const showTypeTabs = !isEdit || !typeLocked;
 
@@ -1188,13 +1194,14 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     <>
             <FormField
               label="Amount (₹)"
-              hint={amountLocked ? `${type === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'} from your bank SMS — not editable` : undefined}
+              hint={amountLocked ? `${type === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'} from your bank SMS — not editable`
+                : pastMember ? `${titleCaseName(pastMember.name)} has left this group — not editable` : undefined}
             >
               <FormAmountInput
                 value={amount}
                 onChangeText={(t: string) => setAmount(sanitizeAmount(t))}
                 placeholder="0"
-                locked={amountLocked}
+                locked={amountLocked || !!pastMember}
                 maxLength={INPUT_LIMITS.AMOUNT_MAX_LEN}
                 autoFocus={!isEdit && active}
               />
@@ -1230,7 +1237,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                   value={activeGroup ? activeGroup.name : 'None'}
                   isPlaceholder={!activeGroup}
                   accentColor={theme.primary}
-                  onPress={() => setGroupPickerOpen(true)}
+                  onPress={pastMember ? showPastLock : () => setGroupPickerOpen(true)}
                 />
               ) : null}
 
@@ -1241,7 +1248,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                     label="Split"
                     value={groupSplit.summary}
                     accentColor={theme.primary}
-                    onPress={splitRoute.open}
+                    onPress={pastMember ? showPastLock : splitRoute.open}
                   >
                     <SplitBreakdownLines rows={groupSplit.breakdownRows} />
                   </FormValueRow>
@@ -1374,7 +1381,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                       </View>
                       <AppSwitch
                         value={ignoreDraft}
-                        onValueChange={setIgnoreDraft}
+                        onValueChange={pastMember ? showPastLock : setIgnoreDraft}
                         trackColor={{ true: theme.primary, false: colors.divider }}
                         thumbColor="#fff"
                         ios_backgroundColor={colors.divider}

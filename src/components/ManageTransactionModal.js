@@ -18,7 +18,7 @@ import { useFocusBorder } from './FormField';
 import { INPUT_LIMITS } from '../utils/validation';
 import { buildCategoryHistory, suggestCategory } from '../utils/categorySuggest';
 import { quickPicks, searchCategories } from '../utils/categoryQuickPick';
-import { canSplitTransaction } from '../utils/split';
+import { canSplitTransaction, pastMemberIn } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 import { applyManageDraft, createManageDraft, manageDraftChanged } from '../utils/manageTransactionDraft';
 import { setReviewFlowDraft } from '../utils/reviewFlowDraft';
@@ -67,13 +67,16 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
   const group = groups.find((item) => item.id === draft.groupId);
   const directSplit = draft.split ? draft.split.others.length > 0 : !!txn.isSplit;
   // Actions that don't apply to this transaction are hidden, never shown disabled.
-  const ignoreAvailable = txn.isIgnored ? !!onRestore : !!onIgnore;
+  // Someone in its live group has left: no ignore, delete or group change (pastMemberIn).
+  const pastMember = !!pastMemberIn(txn, groups);
+  const ignoreAvailable = txn.isIgnored ? !!onRestore : !!onIgnore && !pastMember;
+  const canDelete = !!onDelete && !pastMember;
   const groupAvailable = !!(onPressAddToGroup || onPressRemoveFromGroup);
   const splitAllowed = !!onPressSplit && canSplitTransaction({ ...txn, ...draft }) && !draft.specialCategory;
   // Groups are for money out, and never on top of a direct split (picking a group
   // would silently drop it — remove the split first).
   const groupAllowed = !draft.isIgnored && !txn.lbLocked && !draft.specialCategory
-    && txn.type !== 'credit' && !directSplit;
+    && txn.type !== 'credit' && !directSplit && !pastMember;
   const splitTransaction = useMemo(() => ({ ...txn, categoryId: draft.categoryId,
     isIgnored: draft.isIgnored, groupId: draft.groupId }), [txn, draft.categoryId, draft.isIgnored, draft.groupId]);
 
@@ -257,9 +260,9 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
     }),
   ].filter(Boolean);
   // Up to 2 actions share one row with Delete; 3–4 split so Delete joins the last one.
-  const firstRowCount = actionItems.length + (onDelete ? 1 : 0) <= 3 ? actionItems.length : Math.min(3, actionItems.length - 1);
+  const firstRowCount = actionItems.length + (canDelete ? 1 : 0) <= 3 ? actionItems.length : Math.min(3, actionItems.length - 1);
   const actionRows = [actionItems.slice(0, firstRowCount), actionItems.slice(firstRowCount)].filter((r) => r.length);
-  if (onDelete) {
+  if (canDelete) {
     const last = actionRows[actionRows.length - 1] || (actionRows[0] = []);
     last.push(
       <TouchableOpacity key="delete" style={[styles.deleteIcon, { backgroundColor: theme.danger + '14', borderColor: theme.danger + '55' }]} onPress={() => setConfirmation('delete')} activeOpacity={0.85}

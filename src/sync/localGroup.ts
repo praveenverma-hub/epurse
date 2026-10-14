@@ -49,10 +49,11 @@ export function membersFromFold(local: GroupMember[], shared: GroupShared): Grou
     });
     seen.add(localId);
   }
-  // Added here but not on the server yet — keep them until they're sent.
+  // Added here but not on the server yet — keep them until they're sent. Not one that IS on the
+  // server under its own id: e.g. the person I just claimed, shown until then under the admin's name.
   for (const m of local) {
     if (m.memberId === 'me' || m.isMe || seen.has(m.memberId)) continue;
-    if (!shared.memberMap[m.memberId]) out.push(m);
+    if (!shared.memberMap[m.memberId] && !shared.fold.members[m.memberId]) out.push(m);
   }
   return out;
 }

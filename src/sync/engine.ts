@@ -43,7 +43,8 @@ export function installSharedSync(): void {
         const now = useEPurseStore.getState() as any;
         const plan = planOutgoing(g, now.transactions, newSyncId, BUILT_IN_CATEGORIES, at, now.lentBorrowed);
         if (!plan) continue;
-        now.setSharedGroupState(g.id, plan.shared, { syncIds: plan.syncIds, lbSyncIds: plan.lbSyncIds });
+        const ops = Object.entries(plan.flags).map(([txnId, syncRejected]) => ({ kind: 'flag' as const, txnId, syncRejected }));
+        now.setSharedGroupState(g.id, plan.shared, { syncIds: plan.syncIds, lbSyncIds: plan.lbSyncIds, ops });
         if ((plan.shared.outbox ?? []).length) scheduleFlush(g.id);
       }
     } finally {

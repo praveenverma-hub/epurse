@@ -35,8 +35,8 @@ import {
 } from '../store/useRewardStore';
 import { colors, radius, readableOn, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, formatDateTime } from '../utils/format';
-import { canSplitTransaction } from '../utils/split';
+import { formatCurrency, formatDateTime, titleCaseName } from '../utils/format';
+import { canSplitTransaction, pastMemberIn } from '../utils/split';
 import CategoryPickerModal from './ManageTransactionModal';
 import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
@@ -499,6 +499,11 @@ const DailyQueueStack = () => {
     if (!pickerTxn) return;
     const t = pickerTxn;
     setPickerTxn(null);
+    const past = pastMemberIn(t, groups);
+    if (past) {
+      toast.info(`${titleCaseName(past.name)} has left this group`, 'This expense can\'t be removed now. Add them back to change it.');
+      return;
+    }
     setConfirm({
       title: 'Ignore transaction?',
       message: 'This removes it from your balances and every total and chart. It will be treated as if it never happened.',
@@ -508,12 +513,17 @@ const DailyQueueStack = () => {
       onSecondary: () => setConfirm(null),
       onConfirm: () => { ignoreTransaction(t.id); setConfirm(null); }, // ignored ⇒ leaves the queue
     });
-  }, [pickerTxn, ignoreTransaction]);
+  }, [pickerTxn, ignoreTransaction, groups, toast]);
 
   const handleDelete = useCallback(() => {
     if (!pickerTxn) return;
     const t = pickerTxn;
     setPickerTxn(null);
+    const past = pastMemberIn(t, groups);
+    if (past) {
+      toast.info(`${titleCaseName(past.name)} has left this group`, 'This expense can\'t be removed now. Add them back to change it.');
+      return;
+    }
     setConfirm({
       title: 'Delete transaction?',
       message: 'This action cannot be undone.',
@@ -523,7 +533,7 @@ const DailyQueueStack = () => {
       onSecondary: () => setConfirm(null),
       onConfirm: () => { deleteTransaction(t.id); setConfirm(null); },
     });
-  }, [pickerTxn, deleteTransaction]);
+  }, [pickerTxn, deleteTransaction, groups, toast]);
 
   // Brand-new users see a one-time welcome card atop the queue that teaches the
   // swipe mechanic. It lives only in the rendered list (not the store ledger).

@@ -95,7 +95,13 @@ export function projectExpense(t: SyncTxn, syncId: string, shared: GroupShared, 
   if (!Number.isSafeInteger(total) || total < 1 || total > V1_LIMITS.MAX_PAISE) return null;
 
   const paidBy = toRemoteMember(shared, split.paidByMemberId);
-  const shares = split.shares.map((s) => ({ memberId: toRemoteMember(shared, s.memberId), paise: Math.round(Number(s.shareAmount) * 100) }));
+  // Two local ids can be one person (me + the name I claimed): one share, summed.
+  const byMember = new Map<string, number>();
+  for (const s of split.shares) {
+    const id = toRemoteMember(shared, s.memberId);
+    byMember.set(id, (byMember.get(id) ?? 0) + Math.round(Number(s.shareAmount) * 100));
+  }
+  const shares = [...byMember].map(([memberId, paise]) => ({ memberId, paise }));
   if (!isUuid(paidBy) || shares.some((s) => !isUuid(s.memberId) || !Number.isSafeInteger(s.paise))) return null;
   // Rupee shares can round to a paisa off the total: the payer (or the biggest share) absorbs it.
   const diff = total - shares.reduce((a, s) => a + s.paise, 0);
@@ -121,13 +127,16 @@ export function projectExpense(t: SyncTxn, syncId: string, shared: GroupShared, 
 const sameMap = (a: Record<string, string>, b: Record<string, string>) =>
   Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => a[k] === b[k]);
 
+/** `syncRejected` for an expense that can't be sent at all (vs the server's rules skipping it). */
+export const UNSENDABLE = 'unsendable';
+
 /**
  * What a live group has to send now. null = nothing. `syncIds` gives transactions their
  * server id the first time they can be sent; `shared.outbox` has the new events appended.
  */
 export function planOutgoing(
   group: Group, txns: SyncTxn[], newId: () => string, builtIns: Set<string>, at: string, lb: SyncLbRow[] = [],
-): { shared: GroupShared; syncIds: Record<string, string>; lbSyncIds: Record<string, string> } | null {
+): { shared: GroupShared; syncIds: Record<string, string>; lbSyncIds: Record<string, string>; flags: Record<string, string | null> } | null {
   const shared = group.shared;
   if (!shared || shared.status === 'ended' || !shared.myMemberId) return null;
   const outbox = shared.outbox ?? [];
@@ -158,11 +167,18 @@ export function planOutgoing(
   };
 
   const syncIds: Record<string, string> = {};
+  const flags: Record<string, string | null> = {};
   const here = new Set<string>();
   for (const t of txns) {
     if (t.groupId !== group.id) continue;
     const syncId = t.syncId ?? newId();
     const body = projectExpense(t, syncId, mapped, builtIns);
+    // Never on the server and can't go there as it is (e.g. no split): say so, don't stay silent.
+    const unsendable = !body && t.type === 'debit' && !t.isIgnored && !(t.syncId && shared.fold.entries[t.syncId]);
+    if (unsendable !== (t.syncRejected === UNSENDABLE)) {
+      if (unsendable) flags[t.id] = UNSENDABLE;
+      else if (t.syncRejected === UNSENDABLE) flags[t.id] = null;
+    }
     if (!body) continue;
     if (!t.syncId) syncIds[t.id] = syncId;
     here.add(syncId);
@@ -206,12 +222,13 @@ export function planOutgoing(
     if (!e.deleted && !e.frozen && !settled.has(id)) push({ type: 'settlement.delete', entityId: id });
   }
 
-  if (!events.length && !Object.keys(syncIds).length && !Object.keys(lbSyncIds).length
+  if (!events.length && !Object.keys(syncIds).length && !Object.keys(lbSyncIds).length && !Object.keys(flags).length
     && sameMap(people.memberMap, shared.memberMap)) return null;
   return {
     shared: { ...mapped, outbox: [...outbox, ...events.map((event) => ({ eventId: newId(), at, event }))] },
     syncIds,
     lbSyncIds,
+    flags,
   };
 }
 

@@ -292,6 +292,28 @@ export function isPayerLockedToMe(txn) {
 }
 
 /**
+ * A shared group whose sharing ended (I left, was removed, or everyone else left):
+ * kept to read, but nothing new goes into it — nobody else would ever see it.
+ */
+export function isGroupClosed(group) {
+  return !!group?.shared && group.shared.status === 'ended';
+}
+
+/**
+ * The first person in this live-group expense who has left the group, or null. They
+ * left at ₹0, so its amount, payer, split and existence are locked (sync/fold.ts rejects
+ * any change that moves their balance); title, category, date and note still edit.
+ */
+export function pastMemberIn(txn, groups) {
+  const split = txn?.groupSplit;
+  if (!split) return null;
+  const group = (groups || []).find((g) => g.id === txn.groupId);
+  if (!group?.shared || isGroupClosed(group)) return null;
+  const ids = new Set([split.paidByMemberId, ...(split.shares || []).map((x) => x.memberId)]);
+  return (group.members || []).find((m) => m.archived && ids.has(m.memberId)) || null;
+}
+
+/**
  * The split a SHARED group gets when an expense lands in it without anyone
  * choosing one (Group Zone auto-tag): I paid, everyone — me included — owes an
  * equal share. Same default the Add Transaction form shows for a picked group.
