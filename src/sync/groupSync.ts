@@ -22,11 +22,11 @@ import { buildCheckpoint, emptyFold, foldEvents, type IncomingEvent, type Reject
 import { checkpointDue } from './checkpoint';
 import { planBalanceRows } from './balances';
 import { newInvite, buildInviteLink, parseInviteLink } from './invite';
-import { isGroupAdmin, membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
+import { membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
 import { planIncoming, reconcileOutbox, skippedBySend, type OutboxItem } from './expenses';
 import {
   rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
-  rpcRemoveMember, rpcReaddMember, fetchEvents, fetchGroupAdmins, fetchMyGroupIds, type EventRow, type SealedRow,
+  rpcRemoveMember, rpcReaddMember, fetchEvents, fetchMyGroupIds, type EventRow, type SealedRow,
 } from './api';
 import { ensureSyncSession } from './session';
 import { SyncError } from './errors';
@@ -144,6 +144,8 @@ async function doFlush(localId: string) {
     await pullGroup(localId);
     // Back from "Sharing Ended": the pull just put the server's history back; now changes may go out.
     if (requireShared(localId).shared.resync) store().setSharedGroupState(localId, { ...requireShared(localId).shared, resync: undefined });
+    // In the group but nobody in it yet: a join cut short. Finish it — nothing else to ask.
+    if (!requireShared(localId).shared.myMemberId) await doFinishJoining(localId);
   }
 
   for (;;) {
@@ -182,13 +184,16 @@ async function postCheckpointIfDue(localId: string) {
 
 const chains = new Map<string, Promise<void>>();
 
-/** Sends this group's queued changes, then pulls. Calls for one group run one after another. */
-export function flushGroup(localId: string): Promise<void> {
+// One group's sends, pulls and joins run one after another — two claims at once would add me twice.
+function exclusive(localId: string, run: () => Promise<void>): Promise<void> {
   const prev = chains.get(localId) ?? Promise.resolve();
-  const next = prev.catch(() => {}).then(() => doFlush(localId));
+  const next = prev.catch(() => {}).then(run);
   chains.set(localId, next);
   return next;
 }
+
+/** Sends this group's queued changes, then pulls. */
+export const flushGroup = (localId: string): Promise<void> => exclusive(localId, () => doFlush(localId));
 
 /** Turns a local shared group into a live one, with me as its first member. Run by the first invite. */
 async function startSharing(localId: string): Promise<void> {
@@ -219,7 +224,6 @@ async function startSharing(localId: string): Promise<void> {
     status: 'pending',
     syncedAt: null,
     outbox: first.map((event) => ({ eventId: newSyncId(), at, event })),
-    admins: [userId],
   } satisfies GroupShared);
   try {
     await flushGroup(localId);
@@ -304,9 +308,12 @@ export async function joinFromLink(link: string): Promise<string> {
 }
 
 /** In the group but nobody in it yet (a join cut short): the link's person if still free, else a new one. */
-export async function finishJoining(localId: string): Promise<void> {
+const finishJoining = (localId: string): Promise<void> => exclusive(localId, () => doFinishJoining(localId));
+
+async function doFinishJoining(localId: string): Promise<void> {
   const { shared } = requireShared(localId);
-  if (shared.myMemberId) return;
+  // Nobody in it at all = nothing could be read (a wrong key): never add myself to that.
+  if (shared.myMemberId || !shared.fold.memberOrder.length) return;
   const target = shared.claimFor && unclaimedMembers(shared).some((c) => c.memberId === shared.claimFor) ? shared.claimFor : null;
   try {
     await claimMember(localId, target);
@@ -326,7 +333,7 @@ async function sendNow(localId: string, events: SyncEvent[]) {
 }
 
 /** "This one is me" — or, with no memberId, adds me under my own name. */
-export async function claimMember(localId: string, memberId: string | null): Promise<void> {
+async function claimMember(localId: string, memberId: string | null): Promise<void> {
   const userId = await ensureSyncSession();
   await pullGroup(localId);  // an earlier claim may have landed even though its pull failed
   if (requireShared(localId).shared.myMemberId) return;
@@ -357,8 +364,8 @@ async function archiveSettled(localId: string, memberId: string, notSettledMsg: 
 }
 
 /**
- * Remove someone — only at ₹0 (§8a). They're archived: kept in past expenses, can't be put
- * in new ones. Someone who JOINED also loses server access, which only the admin may do.
+ * Remove someone — any member, only at ₹0 (§8a). They're archived: kept in past expenses, can't
+ * be put in new ones. Someone who joined also loses server access; an invite brings them back.
  */
 export async function removeSharedMember(localId: string, localMemberId: string): Promise<void> {
   await flushGroup(localId);
@@ -369,9 +376,6 @@ export async function removeSharedMember(localId: string, localMemberId: string)
   // Archived but still with access = a removal whose server step failed; this retries it.
   const hasAccess = !!member.userId && shared.fold.activeUsers.includes(member.userId);
   if (member.archived && !hasAccess) return;
-  if (hasAccess && !(shared.myMemberId && isGroupAdmin(shared, 'me'))) {
-    throw new SyncError('NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.');
-  }
   await archiveSettled(localId, memberId, 'Settle up first — they can be removed once their balance in this group is ₹0.');
   if (hasAccess) {
     await rpcRemoveMember(shared.remoteId, member.userId!);
@@ -380,7 +384,7 @@ export async function removeSharedMember(localId: string, localMemberId: string)
 }
 
 /**
- * Add Back — the admin re-adds someone who left or was removed, with no new invite: their
+ * Add Back — any member re-adds someone who left or was removed, with no new invite: their
  * phone still has the key and resumes the group on its next sync (`syncAllSharedGroups`).
  */
 export async function addBackMember(localId: string, localMemberId: string): Promise<void> {
@@ -388,9 +392,6 @@ export async function addBackMember(localId: string, localMemberId: string): Pro
   const { shared } = requireShared(localId);
   const member = shared.fold.members[toRemoteMember(shared, localMemberId)];
   if (!member?.userId || shared.fold.deletedUsers.includes(member.userId)) return;
-  if (!isGroupAdmin(shared, 'me')) {
-    throw new SyncError('NOT_ADMIN', 'Only the group\'s admin can add someone back.');
-  }
   await rpcReaddMember(shared.remoteId, member.userId);
   await pullGroup(localId);  // the member_joined marker un-archives them
 }
@@ -421,16 +422,10 @@ export async function syncAllSharedGroups(): Promise<void> {
     }
   }
   const live = store().groups.filter((g: Group) => g.shared && g.shared.status !== 'ended');
-  const admins = await fetchGroupAdmins([...mine]).catch(() => null);
   for (const g of live) {
     if (g.shared!.status === 'active' && !mine.has(g.shared!.remoteId)) {
       store().setSharedGroupState(g.id, { ...g.shared!, status: 'ended' });
       continue;
-    }
-
-    const nextAdmins = admins?.get(g.shared!.remoteId);
-    if (nextAdmins && JSON.stringify(nextAdmins) !== JSON.stringify(g.shared!.admins ?? [])) {
-      store().setSharedGroupState(g.id, { ...requireShared(g.id).shared, admins: nextAdmins });
     }
     await flushGroup(g.id).catch(() => {});
     // Still archived after the pull (so not added back): a leave — or my removal — whose last

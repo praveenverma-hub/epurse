@@ -14,12 +14,6 @@ import { V1_LIMITS } from './events';
 export const toRemoteMember = (shared: GroupShared, localId: string): string =>
   (localId === 'me' ? shared.myMemberId : shared.memberMap[localId]) ?? localId;
 
-/** Is this person (local member id) the group's admin, as last seen on the server? */
-export function isGroupAdmin(shared: GroupShared, localMemberId: string): boolean {
-  const userId = shared.fold.members[toRemoteMember(shared, localMemberId)]?.userId;
-  return !!userId && (shared.admins ?? []).includes(userId);
-}
-
 /** A member's balance in a synced group, in paise (0 = settled). */
 export const memberBalancePaise = (shared: GroupShared, localMemberId: string): number =>
   shared.fold.balances[toRemoteMember(shared, localMemberId)] ?? 0;
@@ -40,12 +34,14 @@ export function membersFromFold(local: GroupMember[], shared: GroupShared): Grou
     const localId = toLocalMember(shared, remoteId);
     const m = shared.fold.members[remoteId];
     const prev = byId.get(localId);
+    // A deleted account is a past member here too: out of new splits, under Past Members.
+    const gone = m.archived || (!!m.userId && shared.fold.deletedUsers.includes(m.userId));
     out.push({
       memberId: localId,
       name: m.name,
       contactId: prev?.contactId ?? null,
       phone: prev?.phone ?? null,
-      ...(m.archived ? { archived: true } : {}),
+      ...(gone ? { archived: true } : {}),
     });
     seen.add(localId);
   }
@@ -103,14 +99,15 @@ export function planGroupChanges(
   return { events, memberMap };
 }
 
-/** People not yet claimed by anyone — the "Which one are you?" list when joining. */
+/** People nobody has joined as yet — who an invite can be for. */
 export const unclaimedMembers = (shared: GroupShared): { memberId: string; name: string }[] =>
   shared.fold.memberOrder
     .filter((id) => !shared.fold.members[id].userId && !shared.fold.members[id].archived)
     .map((id) => ({ memberId: id, name: shared.fold.members[id].name }));
 
 export type MemberStatus = {
-  tag: 'Admin' | 'Joined' | 'Not Joined' | 'Left' | 'Deleted Account' | 'Member';
+  /** null for me — my row already says "You". */
+  tag: 'Joined' | 'Not Joined' | 'Left' | 'Deleted Account' | 'Member' | null;
   /** Opened the group on their own phone at some point. */
   joined: boolean;
   canRemove: boolean;
@@ -119,29 +116,29 @@ export type MemberStatus = {
 
 /**
  * One person's row in the Members tab: their tag and what I may do about them. `shared` is
- * the group's sync state (absent for a group never shared — then I'm its only real member).
+ * the group's sync state (absent for a group never shared). No admin: every member may
+ * remove someone (at ₹0) or add a former member back — it's a money record between people
+ * who trust each other, not a chat group (decided Oct-15-2026).
  */
 export function memberStatus(shared: GroupShared | undefined, m: Pick<GroupMember, 'memberId' | 'isMe' | 'archived'>): MemberStatus {
   const none = { joined: false, canRemove: false, canAddBack: false };
-  if (!shared) return { ...none, tag: m.isMe ? 'Admin' : 'Member' };
+  if (!shared) return { ...none, tag: m.isMe ? null : 'Member' };
   const live = shared.status !== 'ended';
   const userId = shared.fold.members[toRemoteMember(shared, m.memberId)]?.userId ?? null;
   const joined = !!userId || !!m.isMe;
   const hasAccess = !!userId && shared.fold.activeUsers.includes(userId);
   const deleted = !!userId && shared.fold.deletedUsers.includes(userId);
-  const iAmAdmin = live && !!shared.myMemberId && isGroupAdmin(shared, 'me');
 
-  const tag: MemberStatus['tag'] = deleted ? 'Deleted Account'
+  const tag: MemberStatus['tag'] = m.isMe ? null
+    : deleted ? 'Deleted Account'
     : m.archived ? 'Left'
-    : live && isGroupAdmin(shared, m.memberId) ? 'Admin'
     : joined ? 'Joined' : 'Not Joined';
   if (!live || m.isMe) return { ...none, tag, joined };
   return {
     tag,
     joined,
-    // Someone with access is the admin's to remove (it ends their access); anyone else, anyone's.
     // Archived but still with access = a removal whose server step failed: offered again to retry.
-    canRemove: m.archived ? hasAccess && iAmAdmin : !hasAccess || iAmAdmin,
-    canAddBack: iAmAdmin && !!m.archived && !!userId && !hasAccess && !deleted,
+    canRemove: !m.archived || hasAccess,
+    canAddBack: !!m.archived && !!userId && !hasAccess && !deleted,
   };
 }

@@ -30,7 +30,7 @@ register(`${PROJECT_ROOT}/src/utils/__tests__/_sync-hook.mjs`, import.meta.url);
 const { useEPurseStore: useStore } = await import(`${PROJECT_ROOT}/src/store/ePurseStore.js`);
 const G = await import(`${PROJECT_ROOT}/src/sync/groupSync.ts`);
 const { planOutgoing, UNSENDABLE } = await import(`${PROJECT_ROOT}/src/sync/expenses.ts`);
-const { pastMemberIn } = await import(`${PROJECT_ROOT}/src/utils/split.js`);
+const { pastMemberIn, defaultGroupSplit } = await import(`${PROJECT_ROOT}/src/utils/split.js`);
 const { planBalanceRows, EARLIER_BALANCE_PREFIX } = await import(`${PROJECT_ROOT}/src/sync/balances.ts`);
 const srv = await import(`${PROJECT_ROOT}/src/utils/__tests__/_fakeSyncServer.mjs`);
 const { server } = srv;
@@ -305,10 +305,10 @@ section('9. Remove and Add Back');
   check('nobody can be removed while they\'re owed or owe', (await as(A, () => errCode(() => G.removeSharedMember(localId(A, R), memberIdByName(localId(A, R), 'Amit'))))) === 'NOT_SETTLED');
   await as(C, async () => { S().deleteTransaction(byTitle(C, R, 'Lunch').id); tick(); });
   await syncAll(C, A, B);
-  check('Priya (not the admin) can\'t remove Amit, who joined', (await as(B, () => errCode(() => G.removeSharedMember(localId(B, R), memberIdByName(localId(B, R), 'Amit'))))) === 'NOT_ADMIN');
-  await as(A, () => G.removeSharedMember(localId(A, R), memberIdByName(localId(A, R), 'Amit')));
+  // No admin: Priya, who didn't create the group, may remove him too.
+  await as(B, () => G.removeSharedMember(localId(B, R), memberIdByName(localId(B, R), 'Amit')));
   await syncAll(A, B, C);
-  check('the admin removes Amit at ₹0: his phone shows Sharing Ended', groupOf(C, R).shared.status === 'ended' && !server.members.some((m) => m.group_id === R && m.user_id === C.user));
+  check('any member removes Amit at ₹0: his phone shows Sharing Ended', groupOf(C, R).shared.status === 'ended' && !server.members.some((m) => m.group_id === R && m.user_id === C.user));
   await as(A, () => G.addBackMember(localId(A, R), memberIdByName(localId(A, R), 'Amit')));
   await syncAll(A, C, B);
   check('Add Back: no link, his phone goes live again by itself', groupOf(C, R).shared.status === 'active' && !groupOf(A, R).members.find((m) => m.name === 'Amit').archived);
@@ -556,7 +556,7 @@ section('21b. Removed while holding unsent changes');
   check('…the server never got it', !byTitle(A, R, 'Tea'));
 }
 
-section('22. The admin leaves');
+section('22. The creator leaves');
 {
   const X = phone('Xia'), Y = phone('Yan'), Z = phone('Zed');
   let R4, l1, l2;
@@ -570,9 +570,8 @@ section('22. The admin leaves');
   await syncAll(X, Y, Z);
   await as(X, () => G.leaveSharedGroup(localId(X, R4)));
   await syncAll(Y, Z, X);
-  const admins = groupOf(Y, R4).shared.admins ?? [];
-  check('the server makes the longest-standing member admin, and phones learn it on sync', admins.includes(Y.user) && !admins.includes(X.user), J(admins));
-  check('…the new admin can Add Back the old one', (await as(Y, () => errCode(() => G.addBackMember(localId(Y, R4), memberIdByName(localId(Y, R4), 'Xia'))))) === null);
+  check('the group carries on without its creator', groupOf(Y, R4).shared.status === 'active' && groupOf(Z, R4).shared.status === 'active');
+  check('…and any member can Add Back the creator', (await as(Z, () => errCode(() => G.addBackMember(localId(Z, R4), memberIdByName(localId(Z, R4), 'Xia'))))) === null);
   await syncAll(X, Y, Z);
   check('…who is live again', groupOf(X, R4).shared.status === 'active');
 }
@@ -758,10 +757,10 @@ section('A9. The join landed but its reply was lost');
   await as(X, async () => { link2 = await G.createInviteLink(localId(X, Rr)); });
   server.failOnce('fetch_events');   // redeemed, then the first pull fails: in the group, nobody yet
   const z1 = await as(Z, () => errCode(() => joinLikeScreen(link2)));
-  const z2 = await as(Z, () => errCode(() => G.finishJoining(localId(Z, Rr))));
+  const half = !groupOf(Z, Rr).shared.myMemberId;
   await syncAll(X, Z);
-  check('…and the group\'s ⋮ Finish Joining completes a join cut short', z1 === 'NETWORK' && z2 === null
-    && !!groupOf(Z, Rr).shared.myMemberId && otherNames(X, Rr).filter((n) => n === 'Sid').length === 1, `${z1}/${z2}`);
+  check('…and the next sync finishes a join cut short by itself (nothing to tap)', z1 === 'NETWORK' && half
+    && !!groupOf(Z, Rr).shared.myMemberId && otherNames(X, Rr).filter((n) => n === 'Sid').length === 1, `${z1}/${half}`);
 }
 
 section('A10. Compaction forgets which events it already has');
@@ -796,18 +795,64 @@ section('A13/A14/A16. Smaller gaps');
   await as(X, async () => { open = await G.createInviteLink(localId(X, Rk)); });
   await as(X, () => G.removeSharedMember(localId(X, Rk), memberIdByName(localId(X, Rk), 'Wes')));
   const back = await as(Y, () => errCode(() => joinLikeScreen(open)));
-  check('someone removed can\'t come back through an open invite (e.g. one in the group chat)…', back === 'NOT_MEMBER', String(back));
-  await as(X, () => G.addBackMember(localId(X, Rk), memberIdByName(localId(X, Rk), 'Wes')));
   await syncAll(X, Y);
-  check('…only through the admin\'s Add Back', groupOf(Y, Rk).shared.status === 'active');
+  check('someone removed comes back through a member\'s invite — the invite is their say-so…', back === null && groupOf(Y, Rk).shared.status === 'active', String(back));
+  check('…as their old self, listed once', otherNames(X, Rk).filter((n) => n === 'Wes').length === 1 && !groupOf(X, Rk).members.find((m) => m.name === 'Wes').archived);
   await as(Y, () => G.leaveSharedGroup(localId(Y, Rk)));
   let again;
   await as(X, async () => { again = await G.createInviteLink(localId(X, Rk)); });
   check('someone who LEFT can be invited back as usual', (await as(Y, () => errCode(() => joinLikeScreen(again)))) === null);
+}
 
-  const Z = phone('Xan');
-  await as(Z, async () => { const g = S().createGroup({ name: 'Fresh', type: 'shared', members: [{ memberId: 'c_q', name: 'Q', contactId: 'q' }] }); await G.createInviteLink(g); });
-  check('right after starting to share, the creator is the Admin', J(Z.state.groups[0].shared.admins) === J([Z.user]));
+section('B1. Someone deletes their account');
+{
+  const X = phone('Ana'), Y = phone('Bo'), Z = phone('Cy');
+  const Rd = await makeGroup('Del', X, Y, Z);
+  srv.serverDeleteAccount(Z.user);
+  await syncAll(X, Y);
+  const g = groupOf(X, Rd);
+  const cy = g.members.find((m) => m.name === 'Cy');
+  check('they\'re a past member: tagged Deleted Account, under Past Members', cy?.archived === true);
+  check('…and left out of a new expense\'s default split', !defaultGroupSplit(g, 300).shares.some((s) => s.memberId === cy.memberId));
+}
+
+section('B2. Delete Group keeps only what was paid from my accounts');
+{
+  const X = phone('Dee'), Y = phone('Eli');
+  const Rg = await makeGroup('Gone', X, Y);
+  await as(X, async () => { addExpense(X, localId(X, Rg), 'Hotel', 1000, everyone(localId(X, Rg))); });
+  await as(Y, async () => { addExpense(Y, localId(Y, Rg), 'Cab', 1000, everyone(localId(Y, Rg))); });
+  await syncAll(X, Y);
+  await as(Y, () => G.leaveSharedGroup(localId(Y, Rg)));
+  const bal = accBal(Y);
+  const spend = await as(Y, async () => S().getMonthlySpend());
+  await as(Y, async () => { S().deleteGroup(localId(Y, Rg)); });
+  const left = Y.state.transactions;
+  check('what someone else paid goes — it never counted as my spend', !left.some((t) => t.merchant === 'Hotel'));
+  check('my own expense stays as a plain one on its account, the account untouched',
+    left.some((t) => t.merchant === 'Cab' && t.accountId === Y.acc && !t.groupId) && accBal(Y) === bal);
+  check('…so spend grows only by the rest of MY bill, not by theirs', await as(Y, async () => S().getMonthlySpend()) === spend + 500, `${spend} → ${await as(Y, async () => S().getMonthlySpend())}`);
+}
+
+section('B3. Someone changes who paid my bank expense, then changes it back');
+{
+  const X = phone('Fay'), Y = phone('Gus');
+  const Rp = await makeGroup('Payer', X, Y);
+  const start = accBal(X);
+  await as(X, async () => { addExpense(X, localId(X, Rp), 'Fuel', 600, everyone(localId(X, Rp))); });
+  await syncAll(X, Y);
+  const xId = await as(Y, async () => groupOf(Y, Rp).members.find((m) => m.name === 'Fay').memberId);
+  const flip = (payer) => as(Y, async () => { const t = byTitle(Y, Rp, 'Fuel'); editExpense(t.id, { paidByMemberId: payer, shares: t.groupSplit.shares }); });
+  await flip('me'); await syncAll(Y, X);
+  const fuel = byTitle(X, Rp, 'Fuel');
+  check('"Gus paid": on my phone it\'s a memo, the debit is reversed and my account parked', fuel.isGroupMemo && !fuel.accountId && fuel.memoAccountId === X.acc && accBal(X) === start, `${accBal(X)} vs ${start}`);
+  await flip(xId); await syncAll(Y, X);
+  check('changed back: my account is linked again and debited again', byTitle(X, Rp, 'Fuel').accountId === X.acc && accBal(X) === start - 600, `${accBal(X)}`);
+  await flip('me'); await syncAll(Y, X);
+  await as(Y, async () => { S().deleteTransaction(byTitle(Y, Rp, 'Fuel').id); tick(); });
+  await syncAll(Y, X);
+  const kept = X.state.transactions.find((t) => t.merchant === 'Fuel');
+  check('flipped then deleted on the server: my bank expense stays mine, debited', kept && !kept.groupId && kept.accountId === X.acc && accBal(X) === start - 600, `${accBal(X)}`);
 }
 
 section('Invariants, on every phone and every live group');

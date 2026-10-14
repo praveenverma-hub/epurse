@@ -15,7 +15,7 @@ export interface GroupMember {
   isMe?: boolean;
   contactId?: string | null;
   phone?: string | null;
-  /** Synced groups: left at ₹0 — still in old expenses, can't join new ones. */
+  /** Synced groups: left or removed at ₹0, or deleted their account — still in old expenses, not in new ones. */
   archived?: boolean;
 }
 
@@ -53,8 +53,6 @@ export interface GroupShared {
   status: 'pending' | 'active' | 'ended';
   /** Changes waiting to be sent, oldest first (sync/expenses.ts `planOutgoing`). */
   outbox?: OutboxItem[];
-  /** Server user ids with the admin role (only they can remove someone who joined). Refreshed on sync. */
-  admins?: string[];
   /** Live again after "Sharing Ended" (Add Back, rejoin): take the server's history before sending anything. */
   resync?: boolean;
   /** Joining: the person the invite link was for (its `m`), until I'm someone in the group. */

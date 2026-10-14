@@ -30,7 +30,7 @@ export type Version<T> = { seq: number; by: string; at: string; data: T };
 
 type EntryOf<K extends string, T> = {
   kind: K;
-  /** Who added it — the only one who can delete it while they're still a member. */
+  /** Who added it. */
   createdBy: string;
   /** The current version (= the last of `versions`). */
   data: T;

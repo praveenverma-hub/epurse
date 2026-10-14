@@ -9,7 +9,7 @@ import {
 import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BASE } from '../../sync/invite.ts';
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
-import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, isGroupAdmin, memberBalancePaise, memberStatus } from '../../sync/localGroup.ts';
+import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, memberBalancePaise, memberStatus } from '../../sync/localGroup.ts';
 import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend, UNSENDABLE } from '../../sync/expenses.ts';
 import { checkpointDue } from '../../sync/checkpoint.ts';
 import { lbRowMember } from '../../sync/settlements.ts';
@@ -442,24 +442,21 @@ seq = 0;
   check('server has no colour → this phone\'s default isn\'t sent as an edit',
     planGroupChanges({ name: 'Goa Trip', emoji: '🏖️', color: '#6366F1', members: [local[0], { ...local[1], name: 'Priya S' }] }, noColour, () => 'x').events.length === 0);
   check('metaOf drops a colour that isn\'t #rrggbb', metaOf({ name: 'G', emoji: '', color: 'rgb(1,2,3)' }).color === null && metaOf({ name: 'G', emoji: '', color: 'x' }).emoji === null);
-  check('unclaimed list for "Who Are You?"', JSON.stringify(unclaimedMembers(shared).map((m) => m.name)) === JSON.stringify(['Priya S', 'Dev']));
-  const withAdmins = { ...shared, admins: [U.rahul] };
-  check('admin = the member whose user the server lists as admin (me here, not a contact)',
-    isGroupAdmin(withAdmins, 'me') && !isGroupAdmin(withAdmins, 'c_42') && !isGroupAdmin(shared, 'me'));
-  // Members tab: tag + what I may do, per person (memberStatus).
+  check('who an invite can be for: people nobody has joined as', JSON.stringify(unclaimedMembers(shared).map((m) => m.name)) === JSON.stringify(['Priya S', 'Dev']));
+  // Members tab: tag + what I may do, per person (memberStatus). No admin: every member may do it.
   const st = (sh, m) => { const r = memberStatus(sh, m); return `${r.tag}|${+r.canRemove}${+r.canAddBack}`; };
   const amitUser = U.amit;
-  const base = { ...withAdmins, fold: { ...withAdmins.fold, members: { ...withAdmins.fold.members, [DEV]: { ...withAdmins.fold.members[DEV], userId: amitUser } }, activeUsers: [U.rahul, amitUser] } };
-  check('never shared: me Admin, others plain members, nothing to do', st(undefined, { memberId: 'me', isMe: true }) === 'Admin|00' && st(undefined, { memberId: 'c_42' }) === 'Member|00');
-  check('live, I\'m admin: Dev joined (removable by me), Priya not joined (removable)', st(base, { memberId: DEV }) === 'Joined|10' && st(base, { memberId: 'c_42' }) === 'Not Joined|10');
-  check('…me: Admin, no actions on myself', st(base, { memberId: 'me', isMe: true }) === 'Admin|00');
-  const notAdmin = { ...base, admins: [amitUser] };
-  check('not admin: someone who joined isn\'t mine to remove; someone who didn\'t join is', st(notAdmin, { memberId: DEV }) === 'Admin|00' && st(notAdmin, { memberId: 'c_42' }) === 'Not Joined|10');
+  const base = { ...shared, fold: { ...shared.fold, members: { ...shared.fold.members, [DEV]: { ...shared.fold.members[DEV], userId: amitUser } }, activeUsers: [U.rahul, amitUser] } };
+  check('never shared: no tag on me, others plain members, nothing to do', st(undefined, { memberId: 'me', isMe: true }) === 'null|00' && st(undefined, { memberId: 'c_42' }) === 'Member|00');
+  check('live: Dev joined and Priya not — any member may remove either', st(base, { memberId: DEV }) === 'Joined|10' && st(base, { memberId: 'c_42' }) === 'Not Joined|10');
+  check('…me: no tag, no actions on myself', st(base, { memberId: 'me', isMe: true }) === 'null|00');
   const left = { ...base, fold: { ...base.fold, activeUsers: [U.rahul] } };
-  check('left (archived, no access): admin may Add Back', st(left, { memberId: DEV, archived: true }) === 'Left|01');
-  check('archived but still with access (a removal cut short): admin may Remove again', st(base, { memberId: DEV, archived: true }) === 'Left|10');
+  check('left (archived, no access): any member may Add Back', st(left, { memberId: DEV, archived: true }) === 'Left|01');
+  check('archived but still with access (a removal cut short): Remove again', st(base, { memberId: DEV, archived: true }) === 'Left|10');
   const gone = { ...left, fold: { ...left.fold, deletedUsers: [amitUser] } };
-  check('deleted account: shown so, removable by anyone at ₹0, never added back', st(gone, { memberId: DEV }) === 'Deleted Account|10' && st({ ...notAdmin, fold: gone.fold }, { memberId: DEV }) === 'Deleted Account|10');
+  check('deleted account: shown so, a past member here (out of new splits), nothing to do',
+    st(gone, { memberId: DEV, archived: true }) === 'Deleted Account|00'
+    && membersFromFold(local, { ...gone, myMemberId: M.rahul }).find((m) => m.memberId === DEV)?.archived === true);
   check('sharing ended: tags stay, no actions', st({ ...base, status: 'ended' }, { memberId: 'c_42' }) === 'Not Joined|00');
   const owing = { ...shared, fold: { ...shared.fold, balances: { [M.priya]: -500 } } };
   check('a member\'s balance by their LOCAL id', memberBalancePaise(owing, 'c_42') === -500 && memberBalancePaise(owing, 'me') === 0);

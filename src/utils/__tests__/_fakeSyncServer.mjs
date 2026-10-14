@@ -28,7 +28,6 @@ export const server = {
   invites: new Map(),       // id → { group_id, created_by, token_hash, expires_at, used_by, used_at }
   events: [],               // { group_id, seq, event_id, author_id, key_epoch, nonce, ciphertext, system_type, system_subject, created_at }
   deletedUsers: new Set(),
-  removals: new Set(),      // `${group}|${user}` — group_removals
   compacted: new Map(),     // event_id → { group_id, seq } — group_compacted_ids
   pokes: [],                // realtime broadcasts { group, seq }
   pushes: [],               // push sends { group, to: [user ids] }
@@ -38,7 +37,7 @@ export const server = {
     this.offline = false;
     this.failing.clear(); this.losing.clear();
     this.groups.clear(); this.members = []; this.invites.clear(); this.events = [];
-    this.deletedUsers.clear(); this.removals.clear(); this.compacted.clear(); this.pokes = []; this.pushes = [];
+    this.deletedUsers.clear(); this.compacted.clear(); this.pokes = []; this.pushes = [];
   },
 };
 
@@ -165,7 +164,6 @@ export async function rpcRedeemInvite(inviteId, token) {
   if (!isMember(inv.group_id)) {
     if (inv.used_at || inv.expires_at <= server.now) raise('invite expired or used');
     if (!server.groups.has(inv.group_id)) raise('group has ended');
-    if (server.removals.has(`${inv.group_id}|${uid()}`)) raise('removed from group');
     if (membersOf(inv.group_id).length >= 50) raise('group is full');
     if (server.members.filter((m) => m.user_id === uid()).length >= 100) raise('too many groups');
     server.members.push({ group_id: inv.group_id, user_id: uid(), role: 'member', joined_at: ++joinedCounter });
@@ -184,22 +182,19 @@ export async function rpcLeaveGroup(groupId) {
 
 export async function rpcRemoveMember(groupId, userId) {
   net('remove_member');
-  if (!membersOf(groupId).some((m) => m.user_id === uid() && m.role === 'admin')) raise('admins only');
+  if (!isMember(groupId)) raise('not a member');
   removeMember(groupId, userId, 'member_removed');
-  if (server.groups.has(groupId)) server.removals.add(`${groupId}|${userId}`);
 }
 
 export async function rpcReaddMember(groupId, userId) {
   net('readd_member');
-  if (!membersOf(groupId).some((m) => m.user_id === uid() && m.role === 'admin')) raise('admins only');
+  if (!isMember(groupId)) raise('not a member');
   if (isMember(groupId, userId)) return;
   if (!server.events.some((e) => e.group_id === groupId && e.system_subject === userId
-    && (e.system_type === 'member_left' || e.system_type === 'member_removed'))
-    && !server.removals.has(`${groupId}|${userId}`)) raise('not a former member');
+    && (e.system_type === 'member_left' || e.system_type === 'member_removed'))) raise('not a former member');
   if (server.deletedUsers.has(userId)) raise('insert or update on table "group_members" violates foreign key constraint');
   if (membersOf(groupId).length >= 50) raise('group is full');
   if (server.members.filter((m) => m.user_id === userId).length >= 100) raise('member has too many groups');
-  server.removals.delete(`${groupId}|${userId}`);
   server.members.push({ group_id: groupId, user_id: userId, role: 'member', joined_at: ++joinedCounter });
   appendSystem(groupId, 'member_joined', userId);
 }
@@ -218,16 +213,6 @@ export async function fetchEvents(groupId, afterSeq, limit = 500) {
 export async function fetchMyGroupIds(userId) {
   net('fetch_my_groups');
   return new Set(server.members.filter((m) => m.user_id === userId).map((m) => m.group_id));
-}
-
-export async function fetchGroupAdmins(groupIds) {
-  net('fetch_admins');
-  const out = new Map();
-  for (const m of server.members) {
-    if (m.role !== 'admin' || !groupIds.includes(m.group_id) || !isMember(m.group_id)) continue;
-    out.set(m.group_id, [...(out.get(m.group_id) ?? []), m.user_id].sort());
-  }
-  return out;
 }
 
 export { syncErrorFor };

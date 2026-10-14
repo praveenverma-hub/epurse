@@ -2137,6 +2137,17 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   Members tab = `memberStatus` (adds Deleted Account tag). Removed: pre-launch fallbacks
   (`lbRowMember` contact/name, checkpoint `lastAt` fallback), `compact_groups()`. Event dates use a
   fixed pattern (not `Date.parse`). test:sync 197, test:groupScenarios 106 (0 known gaps).
+  **Oct-15 (15th): no admin — a money record, not a chat group** (user's call: "don't treat these
+  groups as a WhatsApp group"). Any member removes (₹0) and adds back; a removed person can rejoin
+  with any member's invite (`group_removals` dropped). Admin tag, `shared.admins`, `fetchGroupAdmins`,
+  `NOT_ADMIN` gone. Migration `20261019000000_any_member.sql` (pushed to TEST). A join cut short now
+  finishes by itself on the next sync (⋮ Finish Joining removed; joins serialised with sends).
+  **FIXED (found in the re-audit):** (1) Delete Group turned every "someone else paid" memo into the
+  user's own full-amount spend — now `detachFromGroup` drops those and keeps only expenses paid from
+  the user's accounts (same rule as a server delete); (2) another member flipping the payer of my
+  bank expense lost its account link for good (flip back = ₹ never re-debited; delete = my bank
+  expense vanished) — the account is parked in `memoAccountId`, local edits too; (3) deleted
+  accounts were offered in new splits — now past members. test:sync 195, test:groupScenarios 112.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

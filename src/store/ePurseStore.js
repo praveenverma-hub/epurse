@@ -590,6 +590,26 @@ const clearPlainSplit = (txn) => {
 };
 
 /**
+ * A transaction leaving its group for good (the group is deleted here, or the expense is
+ * deleted on the server). Someone else paid, or a synced "you paid" never linked to an
+ * account: no money of mine moved, so it goes (`txn` null) — kept, it would count as my
+ * spend. Anything else is mine and stays as a plain expense (a group memo's parked account
+ * is debited again). Untagging a live expense is different: its split stays.
+ */
+const detachFromGroup = (txn, accounts) => {
+  const paidFrom = txn.isGroupMemo ? txn.memoAccountId : txn.accountId;
+  if (!paidFrom && (txn.isGroupMemo || txn.syncOrigin === 'remote')) return { txn: null, accounts };
+  const next = { ...txn };
+  if (paidFrom) next.accountId = paidFrom;
+  for (const k of ['groupId', 'groupSplit', 'isGroupMemo', 'memoAccountId', 'syncId', 'syncRejected', 'syncOrigin']) delete next[k];
+  if (txn.isGroupMemo) {
+    stampAccountMeta(next, accounts.find((a) => a.id === paidFrom));
+    if (!txn.isIgnored) accounts = applyDelta(accounts, paidFrom, next);
+  }
+  return { txn: next, accounts };
+};
+
+/**
  * Mark the PAYING side of a CC bill payment on the source (bank/debit) account.
  *
  * It only ever RE-TAGS a debit the bank already told us about — it never creates one.
@@ -4133,10 +4153,17 @@ export const useEPurseStore = create(
                 accounts = applyDelta(accounts, old.accountId, { ...old, type: TRANSACTION_TYPES.CREDIT });
               }
               if (next.isGroupMemo) {
+                // Someone says another member paid: my account is parked, so changing it back restores it.
+                if (old.accountId && !old.isGroupMemo) next.memoAccountId = old.accountId;
                 delete next.accountId;
                 clearAccountMeta(next);
-              } else if (next.accountId) {
-                accounts = applyDelta(accounts, next.accountId, next);
+              } else {
+                if (!next.accountId && old.memoAccountId) {
+                  next.accountId = old.memoAccountId;
+                  stampAccountMeta(next, accounts.find((a) => a.id === next.accountId));
+                }
+                delete next.memoAccountId;
+                if (next.accountId) accounts = applyDelta(accounts, next.accountId, next);
               }
               lentBorrowed = [...buildGroupLbRows(group, next), ...lentBorrowed.filter((l) => l.sourceTxnId !== old.id)];
               totalDelta += (next.amount || 0) - (old.amount || 0);
@@ -4144,16 +4171,10 @@ export const useEPurseStore = create(
             } else if (op.kind === 'remove') {
               lentBorrowed = lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
               totalDelta -= old.amount || 0;
-              // A memo or one on no account of mine (no money of mine moved): it goes.
-              // A real debit of mine — incl. a synced one I linked to an account — stays as a plain expense.
-              if (old.isGroupMemo || !old.accountId) {
-                removed.add(old.id);
-              } else {
-                const next = { ...old };
-                delete next.groupId; delete next.groupSplit; delete next.isGroupMemo;
-                delete next.syncId; delete next.syncRejected; delete next.syncOrigin;
-                replaced.set(old.id, next);
-              }
+              const kept = detachFromGroup(old, accounts);
+              accounts = kept.accounts;
+              if (kept.txn) replaced.set(old.id, kept.txn);
+              else removed.add(old.id);
             }
           }
 
@@ -4170,22 +4191,27 @@ export const useEPurseStore = create(
       setGroupZone: (groupId) => set({ activeGroupZoneId: groupId || null }),
 
       deleteGroup: (id) => {
-        set((s) => ({
-          groups: s.groups.filter((g) => g.id !== id),
-          // Deleting the active-zone group turns the zone off.
-          ...(s.activeGroupZoneId === id ? { activeGroupZoneId: null } : {}),
+        set((s) => {
           // Drop this group's debt rows; clearing groupSplit + rows together keeps spend/debt
-          // consistent (the expense reverts to a plain personal spend — no orphan double-count).
-          lentBorrowed: s.lentBorrowed.filter((l) => l.groupId !== id),
-          transactions: s.transactions.map((t) => {
-            if (t.groupId !== id) return t;
-            const next = { ...t };
-            delete next.groupId;
-            delete next.groupSplit;
-            delete next.isGroupMemo;
-            return next;
-          }),
-        }));
+          // consistent. My own expenses revert to plain spends; what someone else paid goes —
+          // kept, it would count as my spend (detachFromGroup).
+          let accounts = s.accounts;
+          const transactions = [];
+          for (const t of s.transactions) {
+            if (t.groupId !== id) { transactions.push(t); continue; }
+            const kept = detachFromGroup(t, accounts);
+            accounts = kept.accounts;
+            if (kept.txn) transactions.push(kept.txn);
+          }
+          return {
+            groups: s.groups.filter((g) => g.id !== id),
+            // Deleting the active-zone group turns the zone off.
+            ...(s.activeGroupZoneId === id ? { activeGroupZoneId: null } : {}),
+            lentBorrowed: s.lentBorrowed.filter((l) => l.groupId !== id),
+            transactions,
+            accounts,
+          };
+        });
       },
 
       /** Tag an existing transaction to a group. For shared groups pass groupSplit to record payer + shares. */
@@ -4443,9 +4469,11 @@ export const useEPurseStore = create(
         // Resolve the paying account (only when YOU paid). A synced expense someone else
         // recorded as mine stays off my accounts until I pick one.
         const unlinkedOk = old.syncOrigin === 'remote';
+        // While someone else is the payer, the account it was paid from waits in memoAccountId.
+        const prevAccountId = old.accountId || old.memoAccountId || null;
         let resolvedAccountId = isGroupMemo ? null
-          : unlinkedOk ? (accountId !== undefined ? accountId : old.accountId) || null
-          : (accountId || old.accountId || null);
+          : unlinkedOk ? (accountId !== undefined ? accountId : prevAccountId) || null
+          : (accountId || prevAccountId);
         let workingAccounts   = s.accounts;
         if (!isGroupMemo && !resolvedAccountId && !unlinkedOk) {
           const { accounts: ensured, account } = ensureAccountForParsed(s.accounts, { ...old, amount: newAmount });
@@ -4467,6 +4495,7 @@ export const useEPurseStore = create(
         if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
         if (groupSplit)  updatedTxn.groupSplit  = groupSplit;  else delete updatedTxn.groupSplit;
         if (isGroupMemo) updatedTxn.isGroupMemo = true;        else delete updatedTxn.isGroupMemo;
+        if (isGroupMemo && prevAccountId) updatedTxn.memoAccountId = prevAccountId; else delete updatedTxn.memoAccountId;
         if (isGroupMemo) {
           delete updatedTxn.accountId;
           clearAccountMeta(updatedTxn);

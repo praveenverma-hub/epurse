@@ -56,7 +56,7 @@ import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember } from '../types/group';
 import { useSyncEnabled } from '../sync/config';
-import { addBackMember, createInviteLink, finishJoining, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
+import { addBackMember, createInviteLink, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
 import { memberBalancePaise, memberStatus } from '../sync/localGroup';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
@@ -260,7 +260,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const handleDeleteGroup = () => {
     setConfirm({
       title: 'Delete group?',
-      message: `"${group.name}" will be removed. Transactions tagged to it won't be deleted — just untagged.`,
+      message: `"${group.name}" will be removed. `
+        + (isShared ? 'Your own expenses stay, untagged. Ones someone else paid are removed.' : 'Its transactions stay, untagged.'),
       primaryText: 'Delete',
       secondaryText: 'Cancel',
       destructive: true,
@@ -407,11 +408,11 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           >
             <Text style={[styles.memberInviteTxt, { color: theme.primary }]}>Invite</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
-            <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>{st.tag}</Text>
+        ) : st.tag ? (
+          <View style={styles.memberRoleTag}>
+            <Text style={styles.memberRoleTagTxt}>{st.tag}</Text>
           </View>
-        )}
+        ) : null}
         {st.canRemove || st.canAddBack ? (
           <OverflowMenu
             style={styles.memberMenuBtn}
@@ -729,11 +730,6 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                       { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
                     ]),
                     ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: startInvite }] : []),
-                    ...(live && !group.shared?.myMemberId
-                      ? [{ key: 'finish', label: 'Finish Joining', icon: 'person-circle-outline' as const, onPress: runShared(async () => {
-                        await finishJoining(group.id);
-                        toast.success('You joined the group');
-                      }, 'Couldn\'t join') }] : []),
                     // A live group is left (₹0 only), not deleted; once ended it's a normal local group.
                     live
                       ? { key: 'leave', label: 'Leave Shared Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }
@@ -1039,7 +1035,7 @@ const styles = StyleSheet.create({
   // gives the heading breathing room before its card, so this is only added
   // where the title sits alone (Pending Settlements/Top Categories).
   sectionGapBelow: { marginBottom: spacing.sm },
-  // One row per member — a role tag (Admin/Member) leads, then the name.
+  // One row per member — avatar, name, then their tag (Joined/Not Joined/Left…) or Invite.
   memberListCard: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden' },
   memberRow: { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
   memberRoleTag: {

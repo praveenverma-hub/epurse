@@ -31,12 +31,10 @@ const KNOWN: [RegExp, SyncError['code'], string][] = [
   [/invalid invite/, 'INVITE_INVALID', 'This invite link isn\'t valid.'],
   [/invite expired or used/, 'INVITE_USED', 'This invite link has expired or was already used. Ask for a new one.'],
   [/group has ended/, 'GROUP_ENDED', 'This group is no longer shared.'],
-  [/removed from group/, 'NOT_MEMBER', 'You were removed from this group. Ask its admin to add you back.'],
   [/group is full/, 'GROUP_FULL', 'This group can\'t take more people.'],
   [/member has too many groups/, 'GROUP_FULL', 'They\'re already in the most shared groups allowed (100).'],
   [/not a former member/, 'NOT_MEMBER', 'Couldn\'t add them back. Send them a new invite instead.'],
   [/too many groups/, 'GROUP_FULL', 'You\'re in the most shared groups allowed (100). Leave one first.'],
-  [/admins only/, 'NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.'],
 ];
 
 /** The error a screen shows for a server message (also used by the test server). */
@@ -119,21 +117,4 @@ export async function fetchMyGroupIds(userId: string): Promise<Set<string>> {
   }
   if (res.error) fail(res.error);
   return new Set((res.data ?? []).map((r: { group_id: string }) => r.group_id));
-}
-
-/** Server group id → its admins' user ids (row-level security: my groups only). */
-export async function fetchGroupAdmins(groupIds: string[]): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
-  if (!groupIds.length) return out;
-  let res;
-  try {
-    res = await sb().from('group_members').select('group_id,user_id').eq('role', 'admin').in('group_id', groupIds);
-  } catch (e) {
-    fail(e as Error);
-  }
-  if (res.error) fail(res.error);
-  for (const r of (res.data ?? []) as { group_id: string; user_id: string }[]) {
-    out.set(r.group_id, [...(out.get(r.group_id) ?? []), r.user_id].sort());
-  }
-  return out;
 }
