@@ -309,6 +309,9 @@ export function pastMemberIn(txn, groups) {
   if (!split) return null;
   const group = (groups || []).find((g) => g.id === txn.groupId);
   if (!group?.shared || isGroupClosed(group)) return null;
+  // Only what's on the server can move a balance; an unsent (or skipped) one stays fixable.
+  const entry = txn.syncId && group.shared.fold?.entries?.[txn.syncId];
+  if (!entry || entry.deleted) return null;
   const ids = new Set([split.paidByMemberId, ...(split.shares || []).map((x) => x.memberId)]);
   return (group.members || []).find((m) => m.archived && ids.has(m.memberId)) || null;
 }
@@ -321,7 +324,7 @@ export function pastMemberIn(txn, groups) {
  */
 export function defaultGroupSplit(group, amount) {
   if (!group || group.type !== 'shared') return null;
-  const ms = group.members || [];
+  const ms = (group.members || []).filter((m) => !m.archived);
   const members = ms.some((m) => m.memberId === 'me') ? ms : [{ memberId: 'me', name: 'You' }, ...ms];
   const parts = evenAmounts(Number(amount) || 0, members.length);
   return {

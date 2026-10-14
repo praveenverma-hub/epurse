@@ -1,7 +1,7 @@
 # Shared Group Sync — design (phases 1–4, settlements, checkpoints)
 
-**Status:** phase 1 code done Oct-13-2026 (behind `sharedSync`, off; no Supabase project yet). Phases 2–3 next.
-**Schema:** `supabase/migrations/` — `20261013000000_shared_groups.sql`, then `…120000_keep_history_on_delete.sql`, `20261014000000_checkpoints.sql` (applied in order; never edit an applied one).
+**Status:** phases 1–4 code done (Oct-13 → Oct-15-2026), all migrations on the TEST project; not yet tried on two real phones. End-to-end behaviour is pinned by `npm run test:groupScenarios` (§12).
+**Schema:** `supabase/migrations/` — every `2026101*_*.sql`, applied in order (later files replace earlier function definitions; never edit an applied one).
 
 Live sync for SHARED groups only (trips, flats, events). Everything else — accounts, SMS
 transactions, budgets, goals, personal groups, unsynced shared groups — never leaves the phone.
@@ -20,7 +20,7 @@ transactions, budgets, goals, personal groups, unsynced shared groups — never 
 | Money | Integer paise on the wire. Shares are sent explicitly; receivers never recompute a split. |
 | Server retention | **Groups never end from inactivity (Oct-15-2026).** After 7 quiet days (settled) or 30 (unsettled) a phone posts a checkpoint of people + who owes whom. After 90 quiet days the group goes DORMANT: the server keeps the group, its members and the latest checkpoint and drops older events; the next change wakes it with no action from anyone (§9). Phones always keep everything. |
 | Integrity | Users own correctness (duplicates, double-recorded payments). The app guarantees every phone computes the same totals and balances, and group history is never rewritten. See §8a. |
-| Delete Account | Membership and account are deleted; the user's events STAY as encrypted group history with the author cleared. See §10. |
+| Delete Account | Membership and account are deleted; the user's events STAY as encrypted group history, still under their (now meaningless) author id so every phone folds them the same. See §10. |
 | PowerSync | No — it syncs readable rows, which E2EE rules out. |
 
 ---
@@ -187,7 +187,10 @@ otherwise phones drift apart. Balances in the fold always sum to zero.
 ## 7. Client sync engine (`src/sync/`)
 
 Built Oct-14-2026: `expenses.ts` (pure), `engine.ts`, `groupSync.ts`. Tested by `test:sync`
-(two-phone simulation) and `test:store` ("shared-group sync: applying server expenses").
+(pure two-phone simulation), `test:store` ("shared-group sync: …") and `test:groupScenarios` —
+many phones on the REAL store + groupSync + fold + crypto against an in-memory server that follows
+the SQL (`_fakeSyncServer.mjs`; keep it in step with every migration). It ends with invariants
+checked on every phone: Lent/Borrowed adds up to the history, nothing left unsent.
 
 **One check point, going out.** `engine.ts` installs ONE store subscription (`SharedSyncBoot` in
 `App.js`, only AFTER hydration — before it, transactions read as empty and every server expense
@@ -228,9 +231,17 @@ group-tagged Lent/Borrowed row (`lent_settled` = they paid me, `borrow_repaid` =
 involve me become rows (`lb_sync_<id>`); one between two other people changes nothing here.
 **Settle from Lent/Borrowed** (`settlePersonBalance`) records each LIVE group's part as that
 group's own row, then one row for the rest — each group's balance is its own. Group Lent/Borrowed
-rows now carry `memberId` (`buildGroupLbRows`); an older row is matched by contact, then by a
-unique name (`lbRowMember`). A settlement the rules skip is flagged on its row (`syncRejected`)
-and not re-sent until it changes; no chip shows it yet.
+rows carry `memberId` (`buildGroupLbRows`, `lbRowMember`). A settlement the rules skip is flagged on
+its row (`syncRejected`), shown NOT SYNCED on the person's Lent/Borrowed group line, and not
+re-sent until it changes.
+
+**Lent/Borrowed always adds up to the history (Oct-15-2026, `src/sync/balances.ts`).** After every
+pull, a live group's Lent/Borrowed rows are compared with what the history says each person and I
+owe each other (only rows of changes the server has — not unsent or NOT SYNCED ones). When part of
+the history is known only as a checkpoint or as a correction of an expense this phone never had
+(joined or restored after a dormant group was compacted), one **"Earlier balance"** row per person
+(`lb_earlier_…`) makes up the difference. So what Lent/Borrowed shows, what Settle settles and
+what Leave/Remove check are always the same number.
 
 **Checkpoints + corrections (built Oct-14-2026).** `flushGroup` = pull → send → pull → post a
 checkpoint if `checkpointDue` (`src/sync/checkpoint.ts`; quiet time from `fold.lastAt`, the server
@@ -286,10 +297,10 @@ new event (data, system or checkpoint):
 - **Member ids.** A synced group's local `members[].memberId` ARE the remote member ids, except the
   member I claimed, which stays `'me'` locally. Translate `'me'` ⇄ `group.shared.myMemberId` at
   the sync boundary only.
-- **Start Live Sharing on an existing shared group** creates the server group and sends
-  `group.meta`, one `member.add` per person and one `expense.upsert` per existing group expense.
-  Then, in one store action, it rewrites the group's local `c_<contactId>` ids to the new member
-  ids (`members`, every `groupSplit.paidByMemberId` / `shares[].memberId`).
+- **Start sharing (the first invite)** creates the server group and sends `group.meta`, one
+  `member.add` per person and one `expense.upsert` per existing group expense. Local `c_<contactId>`
+  ids are NOT rewritten: `shared.memberMap` maps them to the new server ids at the sync boundary.
+  If the server can't be reached, the group goes back to a plain local one (never stuck "pending").
 - **Someone else's expense arrives** → a local group txn with `id = entityId`, no `accountId`, and
   `syncOrigin: 'remote'`. It goes through the EXISTING paths, so no second ledger is built:
   - **Someone else paid** → a memo (`isGroupMemo`, `isMemoTxn`): no account delta, excluded from
@@ -323,12 +334,16 @@ The app guarantees two things only:
 
 | Case | Rule |
 |---|---|
-| My offline change is invalid by the time it reaches the server (e.g. includes someone who left) | My phone shows the server's history + my unsent changes. A rejected change drops out of that view; the expense shows **Didn't Sync** with **Edit**. |
+| My offline change is invalid by the time it reaches the server (e.g. includes someone who left) | A NEW expense or settlement the rules skip shows **NOT SYNCED**; Edit fixes it and it goes out. An EDIT the rules skip is replaced by the server's version (known gap: silently). The app prevents the usual causes — past members aren't offered in new splits, and their expenses' money is locked. |
+| Who may delete (decided Oct-15-2026) | **Any member**, like editing — the creator-only rule is gone (it made deletes, untags and ignores of someone else's expense bounce back or loop). |
 | Edit and delete of the same expense | Delete wins, in any order. |
+| Two phones edit the same OLD (checkpointed) expense | Each correction names the correction it was built on (`base`); the fold keeps the latest per expense (`fold.corrections`, also in checkpoints) and refuses a stale one the same way everywhere. A phone still holding an unsent correction rebuilds it on top when it sees the other (`reconcileOutbox`), so the last edit wins and debts match the card. |
 | Leave the group / remove someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). They're **archived**: still shown in old expenses, can't be added to new ones. **Remove (built Oct-15-2026):** Members tab → ⋮ on their row → Remove From Group (`removeSharedMember`). Anyone may remove a person who never joined; someone who joined can be removed only by the server's admin (`shared.admins`, refreshed in `syncAllSharedGroups`), which also ends their server access (`remove_member`). If that server step fails, the row keeps offering Remove so it can be retried. The Admin tag shows the real server admin, not "me". |
 | Someone left or was removed — what others see (confirmed Oct-15-2026) | They stay in the group's history: every past expense and settlement keeps them (balances must still add up, and every phone must compute the same from the same history). Members tab lists them under a collapsed **Past Members**. Their own phone keeps a read-only copy (**Sharing Ended**: no Add Expense / Edit Group / Group Zone / Add Member, hidden from group pickers, zone turned off) they can delete. |
 | **Add Back** (built Oct-15-2026) | The admin, from Past Members → ⋮ → Add Back to Group: `readd_member` (migration `20261017000000_add_back.sql`) re-adds a FORMER member (their leave/removal marker must be in the history — after dormant compaction it may not be → new invite). No link: their phone still has the key and `syncAllSharedGroups` re-activates its ended copy when the server lists them again. Not for deleted accounts. Becomes per-user-key work once key rotation exists. |
-| Someone who left or was removed comes back (new invite) | They're their OLD member again: `member_joined` un-archives the member that user had claimed, on every phone; their phone resumes it without "Who Are You?" and a "Sharing Ended" copy goes live again (Oct-15-2026). |
+| Someone who LEFT comes back (new invite) | They're their OLD member again: `member_joined` un-archives the member that user had claimed, on every phone; their phone adopts it (`commit`: the member holding my user id is me) and a "Sharing Ended" copy goes live again. |
+| Someone REMOVED tries an invite (decided Oct-15-2026) | Refused ("You were removed from this group. Ask its admin to add you back.") — the server remembers removals (`group_removals`); only the admin's Add Back lets them in. Other people's open invites keep working. |
+| A "Sharing Ended" copy goes live again (Add Back, rejoin) | It takes the server's history first (`resync`): what was changed in the ended copy is overwritten, never sent. |
 | Someone added later belongs in an earlier expense | Allowed: edit that expense and add them (Splitwise does the same). |
 | Expense edited after someone settled | Allowed; balances recompute — **unless someone in it has left** (below). |
 | Expense or settlement involving someone who has LEFT (decided Oct-15-2026) | Nothing may move their balance: they left at ₹0 and aren't there to see it. Fold rule `movesPastMember` → `past_member` for an edit, delete or correction that changes their net. Title, category, date and note still edit. The app enforces it first (`pastMemberIn` in split.js): the edit form locks amount/split/group with a reason, the review card hides Ignore/Delete/group change, and the store refuses delete/ignore/untag/move and keeps the money in `updateGroupExpense`. **Add Back** unlocks it. Once sharing has ended on this phone it's a local group again. Replaces "settle with someone who left" — that case can no longer arise. |
@@ -336,7 +351,7 @@ The app guarantees two things only:
 | Joining a trip I already tracked on my own | Joining always creates a fresh synced group. Nothing is merged or moved; the old local group is the user's to delete. |
 | Other parts of the app change a synced expense (ignore, untag, SMS refund, cleanup…) | ONE check point, not per action: after every store write, diff the synced groups' shared fields against what was last sent and queue events from the difference. Any member can edit any expense (§6); a custom category reads as "other" to the others, and the note stays local. |
 | App update changes a validation rule | Rules are frozen per event `v`. New rules → new `v` + `minSupportedVersion` bump in remote config, so no two live versions disagree. |
-| One bad event in a batch | The server rejects the whole batch; resend one by one and mark only the bad one failed. |
+| One bad event in a batch | NOT built: the server rejects the whole batch and `doFlush` stops there. Structural limits (size, batch) are checked on the phone before sending, so this needs an app bug — then the outbox is stuck until fixed. |
 | Someone is removed | V1: server access ends (row-level security). No key rotation yet; `key_epoch` is reserved for it. |
 | Unsent changes when sharing ends (I left, was removed, or everyone else left) — groups no longer end from inactivity (§9) | The group shows Sharing Ended; local data stays. |
 
@@ -398,6 +413,8 @@ it would have meant new invites for everyone. Migration `20261016000000_dormant_
 - Phone-side mirror: `SHARED_SERVER_IDLE_MS` in `src/constants/retention.ts`.
 - **"Not synced" is exact:** a change is flagged only if it was SENT (its outbox item has a seq),
   the history now covers that seq, and the entity isn't there (`skippedBySend`).
+- Compaction keeps the dropped events' ids (`group_compacted_ids`), so a resend of one after it (a
+  restored phone's outbox, a retry) is still recognised by `append_events` and never counted twice.
 
 ---
 
@@ -412,8 +429,11 @@ Order in `SettingsScreen` `handleDeleteAccount`:
    - calls `purge_user(uid)`, which removes the user's memberships, writes a `member_deleted`
      marker into each group, hands admin to the oldest remaining member, deletes any group left
      empty, and deletes their invites;
-   - then deletes the auth user. Their events **stay** (encrypted; the author column clears
-     automatically), so the group's history is the same for every member, old or newly joined.
+   - then deletes the auth user. Their events **stay** (encrypted), still under their author id —
+     a random uuid of an account that no longer exists. It used to be cleared, and then a phone that
+     rebuilt the history later (a new member, a restore) skipped those events and computed different
+     balances (found by the scenario suite; fixed by `20261018000000_removals_authors_compaction.sql`).
+     Members tabs show them as **Deleted Account**.
    - Unsettled balances do NOT block Delete Account (Play requires deletion to always be
      available); only Leave Group needs ₹0. With a sync account, the confirmation adds: "You
      also leave every shared group; what you added stays in their history for the other
@@ -466,11 +486,16 @@ new invite.
 2. **Groups, invites, keys — code DONE (Oct-14-2026), not yet tried on a device.**
    `src/sync/groupSync.ts`. **A shared group goes live on its FIRST invite** (decided Oct-14 —
    no "Start Live Sharing" step; until someone is invited nothing leaves the phone). Invite:
-   ⋮ → Invite People (generic link) or Members tab → **Invite** next to anyone not joined yet
-   (link made for that person: `&m=<memberId>` in the fragment, so their phone claims the name
-   without asking). Members tab shows Joined / Invite / Left. Join (Groups tab header →
-   `JoinGroupScreen`, paste the link — or the whole shared message; `parseInviteLink` finds the link in it), "Who Are You?" only for generic links or a taken name, Leave Shared Group (₹0 only; replaces Delete while live), Edit Group →
-   `pushGroupChanges` (name/emoji/colour, new people, renames). Pull on GroupDetail focus and
+   ⋮ → Invite People asks **"Who's This Invite For?"** (everyone not joined yet, or Someone New),
+   or Members tab → **Invite** next to a person. A link for a person carries `&m=<memberId>`, and
+   their phone becomes that person; a Someone New link adds them under their own name. **The joiner
+   is never asked** (decided Oct-15-2026): the app can't match a Google account to a name the admin
+   typed from contacts, and the inviter is the one who knows. If that name was taken meanwhile they
+   join as a new person; a join cut short is finished from the group's ⋮ → Finish Joining
+   (`finishJoining`). Members tab tags come from `memberStatus` (Admin / Joined / Not Joined / Left /
+   Deleted Account). Join (Groups tab header → `JoinGroupScreen`, paste the link — or the whole shared
+   message; `parseInviteLink` finds the link in it), Leave Shared Group (₹0 only; replaces Delete
+   while live), Edit Group (name/emoji/colour, new people, renames — sent by the engine's subscription). Pull on GroupDetail focus and
    on Groups tab focus (`syncAllSharedGroups`, which also marks groups the server dropped as
    "Sharing Ended"). Test builds have sharing ON (`useSyncEnabled`). **Expenses don't sync yet**
    — that's phase 3. Invite links open the app since Oct-15 (§5). **QR invite (Oct-15):** Create
@@ -502,7 +527,7 @@ new invite.
 | `src/sync/errors.ts` | ✅ `SyncError` codes + user-facing messages |
 | `src/sync/localGroup.ts` | ✅ server ⇄ local members (`memberMap`, `'me'`), edit planning (pure) |
 | `src/sync/groupSync.ts` | ✅ phase 2 actions (start, invite, join, claim, pull, leave, push edits) |
-| `src/screens/JoinGroupScreen.tsx` | ✅ paste link → "Who Are You?" |
+| `src/screens/JoinGroupScreen.tsx` | ✅ paste link → Join (nothing asked) |
 | `src/sync/expenses.ts` | ✅ `projectExpense`, `planOutgoing`, `planIncoming` (pure) |
 | `src/sync/settlements.ts` | ✅ settle rows ⇄ `settlement.*` events, `lbRowMember` (pure) |
 | `src/sync/checkpoint.ts` | ✅ `checkpointDue` — when a phone posts one (pure) |
@@ -534,7 +559,6 @@ new invite.
     - a member is deleted → the marker is handled.
 - **Server: `supabase test db` (pgTAP):**
   - a non-member can't read;
-  - an expired group can't be read;
   - direct inserts are denied;
   - an invite can't be redeemed twice or after it expires;
   - `append_events` is idempotent;

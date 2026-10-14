@@ -28,15 +28,20 @@ import {
 export type OutboxItem = { eventId: string; at: string; event: SyncEvent; seq?: number };
 
 /** The ids an outbox item is about — a correction is about the expense it corrects. */
-const itemIds = (o: OutboxItem): string[] =>
+export const itemIds = (o: OutboxItem): string[] =>
   o.event.type === 'expense.correct' ? [o.event.entityId, o.event.correctsId]
     : 'entityId' in o.event ? [o.event.entityId] : [];
 
 /** The version a frozen expense is at once the outbox's corrections land (undefined = none pending; null = deleted). */
 function pendingVersion(outbox: OutboxItem[], id: string): ExpenseBody | null | undefined {
-  let v: ExpenseBody | null | undefined;
-  for (const o of outbox) if (o.event.type === 'expense.correct' && o.event.correctsId === id) v = o.event.expense;
-  return v;
+  return lastCorrection(outbox, id)?.expense;
+}
+
+/** The outbox's last correction of this expense — the next one builds on it. */
+function lastCorrection(outbox: OutboxItem[], id: string) {
+  let c: Extract<SyncEvent, { type: 'expense.correct' }> | undefined;
+  for (const o of outbox) if (o.event.type === 'expense.correct' && o.event.correctsId === id) c = o.event;
+  return c;
 }
 
 /**
@@ -49,13 +54,25 @@ export function reconcileOutbox(shared: GroupShared): OutboxItem[] {
   const out: OutboxItem[] = [];
   for (const o of (shared.outbox ?? []).filter((x) => !(x.seq && x.seq <= f.seq))) {
     const ev = o.event;
+    // An unsent correction overtaken by someone else's: rebuild it on top (so the last edit wins).
+    if (ev.type === 'expense.correct' && !o.seq) {
+      const prior = lastCorrection(out, ev.correctsId);
+      const head = prior?.entityId ?? f.corrections?.[ev.correctsId]?.head ?? ev.correctsId;
+      if (ev.base === head) { out.push(o); continue; }
+      if (f.corrections?.[ev.correctsId]?.deleted || prior?.expense === null) continue;
+      const c = buildCorrection(f, ev.entityId, ev.correctsId, ev.expense, prior?.expense ?? undefined, prior?.entityId);
+      if (c && (c.debts.length || JSON.stringify(c.expense) !== JSON.stringify(f.entries[ev.correctsId]?.data))) {
+        out.push({ ...o, event: { type: 'expense.correct', ...c } });
+      }
+      continue;
+    }
     const id = (ev.type === 'expense.upsert' || ev.type === 'expense.delete') && !o.seq ? ev.entityId : null;
     const entry = id ? f.entries[id] : undefined;
     if (!id || !entry || !entry.frozen || entry.kind !== 'expense') { out.push(o); continue; }
     const from = pendingVersion(out, id);
     if (from === null || entry.deleted) continue;
     const next = ev.type === 'expense.upsert' ? (({ type: _t, ...body }) => body)(ev) : null;
-    const c = buildCorrection(f, o.eventId, id, next, from);
+    const c = buildCorrection(f, o.eventId, id, next, from, lastCorrection(out, id)?.entityId);
     if (c) out.push({ ...o, event: { type: 'expense.correct', ...c } });
   }
   return out;
@@ -138,7 +155,7 @@ export function planOutgoing(
   group: Group, txns: SyncTxn[], newId: () => string, builtIns: Set<string>, at: string, lb: SyncLbRow[] = [],
 ): { shared: GroupShared; syncIds: Record<string, string>; lbSyncIds: Record<string, string>; flags: Record<string, string | null> } | null {
   const shared = group.shared;
-  if (!shared || shared.status === 'ended' || !shared.myMemberId) return null;
+  if (!shared || shared.status === 'ended' || !shared.myMemberId || shared.resync) return null;
   const outbox = shared.outbox ?? [];
   const pending = new Set(outbox.map((o) => JSON.stringify(o.event)));
   const events: SyncEvent[] = [];
@@ -159,7 +176,7 @@ export function planOutgoing(
     if (from === null) return;
     const base = from ?? (shared.fold.entries[id].data as ExpenseBody);
     if (next && JSON.stringify(base) === JSON.stringify(next)) return;
-    const c = buildCorrection(shared.fold, newId(), id, next, from);
+    const c = buildCorrection(shared.fold, newId(), id, next, from, lastCorrection(queued, id)?.entityId);
     if (!c) return;
     const ev: SyncEvent = { type: 'expense.correct', ...c };
     events.push(ev);

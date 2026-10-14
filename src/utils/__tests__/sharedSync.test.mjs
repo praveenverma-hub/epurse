@@ -9,7 +9,7 @@ import {
 import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BASE } from '../../sync/invite.ts';
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
 import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
-import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, isGroupAdmin, memberBalancePaise } from '../../sync/localGroup.ts';
+import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, isGroupAdmin, memberBalancePaise, memberStatus } from '../../sync/localGroup.ts';
 import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend, UNSENDABLE } from '../../sync/expenses.ts';
 import { checkpointDue } from '../../sync/checkpoint.ts';
 import { lbRowMember } from '../../sync/settlements.ts';
@@ -254,10 +254,9 @@ const snapshot = () => JSON.stringify(f.balances);
   const lunch = randomUuid(rand);
   step(data(U.priya, expense(lunch, 2000, M.priya, [{ memberId: M.priya, paise: 1000 }, { memberId: M.rahul, paise: 1000 }])));
   const b = snapshot();
-  check('only the creator deletes while they\'re a member', step(data(U.rahul, { type: 'expense.delete', entityId: lunch })) === 'not_creator');
-  check('creator deletes; balances reverse exactly', step(data(U.priya, { type: 'expense.delete', entityId: lunch })) === null
+  check('any member deletes (not only its creator); balances reverse exactly', step(data(U.rahul, { type: 'expense.delete', entityId: lunch })) === null
     && f.balances[M.priya] === JSON.parse(b)[M.priya] - 1000);
-  check('…the delete records who and when', f.entries[lunch].deleted?.by === U.priya && f.entries[lunch].deleted?.at === serverTime(seq));
+  check('…the delete records who and when', f.entries[lunch].deleted?.by === U.rahul && f.entries[lunch].deleted?.at === serverTime(seq));
   check('delete wins: a later edit is rejected', step(data(U.priya, expense(lunch, 4000, M.priya, [{ memberId: M.priya, paise: 4000 }]))) === 'deleted');
   check('deleting twice rejected', step(data(U.priya, { type: 'expense.delete', entityId: lunch })) === 'unknown_entry');
   check('expense id can\'t be reused as a settlement', step(data(U.rahul, { type: 'settlement.upsert', entityId: dinner, from: M.priya, to: M.rahul, amountPaise: 100, date: '2026-10-14' })) === 'wrong_kind');
@@ -348,9 +347,23 @@ const checkpointEvent = (author, fold) => data(author, { type: 'group.checkpoint
   const liveEv = data(U.amit, expense(live, 3000, M.amit, equal3(3000), 'Tea'));
   h = foldEvents(h, [liveEv]).fold; j = foldEvents(j, [liveEv]).fold;
   check('buildCorrection refuses a live expense (just edit it)', buildCorrection(h, randomUuid(rand), live, null) === null);
-  const badCorr = data(U.rahul, { type: 'expense.correct', entityId: randomUuid(rand), correctsId: live, title: 'Tea', date: '2026-10-14', debts: [], expense: null });
+  const badCorr = data(U.rahul, { type: 'expense.correct', entityId: randomUuid(rand), correctsId: live, base: live, title: 'Tea', date: '2026-10-14', debts: [], expense: null });
   const rh = foldEvents(h, [badCorr]), rj = foldEvents(j, [badCorr]);
   check('a correction aimed at a live expense is rejected on both', rh.rejected[0]?.reason === 'not_frozen' && rj.rejected[0]?.reason === 'not_frozen');
+  // Two corrections of the same frozen expense built on the same version: only the first counts.
+  const frozenId = Object.keys(h.entries).find((id) => h.entries[id].kind === 'expense' && h.entries[id].frozen && !h.entries[id].deleted);
+  if (frozenId) {
+    const v = h.entries[frozenId].data;
+    const c1 = buildCorrection(h, randomUuid(rand), frozenId, { ...v, title: 'One' });
+    const c2 = buildCorrection(h, randomUuid(rand), frozenId, { ...v, title: 'Two' });
+    const both = foldEvents(h, [data(U.rahul, { type: 'expense.correct', ...c1 }), data(U.amit, { type: 'expense.correct', ...c2 })]);
+    check('two corrections built on the same version: the second is refused as stale, the same on every phone',
+      both.rejected.length === 1 && both.rejected[0].reason === 'stale_correction' && both.fold.corrections[frozenId].head === c1.entityId);
+    const c3 = buildCorrection(both.fold, randomUuid(rand), frozenId, { ...v, title: 'Three' });
+    check('…the next one, built on the first, goes through', c3.base === c1.entityId && foldEvents(both.fold, [data(U.amit, { type: 'expense.correct', ...c3 })]).rejected.length === 0);
+  } else {
+    check('(a frozen expense to correct)', false);
+  }
   h = rh.fold; j = rj.fold;
   // A tampered app re-sending a frozen id as a plain edit: both phones treat it as new.
   const reuse = data(U.priya, expense(fuel, 1500, M.priya, [{ memberId: M.priya, paise: 1500 }], 'Fuel'));
@@ -433,6 +446,21 @@ seq = 0;
   const withAdmins = { ...shared, admins: [U.rahul] };
   check('admin = the member whose user the server lists as admin (me here, not a contact)',
     isGroupAdmin(withAdmins, 'me') && !isGroupAdmin(withAdmins, 'c_42') && !isGroupAdmin(shared, 'me'));
+  // Members tab: tag + what I may do, per person (memberStatus).
+  const st = (sh, m) => { const r = memberStatus(sh, m); return `${r.tag}|${+r.canRemove}${+r.canAddBack}`; };
+  const amitUser = U.amit;
+  const base = { ...withAdmins, fold: { ...withAdmins.fold, members: { ...withAdmins.fold.members, [DEV]: { ...withAdmins.fold.members[DEV], userId: amitUser } }, activeUsers: [U.rahul, amitUser] } };
+  check('never shared: me Admin, others plain members, nothing to do', st(undefined, { memberId: 'me', isMe: true }) === 'Admin|00' && st(undefined, { memberId: 'c_42' }) === 'Member|00');
+  check('live, I\'m admin: Dev joined (removable by me), Priya not joined (removable)', st(base, { memberId: DEV }) === 'Joined|10' && st(base, { memberId: 'c_42' }) === 'Not Joined|10');
+  check('…me: Admin, no actions on myself', st(base, { memberId: 'me', isMe: true }) === 'Admin|00');
+  const notAdmin = { ...base, admins: [amitUser] };
+  check('not admin: someone who joined isn\'t mine to remove; someone who didn\'t join is', st(notAdmin, { memberId: DEV }) === 'Admin|00' && st(notAdmin, { memberId: 'c_42' }) === 'Not Joined|10');
+  const left = { ...base, fold: { ...base.fold, activeUsers: [U.rahul] } };
+  check('left (archived, no access): admin may Add Back', st(left, { memberId: DEV, archived: true }) === 'Left|01');
+  check('archived but still with access (a removal cut short): admin may Remove again', st(base, { memberId: DEV, archived: true }) === 'Left|10');
+  const gone = { ...left, fold: { ...left.fold, deletedUsers: [amitUser] } };
+  check('deleted account: shown so, removable by anyone at ₹0, never added back', st(gone, { memberId: DEV }) === 'Deleted Account|10' && st({ ...notAdmin, fold: gone.fold }, { memberId: DEV }) === 'Deleted Account|10');
+  check('sharing ended: tags stay, no actions', st({ ...base, status: 'ended' }, { memberId: 'c_42' }) === 'Not Joined|00');
   const owing = { ...shared, fold: { ...shared.fold, balances: { [M.priya]: -500 } } };
   check('a member\'s balance by their LOCAL id', memberBalancePaise(owing, 'c_42') === -500 && memberBalancePaise(owing, 'me') === 0);
 }
@@ -601,11 +629,10 @@ seq = 0;
   check('…the server balance is ₹0, so either can leave', owed() === 0 && (A.group.shared.fold.balances[M.rahul] ?? 0) === 0);
   check('…and nothing echoes back', queue(A) === null && queue(B) === null && pull(A).length === 0);
 
-  // An older settle row without memberId still finds its member.
-  check('a row without memberId matches by contact, then by a unique name',
-    lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, contactId: '42' }) === 'c_42'
-    && lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, person: ' priya s ' }) === 'c_42'
-    && lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, person: 'Nobody' }) === null);
+  check('a row is about the member it names (and only a member of this group)',
+    lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, memberId: 'c_42' }) === 'c_42'
+    && lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, memberId: 'c_99' }) === null
+    && lbRowMember(A.group, { id: 'x', kind: 'lent_settled', amount: 1, contactId: '42' }) === null);
 
   // Settlements between two OTHER people change nothing on this phone.
   log.push(data(U.rahul, { type: 'member.add', memberId: M.amit, name: 'Amit' }));
@@ -621,13 +648,18 @@ seq = 0;
   check('Rahul\'s "received" row goes too, and Priya owes ₹150 again',
     !A.lb.some((l) => l.syncId === sev.entityId) && owed() === -15000 && queue(A) === null && queue(B) === null);
 
-  // Rahul can't delete a settlement Priya made (creator only) → it comes back.
+  // Any member may delete a settlement Priya made (decided Oct-15-26).
   B.lb = [{ id: 'lbB2', kind: 'borrow_repaid', person: 'Rahul', memberId: M.rahul, amount: 150, date: AT, groupId: 'gB' }];
   queue(B); upload(B, U.priya); pull(B); pull(A);
   const second = A.lb.find((l) => l.kind === 'lent_settled' && l.memberId === 'c_42');
   A.lb = A.lb.filter((l) => l !== second);
-  queue(A); upload(A, U.rahul); pull(A);
-  check('a delete by someone else is skipped and the row is restored', A.lb.some((l) => l.syncId === second.syncId) && owed() === 0);
+  queue(A); upload(A, U.rahul); pull(A); pull(B);
+  check('Rahul deletes a settlement Priya made: gone on both phones, she owes ₹150 again',
+    !A.lb.some((l) => l.syncId === second.syncId) && !B.lb.some((l) => l.syncId === second.syncId) && owed() === -15000);
+  B.lb = [{ id: 'lbB3', kind: 'borrow_repaid', person: 'Rahul', memberId: M.rahul, amount: 150, date: AT, groupId: 'gB' }];
+  queue(B); upload(B, U.priya); pull(B); pull(A);
+  check('…she records it again', owed() === 0);
+  const third = A.lb.find((l) => l.kind === 'lent_settled' && l.memberId === 'c_42' && l.syncOrigin === 'remote');
 
   // ── Checkpoints + corrections. Amit owes nothing; Rahul owes Amit ₹50 → unsettled.
   const DAY = 86400000;
@@ -640,8 +672,7 @@ seq = 0;
   check('…not with something waiting to send, nor after disagreeing with one',
     !due({ ...A.group.shared, outbox: [{ eventId: 'x', at: AT, event: { type: 'expense.delete', entityId: dinner } }] }, 60)
     && !due({ ...A.group.shared, fold: { ...A.group.shared.fold, checkpointMismatch: 3 } }, 60));
-  check('an older saved fold (no lastAt) falls back to the newest entry version',
-    due({ ...A.group.shared, fold: { ...A.group.shared.fold, lastAt: undefined } }, 400));
+  check('no server time yet → not due', !due({ ...A.group.shared, fold: { ...A.group.shared.fold, lastAt: undefined } }, 400));
 
   // Rahul's phone posts one.
   log.push(data(U.rahul, { type: 'group.checkpoint', ...buildCheckpoint(A.group.shared.fold) }));
@@ -711,11 +742,11 @@ seq = 0;
   check('…which lands as the new title everywhere', B.txns.find((t) => t.syncId === snack)?.merchant === 'Snacks + Water');
 
   // A frozen settlement's row deleted here can't be deleted on the server: it comes back.
-  const frozenRow = A.lb.find((l) => l.syncId === second.syncId);
+  const frozenRow = A.lb.find((l) => l.syncId === third.syncId);
   A.lb = A.lb.filter((l) => l !== frozenRow);
   check('a frozen settlement sends no delete', queue(A) === null);
   pull(A);
-  check('…and the pull puts its row back', A.lb.some((l) => l.syncId === second.syncId));
+  check('…and the pull puts its row back', A.lb.some((l) => l.syncId === third.syncId));
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);

@@ -31,6 +31,7 @@ const KNOWN: [RegExp, SyncError['code'], string][] = [
   [/invalid invite/, 'INVITE_INVALID', 'This invite link isn\'t valid.'],
   [/invite expired or used/, 'INVITE_USED', 'This invite link has expired or was already used. Ask for a new one.'],
   [/group has ended/, 'GROUP_ENDED', 'This group is no longer shared.'],
+  [/removed from group/, 'NOT_MEMBER', 'You were removed from this group. Ask its admin to add you back.'],
   [/group is full/, 'GROUP_FULL', 'This group can\'t take more people.'],
   [/member has too many groups/, 'GROUP_FULL', 'They\'re already in the most shared groups allowed (100).'],
   [/not a former member/, 'NOT_MEMBER', 'Couldn\'t add them back. Send them a new invite instead.'],
@@ -38,13 +39,17 @@ const KNOWN: [RegExp, SyncError['code'], string][] = [
   [/admins only/, 'NOT_ADMIN', 'Only the group\'s admin can remove someone who has joined.'],
 ];
 
-function fail(error: { message?: string } | null): never {
-  const msg = error?.message ?? '';
-  for (const [re, code, text] of KNOWN) if (re.test(msg)) throw new SyncError(code, text);
+/** The error a screen shows for a server message (also used by the test server). */
+export function syncErrorFor(msg: string): SyncError {
+  for (const [re, code, text] of KNOWN) if (re.test(msg)) return new SyncError(code, text);
   if (/fetch|network|timed? ?out/i.test(msg)) {
-    throw new SyncError('NETWORK', 'Couldn\'t reach the server. Check your connection and try again.');
+    return new SyncError('NETWORK', 'Couldn\'t reach the server. Check your connection and try again.');
   }
-  throw new SyncError('SERVER', 'Something went wrong on our side. Try again.');
+  return new SyncError('SERVER', 'Something went wrong on our side. Try again.');
+}
+
+function fail(error: { message?: string } | null): never {
+  throw syncErrorFor(error?.message ?? '');
 }
 
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {

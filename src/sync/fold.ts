@@ -67,6 +67,8 @@ export type GroupFold = {
   checkpointMismatch: number | null;
   /** Server time of the last event — when the group went quiet (absent on folds saved before Oct-14-26). */
   lastAt?: string | null;
+  /** Corrected expense id → its latest correction (a correction must build on it). */
+  corrections?: Record<string, { head: string; deleted: boolean }>;
 };
 
 /** A row of `group_events`, with the ciphertext already opened (null = couldn't be). */
@@ -87,7 +89,7 @@ export const MAX_MEMBERS = 100;
 
 export const emptyFold = (): GroupFold => ({
   seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {},
-  balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null, lastAt: null,
+  balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null, lastAt: null, corrections: {},
 });
 
 // Maps and arrays are copied once per fold; member/entry objects are replaced, never mutated.
@@ -100,6 +102,7 @@ const cloneFold = (f: GroupFold): GroupFold => ({
   entries: { ...f.entries },
   balances: { ...f.balances },
   debts: { ...f.debts },
+  corrections: { ...f.corrections },
 });
 
 /** The entry as the rules see it: frozen ones don't exist. */
@@ -166,6 +169,7 @@ export const buildCheckpoint = (f: GroupFold): CheckpointBody => ({
   activeUsers: [...f.activeUsers].sort(),
   deletedUsers: [...f.deletedUsers].sort(),
   debts: debtList(f.debts),
+  corrections: Object.keys(f.corrections ?? {}).sort().map((id) => ({ correctsId: id, ...f.corrections![id] })),
 });
 
 const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
@@ -177,6 +181,7 @@ const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
     activeUsers: [...c.activeUsers].sort(),
     deletedUsers: [...c.deletedUsers].sort(),
     debts: [...c.debts].sort((x, y) => (x.from + x.to < y.from + y.to ? -1 : 1)),
+    corrections: [...c.corrections].sort((x, y) => (x.correctsId < y.correctsId ? -1 : 1)),
   });
   return norm(a) === norm(b);
 };
@@ -184,10 +189,11 @@ const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
 /**
  * An edit (or delete, `next` null) of a FROZEN expense, as the change in who-owes-whom.
  * null when this phone doesn't hold that frozen expense — the UI only offers Edit when it does.
- * `from` = the version it changes, when a correction not yet in the history already changed it.
+ * `from` = the version it changes, when a correction not yet in the history already changed it;
+ * `base` = that correction's id (else the latest one in the history).
  */
 export function buildCorrection(
-  f: GroupFold, correctionId: string, correctsId: string, next: ExpenseBody | null, from?: ExpenseBody,
+  f: GroupFold, correctionId: string, correctsId: string, next: ExpenseBody | null, from?: ExpenseBody, base?: string,
 ): CorrectionBody | null {
   const old = f.entries[correctsId];
   if (!old || !old.frozen || old.kind !== 'expense' || old.deleted) return null;
@@ -197,6 +203,7 @@ export function buildCorrection(
   return {
     entityId: correctionId,
     correctsId,
+    base: base ?? f.corrections?.[correctsId]?.head ?? correctsId,
     title: (next ?? from ?? old.data).title,
     date: (next ?? from ?? old.data).date,
     debts: debtList(pairs),
@@ -291,6 +298,7 @@ function applyCheckpoint(f: GroupFold, cp: CheckpointBody, seq: number, missingH
   f.debts = {};
   f.balances = {};
   applyDebts(f, cp.debts, 1);
+  f.corrections = Object.fromEntries(cp.corrections.map((c) => [c.correctsId, { head: c.head, deleted: c.deleted }]));
   f.historyFrom = seq;
   return null;
 }
@@ -365,8 +373,7 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       const kind = ev.type === 'expense.delete' ? 'expense' : 'settlement';
       const prev = live(f, ev.entityId);
       if (!prev || prev.kind !== kind || prev.deleted) return 'unknown_entry';
-      // The creator's call — unless they've left, so nothing would be stuck forever.
-      if (prev.createdBy !== author && f.activeUsers.includes(prev.createdBy)) return 'not_creator';
+      // Any member, like editing (decided Oct-15-2026).
       if (movesPastMember(f, entryDebts(prev), [])) return 'past_member';
       applyDebts(f, entryDebts(prev), -1);
       f.entries[ev.entityId] = { ...prev, deleted: { by: author, at } } as EntryState;
@@ -382,9 +389,15 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
         kind: 'correction', createdBy: author, data, versions: [{ seq, by: author, at, data }], deleted: null, frozen: false,
       };
       for (const d of data.debts) if (!f.members[d.from] || !f.members[d.to]) return 'unknown_member';
+      // Built on the latest version, else two edits made at once would both count (last one wins
+      // instead: the phone that lost rebuilds its edit on top — expenses.ts reconcileOutbox).
+      const chain = f.corrections?.[data.correctsId];
+      if (chain?.deleted) return 'deleted';
+      if (data.base !== (chain?.head ?? data.correctsId)) return 'stale_correction';
       if (movesPastMember(f, [], data.debts)) return 'past_member';
       applyDebts(f, data.debts, 1);
       f.entries[ev.entityId] = entry;
+      f.corrections = { ...f.corrections, [data.correctsId]: { head: ev.entityId, deleted: data.expense === null } };
 
       // Display only: a phone that still holds the original shows it updated in place.
       const orig = f.entries[ev.correctsId];

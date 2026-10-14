@@ -568,7 +568,7 @@ const ignoredSplitPatch = (txn, groups) => {
     isSplitMemo: undefined,
     splitPaidBy: undefined,
     memoAccountId: undefined,
-    ...(shared ? { groupId: null, groupSplit: undefined, isGroupMemo: undefined } : {}),
+    ...(shared ? { groupId: null, groupSplit: undefined, isGroupMemo: undefined, syncId: undefined, syncRejected: undefined } : {}),
   };
 };
 
@@ -4216,6 +4216,8 @@ export const useEPurseStore = create(
           // plain split), so a plain-split MEMO doesn't stay a memo under a group that
           // says I paid (no account would ever be debited).
           let updatedTxn = { ...txn, groupId };
+          // Moved from another group: that group's server copy is deleted — this is a new one here.
+          if (txn.groupId && txn.groupId !== groupId) { delete updatedTxn.syncId; delete updatedTxn.syncRejected; }
           let accounts = s.accounts;
           if (groupSplit) {
             updatedTxn.groupSplit = groupSplit;
@@ -4308,6 +4310,9 @@ export const useEPurseStore = create(
             delete next.groupId;
             delete next.groupSplit;
             delete next.isGroupMemo;
+            // Its server copy is deleted; tagged back in later, it goes as a new expense.
+            delete next.syncId;
+            delete next.syncRejected;
             return next;
           });
           const updatedGroups = s.groups.map((g) =>

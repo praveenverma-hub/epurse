@@ -55,6 +55,10 @@ export interface GroupShared {
   outbox?: OutboxItem[];
   /** Server user ids with the admin role (only they can remove someone who joined). Refreshed on sync. */
   admins?: string[];
+  /** Live again after "Sharing Ended" (Add Back, rejoin): take the server's history before sending anything. */
+  resync?: boolean;
+  /** Joining: the person the invite link was for (its `m`), until I'm someone in the group. */
+  claimFor?: string | null;
   syncedAt: string | null;
 }
 

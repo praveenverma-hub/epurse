@@ -49,11 +49,11 @@ export function membersFromFold(local: GroupMember[], shared: GroupShared): Grou
     });
     seen.add(localId);
   }
-  // Added here but not on the server yet — keep them until they're sent. Not one that IS on the
-  // server under its own id: e.g. the person I just claimed, shown until then under the admin's name.
+  // Not on the server yet (unsent, or sent and not pulled back) — keep them, contact and all.
+  // Not one that IS there under its own id: e.g. the person I just claimed.
   for (const m of local) {
     if (m.memberId === 'me' || m.isMe || seen.has(m.memberId)) continue;
-    if (!shared.memberMap[m.memberId] && !shared.fold.members[m.memberId]) out.push(m);
+    if (!shared.fold.members[shared.memberMap[m.memberId] ?? m.memberId]) out.push(m);
   }
   return out;
 }
@@ -108,3 +108,40 @@ export const unclaimedMembers = (shared: GroupShared): { memberId: string; name:
   shared.fold.memberOrder
     .filter((id) => !shared.fold.members[id].userId && !shared.fold.members[id].archived)
     .map((id) => ({ memberId: id, name: shared.fold.members[id].name }));
+
+export type MemberStatus = {
+  tag: 'Admin' | 'Joined' | 'Not Joined' | 'Left' | 'Deleted Account' | 'Member';
+  /** Opened the group on their own phone at some point. */
+  joined: boolean;
+  canRemove: boolean;
+  canAddBack: boolean;
+};
+
+/**
+ * One person's row in the Members tab: their tag and what I may do about them. `shared` is
+ * the group's sync state (absent for a group never shared — then I'm its only real member).
+ */
+export function memberStatus(shared: GroupShared | undefined, m: Pick<GroupMember, 'memberId' | 'isMe' | 'archived'>): MemberStatus {
+  const none = { joined: false, canRemove: false, canAddBack: false };
+  if (!shared) return { ...none, tag: m.isMe ? 'Admin' : 'Member' };
+  const live = shared.status !== 'ended';
+  const userId = shared.fold.members[toRemoteMember(shared, m.memberId)]?.userId ?? null;
+  const joined = !!userId || !!m.isMe;
+  const hasAccess = !!userId && shared.fold.activeUsers.includes(userId);
+  const deleted = !!userId && shared.fold.deletedUsers.includes(userId);
+  const iAmAdmin = live && !!shared.myMemberId && isGroupAdmin(shared, 'me');
+
+  const tag: MemberStatus['tag'] = deleted ? 'Deleted Account'
+    : m.archived ? 'Left'
+    : live && isGroupAdmin(shared, m.memberId) ? 'Admin'
+    : joined ? 'Joined' : 'Not Joined';
+  if (!live || m.isMe) return { ...none, tag, joined };
+  return {
+    tag,
+    joined,
+    // Someone with access is the admin's to remove (it ends their access); anyone else, anyone's.
+    // Archived but still with access = a removal whose server step failed: offered again to retry.
+    canRemove: m.archived ? hasAccess && iAmAdmin : !hasAccess || iAmAdmin,
+    canAddBack: iAmAdmin && !!m.archived && !!userId && !hasAccess && !deleted,
+  };
+}

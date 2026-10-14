@@ -64,7 +64,11 @@ export type CheckpointBody = {
   activeUsers: string[];
   deletedUsers: string[];
   debts: Debt[];
+  /** Corrected expenses: the latest correction of each, so the next one can be checked against it. */
+  corrections: CorrectionHead[];
 };
+
+export type CorrectionHead = { correctsId: string; head: string; deleted: boolean };
 
 /**
  * An edit to an expense from before the last checkpoint. Phones that joined later never had
@@ -74,6 +78,8 @@ export type CheckpointBody = {
 export type CorrectionBody = {
   entityId: string;
   correctsId: string;
+  /** What it was built on: the latest correction of that expense, or `correctsId` if none. */
+  base: string;
   title: string;
   date: string;
   debts: Debt[];
@@ -102,8 +108,10 @@ const text = (v: unknown, max: number): v is string =>
   typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 const paise = (v: unknown, min: number): v is number =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= V1_LIMITS.MAX_PAISE;
+// A fixed pattern, not Date.parse: every phone must accept exactly the same strings.
+const DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 const date = (v: unknown): v is string =>
-  typeof v === 'string' && v.length <= V1_LIMITS.DATE_MAX && !Number.isNaN(Date.parse(v));
+  typeof v === 'string' && v.length <= V1_LIMITS.DATE_MAX && DATE_RE.test(v);
 const optional = (v: unknown, ok: (x: string) => boolean): v is string | null | undefined =>
   v == null || (typeof v === 'string' && ok(v));
 
@@ -170,7 +178,13 @@ function parseCheckpoint(o: any): CheckpointBody | null {
   const debts = parseDebts(o.debts);
   if (!activeUsers || !deletedUsers || !debts) return null;
   if (debts.some((d) => !seen.has(d.from) || !seen.has(d.to))) return null;
-  return { baseSeq: o.baseSeq, meta, members, activeUsers, deletedUsers, debts };
+  if (o.corrections !== undefined && !Array.isArray(o.corrections)) return null;
+  const corrections: CorrectionHead[] = [];
+  for (const c of o.corrections ?? []) {
+    if (!c || !isUuid(c.correctsId) || !isUuid(c.head) || typeof c.deleted !== 'boolean') return null;
+    corrections.push({ correctsId: c.correctsId, head: c.head, deleted: c.deleted });
+  }
+  return { baseSeq: o.baseSeq, meta, members, activeUsers, deletedUsers, debts, corrections };
 }
 
 /** The event, rebuilt from known fields only — or null if anything is off. */
@@ -212,13 +226,13 @@ export function parseEvent(json: string | null): ParsedEvent | null {
     }
 
     case 'expense.correct': {
-      if (!isUuid(o.entityId) || !isUuid(o.correctsId) || o.entityId === o.correctsId) return null;
+      if (!isUuid(o.entityId) || !isUuid(o.correctsId) || !isUuid(o.base) || o.entityId === o.correctsId) return null;
       if (!text(o.title, V1_LIMITS.TITLE_MAX) || !date(o.date)) return null;
       const debts = parseDebts(o.debts);
       const expense = o.expense === null ? null : parseExpenseBody(o.expense);
       if (!debts || (o.expense !== null && !expense)) return null;
       if (expense && expense.entityId !== o.correctsId) return null;
-      return { at, event: { type: o.type, entityId: o.entityId, correctsId: o.correctsId, title: o.title, date: o.date, debts, expense } };
+      return { at, event: { type: o.type, entityId: o.entityId, correctsId: o.correctsId, base: o.base, title: o.title, date: o.date, debts, expense } };
     }
 
     case 'settlement.upsert':

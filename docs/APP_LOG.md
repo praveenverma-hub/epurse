@@ -2113,6 +2113,30 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   its amount/split/group and can't be deleted or ignored (fold `past_member` + `pastMemberIn` guards in the
   form, review card, Manage sheet, store). Fixes the stuck case where a later edit gave a past member a
   balance nobody could settle. Add Back unlocks it. test:sync 187, test:store +3.
+  **Oct-15 (13th): end-to-end scenario suite** — `npm run test:groupScenarios` (`groupScenarios.test.mjs`): many
+  phones on the REAL store + groupSync + fold + crypto against an in-memory server that follows the SQL
+  (`_fakeSyncServer.mjs`, wired by `_sync-hook.mjs`). 83 checks pass; open bugs are `known(...)` checks
+  (print, don't fail; a fix flips them). FIXED while building it: `pastMemberIn` locked unsent/skipped
+  expenses too (a NOT SYNCED expense naming someone removed could never be fixed). **Open (14, all
+  reproduced):** non-creator delete/untag reappears or loops; Delete Account blanks authors so later
+  joiners disagree; default split/Group Zone include past members; a contact added while a send is
+  pending loses its contact link; concurrent corrections double-count; re-tag into a group undoes itself;
+  ended-copy edits replay on Add Back/rejoin; checkpoint-only debts never reach Lent/Borrowed; claim
+  retry duplicates; compaction loses event-id idempotency; offline first invite stuck "pending";
+  removed member rejoins via any open invite; creator not Admin until next sync.
+  **Oct-15 (14th): all 14 FIXED + simplified** (user's calls: any member deletes; removed stays removed):
+  any-member delete (fold `not_creator` gone); migration `20261018000000_removals_authors_compaction.sql`
+  (pushed to TEST): `group_removals` (removed → no rejoin by invite, only Add Back), author ids survive
+  Delete Account, compacted event ids kept; correction chains (`base` + `fold.corrections`, rebased in
+  `reconcileOutbox`); `sync/balances.ts` "Earlier balance" rows so Lent/Borrowed always equals the history;
+  new splits/Group Zone skip past members; pending contacts kept; untag/move clears `syncId`; claim adopts
+  my member in `commit`; Leave/Remove share `archiveSettled` (checks it landed) and a half-left leave
+  finishes on next sync; ended copy `resync`s before sending; failed first share reverts to local;
+  creator Admin at once. **Joining never asks "Who Are You?"** — Invite People asks the INVITER "Who's
+  This Invite For?"; `joinFromLink` claims the link's person or joins as new; ⋮ Finish Joining.
+  Members tab = `memberStatus` (adds Deleted Account tag). Removed: pre-launch fallbacks
+  (`lbRowMember` contact/name, checkpoint `lastAt` fallback), `compact_groups()`. Event dates use a
+  fixed pattern (not `Date.parse`). test:sync 197, test:groupScenarios 106 (0 known gaps).
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

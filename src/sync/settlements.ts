@@ -23,7 +23,7 @@ export type SyncLbRow = {
   amount: number;
   date?: string;
   groupId?: string;
-  /** Local member id of the other person (rows made before Oct-14-26 may lack it). */
+  /** Local member id of the other person. */
   memberId?: string | null;
   sourceTxnId?: string;
   syncId?: string;
@@ -38,16 +38,9 @@ export type LbOp =
   | { kind: 'lbRemove'; rowId: string }
   | { kind: 'lbFlag'; rowId: string; syncRejected: string | null };
 
-const norm = (s?: string | null) => (s || '').trim().toLowerCase();
-
-/** Which group member a row is about (local id) — by memberId, else contact, else an unambiguous name. */
+/** Which group member a row is about (local id), or null. Every group row carries `memberId` (Oct-14-26). */
 export function lbRowMember(group: Group, row: SyncLbRow): string | null {
-  const others = (group.members || []).filter((m) => !m.isMe);
-  if (row.memberId && others.some((m) => m.memberId === row.memberId)) return row.memberId;
-  const byContact = row.contactId ? others.filter((m) => m.contactId === row.contactId) : [];
-  if (byContact.length === 1) return byContact[0].memberId;
-  const byName = others.filter((m) => norm(m.name) === norm(row.person));
-  return byName.length === 1 ? byName[0].memberId : null;
+  return row.memberId && (group.members || []).some((m) => !m.isMe && m.memberId === row.memberId) ? row.memberId : null;
 }
 
 /** A settle row as the server sees it — or null if it can't be sent. */

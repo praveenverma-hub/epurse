@@ -56,8 +56,8 @@ import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember } from '../types/group';
 import { useSyncEnabled } from '../sync/config';
-import { addBackMember, createInviteLink, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
-import { isGroupAdmin, memberBalancePaise, toRemoteMember } from '../sync/localGroup';
+import { addBackMember, createInviteLink, finishJoining, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
+import { memberBalancePaise, memberStatus } from '../sync/localGroup';
 
 const TransactionItem = TransactionItemRaw as React.ComponentType<{
   txn: any;
@@ -127,6 +127,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [headerH, setHeaderH] = useState(0);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [invite, setInvite] = useState<{ link: string; title: string } | null>(null);
+  const [pickInvite, setPickInvite] = useState(false);
   const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
@@ -301,35 +302,13 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   // In person: they scan the QR (it holds the same link). Remote: Share Link.
   const shareInvite = (link: string) => { void Share.share({ message: `Join "${group.name}" on ePurse: ${link}` }); };
 
-  // Live groups: has this person opened the group on their own phone yet?
-  const joined = (memberId: string) => {
-    const shared = group.shared;
-    if (!shared) return false;
-    return !!shared.fold.members[toRemoteMember(shared, memberId)]?.userId;
-  };
+  // Each person's tag and what I may do about them (sync/localGroup.ts, tested).
+  const status = (m: GroupMember) => memberStatus(group.shared, m);
 
-  // Live groups: the server's admin (refreshed on sync) — only they can remove someone who joined.
-  const iAmAdmin = live && isGroupAdmin(group.shared!, 'me');
-  const hasAccess = (memberId: string) => {
-    const shared = group.shared;
-    const userId = shared?.fold.members[toRemoteMember(shared, memberId)]?.userId;
-    return !!userId && !!shared?.fold.activeUsers.includes(userId);
-  };
-  const memberTag = (m: { memberId: string; isMe?: boolean; archived?: boolean }) => {
-    if (!live) return m.isMe ? 'Admin' : m.archived ? 'Left' : 'Member';
-    if (m.archived) return 'Left';
-    if (isGroupAdmin(group.shared!, m.memberId)) return 'Admin';
-    return joined(m.memberId) ? 'Joined' : 'Member';
-  };
-  // Archived but still with access = a removal whose server step failed; offering it again retries it.
-  const canRemove = (m: { memberId: string; isMe?: boolean; archived?: boolean }) =>
-    live && !m.isMe && (m.archived ? hasAccess(m.memberId) && iAmAdmin : !joined(m.memberId) || iAmAdmin);
-  // Someone who joined, then left or was removed (not a deleted account): the admin can add them back.
-  const canAddBack = (m: { memberId: string; isMe?: boolean; archived?: boolean }) => {
-    if (!iAmAdmin || m.isMe || !m.archived || hasAccess(m.memberId)) return false;
-    const userId = group.shared!.fold.members[toRemoteMember(group.shared!, m.memberId)]?.userId;
-    return !!userId && !group.shared!.fold.deletedUsers.includes(userId);
-  };
+  // Who an invite is for is the inviter's call (they know); the joiner is never asked.
+  const notJoined = (group.members || []).filter((m) => !m.isMe && !m.archived && !status(m).joined);
+  const startInvite = () => (notJoined.length ? setPickInvite(true) : handleInvite());
+  const inviteFor = (m?: GroupMember) => { setPickInvite(false); setTimeout(() => handleInvite(m), 350); };
 
   const handleAddBack = (m: { memberId: string; name: string }) => {
     const name = titleCaseName(m.name);
@@ -345,7 +324,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     });
   };
 
-  const handleRemoveMember = (m: { memberId: string; name: string }) => {
+  const handleRemoveMember = (m: GroupMember) => {
     const name = titleCaseName(m.name);
     if (memberBalancePaise(group.shared!, m.memberId) !== 0) {
       toast.info(`${name} isn't settled up`, 'Someone can be removed once their balance in this group is ₹0.');
@@ -354,7 +333,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     setConfirm({
       title: `Remove ${name}?`,
       message: `${name} stays in past expenses but can't be added to new ones`
-        + (joined(m.memberId) ? ', and stops getting this group\'s updates.' : '.'),
+        + (status(m).joined ? ', and stops getting this group\'s updates.' : '.'),
       primaryText: 'Remove',
       secondaryText: 'Cancel',
       destructive: true,
@@ -411,13 +390,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const pastMembers = (group.members || []).filter((m) => m.archived);
   const renderMemberRow = (m: GroupMember, i: number) => {
     const displayName = m.isMe ? 'You' : titleCaseName(m.name);
+    const st = status(m);
     return (
       <View key={m.memberId} style={[styles.memberRow, i > 0 && styles.pendingRowDivider]}>
         <View style={[styles.avatar, { backgroundColor: theme.primary + '22', marginRight: 0 }]}>
           <Text style={[styles.avatarTxt, { color: theme.primary }]}>{displayName.charAt(0).toUpperCase()}</Text>
         </View>
         <Text style={styles.memberRowName} numberOfLines={1}>{displayName}</Text>
-        {canInvite && !m.isMe && !m.archived && !joined(m.memberId) ? (
+        {canInvite && !m.isMe && !m.archived && !st.joined ? (
           <TouchableOpacity
             style={[styles.memberInviteBtn, { borderColor: theme.primary }]}
             onPress={() => handleInvite({ memberId: m.memberId, name: m.name })}
@@ -429,14 +409,14 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           </TouchableOpacity>
         ) : (
           <View style={[styles.memberRoleTag, m.isMe && { backgroundColor: theme.primary + '18' }]}>
-            <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>{memberTag(m)}</Text>
+            <Text style={[styles.memberRoleTagTxt, m.isMe && { color: theme.primary }]}>{st.tag}</Text>
           </View>
         )}
-        {canRemove(m) || canAddBack(m) ? (
+        {st.canRemove || st.canAddBack ? (
           <OverflowMenu
             style={styles.memberMenuBtn}
             accessibilityLabel={`More for ${displayName}`}
-            actions={canAddBack(m)
+            actions={st.canAddBack
               ? [{ key: 'addBack', label: 'Add Back to Group', icon: 'person-add-outline', onPress: () => handleAddBack(m) }]
               : [{ key: 'remove', label: 'Remove From Group', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
           />
@@ -748,9 +728,12 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                       { key: 'add', label: 'Add Expense', icon: 'add-circle-outline' as const, onPress: () => navigation.navigate('AddGroupExpense', { groupId: group.id }) },
                       { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
                     ]),
-                    ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: () => handleInvite() }] : []),
+                    ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: startInvite }] : []),
                     ...(live && !group.shared?.myMemberId
-                      ? [{ key: 'claim', label: 'Choose Who You Are', icon: 'person-circle-outline' as const, onPress: () => navigation.navigate('JoinGroup', { claimGroupId: group.id }) }] : []),
+                      ? [{ key: 'finish', label: 'Finish Joining', icon: 'person-circle-outline' as const, onPress: runShared(async () => {
+                        await finishJoining(group.id);
+                        toast.success('You joined the group');
+                      }, 'Couldn\'t join') }] : []),
                     // A live group is left (₹0 only), not deleted; once ended it's a normal local group.
                     live
                       ? { key: 'leave', label: 'Leave Shared Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }
@@ -904,6 +887,32 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       />
 
       <InfoSheet
+        visible={pickInvite}
+        variant="center"
+        title="Who's This Invite For?"
+        body="They join as that person, with nothing to choose on their phone."
+        content={(
+          <View style={styles.pickList}>
+            {[...notJoined.map((m) => ({ key: m.memberId, label: titleCaseName(m.name), icon: 'person-outline' as const, m })),
+              { key: 'new', label: 'Someone New', icon: 'person-add-outline' as const, m: undefined }].map((row, i) => (
+              <TouchableOpacity
+                key={row.key}
+                style={[styles.pickRow, i > 0 && styles.pendingRowDivider]}
+                onPress={() => inviteFor(row.m)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+              >
+                <Ionicons name={row.icon} size={18} color={theme.primary} />
+                <Text style={styles.memberRowName} numberOfLines={1}>{row.label}</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+        ctaText="Cancel"
+        onClose={() => setPickInvite(false)}
+      />
+      <InfoSheet
         visible={!!invite}
         variant="center"
         title={invite?.title ?? ''}
@@ -1044,6 +1053,8 @@ const styles = StyleSheet.create({
   mismatchTxt: { ...typography.small, flex: 1, color: colors.textSecondary },
   memberMenuBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: spacing.xs, marginRight: -spacing.xs },
   // The QR's own white quiet zone sits on the white card; the hairline shows its edge.
+  pickList: { marginTop: spacing.md, borderWidth: DIVIDER_W, borderColor: colors.divider, borderRadius: radius.md },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
   qrWrap: { alignSelf: 'center', marginTop: spacing.md, padding: spacing.xs, borderRadius: radius.md, borderWidth: DIVIDER_W, borderColor: colors.divider },
   memberInviteTxt: { ...typography.small, fontWeight: '700' },
   memberRowName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },

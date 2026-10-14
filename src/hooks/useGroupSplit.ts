@@ -37,11 +37,14 @@ export function useGroupSplit({ group, amount, active = true, editTxn, lockPayer
   const isShared = group?.type === 'shared';
   // Guarantee the built-in 'me' member for shared groups (a stored group may have
   // lost it). Personal groups have no members: You are the implicit sole payer.
+  // People who left aren't offered for new splits; an edited expense keeps the ones already in it.
   const allMembers = useMemo(() => {
     if (!isShared) return [ME];
-    const ms = group?.members || [];
+    const split = editTxn?.groupSplit;
+    const inSplit = new Set<string>(split ? [split.paidByMemberId, ...(split.shares || []).map((s: any) => s.memberId)] : []);
+    const ms = (group?.members || []).filter((m) => !m.archived || inSplit.has(m.memberId));
     return ms.some((m) => m.memberId === 'me') ? ms : [ME, ...ms];
-  }, [group, isShared]);
+  }, [group, isShared, editTxn]);
   const meIdx = useMemo(() => Math.max(0, allMembers.findIndex((m) => m.isMe || m.memberId === 'me')), [allMembers]);
   const payerMemberId = allMembers[payerIdx]?.memberId;
   const payerIsMe = !!allMembers[payerIdx]?.isMe || payerMemberId === 'me';

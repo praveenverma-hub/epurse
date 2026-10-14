@@ -5630,7 +5630,9 @@ console.log('\n— shared-group sync: someone in it has left (Oct-15-26) —');
   const shared = { remoteId: 'r1', keys: {}, keyEpoch: 1, myMemberId: 'm-me', memberMap: { me: 'm-me', c_42: 'm-priya' },
     fold: { seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {}, balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null },
     status: 'active', syncedAt: null, outbox: [] };
-  S().setSharedGroupState(gid, shared, { members: [{ memberId: 'c_42', name: 'Priya', contactId: '42', archived: true }] });
+  // e9 is on the server (a fold entry); one only on this phone could still be fixed or deleted.
+  const onServer = { ...shared, fold: { ...shared.fold, entries: { e9: { kind: 'expense', deleted: null, frozen: false } } } };
+  S().setSharedGroupState(gid, onServer, { members: [{ memberId: 'c_42', name: 'Priya', contactId: '42', archived: true }] });
   const split = { paidByMemberId: 'me', paidByName: 'You', shares: [{ memberId: 'me', name: 'You', shareAmount: 500 }, { memberId: 'c_42', name: 'Priya', shareAmount: 500 }] };
   useStore.setState({ transactions: [{ id: 'IdP1', type: 'debit', amount: 1000, merchant: 'Hotel', categoryId: 'travel', createdAt: new Date().toISOString(),
     accountId: 'acc1', groupId: gid, syncId: 'e9', groupSplit: split }] });
