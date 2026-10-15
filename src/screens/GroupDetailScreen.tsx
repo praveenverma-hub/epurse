@@ -31,6 +31,7 @@ import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
+import { lbTagLocked } from '../utils/lbEntryDisplay';
 import { countsForSpend, spendContribution } from '../utils/split';
 import { buildCategoryBreakdown } from '../analytics/behavioralSelectors';
 import EmptyState from '../components/EmptyState';
@@ -44,6 +45,10 @@ import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
+import InfoIcon from '../components/InfoIcon';
+import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
+import GroupHistoryList from '../components/GroupHistoryList';
+import { groupHistory } from '../sync/history';
 import QrCode from '../components/QrCode';
 import EditIcon from '../components/EditIcon';
 import OverflowMenu from '../components/OverflowMenu';
@@ -128,6 +133,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [invite, setInvite] = useState<{ link: string; title: string } | null>(null);
   const [pickInvite, setPickInvite] = useState(false);
+  const [totalsInfo, setTotalsInfo] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
@@ -137,6 +144,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const live = !!group?.shared && group.shared.status !== 'ended';
   // Sharing ended: a read-only record — new entries here would never reach anyone.
   const closed = !!group?.shared && !live;
+  const historyItems = historyOpen ? groupHistory(group?.shared) : [];
   // Send anything queued and catch up whenever the screen comes into view; offline stays quiet.
   useEffect(() => {
     if (!live || !groupId) return undefined;
@@ -346,7 +354,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   };
 
   const handleLeave = () => setConfirm({
-    title: 'Leave Shared Group?',
+    title: `Leave ${group.name}?`,
     message: 'You\'ll stop getting updates. The group and its history stay on your phone.',
     primaryText: 'Leave',
     secondaryText: 'Cancel',
@@ -418,8 +426,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             style={styles.memberMenuBtn}
             accessibilityLabel={`More for ${displayName}`}
             actions={st.canAddBack
-              ? [{ key: 'addBack', label: 'Add Back to Group', icon: 'person-add-outline', onPress: () => handleAddBack(m) }]
-              : [{ key: 'remove', label: 'Remove From Group', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
+              ? [{ key: 'addBack', label: 'Add Back', icon: 'person-add-outline', onPress: () => handleAddBack(m) }]
+              : [{ key: 'remove', label: 'Remove', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
           />
         ) : null}
       </View>
@@ -730,9 +738,10 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                       { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
                     ]),
                     ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: startInvite }] : []),
+                    ...(group.shared ? [{ key: 'history', label: 'History', icon: 'time-outline' as const, onPress: () => setHistoryOpen(true) }] : []),
                     // A live group is left (₹0 only), not deleted; once ended it's a normal local group.
                     live
-                      ? { key: 'leave', label: 'Leave Shared Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }
+                      ? { key: 'leave', label: 'Leave', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }
                       : { key: 'delete', label: 'Delete Group', icon: 'trash-outline' as const, destructive: true, onPress: handleDeleteGroup },
                   ]}
                 />
@@ -748,7 +757,20 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                   </View>
                   <View style={styles.statDivider} />
                   <View style={styles.statCell}>
-                    <Text style={styles.statLabel}>{isShared ? 'YOUR SHARE' : 'THIS MONTH'}</Text>
+                    {isShared ? (
+                      <TouchableOpacity
+                        style={styles.statLabelRow}
+                        onPress={() => setTotalsInfo(true)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="What these totals mean"
+                      >
+                        <Text style={styles.statLabel}>YOUR SHARE</Text>
+                        <InfoIcon size={13} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={styles.statLabel}>THIS MONTH</Text>
+                    )}
                     <Text style={styles.statValue} numberOfLines={1}>
                       {formatCurrency(isShared ? heroFigures.yourShare : currentMonthTotal)}
                     </Text>
@@ -842,7 +864,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         isRefund={!!categoryTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(categoryTxn?.isSplit || categoryTxn?.isSplitMemo)}
-        categoryLocked={!!categoryTxn?.lbLocked}
+        categoryLocked={lbTagLocked(categoryTxn, lentBorrowed)}
         onSelectCategory={(categoryId: string) => {
           if (categoryId === 'cc_bill') {
             const t = categoryTxn;
@@ -882,6 +904,24 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         onClose={() => setConfirm(null)}
       />
 
+      <InfoSheet
+        visible={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        title="History"
+        body={historyOpen && !historyItems.length ? 'Nothing has been added or changed yet.' : undefined}
+        content={historyItems.length ? <GroupHistoryList items={historyItems} withTitle accentColor={theme.primary} /> : null}
+      />
+      <InfoSheet
+        visible={totalsInfo}
+        onClose={() => setTotalsInfo(false)}
+        icon={<Ionicons name="pie-chart-outline" size={36} color={theme.primary} />}
+        title="Group Totals"
+        bullets={[
+          { label: 'Total Spent', value: 'Every bill in this group, whoever paid.' },
+          { label: 'Your Share', value: 'Your part of those bills, whoever paid. This is what counts as your spending.' },
+          { label: 'Balance', value: 'What\'s still owed between you and the others after settle-ups.' },
+        ]}
+      />
       <InfoSheet
         visible={pickInvite}
         variant="center"
@@ -932,6 +972,12 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         accounts={accounts}
         onSelect={(accountId: string) => {
           if (settleTarget) {
+            // Repaying from Cash can't take it below ₹0 — stay in the picker to choose again.
+            const short = cashShortfall(accounts.find((a: any) => a.id === accountId), Math.abs(settleTarget.net));
+            if (short != null) {
+              toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
+              return;
+            }
             settleGroupPersonBalance(group.id, settleTarget.personKey, { accountId });
             toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
           }
@@ -1009,6 +1055,8 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', alignItems: 'center' },
   statCell: { flex: 1 },
   statDivider: { width: DIVIDER_W, backgroundColor: colors.divider, marginHorizontal: spacing.md },
+  // Hugs the label + ⓘ: the cell stretches its children, which made the whole width tappable.
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
   statLabel: { ...typography.tiny, color: colors.textSecondary, fontWeight: '800', letterSpacing: 0.6 },
   // One figure size for the card — shared (2 stats) and personal (1) alike.
   statValue: { ...typography.h2, color: colors.textPrimary, fontWeight: '700', marginTop: 3 },

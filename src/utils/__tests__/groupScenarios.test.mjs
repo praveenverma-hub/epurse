@@ -804,6 +804,30 @@ section('A13/A14/A16. Smaller gaps');
   check('someone who LEFT can be invited back as usual', (await as(Y, () => errCode(() => joinLikeScreen(again)))) === null);
 }
 
+section('B0. A person\'s invite is forwarded to someone else');
+{
+  const X = phone('Hal'), Y = phone('Ivy'), Z = phone('Jon');
+  let id, link, Rf;
+  await as(X, async () => {
+    id = S().createGroup({ name: 'Fwd', type: 'shared', members: [{ memberId: 'c_ivy', name: 'Ivy', contactId: 'ivy' }] });
+    addExpense(X, id, 'Rent', 1000, ['me', 'c_ivy']);
+    link = await G.createInviteLink(id, 'c_ivy');
+    Rf = S().groups.find((g) => g.id === id).shared.remoteId;
+  });
+  const { parseInviteLink } = await import(`${PROJECT_ROOT}/src/sync/invite.ts`);
+  check('the Join screen can say who the link is for', parseInviteLink(link)?.name === 'Ivy');
+  await as(Z, () => G.joinFromLink(link, { asNew: true }));   // "I'm Not Ivy"
+  await syncAll(X, Z);
+  check('"I\'m Not Ivy": Jon joins as himself, Ivy stays free and keeps her share', J(otherNames(X, Rf)) === J(['Ivy', 'Jon'])
+    && !groupOf(X, Rf).shared.fold.members[groupOf(X, Rf).shared.memberMap.c_ivy].userId, J(otherNames(X, Rf)));
+  let again;
+  await as(X, async () => { again = await G.createInviteLink(localId(X, Rf), 'c_ivy'); });
+  await as(Y, () => joinLikeScreen(again));
+  await syncAll(X, Y, Z);
+  check('…and a new link for Ivy makes the real Ivy herself, with the rent she owes', !!groupOf(Y, Rf).shared.myMemberId
+    && Y.state.lentBorrowed.some((l) => l.kind === 'borrowed' && l.amount === 500) && sameBalances(Rf, X, Y, Z));
+}
+
 section('B1. Someone deletes their account');
 {
   const X = phone('Ana'), Y = phone('Bo'), Z = phone('Cy');
@@ -853,6 +877,31 @@ section('B3. Someone changes who paid my bank expense, then changes it back');
   await syncAll(Y, X);
   const kept = X.state.transactions.find((t) => t.merchant === 'Fuel');
   check('flipped then deleted on the server: my bank expense stays mine, debited', kept && !kept.groupId && kept.accountId === X.acc && accBal(X) === start - 600, `${accBal(X)}`);
+}
+
+section('B4. Who changed what, and when');
+{
+  const { entryHistory, groupHistory } = await import(`${PROJECT_ROOT}/src/sync/history.ts`);
+  const X = phone('Kai'), Y = phone('Lea'), Z = phone('Max');
+  const Rh = await makeGroup('Hist', X, Y, Z);
+  await as(X, async () => { addExpense(X, localId(X, Rh), 'Dinner', 900, everyone(localId(X, Rh))); });
+  await as(X, async () => { addExpense(X, localId(X, Rh), 'Taxi', 300, everyone(localId(X, Rh))); });
+  await syncAll(X, Y, Z);
+  await as(Y, async () => { editExpense(byTitle(Y, Rh, 'Dinner').id, { amount: 1200 }); });
+  await syncAll(Y, X, Z);
+  await as(Z, async () => { S().deleteTransaction(byTitle(Z, Rh, 'Taxi').id); tick(); });
+  await syncAll(Z, X, Y);
+  const dinnerId = byTitle(X, Rh, 'Dinner').syncId;
+  const line = (it) => `${it.by} ${it.action}${it.changes?.length ? ` ${it.changes.join('+')}` : ''}`;
+  const onX = entryHistory(groupOf(X, Rh).shared, dinnerId).map(line);
+  check('an expense\'s history: who added it, who changed what', J(onX) === J(['You added', 'Lea edited amount']), J(onX));
+  check('…the same on every phone, from each one\'s own point of view',
+    J(entryHistory(groupOf(Y, Rh).shared, dinnerId).map(line)) === J(['Kai added', 'You edited amount']));
+  const edit = entryHistory(groupOf(Z, Rh).shared, dinnerId)[1];
+  check('…with the amount before and after', edit.prevAmountPaise === 90000 && edit.amountPaise === 120000);
+  const all = groupHistory(groupOf(X, Rh).shared);
+  check('the group\'s history, newest first, keeps the delete — the Taxi is gone from every list but not from here',
+    all[0].action === 'deleted' && all[0].title === 'Taxi' && all[0].by === 'Max' && all.length === 4, J(all.map((i) => `${i.by} ${i.action} ${i.title}`)));
 }
 
 section('Invariants, on every phone and every live group');

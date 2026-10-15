@@ -91,6 +91,12 @@ console.log('\n— invite links —');
   check('a link made for one person carries who', personal?.memberId === forPriya && personal.inviteId === inv.inviteId);
   check('…in the fragment, never the part a server sees', !buildInviteLink(inv.inviteId, inv.token, key, forPriya).split('#')[0].includes(forPriya));
   check('a malformed person id → rejected', parseInviteLink(`${link}&m=not-a-uuid`) === null);
+  const named = buildInviteLink(inv.inviteId, inv.token, key, forPriya, 'Priyā Śharma');
+  check('a person\'s link carries their name (any script), for the Join screen', parseInviteLink(named)?.name === 'Priyā Śharma' && parseInviteLink(named).memberId === forPriya);
+  check('…still found inside a pasted message', parseInviteLink(`Join "Goa": ${named} thanks`)?.name === 'Priyā Śharma');
+  check('a name that doesn\'t decode is just not shown — the invite still works', parseInviteLink(`${buildInviteLink(inv.inviteId, inv.token, key, forPriya)}&n=@@`)?.name === null
+    && parseInviteLink(`${buildInviteLink(inv.inviteId, inv.token, key, forPriya)}&n=_w`)?.name === null);
+  check('no name without a person, and none on a generic link', parseInviteLink(`${link}&n=UHJpeWE`)?.name === null && parsed.name === null);
 }
 
 // ── fold scenario: Goa trip, Rahul (admin), Priya, Amit ──

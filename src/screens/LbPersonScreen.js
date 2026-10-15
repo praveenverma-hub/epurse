@@ -28,6 +28,7 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
+import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import { INPUT_LIMITS, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
 import { FormField, FormTextInput, FormAmountInput, FormValueCard, FormValueRow } from '../components/FormField';
@@ -36,6 +37,7 @@ import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
 import SheetCloseButton from '../components/SheetCloseButton';
 import CenterModal from '../components/CenterModal';
+import LinkContactModal from '../components/LinkContactModal';
 import EmptyState from '../components/EmptyState';
 import LbEntryForm from '../components/LbEntryForm';
 import AccountPickerSheet from '../components/AccountPickerSheet';
@@ -44,7 +46,7 @@ import TxnDetailSheet from '../components/TxnDetailSheet';
 import StatusChip from '../components/StatusChip';
 import {
   LB_NO_ACCOUNT, lbAccountFieldLabel, lbEffectiveKind, lbEntryMeta, lbEntrySign, lbEntryTitle,
-  lbEntryTone, lbLinkedLine, lbMoneyOut, lbNoteText, lbToastTitle,
+  lbEntryTone, lbLinkedLine, lbMoneyOut, lbNoteText, lbTagLocked, lbToastTitle,
 } from '../utils/lbEntryDisplay';
 import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
 import { txnAccountLabel } from '../utils/txnCardModel';
@@ -85,6 +87,8 @@ const LbPersonScreen = ({ route, navigation }) => {
   const deleteLentBorrowedEntry = useEPurseStore((s) => s.deleteLentBorrowedEntry);
   const isLentBorrowedEditable  = useEPurseStore((s) => s.isLentBorrowedEditable);
   const lentBorrowedAccountId   = useEPurseStore((s) => s.lentBorrowedAccountId);
+  const changeLbEntryPerson     = useEPurseStore((s) => s.changeLbEntryPerson);
+  const unlinkLbEntry           = useEPurseStore((s) => s.unlinkLbEntry);
 
   const [detailEntry,  setDetailEntry]  = useState(null);  // the row whose sheet is open
   const [editEntry,    setEditEntry]    = useState(null);  // the row being edited
@@ -93,6 +97,7 @@ const LbPersonScreen = ({ route, navigation }) => {
   const [addKind,      setAddKind]      = useState('lent');  // direction of that new entry
   const [confirm,      setConfirm]      = useState(null);
   const [settleTarget, setSettleTarget] = useState(null);
+  const [moveEntry,    setMoveEntry]    = useState(null);  // Change Person: the row being moved
 
   // Re-derived from `lentBorrowed` so an edit/delete/settle refreshes this screen
   // immediately — getPersonBalances reads the rows on every call, it caches nothing.
@@ -186,6 +191,12 @@ const LbPersonScreen = ({ route, navigation }) => {
   const commitSettle = useCallback((accountId) => {
     const target = settleTarget;
     if (!target) return;
+    // Repaying from Cash can't take it below ₹0 — the picker stays open to choose again.
+    const short = target.net < 0 && accountId ? cashShortfall(accounts.find((a) => a.id === accountId), Math.abs(target.net)) : null;
+    if (short != null) {
+      toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
+      return;
+    }
     const res = settlePersonBalance(target.personKey, accountId ? { accountId } : undefined);
     const who = firstName(target.person);
     toast.success(
@@ -193,7 +204,7 @@ const LbPersonScreen = ({ route, navigation }) => {
       res?.linkedTxn ? lbLinkedLine(res.linkedTxn) : formatOutstanding(freshNet(), who),
     );
     setSettleTarget(null);
-  }, [settleTarget, settlePersonBalance, toast, freshNet]);
+  }, [settleTarget, settlePersonBalance, toast, freshNet, accounts]);
 
   /**
    * Add a new row for THIS person, straight from their ledger — saves bouncing back
@@ -446,13 +457,44 @@ const LbPersonScreen = ({ route, navigation }) => {
         onEdit={setEditEntry}
         onViewTxn={setViewTxn}
         onOpenGroup={(entry) => navigation.navigate('GroupDetail', { groupId: entry.groupId })}
+        // A group's row is fixed from the group; a split's people live on the split.
+        onChangePerson={detailEntry && !detailEntry.isGroupLine && !detailEntry.groupId
+          && !(detailTxn?.isSplit || detailTxn?.isSplitMemo) ? setMoveEntry : undefined}
+        // Tagged on a bank (or typed) transaction: keep the transaction, drop the tag. A
+        // booked row (editable) has no transaction of its own to keep — Edit → Delete.
+        onUnlink={detailEntry && !detailEntry.groupId && detailTxn?.lbLocked && !detailTxn.isSplit
+          && !isLentBorrowedEditable(detailEntry) ? (entry) => setConfirm({
+            title: `Unlink from ${firstName(titleCaseName(person.person))}?`,
+            message: `The ${formatCurrency(entry.amount)} transaction stays in your account. It stops counting toward ${firstName(titleCaseName(person.person))}'s balance`
+              + (detailTxn.source === 'sms' ? ' and goes back to your review queue for a category.' : ' and becomes uncategorised.'),
+            primaryText: 'Unlink',
+            destructive: true,
+            onConfirm: () => {
+              setConfirm(null);
+              if (unlinkLbEntry(entry.id)) toast.success('Unlinked', formatOutstanding(freshNet(), firstName(person.person)));
+            },
+          }) : undefined}
       />
 
-      {/* A manually-lent txn is lbLocked (its ledger link is fixed), so it's view-only here. */}
+      <LinkContactModal
+        visible={!!moveEntry}
+        categoryId={moveEntry?.kind}
+        onConfirm={(contactInfo) => {
+          const entry = moveEntry;
+          setMoveEntry(null);
+          if (entry && changeLbEntryPerson(entry.id, contactInfo)) {
+            toast.success('Moved', `${ENTRY_LABEL[entry.kind] || entry.kind} · ${formatCurrency(entry.amount)} → ${titleCaseName(contactInfo.person)}`);
+          }
+        }}
+        onSkip={() => setMoveEntry(null)}
+        onClose={() => setMoveEntry(null)}
+      />
+
+      {/* Editable like any transaction — its row follows; only a group's settle is view-only. */}
       <TxnDetailSheet
         txn={viewTxn}
         onClose={() => setViewTxn(null)}
-        onEdit={viewTxn && !viewTxn.lbLocked ? (t) => {
+        onEdit={viewTxn && !lbTagLocked(viewTxn, lentBorrowed) ? (t) => {
           setViewTxn(null);
           navigation.navigate('AddTransaction', { editTxnId: t.id });
         } : undefined}
@@ -466,6 +508,16 @@ const LbPersonScreen = ({ route, navigation }) => {
         theme={theme}
         onClose={() => setEditEntry(null)}
         onSave={(patch) => {
+          // Money out of Cash can't take it below ₹0; the entry's own old amount comes back first.
+          const was = lentBorrowedAccountId(editEntry);
+          const to = patch.accountId !== undefined ? patch.accountId : was;
+          const short = lbMoneyOut(editEntry.kind) && to
+            ? cashShortfall(accounts.find((a) => a.id === to), patch.amount, to === was ? Number(editEntry.amount) || 0 : 0)
+            : null;
+          if (short != null) {
+            toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
+            return;
+          }
           const ok = updateLentBorrowedEntry(editEntry.id, patch);
           if (ok) {
             setEditEntry(null);

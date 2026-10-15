@@ -48,6 +48,7 @@ import { useTheme, useGradient } from '../hooks/useTheme';
 import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
 import { STATIC_CONFIG } from '../config/staticConfig';
 import { formatCurrency, formatCompact } from '../utils/format';
+import { lbTagLocked } from '../utils/lbEntryDisplay';
 // import { SAMPLE_MESSAGES } from '../utils/messageParser'; // unused while simulate SMS is hidden
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
 import { syncNow } from '../hooks/useSmsSync';
@@ -178,6 +179,7 @@ const DashboardScreen = ({ navigation }) => {
   const lastSmsDate     = useEPurseStore((s) => s.lastSmsDate);
   const updateTransactionCategory = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
+  const changeLbEntryPerson = useEPurseStore((s) => s.changeLbEntryPerson);
   const lentBorrowedAll = useEPurseStore((s) => s.lentBorrowed);
   const setTransactionHidden = useEPurseStore((s) => s.setTransactionHidden);
   const setTransactionRefund = useEPurseStore((s) => s.setTransactionRefund);
@@ -403,10 +405,10 @@ const DashboardScreen = ({ navigation }) => {
     [budgetUsage, topCategory, subscriptions, uncategorised, weekSummary, ccBills, goalFacts],
   );
 
-  // The single LB entry this LB-tagged (locked) transaction created — powers the
-  // "Edit person" affordance in the manage-transaction sheet's locked notice.
+  // The ledger row a person-tagged transaction carries — "Linked to X" + Change Person
+  // in the category sheet (a group's settle row is fixed from the group, not here).
   const linkedLbEntry = useMemo(
-    () => (activeTxn ? (lentBorrowedAll || []).find((l) => l.sourceTxnId === activeTxn.id) : null),
+    () => (activeTxn?.lbLocked ? (lentBorrowedAll || []).find((l) => l.sourceTxnId === activeTxn.id && !l.groupId) : null),
     [activeTxn, lentBorrowedAll],
   );
 
@@ -912,8 +914,13 @@ const DashboardScreen = ({ navigation }) => {
         visible={!!activeTxn}
         categoryOnly
         categories={categories}
-        categoryLocked={!!activeTxn?.lbLocked}
+        categoryLocked={lbTagLocked(activeTxn, lentBorrowedAll)}
         linkedPerson={linkedLbEntry?.person || null}
+        onEditPerson={linkedLbEntry ? () => {
+          const t = activeTxn;
+          setActiveTxn(null);
+          setLbLinkTxn({ txn: t, categoryId: linkedLbEntry.kind, entryId: linkedLbEntry.id });
+        } : undefined}
         selectedCategoryId={activeTxn?.categoryId}
         selectedParent={activeTxn?.parentCategory}
         selectedChild={activeTxn?.childCategory}
@@ -977,14 +984,16 @@ const DashboardScreen = ({ navigation }) => {
       <LinkContactModal
         visible={!!lbLinkTxn}
         categoryId={lbLinkTxn?.categoryId}
-        suggestedPersons={lbLinkTxn?.suggestedPersons || []}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
-          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          // Change Person moves the existing row; otherwise this tags the transaction.
+          if (lbLinkTxn.entryId) changeLbEntryPerson(lbLinkTxn.entryId, contactInfo);
+          else updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
           setLbLinkTxn(null);
         }}
         onSkip={() => {
           if (!lbLinkTxn) return;
+          if (lbLinkTxn.entryId) { setLbLinkTxn(null); return; }
           updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
           setLbLinkTxn(null);
         }}
@@ -1037,7 +1046,7 @@ const DashboardScreen = ({ navigation }) => {
         onEdit={() => {
           const t = detailTxn;
           setDetailTxn(null);
-          if (t.lbLocked) {
+          if (lbTagLocked(t, lentBorrowedAll)) {
             setLbManageTxn(t);
           } else {
             navigation.navigate('AddTransaction', { editTxnId: t.id });

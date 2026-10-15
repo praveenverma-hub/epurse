@@ -940,14 +940,29 @@ const findLbMatch = (state, { accountId, kind, amount, dateIso }) => {
 // Pre-Oct-10 Repaid bookings weren't locked or flagged — still owned by their row.
 const isLegacyRepayment = (t) => !t.lbLocked && !t.lbBooked && t.categoryId === 'borrow_repaid';
 
-// A booked transaction's ledger row follows it: new amount/date, or gone once it's
-// recategorised away from that kind (it no longer lends/settles anything).
-const syncBookedLb = (lentBorrowed, old, updated) => {
-  if (old.isSplit || !(old.lbBooked || isLegacyRepayment(old))) return lentBorrowed;
-  if (updated.categoryId !== old.categoryId) return lentBorrowed.filter((l) => l.sourceTxnId !== old.id);
-  return lentBorrowed.map((l) => (l.sourceTxnId === old.id
-    ? { ...l, amount: updated.amount, date: updated.createdAt }
+// A group settlement's row moves only from the group (the other members see it too).
+const groupTagged = (lentBorrowed, txnId) => (lentBorrowed || []).some((l) => l.sourceTxnId === txnId && l.groupId);
+
+/**
+ * A person-tagged transaction's ledger row follows it (Oct-15-26 — before, only booked
+ * ones did and the rest were LOCKED, so a wrong person or category couldn't be fixed):
+ * new amount/date; another lend/borrow kind → the row's kind; any other category → the
+ * row goes, since it no longer lends or settles anything. Group settle rows never move here.
+ */
+const syncTaggedLb = (lentBorrowed, old, updated) => {
+  if (old.isSplit || !(old.lbLocked || isLegacyRepayment(old))) return lentBorrowed;
+  const own = (l) => l.sourceTxnId === old.id && !l.groupId;
+  if (!LB_ALL_CATS.has(updated.categoryId)) return lentBorrowed.filter((l) => !own(l));
+  return lentBorrowed.map((l) => (own(l)
+    ? { ...l, kind: updated.categoryId, amount: updated.amount, date: updated.createdAt }
     : l));
+};
+
+/** The transaction's flags once it leaves a lend/borrow category: an ordinary one again. */
+const untagLbFields = (txn, categoryId) => {
+  if (!txn.lbLocked || LB_ALL_CATS.has(categoryId)) return txn;
+  const { lbLocked: _l, lbBooked: _b, ...rest } = txn;
+  return rest;
 };
 
 /**
@@ -5420,8 +5435,7 @@ export const useEPurseStore = create(
        */
       updateTransaction: (txnId, { amount, type, accountId, merchant, categoryId, parentCategory, childCategory, note, createdAt } = {}, { fromLbEntry = false } = {}) => {
         const old = get().transactions.find((t) => t.id === txnId);
-        // An LB-booked txn is locked to everyone but its own ledger row (updateLentBorrowedEntry).
-        if (!old || old.groupId || (old.lbLocked && !(fromLbEntry && old.lbBooked))) return null;
+        if (!old || old.groupId || (old.lbLocked && !fromLbEntry && groupTagged(get().lentBorrowed, txnId))) return null;
 
         const newAmount = Number(amount) || 0;
         if (newAmount <= 0 || newAmount > MAX_ALLOWED_AMOUNT) return null;
@@ -5485,12 +5499,13 @@ export const useEPurseStore = create(
               accounts = applyDelta(accounts, updatedTxn.accountId, updatedTxn);
             }
           }
+          const saved = untagLbFields(updatedTxn, updatedTxn.categoryId);
           return {
-            transactions: s.transactions.map((t) => (t.id === txnId ? updatedTxn : t)),
+            transactions: s.transactions.map((t) => (t.id === txnId ? saved : t)),
             accounts,
             lentBorrowed: mustClearSplit
               ? s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId)
-              : syncBookedLb(s.lentBorrowed, old, updatedTxn),
+              : syncTaggedLb(s.lentBorrowed, old, updatedTxn),
           };
         });
 
@@ -5678,20 +5693,25 @@ export const useEPurseStore = create(
       updateTwoTierCategory: (id, parentCategory, childCategory) =>
         set((s) => {
           const legacyCategoryId = toLegacyCat(parentCategory, childCategory);
+          const txn = s.transactions.find((t) => t.id === id);
+          if (!txn || (txn.lbLocked && groupTagged(s.lentBorrowed, id))) return s;
+          // A person-tagged one leaves its lend/borrow category even when the pick has no legacy id.
+          const categoryId = legacyCategoryId || (txn.lbLocked ? 'other' : txn.categoryId);
 
           return {
             transactions: s.transactions.map((t) =>
               t.id === id
-                ? {
+                ? untagLbFields({
                     ...t,
                     parentCategory,
                     childCategory,
-                    ...(legacyCategoryId ? { categoryId: legacyCategoryId } : {}),
+                    categoryId,
                     userEdited: true,
                     userEditedCategory: true,
-                  }
+                  }, categoryId)
                 : t
             ),
+            lentBorrowed: syncTaggedLb(s.lentBorrowed, txn, { ...txn, categoryId }),
           };
         }),
 
@@ -5704,18 +5724,18 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
-          if (txn.lbLocked) return s; // LB-linked transactions cannot be re-categorised
+          if (txn.lbLocked && groupTagged(s.lentBorrowed, id)) return s;
           const hypothetical = { ...txn, categoryId };
           const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
           const lb = mustClearSplit
             ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id)
-            : s.lentBorrowed;
+            : syncTaggedLb(s.lentBorrowed, txn, hypothetical);
           const cleared = mustClearSplit ? clearPlainSplit(txn) : null;
           return {
             transactions: s.transactions.map((t) => {
               if (t.id !== id) return t;
               if (cleared) return { ...t, categoryId, ...cleared.patch };
-              return { ...t, categoryId };
+              return untagLbFields({ ...t, categoryId }, categoryId);
             }),
             // Dropping the split un-memos it → the outflow is mine again.
             accounts: cleared?.restoreAccountId
@@ -5735,19 +5755,19 @@ export const useEPurseStore = create(
         set((s) => {
           const txn = s.transactions.find((t) => t.id === id);
           if (!txn) return s;
-          if (txn.lbLocked) return s; // LB-linked transactions cannot be re-categorised
+          if (txn.lbLocked && groupTagged(s.lentBorrowed, id)) return s;
 
           // Plain update for non-lent/borrow categories
           if (!LB_ALL_CATS.has(categoryId)) {
             const hypothetical = { ...txn, categoryId };
             const mustClearSplit = txn.isSplit && !canSplitTransaction(hypothetical);
-            const lb = mustClearSplit ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id) : s.lentBorrowed;
+            const lb = mustClearSplit ? s.lentBorrowed.filter((l) => l.sourceTxnId !== id) : syncTaggedLb(s.lentBorrowed, txn, hypothetical);
             const cleared = mustClearSplit ? clearPlainSplit(txn) : null;
             return {
               transactions: s.transactions.map((t) => {
                 if (t.id !== id) return t;
                 if (cleared) return { ...t, categoryId, ...cleared.patch };
-                return { ...t, categoryId };
+                return untagLbFields({ ...t, categoryId }, categoryId);
               }),
               accounts: cleared?.restoreAccountId
                 ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
@@ -5783,7 +5803,10 @@ export const useEPurseStore = create(
 
           return {
             transactions: s.transactions.map((t) =>
-              t.id === id ? { ...t, ...splitClear, categoryId, lbLocked: true } : t
+              t.id === id
+                // A booked one is named after its person ("Repaid Rohit") — keep it true.
+                ? { ...t, ...splitClear, categoryId, lbLocked: true, ...(t.lbBooked ? { merchant: lbTxnMerchant(categoryId, person) } : {}) }
+                : t
             ),
             // Was a memo → it's a real outflow of mine again now it's LB-tagged.
             accounts: cleared?.restoreAccountId
@@ -5794,27 +5817,50 @@ export const useEPurseStore = create(
         }),
 
       /**
-       * Fix a wrongly-named/linked person on an LB-tagged transaction — WITHOUT
-       * touching amount, kind, date, or the transaction's category/lock. Finds the
-       * single lentBorrowed row created for this txn (via updateTransactionCategoryWithContact
-       * / addTransaction's contactInfo path — sourceTxnId === txnId) and rewrites its
-       * person/phone/contactId. No-op if that row can't be found.
+       * Change Person (Oct-15-26): a ledger row recorded against the wrong person moves to
+       * the right one — both balances follow, since they're always summed from the rows.
+       * Not a group's settle row (fixed from the group) or a split's (its people live on
+       * the split). A booked transaction is renamed with it ("Repaid Rohit" → "Repaid Amit").
        */
-      relinkLentBorrowedEntry: (txnId, contactInfo) =>
-        set((s) => {
-          const idx = s.lentBorrowed.findIndex((l) => l.sourceTxnId === txnId);
-          if (idx === -1) return s;
-          const person = (contactInfo?.person || '').trim();
-          if (!person) return s;
-          const lentBorrowed = [...s.lentBorrowed];
-          lentBorrowed[idx] = {
-            ...lentBorrowed[idx],
-            person,
-            phone: contactInfo?.phone || null,
-            contactId: contactInfo?.contactId || null,
-          };
-          return { lentBorrowed };
-        }),
+      changeLbEntryPerson: (entryId, contactInfo) => {
+        const s = get();
+        const row = s.lentBorrowed.find((l) => l.id === entryId);
+        const person = (contactInfo?.person || '').trim();
+        if (!row || row.groupId || !person) return false;
+        const txn = row.sourceTxnId ? s.transactions.find((t) => t.id === row.sourceTxnId) : null;
+        if (txn?.isSplit || txn?.isSplitMemo) return false;
+        const booked = bookedLbTxn(s, row);
+        set({
+          lentBorrowed: s.lentBorrowed.map((l) => (l.id === entryId
+            ? { ...l, person, phone: contactInfo.phone || null, contactId: contactInfo.contactId || null }
+            : l)),
+          ...(booked ? {
+            transactions: s.transactions.map((t) => (t.id === booked.id ? { ...t, merchant: lbTxnMerchant(row.kind, person) } : t)),
+          } : {}),
+        });
+        return true;
+      },
+
+      /**
+       * Unlink (Oct-15-26): a bank transaction tagged as a lend/borrow/settle keeps its money
+       * but stops counting for the person — their row goes, and the transaction is
+       * uncategorised again (an SMS one back in the review queue to pick its category).
+       * A booked row has no bank transaction of its own to keep: it's deleted instead.
+       */
+      unlinkLbEntry: (entryId) => {
+        const s = get();
+        const row = s.lentBorrowed.find((l) => l.id === entryId);
+        if (!row?.sourceTxnId || row.groupId || bookedLbTxn(s, row)) return false;
+        const txn = s.transactions.find((t) => t.id === row.sourceTxnId);
+        if (!txn || !txn.lbLocked || txn.isSplit) return false;
+        const { lbLocked: _l, lbBooked: _b, parentCategory: _p, childCategory: _c, ...rest } = txn;
+        const next = { ...rest, categoryId: 'other', userEditedCategory: false, ...(txn.source === 'sms' ? { isReviewed: false } : {}) };
+        set({
+          lentBorrowed: s.lentBorrowed.filter((l) => l.id !== entryId),
+          transactions: s.transactions.map((t) => (t.id === txn.id ? next : t)),
+        });
+        return true;
+      },
 
       // No-op on an ignored txn (Ignore and Private are exclusive — restore first).
       setTransactionHidden: (id, hidden) =>

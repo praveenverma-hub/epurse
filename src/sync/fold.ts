@@ -35,7 +35,8 @@ type EntryOf<K extends string, T> = {
   /** The current version (= the last of `versions`). */
   data: T;
   versions: Version<T>[];
-  deleted: { by: string; at: string } | null;
+  /** `seq` absent on folds saved before Oct-15-26. */
+  deleted: { by: string; at: string; seq?: number } | null;
   /** From before the last checkpoint: shown in history, ignored by the rules. */
   frozen: boolean;
 };
@@ -376,7 +377,7 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       // Any member, like editing (decided Oct-15-2026).
       if (movesPastMember(f, entryDebts(prev), [])) return 'past_member';
       applyDebts(f, entryDebts(prev), -1);
-      f.entries[ev.entityId] = { ...prev, deleted: { by: author, at } } as EntryState;
+      f.entries[ev.entityId] = { ...prev, deleted: { by: author, at, seq } } as EntryState;
       return null;
     }
 
@@ -404,7 +405,7 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       if (orig && orig.kind === 'expense') {
         f.entries[ev.correctsId] = data.expense
           ? { ...orig, data: data.expense, versions: [...orig.versions, { seq, by: author, at, data: data.expense }] }
-          : { ...orig, deleted: { by: author, at } };
+          : { ...orig, deleted: { by: author, at, seq } };
       }
       return null;
     }

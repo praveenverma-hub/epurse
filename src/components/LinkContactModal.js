@@ -28,6 +28,7 @@ import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
 import { fetchContactsForPicker } from '../services/contactsService';
 import { formatCurrency } from '../utils/format';
+import { useSettlePeople } from '../hooks/useSettlePeople';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,13 +73,14 @@ const looksLikePhone = (q) => /^[\d\s\+\-\(\)]{3,}$/.test(q.trim());
 const LinkContactModal = ({
   visible,
   categoryId,        // 'lent' | 'borrowed' | 'lent_settled' | 'borrow_repaid'
-  suggestedPersons,  // [{ person, phone, contactId, net }] — pre-filtered LB persons
   onConfirm,         // ({ person, phone, contactId }) => void
   onSkip,            // () => void
   onClose,           // () => void
 }) => {
   const theme = useTheme();
-  const suggestions = suggestedPersons || [];
+  // Settling: who owes me / whom I owe, from the ledger (empty for a new lend or borrow).
+  const settlePeople = useSettlePeople();
+  const suggestions = useMemo(() => settlePeople(categoryId), [settlePeople, categoryId]);
   const [contacts, setContacts]           = useState([]);
   const [loading, setLoading]             = useState(false);
   const [query, setQuery]                 = useState('');
@@ -154,7 +156,7 @@ const LinkContactModal = ({
               <Text style={styles.suggestionsLabel}>From your records</Text>
               {suggestions.map((p) => (
                 <TouchableOpacity
-                  key={p.person}
+                  key={p.personKey}
                   style={styles.suggestionRow}
                   onPress={() => setSelected({ id: p.contactId, name: p.person, phone: p.phone || '' })}
                   activeOpacity={0.75}

@@ -5077,7 +5077,9 @@ console.log('\n— LB booked Repayment: edits/deletes move its expense too (Oct-
   G().updateLentBorrowedEntry(row().id, { accountId: 'a2' });
   check('move account → HDFC restored, ICICI debited', bal('a1') === 10000 && bal('a2') === 4300 && txn().accountId === 'a2', `${bal('a1')} ${bal('a2')}`);
 
-  check('a booked txn is locked to its ledger row — Activity can\'t edit it', G().updateTransaction(txn().id, { amount: 500, accountId: 'a2', categoryId: 'borrow_repaid' }) === null && row().amount === 700);
+  // Oct-15-26: no longer locked — an edit from Activity carries through to its row.
+  check('a booked txn edits from Activity too — its row follows', G().updateTransaction(txn().id, { amount: 500, accountId: 'a2', categoryId: 'borrow_repaid' }) !== null
+    && row().amount === 500 && txn().amount === 500 && bal('a2') === 4500 && net() === -500, `${row()?.amount} ${bal('a2')} ${net()}`);
 
   check('delete → ok', G().deleteLentBorrowedEntry(row().id) === true);
   check('…expense gone, ICICI restored, debt back to 1000', !G().transactions.length && bal('a2') === 5000 && net() === -1000 && !row(), `${G().transactions.length} ${bal('a2')} ${net()}`);
@@ -5185,6 +5187,63 @@ console.log('\n— OLD-INSTALL data under the Oct-10-26 LB changes —');
   check('orphaned split row (txn summarised away): view-only, no crash, still counted', !G().isLentBorrowedEditable(row('o4')) && G().lentBorrowedAccountId(row('o4')) === null && G().deleteLentBorrowedEntry('o4') === false && !!row('o4'));
   const r = G().recordLbEntry({ person: 'Kiran', phone: '9111111111', kind: 'lent', amount: 50 }, { accountId: 'a1' });
   check('new entries work on top of old data (books, joins the same person)', !!r && G().getPersonBalances().length === 1 && G().accounts[0].balance === 4850, `${G().getPersonBalances().length} ${G().accounts[0].balance}`);
+}
+
+console.log('\n— Person-tagged transactions are no longer locked (Oct-15-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date().toISOString();
+  useStore.setState({
+    accounts: [{ id: 'a1', name: 'HDFC', bankName: 'HDFC', mask: '1111', type: 'Bank Account', balance: 5000 }],
+    transactions: [{ id: 'sms_in', amount: 500, type: 'credit', categoryId: 'transfer', accountId: 'a1', merchant: 'UPI RAVI', createdAt: now, source: 'sms', isReviewed: false }],
+  });
+  G().addLentBorrowed({ kind: 'lent', person: 'Rohit', phone: '9000000001', amount: 500 });
+  G().addLentBorrowed({ kind: 'lent', person: 'Amit', phone: '9000000002', amount: 500 });
+  const netOf = (phone) => G().getPersonBalances().find((p) => p.phone === phone)?.net ?? 0;
+  const tagRow = () => G().lentBorrowed.find((l) => l.sourceTxnId === 'sms_in');
+  const txn = () => G().transactions.find((t) => t.id === 'sms_in');
+
+  // Amit paid me back, but I tagged it to Rohit.
+  G().updateTransactionCategoryWithContact('sms_in', 'lent_settled', { person: 'Rohit', phone: '9000000001' });
+  check('setup: the wrong person is settled', netOf('9000000001') === 0 && netOf('9000000002') === 500 && txn().lbLocked);
+  check('Change Person moves the row: Rohit owes again, Amit is settled',
+    G().changeLbEntryPerson(tagRow().id, { person: 'Amit', phone: '9000000002' }) === true && netOf('9000000001') === 500 && netOf('9000000002') === 0,
+    `${netOf('9000000001')} ${netOf('9000000002')}`);
+  check('…the bank transaction and account are untouched', txn().amount === 500 && G().accounts[0].balance === 5000 && txn().categoryId === 'lent_settled');
+
+  G().updateTransactionCategory('sms_in', 'salary');
+  check('another category takes it off the person: row gone, lock off, Amit owes again',
+    !tagRow() && !txn().lbLocked && txn().categoryId === 'salary' && netOf('9000000002') === 500, `${netOf('9000000002')}`);
+
+  G().updateTransactionCategoryWithContact('sms_in', 'lent_settled', { person: 'Amit', phone: '9000000002' });
+  G().updateTransactionCategory('sms_in', 'borrowed');
+  check('a lend/borrow kind keeps the row and changes its kind', tagRow()?.kind === 'borrowed' && txn().lbLocked);
+  G().updateTransactionCategory('sms_in', 'lent_settled');
+
+  G().updateTwoTierCategory('sms_in', 'Food & Dining', 'Restaurants');
+  check('a two-tier pick (Manage) does the same: row gone, lock off', !tagRow() && !txn().lbLocked, JSON.stringify(txn()));
+
+  G().updateTransactionCategoryWithContact('sms_in', 'lent_settled', { person: 'Amit', phone: '9000000002' });
+  check('Unlink keeps the bank transaction, drops the row, back to the review queue',
+    G().unlinkLbEntry(tagRow().id) === true && !tagRow() && txn().categoryId === 'other' && !txn().lbLocked && txn().isReviewed === false
+    && G().accounts[0].balance === 5000 && netOf('9000000002') === 500);
+
+  const r = G().recordLbEntry({ person: 'Rohit', phone: '9000000001', kind: 'lent', amount: 200, date: now }, { accountId: 'a1' });
+  const booked = () => G().transactions.find((t) => t.id === G().lentBorrowed.find((l) => l.id === r.entryId).sourceTxnId);
+  check('a booked row can\'t be unlinked (no bank transaction of its own) — Delete instead', G().unlinkLbEntry(r.entryId) === false);
+  G().changeLbEntryPerson(r.entryId, { person: 'Amit', phone: '9000000002' });
+  check('…but moves to another person, renamed with it', booked().merchant === 'Lent to Amit' && netOf('9000000002') === 700, `${booked().merchant} ${netOf('9000000002')}`);
+
+  // A group's settle row stays fixed from the group.
+  useStore.setState((st) => ({
+    transactions: [{ id: 'grp_repay', amount: 100, type: 'debit', categoryId: 'borrow_repaid', accountId: 'a1', createdAt: now, lbLocked: true, lbBooked: true }, ...st.transactions],
+    lentBorrowed: [{ id: 'g1', kind: 'borrow_repaid', person: 'Zoe', amount: 100, groupId: 'grp_1', memberId: 'm1', sourceTxnId: 'grp_repay', date: now }, ...st.lentBorrowed],
+  }));
+  G().updateTransactionCategory('grp_repay', 'food');
+  check('a group settle stays locked: category, person and edits refused',
+    G().transactions.find((t) => t.id === 'grp_repay').categoryId === 'borrow_repaid' && G().changeLbEntryPerson('g1', { person: 'X' }) === false
+    && G().updateTransaction('grp_repay', { amount: 50, accountId: 'a1', categoryId: 'borrow_repaid' }) === null);
 }
 
 console.log('\n— Ignore → Restore keeps a person-tagged txn\'s ledger row (Oct-10-26) —');

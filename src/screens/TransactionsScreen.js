@@ -76,6 +76,7 @@ import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import { resolveTxnAccount } from '../utils/accountMatch';
 import { parentCatIdForTxn } from '../constants/twoTierCategories';
 import { formatCurrency } from '../utils/format';
+import { lbTagLocked } from '../utils/lbEntryDisplay';
 // Calendar-month + custom range logic lives in a pure util so it can be tested
 // headlessly — see dateRange.test.mjs.
 import { buildDateRangeOptions, monthStart, resolveRange, inRange } from '../utils/dateRange';
@@ -212,6 +213,7 @@ const TransactionsScreen = ({ navigation, route }) => {
 
   const updateTransactionCategory            = useEPurseStore((s) => s.updateTransactionCategory);
   const updateTransactionCategoryWithContact = useEPurseStore((s) => s.updateTransactionCategoryWithContact);
+  const changeLbEntryPerson = useEPurseStore((s) => s.changeLbEntryPerson);
   const setTransactionHidden                 = useEPurseStore((s) => s.setTransactionHidden);
   const deleteTransaction                    = useEPurseStore((s) => s.deleteTransaction);
   const ignoreTransaction                    = useEPurseStore((s) => s.ignoreTransaction);
@@ -313,23 +315,10 @@ const TransactionsScreen = ({ navigation, route }) => {
     }, []),
   );
 
-  // ── LB net balance (for suggestedPersons in LinkContactModal) ─────────────
-  const lbNetByPerson = useMemo(() => {
-    const map = {};
-    (lentBorrowed || []).forEach((e) => {
-      if (!map[e.person]) {
-        map[e.person] = { person: e.person, phone: e.phone ?? null, contactId: e.contactId ?? null, net: 0 };
-      }
-      const sign = (e.kind === 'lent' || e.kind === 'borrow_repaid') ? 1 : -1;
-      map[e.person].net += sign * e.amount;
-    });
-    return map;
-  }, [lentBorrowed]);
-
-  // The single LB entry this LB-tagged (locked) transaction created — powers the
-  // "Edit person" affordance in the manage-transaction sheet's locked notice.
+  // The ledger row a person-tagged transaction carries — "Linked to X" + Change Person
+  // in the category sheet (a group's settle row is fixed from the group, not here).
   const linkedLbEntry = useMemo(
-    () => (activeTxn ? (lentBorrowed || []).find((l) => l.sourceTxnId === activeTxn.id) : null),
+    () => (activeTxn?.lbLocked ? (lentBorrowed || []).find((l) => l.sourceTxnId === activeTxn.id && !l.groupId) : null),
     [activeTxn, lentBorrowed],
   );
 
@@ -750,18 +739,7 @@ const TransactionsScreen = ({ navigation, route }) => {
     if (!activeTxn) return;
     const t = activeTxn;
     setActiveTxn(null);
-    let suggestedPersons = [];
-    if (categoryId === 'lent_settled') {
-      suggestedPersons = Object.values(lbNetByPerson)
-        .filter((p) => p.net > 0)
-        .sort((a, b) => b.net - a.net);
-    } else if (categoryId === 'borrow_repaid') {
-      suggestedPersons = Object.values(lbNetByPerson)
-        .filter((p) => p.net < 0)
-        .sort((a, b) => a.net - b.net)
-        .map((p) => ({ ...p, net: Math.abs(p.net) }));
-    }
-    setLbLinkTxn({ txn: t, categoryId, suggestedPersons });
+    setLbLinkTxn({ txn: t, categoryId });
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1122,8 +1100,13 @@ const TransactionsScreen = ({ navigation, route }) => {
         isRefund={!!activeTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(activeTxn?.isSplit || activeTxn?.isSplitMemo)}
-        categoryLocked={!!activeTxn?.lbLocked}
+        categoryLocked={lbTagLocked(activeTxn, lentBorrowed)}
         linkedPerson={linkedLbEntry?.person || null}
+        onEditPerson={linkedLbEntry ? () => {
+          const t = activeTxn;
+          setActiveTxn(null);
+          setLbLinkTxn({ txn: t, categoryId: linkedLbEntry.kind, entryId: linkedLbEntry.id });
+        } : undefined}
         onClose={() => setActiveTxn(null)}
         onDone={(draft) => {
           if (!activeTxn) return;
@@ -1158,14 +1141,16 @@ const TransactionsScreen = ({ navigation, route }) => {
       <LinkContactModal
         visible={!!lbLinkTxn}
         categoryId={lbLinkTxn?.categoryId}
-        suggestedPersons={lbLinkTxn?.suggestedPersons || []}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
-          updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
+          // Change Person moves the existing row; otherwise this tags the transaction.
+          if (lbLinkTxn.entryId) changeLbEntryPerson(lbLinkTxn.entryId, contactInfo);
+          else updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, contactInfo);
           setLbLinkTxn(null);
         }}
         onSkip={() => {
           if (!lbLinkTxn) return;
+          if (lbLinkTxn.entryId) { setLbLinkTxn(null); return; }
           updateTransactionCategoryWithContact(lbLinkTxn.txn.id, lbLinkTxn.categoryId, { person: 'Unlinked', phone: null, contactId: null });
           setLbLinkTxn(null);
         }}
@@ -1210,7 +1195,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         onEdit={() => {
           const t = detailTxn;
           setDetailTxn(null);
-          if (t.lbLocked) {
+          if (lbTagLocked(t, lentBorrowed)) {
             setLbManageTxn(t);
           } else {
             navigation.navigate('AddTransaction', { editTxnId: t.id });

@@ -34,3 +34,17 @@ export function suggestLbPeople(people: LbPerson[], query: string, limit = 3): L
     .slice(0, limit)
     .map((s) => s.p);
 }
+
+/** Below this an open balance is rounding, not money owed. */
+const OPEN_MIN = 0.5;
+
+/**
+ * Who a settlement of `kind` can close, biggest balance first: 'lent_settled' (they pay
+ * me back) → people who owe me; 'borrow_repaid' (I pay them back) → people I owe. Any
+ * other kind → none. The ONE list every settle picker shows. `net` keeps its sign.
+ */
+export function openBalancePeople(people: LbPerson[], kind: string | null | undefined): LbPerson[] {
+  const sign = kind === 'lent_settled' ? 1 : kind === 'borrow_repaid' ? -1 : 0;
+  if (!sign) return [];
+  return people.filter((p) => sign * p.net >= OPEN_MIN).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+}

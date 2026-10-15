@@ -185,6 +185,14 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Accounts & Balances
 
 **Done**
+- **Oct-15-26: Cash can't go below ₹0** (user: "only a credit card goes negative"). `utils/cashBalance.ts`
+  `cashShortfall` checked where the USER spends from Cash — Add/Edit Transaction (plain, split, group I pay),
+  Lent/Borrowed form (money out), entry edit, person Settle and group Settle pickers (picker stays open),
+  Goal Add Money. Never in `applyDelta` (reversals/SMS must always move). Bank/wallet not held to it: their
+  figure comes from SMS and is often not anchored. New Cash account: **Cash in Hand** field (anchors it).
+  Credit-card **Shared Limit → Link** lists only the same bank's cards. Open question to the user: linked
+  cards' bills stay separate (a cleared bill on one never clears the other) — confirm whether their bank
+  bills them together. test:accountFlow 30.
 - Debit Card account type, SMS type-inference rules.
 - Account unification: debit-card ↔ bank merge via `aliasMasks` (same money, 3 link paths).
 - Net worth = assets − CC liability.
@@ -1836,6 +1844,20 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Lent/Borrowed & Splits
 
 **Done**
+- **Oct-15-26: settle/lend transactions no longer locked** (user: "if someone settles for the wrong person?").
+  Was: tagging a bank SMS as Received back / Repaid locked its category, the ledger refused to edit or
+  delete its row, and an unused `relinkLentBorrowedEntry` had no button — a wrong person was unfixable
+  without ignoring/deleting a real payment. Now: **Change Person** (category sheet "Linked to X" row, and
+  the ledger row sheet) moves the row — both balances follow; another category takes it off the person
+  (said in the sheet first); **Unlink** on the ledger row keeps the bank txn (→ uncategorised, SMS back in
+  review); amount/date edits carry to the row; Activity edits booked ones too. Only a group's settle stays
+  locked. Store: `syncTaggedLb`, `untagLbFields`, `changeLbEntryPerson`, `unlinkLbEntry`, `lbTagLocked`.
+  Found: `updateTwoTierCategory` had no lock check — only the Manage sheet stopped drift. test:store +10.
+- **Oct-15-26: Settle suggests who has an open balance.** `openBalancePeople` (lbPeopleSearch.ts) +
+  `useSettlePeople`: Received back → people who owe me; Repaid → people I owe; biggest first, grouped by
+  person (`getPersonBalances`, was by raw name in Activity). `LinkContactModal` now builds its own list, so
+  Activity, Dashboard, Daily Queue and Add Transaction all show it (three passed none). LB form with
+  Already Received / Already Repaid lists them before typing and fills the open amount on pick. test:lbEntry 30.
 - LentBorrowed refactor (May-2026): multi-select filters, account chip nav, LB exclusion
   from totals, contact/phone linking, per-person net balance.
 - Sep-24-2026: LB person screen's pinned Settle footer sat flush against the home indicator —
@@ -2148,6 +2170,14 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   bank expense lost its account link for good (flip back = ₹ never re-debited; delete = my bank
   expense vanished) — the account is parked in `memoAccountId`, local edits too; (3) deleted
   accounts were offered in new splits — now past members. test:sync 195, test:groupScenarios 112.
+  **Oct-15 (16th): forwarded invites, history, wording.** A person's invite carries their name
+  (`&n=`, fragment only); Join shows **Join as Priya** + outlined **I'm Not Priya** (`joinFromLink`
+  `asNew`) — a forwarded link no longer takes Priya's place (which, with her debts, couldn't be undone).
+  **History:** `sync/history.ts` reads the fold's versions (deletes now keep their `seq`); shown in the
+  expense detail sheet and Group Detail ⋮ → History (`GroupHistoryList`, deletes included). Group card:
+  ⓘ beside YOUR SHARE → "Group Totals" sheet (Your Share = your part of every bill, whoever paid = your
+  spending). Labels: ⋮ Leave (was Leave Shared Group; confirm "Leave <group>?"), member ⋮ Remove / Add
+  Back. test:sync 199, test:groupScenarios 119.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 

@@ -256,17 +256,19 @@ export async function createInviteLink(localId: string, forMember?: string): Pro
 
   const inv = newInvite(randomBytes);
   await rpcCreateInvite(inv.inviteId, shared.remoteId, inv.tokenHashHex);
-  return buildInviteLink(inv.inviteId, inv.token, key, claimable);
+  return buildInviteLink(inv.inviteId, inv.token, key, claimable, claimable ? shared.fold.members[claimable].name : null);
 }
 
 /**
- * Joins from an invite link, all the way: a link made for one person makes me that person;
- * any other makes me a new person under my own name (the INVITER says who a link is for —
- * the joiner is never asked). Rejoining makes me my old self again. Returns the local group id.
+ * Joins from an invite link, all the way: a link made for one person makes me that person
+ * (the INVITER says who it's for), unless `asNew` — "I'm Not Priya" on a forwarded link;
+ * any other link makes me a new person under my own name. Rejoining makes me my old self
+ * again. Returns the local group id.
  */
-export async function joinFromLink(link: string): Promise<string> {
+export async function joinFromLink(link: string, { asNew = false }: { asNew?: boolean } = {}): Promise<string> {
   const parsed = parseInviteLink(link.trim());
   if (!parsed) throw new SyncError('INVITE_INVALID', 'That isn\'t an ePurse invite link.');
+  const claimFor = asNew ? null : parsed.memberId;
   await ensureSyncSession();
   const redeemed = await rpcRedeemInvite(parsed.inviteId, parsed.token);
 
@@ -277,7 +279,7 @@ export async function joinFromLink(link: string): Promise<string> {
     localId = existing.id;
     let sh = existing.shared!;
     if (sh.status === 'ended') sh = reactivated(sh);
-    if (!sh.myMemberId) sh = { ...sh, claimFor: parsed.memberId };
+    if (!sh.myMemberId) sh = { ...sh, claimFor };
     if (sh !== existing.shared) store().setSharedGroupState(localId, sh);
     await pullGroup(localId);
   } else {
@@ -292,7 +294,7 @@ export async function joinFromLink(link: string): Promise<string> {
       status: 'active',
       syncedAt: null,
       outbox: [],
-      claimFor: parsed.memberId,
+      claimFor,
     } satisfies GroupShared);
 
     const rejected = await pullGroup(localId);

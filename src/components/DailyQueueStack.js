@@ -36,6 +36,7 @@ import {
 import { colors, radius, readableOn, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime, titleCaseName } from '../utils/format';
+import { lbTagLocked } from '../utils/lbEntryDisplay';
 import { canSplitTransaction, pastMemberIn } from '../utils/split';
 import CategoryPickerModal from './ManageTransactionModal';
 import CCBillPaymentSheet from './CCBillPaymentSheet';
@@ -316,6 +317,7 @@ const DailyQueueStack = () => {
   const queue    = useEPurseStore(useShallow(selectUnreviewedQueue));
 
   const groups   = useEPurseStore((s) => s.groups);
+  const lentBorrowed = useEPurseStore((s) => s.lentBorrowed);
   const welcomeReviewSeen   = useEPurseStore((s) => s.welcomeReviewSeen);
   const setWelcomeReviewSeen = useEPurseStore((s) => s.setWelcomeReviewSeen);
   const reviewOfferPending  = useEPurseStore((s) => !s.reviewReminderOffered && s.notificationPrefs?.reviewReminder === undefined);
@@ -659,7 +661,7 @@ const DailyQueueStack = () => {
         isIgnored={!!pickerTxn?.isIgnored}
         canSplit={!!pickerTxn && canSplitTransaction(pickerTxn)}
         isSplitTxn={!!pickerTxn?.isSplit}
-        categoryLocked={!!pickerTxn?.lbLocked}
+        categoryLocked={lbTagLocked(pickerTxn, lentBorrowed)}
         currentGroupId={pickerTxn?.groupId || null}
         onSelectCategory={handleSelectCategory}
         onSelectTwoTier={handleSelectTwoTier}

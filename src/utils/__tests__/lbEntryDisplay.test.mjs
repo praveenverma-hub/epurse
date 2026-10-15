@@ -2,7 +2,7 @@
 // LB person ledger row wording — each fact once (Oct-10-26)
 //     npm run test:lbEntry
 // =============================================================================
-import { suggestLbPeople } from '../lbPeopleSearch.ts';
+import { suggestLbPeople, openBalancePeople } from '../lbPeopleSearch.ts';
 import { lbEntryTitle, lbEntryMeta, lbEntrySign, lbEntrySource, lbEntryTone, lbNoteText, lbEffectiveKind, lbAccountFieldLabel, lbToastTitle } from '../lbEntryDisplay.ts';
 
 let pass = 0, fail = 0;
@@ -57,6 +57,14 @@ check('case-insensitive, trims', names('  ASHA ') === 'Asha Rao');
 check('empty query → none', suggestLbPeople(people, '').length === 0);
 check('exact full name → nothing to suggest', names('rohan') === '');
 check('limit 3', suggestLbPeople([...people, { personKey: 'e', person: 'Rhea', net: 1 }], 'r').length === 3);
+
+console.log('\n— settle suggestions (who has an open balance that way) —');
+const open = (kind, list = people) => openBalancePeople(list, kind).map((p) => p.person).join(',');
+check('received back → people who owe me, biggest first', open('lent_settled') === 'Rohit Sharma,Sharon', open('lent_settled'));
+check('repaid → people I owe', open('borrow_repaid') === 'Rohan', open('borrow_repaid'));
+check('settled people and rounding leftovers are left out', open('lent_settled', [{ personKey: 'x', person: 'X', net: 0.2 }, { personKey: 'y', person: 'Y', net: 0 }]) === '');
+check('a new lend or borrow suggests nobody', open('lent') === '' && open('borrowed') === '' && open(undefined) === '');
+check('balance keeps its sign (the row says who owes whom)', openBalancePeople(people, 'borrow_repaid')[0].net === -100);
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

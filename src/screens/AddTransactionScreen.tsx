@@ -81,6 +81,7 @@ import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
 import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe, pastMemberIn } from '../utils/split';
 import { formatCurrency, titleCaseName } from '../utils/format';
+import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import {
   ParentCat,
   ChildCat,
@@ -1085,6 +1086,18 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
       return;
     }
 
+    // Cash can't go below ₹0 — only when I pay it, from Cash (an edit frees its old amount first).
+    const iPay = activeGroup ? groupSplit.payerIsMe : !(isSplit && canSplitHere && effectivePayer);
+    if (type === TRANSACTION_TYPES.DEBIT && iPay) {
+      const was = isEdit && editTxn && editTxn.accountId === resolvedAccountId && editTxn.type === TRANSACTION_TYPES.DEBIT
+        ? Number(editTxn.amount) || 0 : 0;
+      const short = cashShortfall(accounts.find((a: any) => a.id === resolvedAccountId), num, was);
+      if (short != null) {
+        toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
+        return;
+      }
+    }
+
     if (activeGroup) {
       const res = groupSplit.resolveShares();
       if (!res.ok) {
@@ -1669,7 +1682,6 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
             {!isEdit && <LinkContactModal
               visible={lbPickerOpen}
               categoryId={legacyCategoryId}
-              suggestedPersons={[]}
               onConfirm={(contactInfo: any) => {
                 setLbPickerOpen(false);
                 submit(() => commitTransaction({

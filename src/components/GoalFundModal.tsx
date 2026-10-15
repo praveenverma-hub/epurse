@@ -29,6 +29,7 @@ import { useCategoryMaps } from '../hooks/useCategoryTree';
 import { hasAutoRule, goalAutoRule, ruleMatchesTxn } from '../utils/goalPlan';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
+import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { hapticLight } from '../utils/haptics';
 import { useToast } from './Toast';
@@ -137,6 +138,11 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
     if (!goal || amt <= 0) { onClose(); return; }
     if (!fundAccountId) {
       toast.error('Add an account first', 'You need at least one account to add this against.');
+      return;
+    }
+    const short = cashShortfall(accounts.find((a: any) => a.id === fundAccountId), amt);
+    if (short != null) {
+      toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
       return;
     }
     const nowIso = new Date().toISOString();

@@ -73,12 +73,11 @@ interface Props {
   isIgnored: boolean;
   canSplit: boolean;
   isSplitTxn: boolean;
-  /** When true, hides the category picker and shows a locked notice instead. */
+  /** A group's settle (`lbTagLocked`): hides the picker and says where it changes instead. */
   categoryLocked?: boolean;
-  /** Name currently linked to this LB-tagged txn — shown in the locked notice. */
+  /** Who this person-tagged txn is linked to — shown above the list. */
   linkedPerson?: string | null;
-  /** Provided only when a linked LB entry was found for this txn — opens the
-   * same "who did you lend to / repay" picker to correct a wrong name/contact. */
+  /** Opens the person picker to move its ledger row to someone else. */
   onEditPerson?: () => void;
   onPressSplit?: () => void;
   onSelectCategory: (categoryId: string) => void;
@@ -491,28 +490,30 @@ const CategoryPickerModal: React.FC<Props> = ({
           </View>
 
           {categoryLocked ? (
-            <>
-              <View style={styles.lockedNotice}>
-                <Text style={styles.lockedIcon}>🔒</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.lockedTitle}>Category locked</Text>
-                  <Text style={styles.lockedBody}>
-                    {linkedPerson
-                      ? `Linked to ${linkedPerson}. Category cannot be changed, but you can fix the name below.`
-                      : 'This transaction is linked to a lent/borrow record. Category cannot be changed.'}
-                  </Text>
-                </View>
+            <View style={styles.lockedNotice}>
+              <Ionicons name="lock-closed-outline" size={16} color={colors.warning} style={styles.lockedIcon} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lockedTitle}>Settled in a Group</Text>
+                <Text style={styles.lockedBody}>Its category and person change from that group.</Text>
               </View>
-              {onEditPerson && (
-                <TouchableOpacity style={styles.editPersonBtn} onPress={onEditPerson} activeOpacity={0.75}>
-                  <EditIcon size={15} color={theme.primary} />
-                  <Text style={[styles.editPersonText, { color: theme.primary }]}>
-                    {linkedPerson ? `Edit person — ${linkedPerson}` : 'Edit person'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </>
+            </View>
           ) : (
+            <>
+            {/* Tagged to a person: editable like any transaction (Oct-15-26 — was locked).
+                Say what another category does before it's picked. */}
+            {linkedPerson ? (
+              <View style={styles.linkedRow}>
+                <Ionicons name="person-outline" size={16} color={theme.primary} />
+                <Text style={styles.linkedTxt} numberOfLines={2}>
+                  Linked to {linkedPerson}. Another category takes it off their balance.
+                </Text>
+                {onEditPerson ? (
+                  <TouchableOpacity onPress={onEditPerson} hitSlop={8} accessibilityRole="button">
+                    <Text style={[styles.editPersonText, { color: theme.primary }]}>Change Person</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
             <ScrollView
               showsVerticalScrollIndicator={false}
               style={[styles.list, categoryOnly && styles.categoryOnlyList]}
@@ -540,6 +541,7 @@ const CategoryPickerModal: React.FC<Props> = ({
                 onSelectCategory={onSelectCategory}
               />
             </ScrollView>
+            </>
           )}
 
           {(showPrivacy || showIgnore || showRefund) && (
@@ -1038,7 +1040,7 @@ const styles = StyleSheet.create({
     padding:         spacing.md,
     marginBottom:    spacing.sm,
   },
-  lockedIcon: { fontSize: 16, marginTop: 1 },
+  lockedIcon: { marginTop: 2 },
   lockedTitle: {
     ...typography.bodyBold,
     fontWeight: '700' as const,
@@ -1052,17 +1054,12 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop:  1,
   },
-  editPersonBtn: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'center',
-    gap:             6,
-    borderWidth:     1,
-    borderColor:     colors.divider,
-    borderRadius:    radius.md,
-    paddingVertical: spacing.sm + 2,
-    marginBottom:    spacing.sm,
+  linkedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.sm,
   },
+  linkedTxt: { fontSize: 12, fontWeight: '500' as const, lineHeight: 17, color: colors.textSecondary, flex: 1 },
   editPersonText: {
     ...typography.small,
     fontWeight: '700' as const,

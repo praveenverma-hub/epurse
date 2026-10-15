@@ -461,8 +461,10 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // ── Links: combined credit limit (CC) / debit card ↔ bank ────────────────
   const cardLabel = (a: Account) => `${deriveBankName(a)}${a.mask ? ` ··${a.mask}` : ''}`;
+  // A combined limit only exists within one bank: only that bank's other cards can share it.
   const otherCards = isCreditCard
-    ? accounts.filter((a) => a.id !== account.id && a.type === ACCOUNT_TYPES.CREDIT_CARD && !a.archived)
+    ? accounts.filter((a) => a.id !== account.id && a.type === ACCOUNT_TYPES.CREDIT_CARD && !a.archived
+      && deriveBankName(a) === deriveBankName(account))
     : [];
   const sharedWith = isCreditCard && account.limitGroupId
     ? accounts.filter((a) => a.id !== account.id && a.limitGroupId === account.limitGroupId)
@@ -1079,8 +1081,8 @@ const AccountDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <AccountPickerSheet
         visible={limitPickerOpen}
         title="Shares a limit with…"
-        subtitle="Pick the card on the same combined limit"
-        accounts={[...otherCards].sort((a, b) => Number(b.bankName === account.bankName) - Number(a.bankName === account.bankName))}
+        subtitle={`Pick the ${deriveBankName(account)} card on the same combined limit`}
+        accounts={otherCards}
         showBalance={false}
         skipLabel={undefined}
         onSkip={undefined}

@@ -39,7 +39,7 @@ import {
   sanitizeAmount,
 } from '../utils/validation';
 import { formatCompact, formatCurrency, titleCaseName } from '../utils/format';
-import { suggestLbPeople } from '../utils/lbPeopleSearch';
+import { openBalancePeople, suggestLbPeople } from '../utils/lbPeopleSearch';
 import PrimaryButton from './PrimaryButton';
 import ContactPickerSheet from './ContactPickerSheet';
 import DateField from './DateField';
@@ -47,6 +47,7 @@ import { FormChipRow, FormChip } from './FormField';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { LB_NO_ACCOUNT, lbAccountFieldLabel, lbEffectiveKind, lbMoneyOut } from '../utils/lbEntryDisplay';
 import AccountPickerSheet from './AccountPickerSheet';
+import { cashShortfall } from '../utils/cashBalance';
 import EditIcon from './EditIcon';
 
 const EMPTY = [];
@@ -121,17 +122,24 @@ const LbEntryForm = ({
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
   // Hidden once a person is chosen (suggestion or contact); typing again reopens it.
   const [personChosen, setPersonChosen] = useState(false);
-  const suggestions = useMemo(
-    () => (locked || personChosen ? EMPTY : suggestLbPeople(people, person)),
-    [locked, personChosen, people, person],
-  );
+  // Already Received / Already Repaid = a settlement: offer the people with a balance that
+  // way before anything is typed, and only them.
+  const settleKind = alreadySettled ? lbEffectiveKind(kind, true) : null;
+  const suggestions = useMemo(() => {
+    if (locked || personChosen) return EMPTY;
+    if (!settleKind) return suggestLbPeople(people, person);
+    const open = openBalancePeople(people, settleKind);
+    return person.trim() ? suggestLbPeople(open, person, 5) : open.slice(0, 5);
+  }, [locked, personChosen, people, person, settleKind]);
   const pickSuggestion = useCallback((p) => {
     setPerson(p.person);
     setContactId(p.contactId ?? null);
     setPhone(p.phone || '');
     setPersonChosen(true);
-    setFormErr((e) => (e?.person ? { ...e, person: null } : e));
-  }, []);
+    // Settling them: start from what's open (still editable for a part payment).
+    if (settleKind && !amount) setAmount(String(Math.round(Math.abs(p.net) * 100) / 100));
+    setFormErr((e) => (e?.person || e?.amount ? { ...e, person: null, amount: null } : e));
+  }, [settleKind, amount]);
   const pickContact = useCallback(() => setContactSheetVisible(true), []);
 
   // A pick IS the identity: it replaces name, number and link together (the number
@@ -166,6 +174,12 @@ const LbEntryForm = ({
           : badAmount ? 'Amount must be more than ₹0'
           : null,
       });
+      return;
+    }
+    // Cash can't go below ₹0 (utils/cashBalance) — money going out of it, that is.
+    const cashLeft = lbMoneyOut(lbEffectiveKind(kind, alreadySettled)) ? cashShortfall(selectedAccount, n) : null;
+    if (cashLeft != null) {
+      setFormErr({ amount: `Only ${formatCurrency(cashLeft)} in Cash — pick another account` });
       return;
     }
     setFormErr(null);

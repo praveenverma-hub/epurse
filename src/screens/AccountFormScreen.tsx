@@ -84,6 +84,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
   const isEdit = !!account;
 
   const addAccount            = useEPurseStore((s: any) => s.addAccount);
+  const setAccountAnchor      = useEPurseStore((s: any) => s.setAccountAnchor);
   const renameAccount         = useEPurseStore((s: any) => s.renameAccount);
   const setAccountType        = useEPurseStore((s: any) => s.setAccountType);
   const deleteAccount         = useEPurseStore((s: any) => s.deleteAccount);
@@ -115,6 +116,8 @@ const AccountFormScreen = ({ navigation, route }: any) => {
   const [minimumDue, setMinimumDueText]     = useState(account?.minimumDue != null ? String(account.minimumDue) : '');
   const [statementDay, setStatementDayText] = useState(account?.statementDay != null ? String(account.statementDay) : '');
   const [dueDay, setDueDayText]             = useState(account?.dueDay != null ? String(account.dueDay) : '');
+  // New Cash account: what's in hand now. Cash can't go below ₹0, so it needs a starting figure.
+  const [cashInHand, setCashInHand]         = useState('');
 
   const [confirmTypeChange, setConfirmTypeChange] = useState(false);
   const [confirmArchive, setConfirmArchive]       = useState(false);
@@ -217,6 +220,8 @@ const AccountFormScreen = ({ navigation, route }: any) => {
 
     submit(() => {
       const newId = addAccount(baseFields);
+      const startCash = typeDraft === ACCOUNT_TYPES.CASH ? parseAmount(cashInHand) : 0;
+      if (startCash > 0) setAccountAnchor(newId, startCash);
       if (primaryDraft) setPrimaryAccount(newId);
       navigation.goBack();
     });
@@ -334,6 +339,17 @@ const AccountFormScreen = ({ navigation, route }: any) => {
               maxLength={INPUT_LIMITS.NAME_MAX}
             />
           </FormField>
+          {!isEdit && typeDraft === ACCOUNT_TYPES.CASH ? (
+            <FormField label="Cash in Hand" hint="Spending from Cash can't go past what you have.">
+              <FormAmountInput
+                value={cashInHand}
+                onChangeText={(t) => setCashInHand(sanitizeAmount(t))}
+                placeholder="0"
+                compact
+                style={{ borderColor: theme.inputBorder, color: theme.textPrimary }}
+              />
+            </FormField>
+          ) : null}
           {isEdit && !nameValid ? (
             <Text style={[styles.err, { color: theme.danger }]}>
               Give the account a name of at least {INPUT_LIMITS.NAME_MIN} characters.

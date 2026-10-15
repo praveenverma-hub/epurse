@@ -71,7 +71,7 @@ export function applyManageDraft(store, txn, draft) {
   }
   const categoryChanged = draft.categoryId !== txn.categoryId
     || draft.parentCategory !== txn.parentCategory || draft.childCategory !== txn.childCategory;
-  if (categoryChanged && !draft.specialCategory && !txn.lbLocked) {
+  if (categoryChanged && !draft.specialCategory) {
     if (draft.parentCategory && draft.childCategory) {
       current.updateTwoTierCategory(txn.id, draft.parentCategory, draft.childCategory);
     } else current.updateTransactionCategory(txn.id, draft.categoryId);

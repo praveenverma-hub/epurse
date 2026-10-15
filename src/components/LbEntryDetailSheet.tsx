@@ -46,6 +46,10 @@ interface Props {
   onEdit: (entry: LbDisplayEntry) => void;
   onViewTxn: (txn: SourceTxn) => void;
   onOpenGroup: (entry: LbDisplayEntry) => void;
+  /** Recorded against the wrong person → move it (any row but a group's or a split's). */
+  onChangePerson?: (entry: LbDisplayEntry) => void;
+  /** Tagged on a bank transaction → stop counting it for this person, keep the transaction. */
+  onUnlink?: (entry: LbDisplayEntry) => void;
 }
 
 const HINT = {
@@ -56,7 +60,7 @@ const HINT = {
   group: "Comes from this group's expenses — change them in the group.",
 } as const;
 
-export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable, accountLabel, onClose, onEdit, onViewTxn, onOpenGroup }: Props) {
+export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable, accountLabel, onClose, onEdit, onViewTxn, onOpenGroup, onChangePerson, onUnlink }: Props) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const bottomInset = Platform.OS === 'ios' ? insets.bottom : 0;
@@ -151,8 +155,26 @@ export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable,
             ))}
           </View>
 
-          {source !== 'manual' && !editable ? (
+          {source !== 'manual' && !editable && !onUnlink ? (
             <Text style={styles.hint}>{source === 'txn' && !sourceTxn ? HINT.txnGone : HINT[source]}</Text>
+          ) : null}
+
+          {/* Fixes for a mistake (Oct-15-26 — these rows used to be locked for good). */}
+          {onChangePerson || onUnlink ? (
+            <View style={styles.fixRow}>
+              {onChangePerson ? (
+                <TouchableOpacity style={[styles.fixBtn, { borderColor: ctaInk }]} onPress={() => act(() => onChangePerson(shown))} activeOpacity={0.8} accessibilityRole="button">
+                  <Ionicons name="swap-horizontal-outline" size={15} color={ctaInk} />
+                  <Text style={[styles.actionTxt, { color: ctaInk }]}>Change Person</Text>
+                </TouchableOpacity>
+              ) : null}
+              {onUnlink ? (
+                <TouchableOpacity style={[styles.fixBtn, { borderColor: colors.divider }]} onPress={() => act(() => onUnlink(shown))} activeOpacity={0.8} accessibilityRole="button">
+                  <Ionicons name="unlink-outline" size={15} color={colors.textSecondary} />
+                  <Text style={[styles.actionTxt, { color: colors.textSecondary }]}>Unlink</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           ) : null}
         </View>
       </View>
@@ -198,4 +220,9 @@ const styles = StyleSheet.create({
   detailLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   detailValue: { ...typography.body, color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
   hint: { ...typography.small, color: colors.textSecondary, marginTop: spacing.md },
+  fixRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  fixBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderWidth: 1, borderRadius: radius.pill, paddingVertical: spacing.sm,
+  },
 });

@@ -126,5 +126,17 @@ const txn = (createdAt, type, amount) => ({ createdAt, type, amount });
   check('…and deltaPct falls back to 0, not NaN/Infinity', empty.deltaPct === 0, `${empty.deltaPct}`);
 }
 
+console.log('\n— cash can\'t go below ₹0 —');
+{
+  const { cashShortfall } = await import(`${PROJECT_ROOT}/src/utils/cashBalance.ts`);
+  const cash = { type: 'Cash', balance: 500 };
+  check('fits → no shortfall', cashShortfall(cash, 500) === null && cashShortfall(cash, 120.5) === null);
+  check('too much → how much there is', cashShortfall(cash, 500.01) === 500);
+  check('editing frees the entry\'s old amount first', cashShortfall(cash, 700, 200) === null && cashShortfall(cash, 701, 200) === 700);
+  check('already below ₹0 (old data) → reads as ₹0 available', cashShortfall({ type: 'Cash', balance: -40 }, 10) === 0);
+  check('only Cash: a card, bank or wallet is never held to it',
+    ['Credit Card', 'Bank', 'Digital Wallet'].every((type) => cashShortfall({ type, balance: 0 }, 1000) === null) && cashShortfall(null, 5) === null);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

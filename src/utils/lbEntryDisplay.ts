@@ -90,3 +90,13 @@ export function lbToastTitle(kind: string, amount: number, who: string): string 
 /** Toast line when recordLbEntry linked an existing bank transfer instead of booking one. */
 export const lbLinkedLine = (txn: { amount: number; createdAt?: string }) =>
   `Linked to your ${formatCurrency(txn.amount)} transfer of ${formatDate(txn.createdAt || '')}`;
+
+/**
+ * Is this person-tagged transaction's category locked? Only for a GROUP's settle (fixed from
+ * the group — the other members see it). Every other one edits like any transaction and its
+ * ledger row follows (Oct-15-26; the store keeps them in step — syncTaggedLb).
+ */
+export const lbTagLocked = (
+  txn: { id: string; lbLocked?: boolean } | null | undefined,
+  lentBorrowed: { sourceTxnId?: string; groupId?: string | null }[] | null | undefined,
+): boolean => !!txn?.lbLocked && (lentBorrowed || []).some((l) => l.sourceTxnId === txn.id && !!l.groupId);

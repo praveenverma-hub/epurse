@@ -25,6 +25,8 @@ import { colors, radius, spacing, typography as typographyBase } from '../consta
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import SplitPositionView from './SplitPositionView';
+import GroupHistoryList from './GroupHistoryList';
+import { entryHistory } from '../sync/history';
 import { locationKey } from '../utils/location';
 import { CARD_CONTEXT, txnAccountLabel, txnPayerName } from '../utils/txnCardModel';
 import { LB_NO_ACCOUNT } from '../utils/lbEntryDisplay';
@@ -66,6 +68,8 @@ interface Txn {
   isGroupMemo?: boolean;
   /** Came from another member's phone (shared group sync). */
   syncOrigin?: 'remote';
+  /** Its id on the group's server (shared group sync). */
+  syncId?: string;
   lbLocked?: boolean;
   /** Coarse place stamped at capture time (manual add or a live incoming SMS
    *  only — see services/locationService). City-level only; district/region
@@ -152,6 +156,8 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
   const accountLabel = txnPayerName(txn as any, group) ? ''
     : txnAccountLabel(txn, account) || (txn.syncOrigin === 'remote' ? LB_NO_ACCOUNT : '');
   const hasSplit = !!txn.groupSplit?.shares?.length || !!txn.isSplit;
+  // Shared groups: who added and changed it, and when — anyone may, so everyone can check.
+  const history = entryHistory(group?.shared, txn.syncId);
   // City-only for now (per user request) — `locationKey` already falls back to
   // district/region when the geocoder couldn't name a city, so this still shows
   // SOMETHING useful rather than nothing on the rare city-less fix.
@@ -257,6 +263,12 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
                 <SplitPositionView txn={txn} group={group} accentColor={theme.primary} />
               </View>
             ) : null}
+            {history.length ? (
+              <View style={styles.historySection}>
+                <Text style={styles.detailLabel}>History</Text>
+                <GroupHistoryList items={history} accentColor={theme.primary} />
+              </View>
+            ) : null}
           </ScrollView>
 
         </View>
@@ -308,4 +320,5 @@ const styles = StyleSheet.create({
   detailLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   detailValue: { ...typography.body, color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
   splitSection: { marginTop: spacing.md },
+  historySection: { marginTop: spacing.lg, gap: spacing.xs },
 });
