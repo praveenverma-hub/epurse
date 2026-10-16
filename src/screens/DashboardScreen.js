@@ -35,7 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
-import { useEPurseStore, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsTracked, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive } from '../store/ePurseStore';
 import { goalsBehindPlan, goalsNearTarget } from '../analytics/nudgeFacts';
 import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import {
@@ -83,6 +83,7 @@ import TransactionItem from '../components/TransactionItem';
 import TxnDebugSheet from '../components/TxnDebugSheet';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
 import FAB from '../components/FAB';
+import { ACCOUNT_TYPES } from '../constants/categories';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import ManageTransactionModal from '../components/ManageTransactionModal';
 import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
@@ -233,6 +234,8 @@ const DashboardScreen = ({ navigation }) => {
   const latestRecapMonth     = useEPurseStore(selectLatestRecapMonth);
   const recapCardDismissed   = useEPurseStore((s) => s.monthlyRecapCardDismissed);
   const dismissMonthlyRecapCard = useEPurseStore((s) => s.dismissMonthlyRecapCard);
+  // Off → the tab bar's center "+" adds instead of the FAB, and there's no Accounts tab.
+  const accountsTracked      = useEPurseStore(selectAccountsTracked);
 
   // Ink for the ACTIVE segment, which sits on a solid white cell. Measured, not
   // picked: the old active pill used `theme.primary` directly, which is 3.12:1 on
@@ -796,7 +799,14 @@ const DashboardScreen = ({ navigation }) => {
           // card was inset twice — 16pt gutter + 28pt peek = 44pt from the edge,
           // against 16pt for every other card on the page.
           bleed={spacing.lg}
-          onNavigate={(route, params) => navigation.navigate(route, params)}
+          onNavigate={(route, params) => {
+            if (route === 'Accounts' && !accountsTracked) {
+              const card = params?.cardLast4 && useEPurseStore.getState().accounts.find((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD && a.mask === params.cardLast4);
+              if (card) navigation.navigate('AccountDetails', { accountId: card.id });
+              return;
+            }
+            navigation.navigate(route, params);
+          }}
         />
 
         {/* ═══ "YOUR MONEY" group ═══
@@ -908,7 +918,9 @@ const DashboardScreen = ({ navigation }) => {
         <AppBrandFooter bottomClearance={tabBarClearance(insets.bottom)} />
       </CollapsingHeaderScreen>
 
-      <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
+      {accountsTracked ? (
+        <FAB onPress={() => navigation.navigate('AddTransaction')} bottomInset={TAB_BAR_HEIGHT + insets.bottom} />
+      ) : null}
 
       <CategoryPickerModal
         visible={!!activeTxn}

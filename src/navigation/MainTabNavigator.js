@@ -3,6 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { TabBarVisibilityProvider } from '../context/TabBarVisibilityContext';
 import AnimatedTabBar from '../components/AnimatedTabBar';
+import { useEPurseStore, selectAccountsTracked } from '../store/ePurseStore';
 
 import DashboardScreen  from '../screens/DashboardScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
@@ -13,10 +14,17 @@ import GroupsScreen     from '../screens/GroupsScreen';
 const Tab = createBottomTabNavigator();
 
 export default function MainTabNavigator() {
+  const accountsTracked = useEPurseStore(selectAccountsTracked);
+
   return (
     <TabBarVisibilityProvider>
       <Tab.Navigator
-        tabBar={(props) => <AnimatedTabBar {...props} />}
+        tabBar={(props) => (
+          <AnimatedTabBar
+            {...props}
+            onCenterPress={accountsTracked ? undefined : () => props.navigation.navigate('AddTransaction')}
+          />
+        )}
         screenOptions={{ headerShown: false }}
         backBehavior="history"
       >
@@ -24,7 +32,7 @@ export default function MainTabNavigator() {
         <Tab.Screen name="Transactions" component={TransactionsScreen} />
         <Tab.Screen name="Groups"       component={GroupsScreen} />
         <Tab.Screen name="Insights"     component={InsightsScreen} />
-        <Tab.Screen name="Accounts"     component={AccountsScreen} />
+        {accountsTracked ? <Tab.Screen name="Accounts" component={AccountsScreen} /> : null}
       </Tab.Navigator>
     </TabBarVisibilityProvider>
   );

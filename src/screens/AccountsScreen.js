@@ -9,7 +9,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions,
+  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Linking, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -33,6 +33,9 @@ import { ccPaymentStatus, PAYMENT_STATUS_LABEL, dueRelativeText, ccStatusColor }
 import { currentPaymentWindow } from '../utils/dueDate';
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL } from '../constants/categories';
 import { tabBarClearance } from '../context/TabBarVisibilityContext';
+import { requestSmsPermission } from '../services/smsService';
+import { syncNow } from '../hooks/useSmsSync';
+import { suppressAppLockOnce } from '../utils/appLockSuppress';
 
 import AccountCard    from '../components/AccountCard';
 import StatSplitRow   from '../components/StatSplitRow';
@@ -113,6 +116,23 @@ export default function AccountsScreen({ navigation }) {
   const accounts     = useEPurseStore((s) => s.accounts);
   const userName     = useEPurseStore((s) => s.userName);
   const deleteAccount = useEPurseStore((s) => s.deleteAccount);
+
+  // SMS was in use (a sweep ran) but access is now off — balances stop moving on
+  // their own, so say so once, quietly. Tracking itself stays on (user's choice).
+  const smsOff = useEPurseStore((s) =>
+    Platform.OS === 'android' && s.hasOnboarded && !s.smsPermissionGranted && !!s.lastSmsDate);
+  const setSmsPermissionGranted = useEPurseStore((s) => s.setSmsPermissionGranted);
+  const turnOnSms = useCallback(async () => {
+    const { granted, neverAskAgain } = await requestSmsPermission();
+    if (granted) {
+      setSmsPermissionGranted(true);
+      syncNow();
+    } else if (neverAskAgain) {
+      // The dialog can't show again — only the phone's settings can grant it.
+      suppressAppLockOnce();
+      Linking.openSettings();
+    }
+  }, [setSmsPermissionGranted]);
 
   // Debit-card↔bank unification: auto-detected merge suggestions + the actions.
   // useMemo, not a selector: it builds a fresh array of fresh objects, which
@@ -387,6 +407,18 @@ export default function AccountsScreen({ navigation }) {
           </>
         )}
       >
+        {smsOff ? (
+          <View style={[styles.smsOffRow, { backgroundColor: theme.warning + '14', borderColor: theme.warning + '33' }]}>
+            <Ionicons name="chatbox-ellipses-outline" size={15} color={theme.warning} />
+            <Text style={[styles.smsOffText, { color: theme.textSecondary }]}>
+              SMS access is off, so balances won't update on their own.
+            </Text>
+            <TouchableOpacity onPress={turnOnSms} hitSlop={8} accessibilityRole="button">
+              <Text style={[styles.smsOffAction, { color: theme.primary }]}>Turn On</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* Merge suggestions — "this card & this bank look like the same money" */}
         {linkSuggestions.map((sug) => (
           <View key={`${sug.cardMask}:${sug.bankMask}`} style={styles.linkSuggest}>
@@ -733,6 +765,13 @@ const styles = StyleSheet.create({
   addCardPlus:  { fontSize: 32, color: colors.textSecondary, fontWeight: '300', lineHeight: 36 },
   addCardLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
 
+  smsOffRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md, borderWidth: 1, marginBottom: spacing.md,
+  },
+  smsOffText: { ...typography.small, flex: 1 },
+  smsOffAction: { ...typography.small, fontWeight: '700' },
   flipHintText: {
     ...typography.tiny,
     color: colors.textSecondary,

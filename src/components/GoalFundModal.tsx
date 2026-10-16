@@ -18,7 +18,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { radius, spacing, typography as typographyBase } from '../constants/theme';
 import type { TextStyle } from 'react-native';
@@ -30,7 +30,7 @@ import { hasAutoRule, goalAutoRule, ruleMatchesTxn } from '../utils/goalPlan';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
-import { defaultAccountId } from '../utils/defaultAccount';
+import { defaultAccountId, hiddenBookingAccountId } from '../utils/defaultAccount';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { hapticLight } from '../utils/haptics';
 import { useToast } from './Toast';
@@ -106,6 +106,8 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
 
   const allAccounts = useEPurseStore((s: any) => s.accounts) as any[];
   const accounts = useMemo(() => allAccounts.filter((a) => !a.archived), [allAccounts]);
+  // Tracking off in Settings: no account choice shown; it still books to the primary.
+  const accountsHidden = useEPurseStore(selectAccountsHidden) as boolean;
   const addTransaction = useEPurseStore((s: any) => s.addTransaction);
   const addGoalContribution = useEPurseStore((s: any) => s.addGoalContribution);
   const getGoalLifetimeSaved = useEPurseStore((s: any) => s.getGoalLifetimeSaved);
@@ -119,7 +121,7 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
   useEffect(() => {
     if (!goal) return;
     setFundText('');
-    setFundAccountId(defaultAccountId(accounts));
+    setFundAccountId(accountsHidden ? hiddenBookingAccountId(accounts) : defaultAccountId(accounts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goal?.id]);
 
@@ -247,7 +249,7 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
       {/* Which account it left. Skipped entirely with only one account —
           there's nothing to choose, so asking would just be one more tap on
           the thing this modal exists to keep fast. */}
-      {accounts.length > 1 ? (
+      {accounts.length > 1 && !accountsHidden ? (
         <FormField label="From" style={styles.fundAccountField}>
           <FormChipRow>
             {accounts.map((a: any) => (
@@ -265,7 +267,7 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
       {goal ? (
         <Text style={[styles.fundCatHint, { color: theme.textMuted }]}>
           Added under {goalTxnCategoryLabel(cat!)}
-          {accounts.length <= 1 && accounts[0] ? ` · ${accounts[0].name}` : ''}
+          {accounts.length <= 1 && accounts[0] && !accountsHidden ? ` · ${accounts[0].name}` : ''}
         </Text>
       ) : null}
     </CenterModal>

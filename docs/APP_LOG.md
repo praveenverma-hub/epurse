@@ -193,6 +193,32 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   Soft nudge, Add Txn only (not modals): `AccountField.emptyOffer` → "Account · Add" row (opens AccountForm, new
   account auto-primary so it's picked on return) + ✕ that hides it for good (`accountTipDismissed`, on backup
   allow-list). LB form: with no accounts the Note is an inline input (no + toggle row). "No Accounts Yet" title case.
+- **Oct-16-26: account tracking is a mode** (`trackAccountsChoice`, `selectAccountsTracked`). Inferred live: on while SMS is
+  granted or the user has a live account (only the Settings switch is saved — an auto-saved "on" first shipped
+  and kept the tab after SMS was revoked with no accounts; key renamed so those are ignored);
+  off for a manual-only user (SMS denied / iOS). Settings → **Track Account Balances** switch overrides. Off → no
+  Accounts tab, center Add (FAB-gradient circle, plain white "+", level with the tabs) in `AnimatedTabBar` opens Add Transaction, Home FAB hidden, Add Txn's
+  "Account · Add" offer hidden if switched off by hand. Nothing deleted. Home card-bill card falls back to the
+  card's `AccountDetails`. On backup allow-list. Groups' "Add group" FAB → a **"New Group" chip** at the end of
+  the filter row — one horizontal scroll, never wraps; pushed right when it fits. Both modes. **Open:** no onboarding line pointing at the Settings switch.
+- **Oct-16-26: SMS revoked mid-use → tracking stays ON while accounts exist** (accounts/history are real; the tab only moves on a
+  user action). Fixed the real gap: `syncNow` now clears a stale `smsPermissionGranted` when the OS permission is gone
+  (after onboarding; `test:smsSync` 36/36). Accounts screen shows a quiet inline "SMS access is off, so balances won't
+  update on their own. Turn On" when SMS was used before (`lastSmsDate`) — Turn On re-asks, or opens phone settings
+  if "never ask again".
+- **Oct-16-26: tracking switched OFF by hand (e.g. an SMS user who only wants expenses)** — `selectAccountsHidden`
+  (`trackAccountsChoice === false`). Data keeps flowing (SMS still creates/updates accounts) but every account picker
+  hides and entries book to the PRIMARY quietly, so balances are right if they turn it back on: `AccountField` (Add Txn,
+  Group Expense) returns null, LB form (Note goes inline), LB entry edit sheet, Goal Fund chips; person + group Settle
+  skip the picker for a plain confirm that books to the primary. Settings hint when off: "Accounts keep updating from
+  SMS. Turn on any time." / "Your accounts are kept…". Card-bill reminders untouched (Notifications settings).
+  Booking goes through `hiddenBookingAccountId` (utils/defaultAccount.ts): primary, or NO account when the primary is
+  Cash (a manual user's first account auto-primaries; its ₹0 floor would block entries they can't see). `test:defaultAccount` 6/6.
+- **Oct-17-26: switching tracking ON without SMS (Android) offers SMS first** — CenterModal "Track Balances From SMS?"
+  with the Play disclosure (now one constant, `constants/permissionDisclosure.ts`, shared with onboarding): **Allow SMS**
+  (permission prompt → sync; "never ask again" → phone settings) or **Track Manually**; both turn tracking on, closing
+  changes nothing. iOS: the switch just flips (default off there — no SMS, no accounts). Switch kept on iOS for manual
+  balance tracking.
 - **Oct-15-26: Cash can't go below ₹0** (user: "only a credit card goes negative"). `utils/cashBalance.ts`
   `cashShortfall` checked where the USER spends from Cash — Add/Edit Transaction (plain, split, group I pay),
   Lent/Borrowed form (money out), entry edit, person Settle and group Settle pickers (picker stays open),
@@ -3051,6 +3077,8 @@ off are DONE (see Backup).
 ---
 
 ## Release & Build (Play Store)
+
+**iOS:** the fix list is `docs/IOS_RELEASE.md` (P0–P3 checklist, Oct-16-2026) — tick items there as they land.
 
 **Done**
 - Sep-22-2026: **build-variant badges + side-by-side installs.** `app.json` split into

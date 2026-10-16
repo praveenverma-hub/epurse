@@ -131,7 +131,7 @@ export const STORE_KEYS = [
   // "already told you" guards — without them a restore re-sends old alerts
   'subscriptionHikesNotified', 'ccCycleHeadsUpNotified', 'lastMidmonthNudgeMonth',
   // one-shot UI state, so a restore doesn't replay tutorials the user finished
-  'welcomeReviewSeen', 'planBannerDismissed', 'accountTipDismissed', 'reviewReminderOffered',
+  'welcomeReviewSeen', 'planBannerDismissed', 'accountTipDismissed', 'trackAccountsChoice', 'reviewReminderOffered',
   'weeklyRecapHandled', 'recapMonthHandled', 'monthlyRecapCardDismissed',
   'declinedAccountLinks', 'declinedLimitLinks', 'activeGroupZoneId', 'userCustomRules',
   // shared-group sync: which server account Delete Account must clear

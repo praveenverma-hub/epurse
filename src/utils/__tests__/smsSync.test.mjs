@@ -71,6 +71,14 @@ check("both store flags off → 'no-permission'", r.status === 'no-permission', 
 reset({ osPermission: false });
 r = await syncNow();
 check("flags on but OS permission revoked → 'no-permission'", r.status === 'no-permission', JSON.stringify(r));
+check('…before onboarding the flag is left alone (onboarding owns it)', st().smsPermissionGranted === true);
+
+reset({ osPermission: false });
+useEPurseStore.setState({ smsPermissionGranted: true, hasOnboarded: true });
+r = await syncNow();
+check('onboarded + revoked in phone settings → stale flag turned off',
+  r.status === 'no-permission' && st().smsPermissionGranted === false, JSON.stringify(r));
+useEPurseStore.setState({ hasOnboarded: false });
 
 // Restored phone / granted from system Settings: the flag is device-only, so it's
 // off after a restore. Once onboarded, the OS permission must win.

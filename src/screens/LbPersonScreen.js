@@ -24,7 +24,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
@@ -48,7 +48,7 @@ import {
   LB_NO_ACCOUNT, lbAccountFieldLabel, lbEffectiveKind, lbEntryMeta, lbEntrySign, lbEntryTitle,
   lbEntryTone, lbLinkedLine, lbMoneyOut, lbNoteText, lbTagLocked, lbToastTitle,
 } from '../utils/lbEntryDisplay';
-import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
+import { defaultAccountId as pickDefaultAccountId, hiddenBookingAccountId } from '../utils/defaultAccount';
 import { txnAccountLabel } from '../utils/txnCardModel';
 import { useToast } from '../components/Toast';
 
@@ -80,6 +80,7 @@ const LbPersonScreen = ({ route, navigation }) => {
   const lentBorrowed          = useEPurseStore((s) => s.lentBorrowed);
   const groups                = useEPurseStore((s) => s.groups);
   const accounts              = useEPurseStore((s) => s.accounts);
+  const accountsHidden        = useEPurseStore(selectAccountsHidden);
   const transactions          = useEPurseStore((s) => s.transactions);
   const settlePersonBalance   = useEPurseStore((s) => s.settlePersonBalance);
   const recordLbEntry         = useEPurseStore((s) => s.recordLbEntry);
@@ -199,20 +200,21 @@ const LbPersonScreen = ({ route, navigation }) => {
   }, [settleTarget, settlePersonBalance, toast, freshNet, accounts]);
 
   // Either direction asks which account the money moved through (the picker IS the
-  // confirmation); "Not from an account" keeps it ledger-only. No accounts at all →
-  // nothing to pick, so a plain confirm settles ledger-only (accounts are optional).
+  // confirmation); "Not from an account" keeps it ledger-only. No picker when there's
+  // nothing to pick (no accounts → ledger-only) or tracking is off in Settings (→ the
+  // primary, quietly — or no account if that's Cash): a plain confirm instead.
   const handleSettlePress = useCallback(() => {
     if (!person || net === 0) return;
-    if (accounts.some((a) => !a.archived)) { setSettleTarget(person); return; }
+    if (!accountsHidden && accounts.some((a) => !a.archived)) { setSettleTarget(person); return; }
     setConfirm({
       title: 'Settle Up',
       message: `${titleCaseName(person.person)} · ${formatCurrency(Math.abs(net))}`,
       primaryText: 'Settle',
       secondaryText: 'Cancel',
       onSecondary: () => setConfirm(null),
-      onConfirm: () => { setConfirm(null); commitSettle(null, person); },
+      onConfirm: () => { setConfirm(null); commitSettle(hiddenBookingAccountId(accounts), person); },
     });
-  }, [person, net, accounts, commitSettle]);
+  }, [person, net, accounts, accountsHidden, commitSettle]);
 
   /**
    * Add a new row for THIS person, straight from their ledger — saves bouncing back
@@ -649,6 +651,7 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
   const [accountsOpen, setAccountsOpen] = useState(false);
   const liveAccounts = accounts.filter((a) => !a.archived);
   const selectedAccount = liveAccounts.find((a) => a.id === accountId) || null;
+  const accountsHidden = useEPurseStore(selectAccountsHidden);
   const [note,   setNote]   = useState(() => lbNoteText(entry.note));
   const [date,   setDate]   = useState(() => new Date(entry.date));
 
@@ -702,7 +705,7 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
 
             {/* One row → the account picker sheet, rendered INSIDE this sheet's Modal
                 (nested, like DateField's iOS picker), never beside it (§8b). */}
-            {liveAccounts.length ? (
+            {liveAccounts.length && !accountsHidden ? (
               <View style={styles.accountField}>
                 <FormValueCard>
                   <FormValueRow

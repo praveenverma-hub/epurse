@@ -26,6 +26,7 @@
     "build:prod-local": "bash build.sh prod --eas-local",
     "build:ios": "bash build.sh stage-prod --ios",
     "test:parse": "node --no-warnings src/utils/__tests__/parseAll.test.mjs",
+    "test:defaultAccount": "node --no-warnings src/utils/__tests__/defaultAccount.test.mjs",
     "test:parser": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/messageParser.test.mjs",
     "test:categorySuggest": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/categorySuggest.test.mjs",
     "test:categoryQuickPick": "node --no-warnings --import ./src/utils/__tests__/_register.mjs src/utils/__tests__/categoryQuickPick.test.mjs",

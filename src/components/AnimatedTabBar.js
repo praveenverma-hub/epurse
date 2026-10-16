@@ -7,6 +7,9 @@
 //   • ALWAYS reveals itself on a tab change (see the effect below) — the hidden
 //     state is global, and it slides fully off-screen, so a tab left hidden is
 //     untappable and therefore unrecoverable.
+//   • `onCenterPress` → an Add button in the middle, level with the tabs: the FAB's
+//     gradient circle and white "+" — used when the Accounts tab is off, so four
+//     tabs + one Add. No corner frame: that's the scan-to-pay mark in UPI apps.
 //   • Position is absolute so page content flows under it. Screens must pay
 //     `tabBarClearance(insets.bottom)` as bottom padding — NOT a hand-picked
 //     number; see the helper's comment for why three screens each guessed
@@ -32,10 +35,12 @@ import React, { useEffect, useMemo } from 'react';
 import { View, TouchableOpacity, Text, Animated, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useTabBarVisibility, TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
-import { useTheme } from '../hooks/useTheme';
-import { chromeHairline, readableOn } from '../constants/theme';
+import { useGradient, useTheme } from '../hooks/useTheme';
+import PlusGlyph from './PlusGlyph';
+import { chromeHairline, readableOn, shadows } from '../constants/theme';
 
 /**
  * Was 18, which is undersized next to a 10px label in a 62pt bar — the platform
@@ -52,9 +57,12 @@ const TAB_CONFIG = [
   { name: 'Accounts',     label: 'Accounts', icon: 'card',           iconOutline: 'card-outline' },
 ];
 
-export default function AnimatedTabBar({ state, navigation }) {
+const CENTER_SIZE = 54;
+
+export default function AnimatedTabBar({ state, navigation, onCenterPress }) {
   const insets = useSafeAreaInsets();
   const theme  = useTheme();
+  const gradient = useGradient();
   const { tabBarAnim, showTabBar } = useTabBarVisibility();
 
   /**
@@ -105,10 +113,10 @@ export default function AnimatedTabBar({ state, navigation }) {
         },
       ]}
     >
-      {state.routes.map((route, index) => {
+      {state.routes.flatMap((route, index) => {
         const isFocused = state.index === index;
         const cfg = TAB_CONFIG.find((t) => t.name === route.name);
-        if (!cfg) return null;
+        if (!cfg) return [];
 
         const onPress = () => {
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -117,12 +125,28 @@ export default function AnimatedTabBar({ state, navigation }) {
 
         const ink = isFocused ? activeColor : theme.textSecondary;
 
-        return (
+        const tab = (
           <TouchableOpacity key={route.key} onPress={onPress} activeOpacity={0.7} style={styles.tab}>
             <Ionicons name={isFocused ? cfg.icon : cfg.iconOutline} size={ICON_SIZE} color={ink} />
             <Text style={[styles.label, { color: ink }]}>{cfg.label}</Text>
           </TouchableOpacity>
         );
+        if (!onCenterPress || index !== Math.floor(state.routes.length / 2) - 1) return [tab];
+        return [tab, (
+          <View key="center-add" style={styles.centerSlot}>
+            <TouchableOpacity
+              onPress={onCenterPress}
+              activeOpacity={0.85}
+              style={[styles.centerShadow, { shadowColor: theme.primary }]}
+              accessibilityRole="button"
+              accessibilityLabel="Add Transaction"
+            >
+              <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.center}>
+                <PlusGlyph size={30} />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )];
       })}
     </Animated.View>
   );
@@ -153,6 +177,19 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     gap: 3,
     position: 'relative',
+  },
+  // Centred on the whole bar (no tab paddingTop) — the circle is the bar's tallest item.
+  centerSlot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centerShadow: {
+    borderRadius: CENTER_SIZE / 2,
+    ...shadows.fab,
+  },
+  center: {
+    width: CENTER_SIZE,
+    height: CENTER_SIZE,
+    borderRadius: CENTER_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   label: {
     fontSize: 10,

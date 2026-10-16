@@ -32,11 +32,11 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, ScrollView, AppState } from 'react-native';
+import { StyleSheet, ScrollView, AppState, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsTracked } from '../store/ePurseStore';
 import { CHANNELS, pushEnabled } from '../constants/notificationPolicy';
 import type { NotificationKind } from '../constants/notificationPolicy';
 import { getNotificationPermission } from '../utils/notifications';
@@ -50,11 +50,16 @@ import { useTheme } from '../hooks/useTheme';
 import { useGoogleSession } from '../hooks/useGoogleSession';
 import { deleteSyncAccount } from '../sync/session';
 import NavListRow from '../components/NavListRow';
+import AppSwitch from '../components/AppSwitch';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import ThemePickerSheet from '../components/ThemePickerSheet';
 import CenterModal from '../components/CenterModal';
 import { FormChipRow, FormChip } from '../components/FormField';
 import { CLEANUP_CHOICES_YEARS } from '../constants/retention';
+import { SMS_DISCLOSURE } from '../constants/permissionDisclosure';
+import { requestSmsPermission } from '../services/smsService';
+import { syncNow } from '../hooks/useSmsSync';
+import { suppressAppLockOnce } from '../utils/appLockSuppress';
 
 type CleanupRemoved = { transactions: number; lentBorrowed: number; people: number; groups: number };
 
@@ -82,6 +87,37 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const showMonthlyRecap = useEPurseStore((s: any) => s.showMonthlyRecap);
   const excludedExpenseParents = useEPurseStore((s: any) => s.excludedExpenseParents) as string[];
   const appLockEnabled = useEPurseStore((s: any) => s.appLockEnabled) as boolean;
+  const accountsTracked = useEPurseStore(selectAccountsTracked) as boolean;
+  const setTrackAccounts = useEPurseStore((s: any) => s.setTrackAccounts) as (v: boolean) => void;
+  const smsGranted = useEPurseStore((s: any) => !!s.smsPermissionGranted) as boolean;
+  const setSmsPermissionGranted = useEPurseStore((s: any) => s.setSmsPermissionGranted) as (v: boolean) => void;
+  // Turning tracking ON without SMS (Android) offers SMS first — it's what keeps balances
+  // current. Either answer turns tracking on; closing the dialog changes nothing.
+  const [smsAskOpen, setSmsAskOpen] = useState(false);
+  const toggleTracking = (on: boolean) => {
+    if (on && Platform.OS === 'android' && !smsGranted) { setSmsAskOpen(true); return; }
+    setTrackAccounts(on);
+  };
+  const allowSmsAndTrack = async () => {
+    setSmsAskOpen(false);
+    setTrackAccounts(true);
+    const { granted, neverAskAgain } = await requestSmsPermission();
+    if (granted) {
+      setSmsPermissionGranted(true);
+      syncNow();
+    } else if (neverAskAgain) {
+      // The dialog can't show again — only the phone's settings can grant it.
+      suppressAppLockOnce();
+      Linking.openSettings();
+    }
+  };
+  const hasAccounts = useEPurseStore((s: any) => s.accounts.some((a: any) => !a.archived)) as boolean;
+  // Off with accounts behind it: say nothing is lost, so turning it off isn't scary.
+  const trackHint = accountsTracked || (!smsGranted && !hasAccounts)
+    ? 'Balances and card bills in an Accounts tab'
+    : smsGranted
+      ? 'Accounts keep updating from SMS. Turn on any time.'
+      : 'Your accounts are kept. Turn on any time.';
   const notificationPrefs = useEPurseStore((s: any) => s.notificationPrefs) as Record<string, boolean>;
   const deleteAllUserData = useEPurseStore((s: any) => s.deleteAllUserData);
   const previewHistoryCleanup = useEPurseStore((s: any) => s.previewHistoryCleanup);
@@ -224,6 +260,24 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             }
             hintTone={excludedCount > 0 ? 'warn' : 'default'}
           />
+          {/* Off = no Accounts tab (the bar gets a center "+" instead). Accounts and
+              their links are kept, so turning it back on loses nothing. */}
+          <NavListRow
+            icon="card-outline"
+            label="Track Account Balances"
+            hint={trackHint}
+            chevron={false}
+            onPress={() => toggleTracking(!accountsTracked)}
+            right={
+              <AppSwitch
+                value={accountsTracked}
+                onValueChange={toggleTracking}
+                trackColor={{ true: theme.primary, false: theme.divider }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.divider}
+              />
+            }
+          />
           <NavListRow
             icon="pricetags-outline"
             label="Categories"
@@ -283,6 +337,17 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         currentThemeId={themeId}
         onSelect={(id) => setThemeId(id)}
         onClose={() => setThemeSheetOpen(false)}
+      />
+
+      <CenterModal
+        visible={smsAskOpen}
+        title="Track Balances From SMS?"
+        message={`ePurse ${SMS_DISCLOSURE}`}
+        primaryText="Allow SMS"
+        secondaryText="Track Manually"
+        onPrimary={allowSmsAndTrack}
+        onSecondary={() => { setSmsAskOpen(false); setTrackAccounts(true); }}
+        onClose={() => setSmsAskOpen(false)}
       />
 
       <CenterModal

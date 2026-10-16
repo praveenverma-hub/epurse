@@ -84,6 +84,7 @@ import { runInitialInboxSweep } from '../utils/inboxSweep';
 import { getStorageRecovery } from '../storage/appStorage';
 import { shouldShowAccountConfirmation } from '../utils/onboardingRouting';
 import { INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount } from '../utils/validation';
+import { SMS_DISCLOSURE } from '../constants/permissionDisclosure';
 
 // =============================================================================
 // Types
@@ -207,7 +208,7 @@ const AUTO_TRANSITION_MS = 1250;
  */
 const DISCLOSURE_MESSAGE = [
   smsSupported
-    ? '• SMS — reads bank and card messages ON THIS DEVICE to detect transactions automatically. Message text is processed on-device; it is never uploaded as raw text.'
+    ? `• SMS — ${SMS_DISCLOSURE}`
     : null,
   '• Contacts — lets you pick people when splitting an expense or tracking money lent/borrowed.',
   '• Location — tags a transaction with the city it happened in, from your device\'s approximate location.',

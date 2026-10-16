@@ -25,7 +25,8 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
+import { hiddenBookingAccountId } from '../utils/defaultAccount';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H, withAlpha, DIVIDER_W } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
@@ -111,6 +112,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const categories = useEPurseStore((s: any) => s.categories) as any[];
   const accounts = useEPurseStore((s: any) => s.accounts) as any[];
   const liveAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
+  const accountsHidden = useEPurseStore(selectAccountsHidden) as boolean;
   const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
   const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => any[];
   const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
@@ -367,8 +369,10 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   });
 
   const handleSettle = (pb: GroupBalanceRow) => {
-    // No accounts → nothing to repay from, so the plain ledger-only confirm below.
-    if (pb.net < 0 && liveAccounts.length) { setSettleTarget(pb); return; }
+    // No picker when there's nothing to pick (no accounts → ledger-only) or tracking is
+    // off in Settings (→ the primary quietly, or none if that's Cash): the confirm below.
+    if (pb.net < 0 && liveAccounts.length && !accountsHidden) { setSettleTarget(pb); return; }
+    const repayFrom = pb.net < 0 ? hiddenBookingAccountId(liveAccounts) : null;
     setConfirm({
       title: 'Settle up',
       message:
@@ -378,7 +382,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       secondaryText: 'Cancel',
       destructive: true,
       onPrimary: () => {
-        settleGroupPersonBalance(group.id, pb.personKey);
+        settleGroupPersonBalance(group.id, pb.personKey, repayFrom ? { accountId: repayFrom } : undefined);
         setConfirm(null);
         toast.success('Settled', `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}`);
       },

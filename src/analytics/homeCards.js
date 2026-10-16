@@ -189,7 +189,8 @@ const ccBillCard = (ccBills, nowMs) => {
       ? `${card} — late fees apply if unpaid.`
       : `${card} — pay in full to avoid interest.`,
     cta: 'Open accounts',
-    target: ['Accounts'],
+    // The mask lets Home open the card itself when the Accounts tab is off.
+    target: ['Accounts', { cardLast4: bill.cardLast4 || null }],
   };
 };
 

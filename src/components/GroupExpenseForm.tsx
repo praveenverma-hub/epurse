@@ -13,7 +13,7 @@ import { useTheme } from '../hooks/useTheme';
 import PrimaryButtonBase from './PrimaryButton';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 import { useToast } from './Toast';
 import { TwoTierCategorySheet } from './TwoTierCategorySheet';
 import DateField from './DateField';
@@ -31,7 +31,7 @@ import { useGroupSplit } from '../hooks/useGroupSplit';
 import { useAutoCategory } from '../hooks/useAutoCategory';
 import SplitBreakdownLines from './SplitBreakdownLines';
 import { useSplitEditorRoute } from '../store/useSplitEditorRoute';
-import { defaultAccountId } from '../utils/defaultAccount';
+import { defaultAccountId as pickDefaultAccountId, hiddenBookingAccountId } from '../utils/defaultAccount';
 import type { Group, GroupExpenseData } from '../types/group';
 
 const PrimaryButton = PrimaryButtonBase as React.FC<{
@@ -101,6 +101,9 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, presetMer
   const [date, setDate] = useState(() => new Date());
   const [merchant, setMerchant] = useState('');
   const [note, setNote] = useState('');
+  const accountsHidden = useEPurseStore(selectAccountsHidden) as boolean;
+  // Tracking off in Settings → no picker; book where the hidden form would.
+  const defaultAccountId = (list: any[]) => (accountsHidden ? hiddenBookingAccountId(list) : pickDefaultAccountId(list));
   const [accountId, setAccountId] = useState<string | null>(null);
   const [parentCat, setParentCat] = useState<string | null>(null);
   const [childCat, setChildCat] = useState<string | null>(null);
@@ -165,7 +168,7 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, presetMer
     setAccountId(defaultAccountId(accounts));
     setParentCat(null);
     setChildCat(null);
-  }, [visible, group, accounts, amountLocked, presetAmount, presetMerchant, editTxn]);
+  }, [visible, group, accounts, accountsHidden, amountLocked, presetAmount, presetMerchant, editTxn]);
 
   const handleAdd = () => {
     if (amount <= 0) {

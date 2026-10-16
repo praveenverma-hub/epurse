@@ -49,6 +49,8 @@ import { LB_NO_ACCOUNT, lbAccountFieldLabel, lbEffectiveKind, lbMoneyOut } from 
 import AccountPickerSheet from './AccountPickerSheet';
 import { cashShortfall } from '../utils/cashBalance';
 import EditIcon from './EditIcon';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
+import { hiddenBookingAccountId } from '../utils/defaultAccount';
 
 const EMPTY = [];
 
@@ -106,10 +108,14 @@ const LbEntryForm = ({
   const [alreadySettled, setAlreadySettled] = useState(false);
   // undefined = not picked yet → follow the default (accounts may load after mount).
   const [pickedAccountId, setAccountId] = useState(undefined);
-  const accountId = pickedAccountId === undefined ? defaultAccountId : pickedAccountId;
+  // Hidden when tracking is off in Settings — the entry books where `hiddenBookingAccountId` says.
+  const accountsHidden = useEPurseStore(selectAccountsHidden);
+  const baseAccountId = accountsHidden ? hiddenBookingAccountId(accounts) : defaultAccountId;
+  const accountId = pickedAccountId === undefined ? baseAccountId : pickedAccountId;
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const liveAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
+  const showAccount = liveAccounts.length > 0 && !accountsHidden;
   const selectedAccount = liveAccounts.find((a) => a.id === accountId) || null;
   const [formErr, setFormErr] = useState(null); // { person?: msg, amount?: msg } — each under its own field
   // Fixing one field clears only ITS message, not the other's.
@@ -367,7 +373,7 @@ const LbEntryForm = ({
           LbPersonScreen it nests in the add sheet's own Modal, like DateField's iOS
           picker, never beside it (§8b). No accounts → nothing to share the row with, so
           the note is just an inline field. */}
-      {liveAccounts.length ? (
+      {showAccount ? (
       <View style={styles.amountRow}>
         {/* Toggles the note field below. Closing KEEPS the text (it still saves), so a
             written note shows here as a preview with the canonical pencil; + when there's
@@ -406,7 +412,7 @@ const LbEntryForm = ({
         </TouchableOpacity>
       </View>
       ) : null}
-      {noteOpen || !liveAccounts.length ? (
+      {noteOpen || !showAccount ? (
         <TextInput
           value={note}
           onChangeText={(t) => setNote(t.slice(0, INPUT_LIMITS.NOTE_MAX))}

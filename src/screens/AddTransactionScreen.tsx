@@ -27,7 +27,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { useEPurseStore } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 import { TRANSACTION_TYPES } from '../constants/categories';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation';
@@ -56,7 +56,7 @@ import EmptyState from '../components/EmptyState';
 import AccountField from '../components/AccountField';
 import UnderlineTabBar from '../components/UnderlineTabBar';
 import { TabView } from 'react-native-tab-view';
-import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
+import { defaultAccountId as pickDefaultAccountId, hiddenBookingAccountId } from '../utils/defaultAccount';
 
 // Cast to typed interface — PrimaryButton.js has no TS declarations
 const PrimaryButton: React.FC<{
@@ -247,7 +247,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const categoryMaps = useCategoryMaps();   // custom-aware legacy lookup maps
   const categories  = useEPurseStore((s: any) => s.categories);
   const accounts    = useEPurseStore((s: any) => s.accounts);
-  const accountTipDismissed = useEPurseStore((s: any) => s.accountTipDismissed) as boolean;
+  // Tracking switched off in Settings → don't offer an account either.
+  const accountTipDismissed = useEPurseStore((s: any) => s.accountTipDismissed || s.trackAccountsChoice === false) as boolean;
   const dismissAccountTip = useEPurseStore((s: any) => s.dismissAccountTip) as () => void;
   const addTransaction  = useEPurseStore((s: any) => s.addTransaction);
   const updateTransaction = useEPurseStore((s: any) => s.updateTransaction);
@@ -406,7 +407,11 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   // The store guarantees exactly one active account is `primary` whenever any
   // account exists (see `ensurePrimary` in ePurseStore.js) — that's the one
   // real default for a manual entry, not an arbitrary "first Cash account".
-  const defaultAccountId = useMemo(() => pickDefaultAccountId(accounts), [accounts]);
+  const accountsHidden = useEPurseStore(selectAccountsHidden) as boolean;
+  const defaultAccountId = useMemo(
+    () => (accountsHidden ? hiddenBookingAccountId(accounts) : pickDefaultAccountId(accounts)),
+    [accounts, accountsHidden],
+  );
 
   const selectedParentDef = useMemo(
     () => categoryTree.find((p) => p.label === parentCategory) ?? null,

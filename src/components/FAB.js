@@ -1,7 +1,7 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import PlusGlyph from './PlusGlyph';
 
 import { radius, shadows, spacing } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
@@ -23,10 +23,10 @@ const FAB = ({ onPress, icon = '+', bottomInset = 0, accessibilityLabel = 'Add' 
         end={{ x: 1, y: 1 }}
         style={styles.fab}
       >
-        {/* Use a vector glyph for the default "+" so it's perfectly centred (a
-            text "+" sits optically high and shifts with font padding). */}
+        {/* The shared drawn "+" (same as the tab bar's Add) — a text "+" sits
+            optically high and shifts with font padding. */}
         {icon === '+' ? (
-          <Ionicons name="add" size={34} color="#fff" />
+          <PlusGlyph size={34} />
         ) : (
           <Text style={styles.icon}>{icon}</Text>
         )}

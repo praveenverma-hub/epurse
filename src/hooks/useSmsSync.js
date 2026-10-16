@@ -118,7 +118,13 @@ export async function syncNow() {
   try {
     // Double-check OS permission — user may have revoked it in settings
     const ok = await hasSmsPermission();
-    if (!ok) { settleFirstSweep(); return { status: 'no-permission', scanned: 0, added: 0 }; }
+    if (!ok) {
+      // Revoked in phone settings: drop the stale flag so the app stops claiming
+      // access (Accounts shows "SMS access is off"). Not before onboarding — it owns that.
+      if (st.hasOnboarded && st.smsPermissionGranted) st.setSmsPermissionGranted(false);
+      settleFirstSweep();
+      return { status: 'no-permission', scanned: 0, added: 0 };
+    }
 
     // ── Inbox sweep ────────────────────────────────────────────────────────
     //

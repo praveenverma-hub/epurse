@@ -1707,6 +1707,10 @@ export const useEPurseStore = create(
       planBannerDismissed: false,
       // User closed the Add Transaction "Account · Add" row shown while they have no accounts.
       accountTipDismissed: false,
+      // Settings → Track Account Balances: the USER's explicit choice only. null = never
+      // touched → inferred live (selectAccountsTracked). Never written by inference — an
+      // auto-saved "on" would look like a choice and never turn off again.
+      trackAccountsChoice: null,
 
       // Two-tier user-defined automation rules — keyed by SCREAMING_SNAKE_CASE merchant.
       userCustomRules: {},
@@ -1766,6 +1770,7 @@ export const useEPurseStore = create(
       /** User dismissed the dashboard plan-CTA banner. */
       dismissPlanBanner: () => set({ planBannerDismissed: true }),
       dismissAccountTip: () => set({ accountTipDismissed: true }),
+      setTrackAccounts: (v) => set({ trackAccountsChoice: !!v }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
 
@@ -6902,6 +6907,7 @@ export const useEPurseStore = create(
           recapMonthHandled: null,
           monthlyRecapCardDismissed: null,
           accountTipDismissed: false,
+          trackAccountsChoice: null,
           pendingMonthlyRecap: null,
           recapOptions: RECAP_OPTION_DEFAULTS,
           reminders: [],
@@ -7039,6 +7045,7 @@ export const useEPurseStore = create(
           welcomeReviewSeen: false,
           planBannerDismissed: false,
           accountTipDismissed: false,
+          trackAccountsChoice: null,
           reviewStreak: { current: 0, best: 0, lastReviewDate: null },
         });
       },
@@ -7930,6 +7937,7 @@ export const useEPurseStore = create(
         welcomeReviewSeen: state.welcomeReviewSeen ?? false,
         planBannerDismissed: state.planBannerDismissed ?? false,
         accountTipDismissed: state.accountTipDismissed ?? false,
+        trackAccountsChoice: state.trackAccountsChoice ?? null,
         groups: state.groups ?? [],
         activeGroupZoneId: state.activeGroupZoneId ?? null,
         declinedAccountLinks: state.declinedAccountLinks ?? [],
@@ -7962,6 +7970,19 @@ export const selectVisibleTransactions = (s) =>
   s.transactions.filter((t) => !t.isIgnored && !t.isHidden);
 export const selectCategories = (s) => s.categories;
 export const selectLentBorrowed = (s) => s.lentBorrowed;
+/**
+ * Accounts tab vs the center "+" (accounts are optional). The user's own choice wins;
+ * otherwise on while there's something to show — SMS access or a live account — and
+ * off for a manual-only user (SMS denied / iOS) with neither.
+ */
+export const selectAccountsTracked = (s) =>
+  s.trackAccountsChoice ?? (!!s.smsPermissionGranted || s.accounts.some((a) => !a.archived));
+/**
+ * The user switched tracking OFF in Settings (not merely inferred off). Account pickers
+ * hide and entries book to the primary quietly, so balances stay right if they turn it
+ * back on. Inferred-off users have no accounts, so their pickers are empty anyway.
+ */
+export const selectAccountsHidden = (s) => s.trackAccountsChoice === false;
 
 /**
  * Unreviewed SMS transactions — the Daily Queue feed.

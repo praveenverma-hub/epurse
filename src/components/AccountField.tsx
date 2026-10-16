@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { FormValueRow } from './FormField';
 import { colors, spacing } from '../constants/theme';
 import AccountPickerSheetBase from './AccountPickerSheet';
+import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 
 // AccountPickerSheet.js has no TS declarations — its optional props read as required.
 const AccountPickerSheet = AccountPickerSheetBase as React.FC<any>;
@@ -29,7 +30,10 @@ interface AccountFieldProps {
 
 export default function AccountField({ accounts, value, onChange, accentColor, disabled, noneLabel, emptyOffer }: AccountFieldProps) {
   const [open, setOpen] = useState(false);
+  // Tracking switched off in Settings: no picker — the caller still books its default (primary).
+  const hidden = useEPurseStore(selectAccountsHidden) as boolean;
   const selected = accounts.find((a) => a.id === value) ?? null;
+  if (hidden) return null;
   if (emptyOffer && !accounts.some((a) => !a.archived)) {
     return (
       <View style={styles.offerRow}>

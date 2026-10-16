@@ -3,11 +3,12 @@
 // shared-group balances (never a personal group's own tracked spend), an
 // All/Owed-to-you/You-owe filter, and one balance card per group. Tapping a
 // card pushes GroupDetailScreen (level 2: hero, actions, Transactions/Members/
-// Summary tabs). The FAB creates a new group — adding an EXPENSE now lives
-// inside a group's own detail screen.
+// Summary tabs). "New Group" is a chip at the end of the filter row, not a FAB —
+// the tab bar may carry a center "+" already, and two pluses read as one action
+// twice. Adding an EXPENSE lives inside a group's own detail screen.
 // =============================================================================
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
@@ -19,9 +20,8 @@ import { useTheme, useGradient } from '../hooks/useTheme';
 import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
 import { formatCurrency, monthKey } from '../utils/format';
 import { countsForSpend, spendContribution } from '../utils/split';
-import { TAB_BAR_HEIGHT } from '../context/TabBarVisibilityContext';
+import { tabBarClearance } from '../context/TabBarVisibilityContext';
 import { useTabBarScroll } from '../hooks/useTabBarScroll';
-import FAB from '../components/FAB';
 import EmptyState from '../components/EmptyState';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
@@ -260,36 +260,46 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         )}
         contentContainerStyle={isEmpty
           ? styles.emptyContainer
-          : [styles.list, filteredGroups.length === 0 && styles.listFill, { paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 96 }]}
+          : [styles.list, filteredGroups.length === 0 && styles.listFill, { paddingBottom: tabBarClearance(insets.bottom) }]}
         onScroll={onScroll}
       >
         {isEmpty ? (
           <EmptyState
             icon="people-outline"
-            title="No groups yet"
+            title="No Groups Yet"
             subtitle="Create a personal group to track themed spending (house build, trip) or a shared group to split expenses with friends."
-            actionLabel="Create first group"
+            actionLabel="Create First Group"
             onAction={openCreate}
           />
         ) : (
           <>
-            {hasSharedGroups && (
-              <View style={styles.chipRow}>
-                {CHIPS.map((c) => {
-                  const active = filter === c.key;
-                  return (
-                    <TouchableOpacity
-                      key={c.key}
-                      style={[styles.chip, active && { backgroundColor: theme.primary + '18', borderColor: theme.primary }]}
-                      onPress={() => setFilter(c.key)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.chipTxt, active && { color: theme.primary, fontWeight: '700' }]}>{c.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
+            {/* One scrolling row — never wraps. "New Group" is the last chip, pushed
+                right when the row has room. Filters only with shared groups. */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowContent}>
+              {hasSharedGroups ? CHIPS.map((c) => {
+                const active = filter === c.key;
+                return (
+                  <TouchableOpacity
+                    key={c.key}
+                    style={[styles.chip, active && { backgroundColor: theme.primary + '18', borderColor: theme.primary }]}
+                    onPress={() => setFilter(c.key)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.chipTxt, active && { color: theme.primary, fontWeight: '700' }]}>{c.label}</Text>
+                  </TouchableOpacity>
+                );
+              }) : null}
+              <TouchableOpacity
+                style={[styles.chip, styles.newChip, { borderColor: theme.primary }]}
+                onPress={openCreate}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="New Group"
+              >
+                <Ionicons name="add" size={14} color={theme.primary} />
+                <Text style={[styles.chipTxt, { color: theme.primary, fontWeight: '700' }]}>New Group</Text>
+              </TouchableOpacity>
+            </ScrollView>
 
             {/* <SectionHeader
               icon="people-outline"
@@ -322,8 +332,6 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
           </>
         )}
       </CollapsingHeaderScreen>
-
-      <FAB onPress={openCreate} icon="+" bottomInset={TAB_BAR_HEIGHT + insets.bottom} accessibilityLabel="Add group" />
 
       <InfoSheet
         visible={infoVisible}
@@ -363,7 +371,10 @@ const styles = StyleSheet.create({
   // Home and AccountsScreen use); this is just the gap above it.
   heroSummaryCard: { marginTop: spacing.md },
 
-  chipRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  chipRow: { flexGrow: 0, marginBottom: spacing.md },
+  // flexGrow fills the width when it fits, so `newChip`'s auto margin can push it right.
+  chipRowContent: { flexGrow: 1, alignItems: 'center', gap: spacing.sm },
+  newChip: { flexDirection: 'row', alignItems: 'center', gap: 2, marginLeft: 'auto' },
   chip: {
     paddingHorizontal: spacing.sm + 2, paddingVertical: 6, borderRadius: radius.pill,
     borderWidth: 1, borderColor: colors.divider, backgroundColor: colors.card,
