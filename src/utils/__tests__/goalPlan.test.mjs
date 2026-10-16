@@ -246,8 +246,8 @@ check('…and 0 with no target, rather than NaN', lifetimePct(0, 5000), 0);
     /CREDIT_ONLY_PARENT_IDS\.has\(/.test(picker));
 
   // ── Sub-category funding ───────────────────────────────────────────────
-  // Only 4 of the 29 built-in sub-categories carry their own legacy id
-  // (`groceries`, plus self/lent/borrowed), so a rule matched ONLY against the
+  // Only 6 of the 31 built-in sub-categories carry their own legacy id
+  // (`groceries`, plus self/lent/borrowed/received back/repaid), so a rule matched ONLY against the
   // flat category on a row could never tell Restaurants from Food Delivery —
   // both are legacy `food`. That is why a rule now also matches the tree CHILD
   // the row was categorised into: the review queue exists precisely so the user
@@ -255,8 +255,8 @@ check('…and 0 with no target, rather than NaN', lifetimePct(0, 5000), 0);
   const pickableOf = (p) => p.children.filter((c) => c.legacyId && c.legacyId !== p.legacyId);
   const totalChildren = PARENT_CATEGORIES.reduce((n, p) => n + p.children.length, 0);
   const totalPickable = PARENT_CATEGORIES.reduce((n, p) => n + pickableOf(p).length, 0);
-  ok('only 4 of the 29 sub-categories carry their own legacy id…',
-    totalPickable === 4 && totalChildren === 29);
+  ok('only 6 of the 31 sub-categories carry their own legacy id…',
+    totalPickable === 6 && totalChildren === 31);
   ok('…so matching on the flat id alone could never reach the other 25',
     PARENT_CATEGORIES.find((p) => p.id === 'food').children
       .filter((c) => !c.legacyId).length === 3);

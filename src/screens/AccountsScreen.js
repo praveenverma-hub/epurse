@@ -493,7 +493,7 @@ export default function AccountsScreen({ navigation }) {
         {sortedAccounts.length === 0 ? (
           <EmptyState
             icon="card-outline"
-            title="No accounts yet"
+            title="No Accounts Yet"
             subtitle="Add your bank, card or cash to see your balances and where your money moves."
             actionLabel="Add Account"
             onAction={() => navigation.navigate('AccountForm')}

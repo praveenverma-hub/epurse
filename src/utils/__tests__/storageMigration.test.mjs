@@ -112,18 +112,21 @@ console.log(`\n${C.bold}══════ Storage — AsyncStorage migration �
   useStore.setState({ userName: 'Praveen', smsPermissionGranted: true, googleAccount: { email: 'p@x.y' },
     monthlyAggregates: { '2026-05': { totalSpend: 1234, totalIncome: 0, byCategory: { food: 1234 } } } });
 
-  // What an OLD install has on disk: version 41, and an SMS body on a txn (v42 strips it).
+  // What an OLD install has on disk: version 41, an SMS body on a txn (v42 strips it) and
+  // stale picker labels on another (v43 re-derives them).
+  const OLD = 41;
   const persisted = JSON.parse(J(partialize(S())));
   persisted.transactions[0] = { ...persisted.transactions[0], smsText: 'Rs.450.00 debited … Avl bal Rs.42,310.50' };
-  const legacyRaw = J({ state: persisted, version: CURRENT - 1 });
+  persisted.transactions.push({ id: 'stale1', amount: 100, type: 'debit', categoryId: 'borrow_repaid', parentCategory: 'Food & Dining', childCategory: 'Restaurants', createdAt: new Date().toISOString() });
+  const legacyRaw = J({ state: persisted, version: OLD });
 
   const { records, device } = fresh();
   const r = await migrateFromLegacy({ readLegacy: async () => legacyRaw, records, device });
   check('e2e: a real v41 store migrates and verifies', r.status === 'migrated' && r.counts.transactions === persisted.transactions.length, J(r));
   const meta = await records.readMeta();
-  check('e2e: stored AS-IS at its old version (persist migrates on hydrate)', meta.storeVersion === String(CURRENT - 1) && meta.legacyVersion === String(CURRENT - 1));
+  check('e2e: stored AS-IS at its old version (persist migrates on hydrate)', meta.storeVersion === String(OLD) && meta.legacyVersion === String(OLD));
 
-  const lost = { transactions: S().transactions.length, lb: S().lentBorrowed.length };
+  const lost = { transactions: persisted.transactions.length, lb: S().lentBorrowed.length };
   useStore.setState({ transactions: [], lentBorrowed: [], groups: [], goals: [], userName: '', googleAccount: null });
   const h = createHybridStorage({ records, device, flushDelayMs: 0 });
   useStore.persist.setOptions({ storage: h });
@@ -133,7 +136,8 @@ console.log(`\n${C.bold}══════ Storage — AsyncStorage migration �
     S().transactions.length === lost.transactions && S().lentBorrowed.length === lost.lb && S().groups.length === 1
     && S().goals.length === 1 && S().userName === 'Praveen' && S().googleAccount?.email === 'p@x.y'
     && S().monthlyAggregates['2026-05'].totalSpend === 1234);
-  check('e2e: the normal migrate chain ran (v42 stripped the SMS body)', S().transactions.every((t) => t.smsText === undefined));
+  check('e2e: the normal migrate chain ran (v42 stripped the SMS body, v43 fixed stale labels)', S().transactions.every((t) => t.smsText === undefined)
+    && S().transactions.find((t) => t.id === 'stale1')?.childCategory === 'Repaid');
   const after = await records.load();
   check('e2e: …and the migrated result was written back at the current version',
     after.meta.storeVersion === String(CURRENT) && after.rows.transactions.every((x) => x.value.smsText === undefined));

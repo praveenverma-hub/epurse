@@ -5,7 +5,7 @@
 // lent_settled / borrow_repaid rendered as a flat settlement section below.
 // =============================================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -24,6 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, readableOn, spacing, typography, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
+import { useLbChildAllowed } from '../hooks/useSettlePeople';
 import { STATIC_CONFIG } from '../config/staticConfig';
 import PrimaryButtonBase from './PrimaryButton';
 import EditIcon from './EditIcon';
@@ -32,7 +33,7 @@ import {
   ParentCat,
   ChildCat,
   LB_CHILD_LABEL_TO_ID,
-  LB_SETTLEMENT_IDS,
+  categoryFieldsFor,
   twoTierToLegacyCatId,
 } from '../constants/twoTierCategories';
 
@@ -73,6 +74,8 @@ interface Props {
   isIgnored: boolean;
   canSplit: boolean;
   isSplitTxn: boolean;
+  /** 'debit' | 'credit' — which lend/borrow options fit. */
+  txnType?: string;
   /** A group's settle (`lbTagLocked`): hides the picker and says where it changes instead. */
   categoryLocked?: boolean;
   /** Who this person-tagged txn is linked to — shown above the list. */
@@ -243,10 +246,10 @@ interface CategoryTreeListProps {
   resetKey?: unknown;
   /** A child chip — LB children included; the host decides what LB means. */
   onSelectTwoTier: (parent: ParentCat, child: ChildCat) => void;
-  /** lent_settled / borrow_repaid. */
-  onSelectSettlement: (categoryId: string) => void;
   /** Credit Card Bill (opens the card-reconcile flow). */
   onSelectCategory: (categoryId: string) => void;
+  /** 'debit' | 'credit' — which lend/borrow options fit (useLbChildAllowed). */
+  txnType?: string;
 }
 
 export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
@@ -256,12 +259,26 @@ export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
   selectedChild,
   resetKey,
   onSelectTwoTier,
-  onSelectSettlement,
   onSelectCategory,
+  txnType,
 }) => {
   const theme = useTheme();
-  const categoryTree = useCategoryTree();   // built-ins + user's custom categories
+  const fullTree = useCategoryTree();   // built-ins + user's custom categories
+  // Lend/borrow options only where they fit: the money's direction, and a settlement
+  // only with someone to settle with.
+  const lbAllowed = useLbChildAllowed(txnType, selectedCategoryId);
+  const categoryTree = useMemo(
+    () => fullTree.map((p) => ({ ...p, children: p.children.filter((c) => lbAllowed(c.label)) })),
+    [fullTree, lbAllowed],
+  );
   const [expandedParentId, setExpandedParentId] = useState<string | null>(null);
+  // Labels are the selection; a transaction with only a category id (older entries,
+  // bookings) shows that id's place in the tree instead of nothing.
+  if (!selectedParent && selectedCategoryId) {
+    const f = categoryFieldsFor(selectedCategoryId);
+    selectedParent = f.parentCategory;
+    selectedChild = f.childCategory;
+  }
 
   // Auto-expand the active parent. cc_bill never carries parent/child labels,
   // so it's keyed off selectedCategoryId (lands with Bills & Utilities open).
@@ -273,7 +290,6 @@ export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
     } else setExpandedParentId(null);
   }, [resetKey, selectedParent, selectedCategoryId]);
 
-  const settlementCats = categories.filter((c) => LB_SETTLEMENT_IDS.has(c.id));
   // Fall back to a fixed label so the row shows even if an older persisted category
   // list doesn't yet include cc_bill (it's injected on rehydrate, but don't depend on it).
   const ccBillCat = categories.find((c) => c.id === 'cc_bill')
@@ -328,47 +344,6 @@ export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
         />
       ))}
 
-      {/* Settlement categories — lent_settled / borrow_repaid */}
-      {settlementCats.length > 0 && (
-        <View style={styles.settlementSection}>
-          <Text style={styles.settlementSectionLabel}>SETTLEMENTS</Text>
-          {settlementCats.map((cat) => {
-            const active = selectedCategoryId === cat.id;
-            return (
-              <TouchableOpacity
-                key={cat.id}
-                style={[
-                  styles.parentRow,
-                  styles.settlementRow,
-                  active && {
-                    borderWidth: 1.5,
-                    borderColor: colors.success + '66',
-                    backgroundColor: colors.success + '10',
-                  },
-                ]}
-                onPress={() => onSelectSettlement(cat.id)}
-                activeOpacity={0.72}
-              >
-                <Text style={styles.rowEmoji}>{cat.emoji}</Text>
-                <View style={styles.rowMid}>
-                  <Text
-                    style={[
-                      styles.rowLabel,
-                      active && { color: colors.success, fontWeight: '700' },
-                    ]}
-                  >
-                    {cat.name}
-                  </Text>
-                  <Text style={styles.lbHint}>Links to person · tracks balance</Text>
-                </View>
-                {active && (
-                  <Text style={{ color: colors.success, fontWeight: '800' }}>✓</Text>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
     </>
   );
 };
@@ -387,6 +362,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   canSplit,
   isSplitTxn,
   categoryLocked = false,
+  txnType,
   linkedPerson,
   onEditPerson,
   onPressSplit,
@@ -537,8 +513,8 @@ const CategoryPickerModal: React.FC<Props> = ({
                   else if (onSelectTwoTier) onSelectTwoTier(parent.label, child.label);
                   else onSelectCategory(parent.id);
                 }}
-                onSelectSettlement={(id) => (onSelectLentBorrow ? onSelectLentBorrow(id) : onSelectCategory(id))}
                 onSelectCategory={onSelectCategory}
+                txnType={txnType}
               />
             </ScrollView>
             </>

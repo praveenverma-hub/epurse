@@ -34,6 +34,7 @@ import { INPUT_LIMITS, sanitizeName, sanitizeAmount } from '../utils/validation'
 import { colors, radius, spacing, typography, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree, useCategoryMaps } from '../hooks/useCategoryTree';
+import { useLbChildAllowed } from '../hooks/useSettlePeople';
 import PrimaryButtonBase from '../components/PrimaryButton';
 import SheetCloseButton from '../components/SheetCloseButton';
 import DateField from '../components/DateField';
@@ -246,6 +247,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const categoryMaps = useCategoryMaps();   // custom-aware legacy lookup maps
   const categories  = useEPurseStore((s: any) => s.categories);
   const accounts    = useEPurseStore((s: any) => s.accounts);
+  const accountTipDismissed = useEPurseStore((s: any) => s.accountTipDismissed) as boolean;
+  const dismissAccountTip = useEPurseStore((s: any) => s.dismissAccountTip) as () => void;
   const addTransaction  = useEPurseStore((s: any) => s.addTransaction);
   const updateTransaction = useEPurseStore((s: any) => s.updateTransaction);
   const setTransactionSplit = useEPurseStore((s: any) => s.setTransactionSplit);
@@ -426,6 +429,13 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
    * the page to compute shares: the mandatory fields — a non-zero amount and a merchant label. Category is
    * optional, so it doesn't gate this (an uncategorised entry splits fine).
    */
+  // Lend/borrow options by the Expense/Income tab, and a settlement only with someone to settle with.
+  const lbAllowed = useLbChildAllowed(type, editTxn?.categoryId);
+  const pickTree = useMemo(
+    () => categoryTree.map((p) => ({ ...p, children: p.children.filter((c) => lbAllowed(c.label)) })),
+    [categoryTree, lbAllowed],
+  );
+
   const splitReady =
     canSplitHere &&
     (parseFloat(amount) || 0) > 0 &&
@@ -1309,6 +1319,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
                 onChange={setAccountId}
                 noneLabel={unlinkedOk ? LB_NO_ACCOUNT : undefined}
                 accentColor={theme.primary}
+                emptyOffer={!isEdit && !accountTipDismissed ? {
+                  onAdd: () => navigation.navigate('AccountForm'),
+                  onDismiss: dismissAccountTip,
+                } : undefined}
               />
               ) : null}
 
@@ -1682,6 +1696,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
             {!isEdit && <LinkContactModal
               visible={lbPickerOpen}
               categoryId={legacyCategoryId}
+              amount={parseFloat(amount) || 0}
               onConfirm={(contactInfo: any) => {
                 setLbPickerOpen(false);
                 submit(() => commitTransaction({
@@ -1722,7 +1737,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {categoryTree.map((parent) => (
+              {pickTree.map((parent) => (
                 <AddTxnParentRow
                   key={parent.id}
                   parent={parent}

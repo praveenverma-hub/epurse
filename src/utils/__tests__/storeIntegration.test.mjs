@@ -5189,6 +5189,25 @@ console.log('\n— OLD-INSTALL data under the Oct-10-26 LB changes —');
   check('new entries work on top of old data (books, joins the same person)', !!r && G().getPersonBalances().length === 1 && G().accounts[0].balance === 4850, `${G().getPersonBalances().length} ${G().accounts[0].balance}`);
 }
 
+console.log('\n— A flat category change rewrites the picker labels too (Oct-15-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const { parentCatIdForTxn } = await import(`${PROJECT_ROOT}/src/constants/twoTierCategories.ts`);
+  const now = new Date().toISOString();
+  useStore.setState({
+    accounts: [{ id: 'a1', name: 'HDFC', type: 'Bank Account', balance: 5000 }],
+    transactions: [{ id: 't1', amount: 300, type: 'debit', categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants', accountId: 'a1', createdAt: now, source: 'sms' }],
+  });
+  G().addLentBorrowed({ kind: 'borrowed', person: 'Rohit', amount: 300 });
+  const t = () => G().transactions[0];
+  G().updateTransactionCategoryWithContact('t1', 'borrow_repaid', { person: 'Rohit' });
+  check('tagged Repaid: Transfers › Repaid, not still Food › Restaurants (it counted in Food\'s budget)',
+    t().parentCategory === 'Transfers' && t().childCategory === 'Repaid' && parentCatIdForTxn(t()) === 'transfers', `${t().parentCategory} › ${t().childCategory}`);
+  G().updateTransactionCategory('t1', 'shopping');
+  check('a flat re-pick takes its parent, with no stale child', t().parentCategory === 'Shopping' && !t().childCategory && parentCatIdForTxn(t()) === 'shopping', `${t().parentCategory} › ${t().childCategory}`);
+}
+
 console.log('\n— Person-tagged transactions are no longer locked (Oct-15-26) —');
 {
   reset();

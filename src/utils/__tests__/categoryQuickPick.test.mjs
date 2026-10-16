@@ -92,5 +92,32 @@ check('search: case-insensitive, trimmed', labels(searchCategories(tree, '  FUEL
 check('search: empty query → nothing', searchCategories(tree, '  ').length === 0);
 check('search: respects the limit', searchCategories(tree, 'a', 2).length === 2);
 
+console.log('\n— one category, three fields (Oct-15-26) —');
+{
+  const { categoryFieldsFor, fixStaleCategoryLabels, lbChildAllowed, parentCatIdForTxn } = await import(`${PROJECT_ROOT}/src/constants/twoTierCategories.ts`);
+  const J = JSON.stringify;
+  check('a settlement is a Transfers child', J(categoryFieldsFor('lent_settled')) === J({ categoryId: 'lent_settled', parentCategory: 'Transfers', childCategory: 'Received Back' })
+    && categoryFieldsFor('borrow_repaid').childCategory === 'Repaid');
+  check('a flat parent id → that parent, no child; cc_bill / other → no labels',
+    categoryFieldsFor('shopping').parentCategory === 'Shopping' && !categoryFieldsFor('shopping').childCategory
+    && !categoryFieldsFor('cc_bill').parentCategory && !categoryFieldsFor('other').parentCategory);
+  const stale = { categoryId: 'borrow_repaid', parentCategory: 'Food & Dining', childCategory: 'Restaurants' };
+  check('the bug: stale labels win — a Repaid counted as Food', parentCatIdForTxn(stale) === 'food');
+  const fixed = fixStaleCategoryLabels(stale);
+  check('v43 repair: labels follow the id → Transfers', fixed.childCategory === 'Repaid' && parentCatIdForTxn(fixed) === 'transfers', J(fixed));
+  check('…a consistent pick is left alone (and the same object)', fixStaleCategoryLabels({ categoryId: 'food', parentCategory: 'Food & Dining', childCategory: 'Restaurants' }).childCategory === 'Restaurants');
+  const custom = { categoryId: 'food', parentCategory: 'My Pets', childCategory: 'Vet' };
+  check('…and a custom parent is never touched', fixStaleCategoryLabels(custom) === custom);
+  const ok = (label, o) => lbChildAllowed(label, { owesMe: false, iOwe: false, ...o });
+  check('money out: Lent; Repaid only when I owe someone; never Borrowed / Received Back',
+    ok('Lent', { type: 'debit' }) && !ok('Repaid', { type: 'debit' }) && ok('Repaid', { type: 'debit', iOwe: true })
+    && !ok('Borrowed', { type: 'debit' }) && !ok('Received Back', { type: 'debit', owesMe: true }));
+  check('money in: Borrowed; Received Back only when someone owes me',
+    ok('Borrowed', { type: 'credit' }) && !ok('Received Back', { type: 'credit' }) && ok('Received Back', { type: 'credit', owesMe: true }) && !ok('Lent', { type: 'credit' }));
+  check('what the transaction already is stays shown', ok('Received Back', { type: 'credit', current: 'lent_settled' }));
+  check('direction unknown: still no settlement without a balance', ok('Lent', {}) && !ok('Repaid', {}) && ok('Repaid', { iOwe: true }));
+  check('other categories are never filtered', ok('Restaurants', { type: 'credit' }) && ok('P2P Transfer', { type: 'debit' }));
+}
+
 console.log(`\n${C.bold}${fail ? C.red : C.green}${pass}/${pass + fail} passed${C.reset}`);
 process.exit(fail ? 1 : 0);

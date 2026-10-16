@@ -15,7 +15,7 @@
 // rule falls back to a generic bucket for its `kind`.
 // =============================================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 
 import { useEPurseStore } from '../store/ePurseStore';
@@ -30,6 +30,7 @@ import { hasAutoRule, goalAutoRule, ruleMatchesTxn } from '../utils/goalPlan';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
+import { defaultAccountId } from '../utils/defaultAccount';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { hapticLight } from '../utils/haptics';
 import { useToast } from './Toast';
@@ -103,7 +104,8 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
   const { submit } = useSubmitGuard();
   const categoryMaps = useCategoryMaps();
 
-  const accounts = useEPurseStore((s: any) => s.accounts);
+  const allAccounts = useEPurseStore((s: any) => s.accounts) as any[];
+  const accounts = useMemo(() => allAccounts.filter((a) => !a.archived), [allAccounts]);
   const addTransaction = useEPurseStore((s: any) => s.addTransaction);
   const addGoalContribution = useEPurseStore((s: any) => s.addGoalContribution);
   const getGoalLifetimeSaved = useEPurseStore((s: any) => s.getGoalLifetimeSaved);
@@ -117,7 +119,7 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
   useEffect(() => {
     if (!goal) return;
     setFundText('');
-    setFundAccountId(accounts[0]?.id ?? null);
+    setFundAccountId(defaultAccountId(accounts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goal?.id]);
 
@@ -136,10 +138,6 @@ const GoalFundModal: React.FC<Props> = ({ goal, onClose }) => {
   const confirmFund = () => submit(() => {
     const amt = parseAmount(fundText);
     if (!goal || amt <= 0) { onClose(); return; }
-    if (!fundAccountId) {
-      toast.error('Add an account first', 'You need at least one account to add this against.');
-      return;
-    }
     const short = cashShortfall(accounts.find((a: any) => a.id === fundAccountId), amt);
     if (short != null) {
       toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));

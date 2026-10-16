@@ -185,6 +185,14 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Accounts & Balances
 
 **Done**
+- **Oct-16-26: accounts are OPTIONAL — no form blocks without one** (user: "totally up to user if they add").
+  With no live accounts the Account row stays hidden and entries save with `accountId: null` (Add/Edit Txn,
+  Group Expense, LB form + entry edit — already so). Fixed the outliers: `GoalFundModal` no longer blocks with
+  "Add an account first" (and now ignores archived accounts, defaults to primary); person Settle
+  (`LbPersonScreen`) and group borrow Settle (`GroupDetailScreen`) skip the empty picker for a plain ledger-only confirm.
+  Soft nudge, Add Txn only (not modals): `AccountField.emptyOffer` → "Account · Add" row (opens AccountForm, new
+  account auto-primary so it's picked on return) + ✕ that hides it for good (`accountTipDismissed`, on backup
+  allow-list). LB form: with no accounts the Note is an inline input (no + toggle row). "No Accounts Yet" title case.
 - **Oct-15-26: Cash can't go below ₹0** (user: "only a credit card goes negative"). `utils/cashBalance.ts`
   `cashShortfall` checked where the USER spends from Cash — Add/Edit Transaction (plain, split, group I pay),
   Lent/Borrowed form (money out), entry edit, person Settle and group Settle pickers (picker stays open),
@@ -1844,6 +1852,18 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Lent/Borrowed & Splits
 
 **Done**
+- **Oct-15-26: category refactor — settlements under Transfers.** FIXED (found via the user's "picker shows
+  another category AND Received back ticked"): a flat category write (tag as a settlement, cc_bill, a plain
+  re-pick) changed only `categoryId` and left the old picker labels — which WIN in `parentCatIdForTxn`, so a
+  Repaid tagged on a Food › Restaurants txn still counted in Food's budget, spend rules and insights (tested).
+  Now every flat write sets all three fields (`withFlatCategory` / `categoryFieldsFor`); store **v43**
+  re-derives stale labels (`fixStaleCategoryLabels`, custom parents untouched; backup STORE_VERSION 43).
+  Transfers now holds Lent · Borrowed · **Received Back** · **Repaid** (+ P2P, Self); the separate Settlements
+  section is gone. Options follow the money (`lbChildAllowed` / `useLbChildAllowed`): out → Lent, Repaid only
+  if I owe someone; in → Borrowed, Received Back only if someone owes me; the current one always shows —
+  in the category sheet, Manage (list + search) and the Add form. Person picker warns when a settlement is
+  more than what's open ("The other ₹300 will show as you owing Rohit" — `settleExtra`). Tests: store +2,
+  categoryQuickPick +11, lbEntry +6, storage pinned to a v41 install.
 - **Oct-15-26: settle/lend transactions no longer locked** (user: "if someone settles for the wrong person?").
   Was: tagging a bank SMS as Received back / Repaid locked its category, the ledger refused to edit or
   delete its row, and an unused `relinkLentBorrowedEntry` had no button — a wrong person was unfixable

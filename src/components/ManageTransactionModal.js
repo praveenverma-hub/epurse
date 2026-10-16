@@ -12,7 +12,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import { useEPurseStore } from '../store/ePurseStore';
 import { DIVIDER_W, radius, readableOn, spacing, typography } from '../constants/theme';
-import { LB_CHILD_LABEL_TO_ID, LB_ALL_CATS, LB_SETTLEMENT_IDS, twoTierToLegacyCatId } from '../constants/twoTierCategories';
+import { LB_CHILD_LABEL_TO_ID, LB_ALL_CATS, twoTierToLegacyCatId } from '../constants/twoTierCategories';
 import { CategoryTreeList } from './CategoryPickerModal';
 import { useFocusBorder } from './FormField';
 import { INPUT_LIMITS } from '../utils/validation';
@@ -23,6 +23,7 @@ import { formatCurrency } from '../utils/format';
 import { applyManageDraft, createManageDraft, manageDraftChanged } from '../utils/manageTransactionDraft';
 import { setReviewFlowDraft } from '../utils/reviewFlowDraft';
 import { txnAccountLabel } from '../utils/txnCardModel';
+import { useLbChildAllowed } from '../hooks/useSettlePeople';
 
 // A fresh draft per opening. Closing never writes to the ledger.
 const GROUP_TONE = '#A8409F';
@@ -125,11 +126,13 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
       allow: (p, c) => !LB_CHILD_LABEL_TO_ID[c.label] && (txn.type === 'credit' || p.label !== 'Income'),
     });
   }, [tree, others, suggest, txn]);
-  // Settlements + Credit Card Bill aren't tree children — searchable by name.
+  // Credit Card Bill isn't a tree child — searchable by name. (Settlements are Transfers
+  // children now, found like any other.)
   const specials = useMemo(() => [
-    ...categories.filter((item) => LB_SETTLEMENT_IDS.has(item.id)),
     categories.find((item) => item.id === 'cc_bill') || { id: 'cc_bill', name: 'Credit Card Bill', emoji: '💳' },
   ], [categories]);
+  // Same rule as the full list: lend/borrow options by direction and open balances.
+  const lbAllowed = useLbChildAllowed(txn.type, txn.categoryId);
   // A pick made via search / the full list joins the chips (front), so it shows as selected.
   const draftParent = tree.find((item) => item.label === draft.parentCategory);
   const draftChild = draftParent?.children.find((c) => c.label === draft.childCategory);
@@ -145,7 +148,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
   const typedSuggestion = q ? suggest(q) : null;
   const typedPick = typedSuggestion ? tree.find((p) => p.label === typedSuggestion.parentCategory) : null;
   const typedChild = typedPick?.children.find((c) => c.label === typedSuggestion.childCategory);
-  const nameMatches = q ? searchCategories(tree, q, SEARCH_MAX - specialResults.length) : [];
+  const nameMatches = q ? searchCategories(tree, q, SEARCH_MAX).filter((r) => lbAllowed(r.child.label)).slice(0, SEARCH_MAX - specialResults.length) : [];
   const typedExtra = typedChild && !nameMatches.some((r) => r.parent.label === typedPick.label && r.child.label === typedChild.label)
     ? [{ parent: typedPick, child: typedChild }] : [];
   const results = [...nameMatches.slice(0, SEARCH_MAX - specialResults.length - typedExtra.length), ...typedExtra];
@@ -324,8 +327,8 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
                   selectedParent={draft.parentCategory}
                   selectedChild={draft.childCategory}
                   onSelectTwoTier={chooseChild}
-                  onSelectSettlement={chooseSpecial}
                   onSelectCategory={chooseSpecial}
+                  txnType={txn.type}
                 />
               </> : panel === 'group' ? <>
                 {/* Same list as the standalone Add to Group sheet. "No Group" only once there's a group to leave. */}

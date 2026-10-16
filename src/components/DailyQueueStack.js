@@ -661,6 +661,7 @@ const DailyQueueStack = () => {
         isIgnored={!!pickerTxn?.isIgnored}
         canSplit={!!pickerTxn && canSplitTransaction(pickerTxn)}
         isSplitTxn={!!pickerTxn?.isSplit}
+        txnType={pickerTxn?.type}
         categoryLocked={lbTagLocked(pickerTxn, lentBorrowed)}
         currentGroupId={pickerTxn?.groupId || null}
         onSelectCategory={handleSelectCategory}
@@ -687,6 +688,7 @@ const DailyQueueStack = () => {
       <LinkContactModal
         visible={!!lbLinkData}
         categoryId={lbLinkData?.categoryId}
+        amount={lbLinkData?.txn?.amount}
         onConfirm={handleLinkContact}
         onClose={handleLbClose}
       />

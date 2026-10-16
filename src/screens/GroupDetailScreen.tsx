@@ -110,6 +110,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const lentBorrowed = useEPurseStore((s: any) => s.lentBorrowed) as any[];
   const categories = useEPurseStore((s: any) => s.categories) as any[];
   const accounts = useEPurseStore((s: any) => s.accounts) as any[];
+  const liveAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
   const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
   const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => any[];
   const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
@@ -366,7 +367,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   });
 
   const handleSettle = (pb: GroupBalanceRow) => {
-    if (pb.net < 0) { setSettleTarget(pb); return; }
+    // No accounts → nothing to repay from, so the plain ledger-only confirm below.
+    if (pb.net < 0 && liveAccounts.length) { setSettleTarget(pb); return; }
     setConfirm({
       title: 'Settle up',
       message:
@@ -864,6 +866,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         isRefund={!!categoryTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(categoryTxn?.isSplit || categoryTxn?.isSplitMemo)}
+        txnType={categoryTxn?.type}
         categoryLocked={lbTagLocked(categoryTxn, lentBorrowed)}
         onSelectCategory={(categoryId: string) => {
           if (categoryId === 'cc_bill') {
@@ -969,7 +972,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         subtitle={settleTarget
           ? `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
           : undefined}
-        accounts={accounts}
+        accounts={liveAccounts}
         onSelect={(accountId: string) => {
           if (settleTarget) {
             // Repaying from Cash can't take it below ₹0 — stay in the picker to choose again.

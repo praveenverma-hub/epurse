@@ -1100,6 +1100,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         isRefund={!!activeTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(activeTxn?.isSplit || activeTxn?.isSplitMemo)}
+        txnType={activeTxn?.type}
         categoryLocked={lbTagLocked(activeTxn, lentBorrowed)}
         linkedPerson={linkedLbEntry?.person || null}
         onEditPerson={linkedLbEntry ? () => {
@@ -1141,6 +1142,7 @@ const TransactionsScreen = ({ navigation, route }) => {
       <LinkContactModal
         visible={!!lbLinkTxn}
         categoryId={lbLinkTxn?.categoryId}
+        amount={lbLinkTxn?.txn?.amount}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
           // Change Person moves the existing row; otherwise this tags the transaction.

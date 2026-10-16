@@ -914,6 +914,7 @@ const DashboardScreen = ({ navigation }) => {
         visible={!!activeTxn}
         categoryOnly
         categories={categories}
+        txnType={activeTxn?.type}
         categoryLocked={lbTagLocked(activeTxn, lentBorrowedAll)}
         linkedPerson={linkedLbEntry?.person || null}
         onEditPerson={linkedLbEntry ? () => {
@@ -984,6 +985,7 @@ const DashboardScreen = ({ navigation }) => {
       <LinkContactModal
         visible={!!lbLinkTxn}
         categoryId={lbLinkTxn?.categoryId}
+        amount={lbLinkTxn?.txn?.amount}
         onConfirm={(contactInfo) => {
           if (!lbLinkTxn) return;
           // Change Person moves the existing row; otherwise this tags the transaction.

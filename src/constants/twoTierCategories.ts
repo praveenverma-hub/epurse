@@ -134,6 +134,10 @@ export const PARENT_CATEGORIES: ParentCat[] = [
       { id: 'self',      label: 'Self',         emoji: '🔄', legacyId: 'self' },
       { id: 'lent',      label: 'Lent',         emoji: '🤝', legacyId: 'lent' },
       { id: 'borrowed',  label: 'Borrowed',     emoji: '🧾', legacyId: 'borrowed' },
+      // Settlements live here too (Oct-15-26 — were a separate picker section that kept
+      // its own selection): the picker now matches how they count, as Transfers.
+      { id: 'received_back', label: 'Received Back', emoji: '✅', legacyId: 'lent_settled' },
+      { id: 'repaid',        label: 'Repaid',        emoji: '💳', legacyId: 'borrow_repaid' },
     ],
   },
   {
@@ -232,8 +236,6 @@ export const buildLegacyMaps = (tree: ParentCat[]): CategoryMaps => {
   // Aliases / flat categories that don't live in the tree.
   parentLabelToId['Unassigned'] = 'other';
   Object.assign(legacyToParentId, {
-    lent_settled:  'transfers',
-    borrow_repaid: 'transfers',
     // A credit-card bill payment is a bill, not a money-movement transfer — it
     // just happens to be rendered via its own "CARD" section in the picker
     // (like the settlement rows above) rather than as a normal tree child,
@@ -259,12 +261,49 @@ export const LEGACY_TO_PARENT_ID    = DEFAULT_MAPS.legacyToParentId;
 // ─── Lent/Borrow + settlement helper sets (flat legacy ids) ──────────────────
 /** All lent/borrow legacy categoryIds (the "LB" family). */
 export const LB_ALL_CATS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
-/** Settlement legacy ids shown as a flat section (not in the tree). */
+/** The two settlement kinds (Transfers › Received Back / Repaid). */
 export const LB_SETTLEMENT_IDS = new Set(['lent_settled', 'borrow_repaid']);
 /** Two-tier child LABEL → legacy id for the lent/borrow contact-link intercept. */
-export const LB_CHILD_LABEL_TO_ID: Record<string, string> = { Lent: 'lent', Borrowed: 'borrowed' };
+export const LB_CHILD_LABEL_TO_ID: Record<string, string> = {
+  Lent: 'lent', Borrowed: 'borrowed', 'Received Back': 'lent_settled', Repaid: 'borrow_repaid',
+};
 /** Two-tier child labels that cannot be split (they become debt records). */
-export const SPLIT_BLOCKED_CHILD_LABELS = new Set(['Lent', 'Borrowed']);
+export const SPLIT_BLOCKED_CHILD_LABELS = new Set(Object.keys(LB_CHILD_LABEL_TO_ID));
+
+/**
+ * The lend/borrow options that make sense for a transaction: money OUT can be Lent, or
+ * Repaid when I owe someone; money IN can be Borrowed, or Received Back when someone owes
+ * me. One already on the transaction always stays (it's what's selected).
+ */
+export function lbChildAllowed(
+  label: string, { type, owesMe, iOwe, current }: { type?: string; owesMe: boolean; iOwe: boolean; current?: string },
+): boolean {
+  const id = LB_CHILD_LABEL_TO_ID[label];
+  if (!id || id === current) return true;
+  const out = type ? type !== 'credit' : null;   // null: direction unknown
+  if (id === 'lent') return out !== false;
+  if (id === 'borrowed') return out !== true;
+  if (id === 'borrow_repaid') return out !== false && iOwe;
+  return out !== true && owesMe;   // lent_settled
+}
+
+/**
+ * The full category for a flat legacy id — every category write goes through this, so a
+ * transaction's three fields never disagree: 'lent_settled' → Transfers › Received Back,
+ * 'shopping' → Shopping (no child), 'cc_bill' / 'other' → no labels. A stale pair left by a
+ * flat write used to WIN (parentCatIdForTxn reads the labels first): a Repaid tagged on a
+ * Food › Restaurants txn still counted as Food in budgets and spend rules.
+ */
+export function categoryFieldsFor(categoryId: string, tree: ParentCat[] = PARENT_CATEGORIES): {
+  categoryId: string; parentCategory: string | undefined; childCategory: string | undefined;
+} {
+  for (const p of tree) {
+    const c = p.children.find((x) => x.legacyId === categoryId);
+    if (c) return { categoryId, parentCategory: p.label, childCategory: c.label };
+  }
+  const p = tree.find((x) => x.legacyId === categoryId);
+  return { categoryId, parentCategory: p?.label, childCategory: undefined };
+}
 
 // ─── Budgetable parents ──────────────────────────────────────────────────────
 // Money-movement parents (Transfers, Income) can't hold a budget; everything else
@@ -325,3 +364,18 @@ export const parentCatIdForTxn = (
   if (t.parentCategory && maps.parentLabelToId[t.parentCategory]) return maps.parentLabelToId[t.parentCategory];
   return maps.legacyToParentId[t.categoryId ?? ''] || 'other';
 };
+
+/**
+ * Store v43 repair: a transaction whose built-in labels name a different category than
+ * its `categoryId` — left by flat writes before Oct-15-26 (see categoryFieldsFor). The id
+ * was the later choice, so the labels are re-derived from it. A custom parent is left alone.
+ */
+export function fixStaleCategoryLabels<T extends { categoryId?: string; parentCategory?: string; childCategory?: string }>(t: T): T {
+  if (!t?.parentCategory || !t.categoryId || !DEFAULT_MAPS.parentLabelToId[t.parentCategory]) return t;
+  if (twoTierToLegacyCatId(t.parentCategory, t.childCategory) === t.categoryId) return t;
+  const f = categoryFieldsFor(t.categoryId);
+  const next = { ...t };
+  if (f.parentCategory) next.parentCategory = f.parentCategory; else delete next.parentCategory;
+  if (f.childCategory) next.childCategory = f.childCategory; else delete next.childCategory;
+  return next;
+}

@@ -48,3 +48,26 @@ export function openBalancePeople(people: LbPerson[], kind: string | null | unde
   if (!sign) return [];
   return people.filter((p) => sign * p.net >= OPEN_MIN).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
 }
+
+const last10 = (p?: string | null) => (p || '').replace(/\D/g, '').slice(-10);
+
+/** The ledger person a picked contact / name is — same contact, number or name — or null. */
+export function findLbPerson(people: LbPerson[], who: { contactId?: string | null; phone?: string | null; name?: string | null }): LbPerson | null {
+  const ph = last10(who.phone);
+  const name = (who.name || '').trim().toLowerCase();
+  return people.find((p) => (who.contactId && p.contactId === who.contactId) || (ph.length === 10 && last10(p.phone) === ph))
+    ?? people.find((p) => !!name && (p.person || '').trim().toLowerCase() === name)
+    ?? null;
+}
+
+/**
+ * A settlement bigger than what's open with them flips who owes whom by the rest
+ * (Rohit owed ₹500, he paid ₹800 → you owe Rohit ₹300). null when it fits.
+ */
+export function settleExtra(kind: string | null | undefined, amount: number, person: LbPerson | null): { open: number; extra: number } | null {
+  const sign = kind === 'lent_settled' ? 1 : kind === 'borrow_repaid' ? -1 : 0;
+  if (!sign || !(amount > 0)) return null;
+  const open = Math.max(0, sign * (person?.net ?? 0));
+  const extra = Math.round((amount - open) * 100) / 100;
+  return extra >= OPEN_MIN ? { open, extra } : null;
+}

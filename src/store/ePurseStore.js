@@ -37,6 +37,8 @@ import {
   buildLegacyMaps,
   findParentById,
   LB_ALL_CATS,
+  categoryFieldsFor,
+  fixStaleCategoryLabels,
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
   CREDIT_ONLY_PARENT_IDS,
 } from '../constants/twoTierCategories';
@@ -590,6 +592,18 @@ const clearPlainSplit = (txn) => {
 };
 
 /**
+ * A FLAT category write (a legacy id, no picker labels): sets the id AND its two-tier labels
+ * together (categoryFieldsFor). Leaving the old labels made them win over the new id.
+ */
+const withFlatCategory = (t, categoryId) => {
+  const f = categoryFieldsFor(categoryId);
+  const next = { ...t, categoryId };
+  if (f.parentCategory) next.parentCategory = f.parentCategory; else delete next.parentCategory;
+  if (f.childCategory) next.childCategory = f.childCategory; else delete next.childCategory;
+  return next;
+};
+
+/**
  * A transaction leaving its group for good (the group is deleted here, or the expense is
  * deleted on the server). Someone else paid, or a synced "you paid" never linked to an
  * account: no money of mine moved, so it goes (`txn` null) — kept, it would count as my
@@ -660,7 +674,7 @@ const bookCcPaymentSource = (state, sourceAccountId, amount, nowIso) => {
     accounts: state.accounts,
     transactions: state.transactions.map((t) =>
       t.id === existing.id
-        ? { ...t, categoryId: 'cc_bill', userEditedCategory: true, isSplit: false, splitWith: [] }
+        ? { ...withFlatCategory(t, 'cc_bill'), userEditedCategory: true, isSplit: false, splitWith: [] }
         : t,
     ),
   };
@@ -884,7 +898,7 @@ const bookLbTxn = (state, accountId, kind, amount, personName, nowIso) => {
     id: txnId,
     amount,
     type: LB_MONEY_OUT.has(kind) ? TRANSACTION_TYPES.DEBIT : TRANSACTION_TYPES.CREDIT,
-    categoryId: kind,
+    ...categoryFieldsFor(kind),
     accountId,
     accountType: acct.type,
     accountMask: acct.mask || null,
@@ -1691,6 +1705,8 @@ export const useEPurseStore = create(
       welcomeReviewSeen: false,
       // User dismissed the dashboard "Plan your month" CTA banner (the ✕). Hides it.
       planBannerDismissed: false,
+      // User closed the Add Transaction "Account · Add" row shown while they have no accounts.
+      accountTipDismissed: false,
 
       // Two-tier user-defined automation rules — keyed by SCREAMING_SNAKE_CASE merchant.
       userCustomRules: {},
@@ -1749,6 +1765,7 @@ export const useEPurseStore = create(
       setWelcomeReviewSeen: (v = true) => set({ welcomeReviewSeen: !!v }),
       /** User dismissed the dashboard plan-CTA banner. */
       dismissPlanBanner: () => set({ planBannerDismissed: true }),
+      dismissAccountTip: () => set({ accountTipDismissed: true }),
       setSmsPermissionGranted: (v) => set({ smsPermissionGranted: !!v }),
       setContactsPermissionGranted: (v) => set({ contactsPermissionGranted: !!v }),
 
@@ -5734,8 +5751,8 @@ export const useEPurseStore = create(
           return {
             transactions: s.transactions.map((t) => {
               if (t.id !== id) return t;
-              if (cleared) return { ...t, categoryId, ...cleared.patch };
-              return untagLbFields({ ...t, categoryId }, categoryId);
+              if (cleared) return { ...withFlatCategory(t, categoryId), ...cleared.patch };
+              return untagLbFields(withFlatCategory(t, categoryId), categoryId);
             }),
             // Dropping the split un-memos it → the outflow is mine again.
             accounts: cleared?.restoreAccountId
@@ -5766,8 +5783,8 @@ export const useEPurseStore = create(
             return {
               transactions: s.transactions.map((t) => {
                 if (t.id !== id) return t;
-                if (cleared) return { ...t, categoryId, ...cleared.patch };
-                return untagLbFields({ ...t, categoryId }, categoryId);
+                if (cleared) return { ...withFlatCategory(t, categoryId), ...cleared.patch };
+                return untagLbFields(withFlatCategory(t, categoryId), categoryId);
               }),
               accounts: cleared?.restoreAccountId
                 ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
@@ -5805,7 +5822,7 @@ export const useEPurseStore = create(
             transactions: s.transactions.map((t) =>
               t.id === id
                 // A booked one is named after its person ("Repaid Rohit") — keep it true.
-                ? { ...t, ...splitClear, categoryId, lbLocked: true, ...(t.lbBooked ? { merchant: lbTxnMerchant(categoryId, person) } : {}) }
+                ? { ...withFlatCategory(t, categoryId), ...splitClear, lbLocked: true, ...(t.lbBooked ? { merchant: lbTxnMerchant(categoryId, person) } : {}) }
                 : t
             ),
             // Was a memo → it's a real outflow of mine again now it's LB-tagged.
@@ -5998,7 +6015,7 @@ export const useEPurseStore = create(
           set({
             transactions: s.transactions.map((t) => (t.id === match.id
               // Recording it IS the review — don't leave it waiting in the daily queue.
-              ? { ...t, categoryId: entry.kind, lbLocked: true, userEditedCategory: true, isReviewed: true }
+              ? { ...withFlatCategory(t, entry.kind), lbLocked: true, userEditedCategory: true, isReviewed: true }
               : t)),
             lentBorrowed: [{ ...row, sourceTxnId: match.id }, ...s.lentBorrowed],
           });
@@ -6884,6 +6901,7 @@ export const useEPurseStore = create(
           showMonthlyRecap: true,
           recapMonthHandled: null,
           monthlyRecapCardDismissed: null,
+          accountTipDismissed: false,
           pendingMonthlyRecap: null,
           recapOptions: RECAP_OPTION_DEFAULTS,
           reminders: [],
@@ -7020,6 +7038,7 @@ export const useEPurseStore = create(
           xp: 0,
           welcomeReviewSeen: false,
           planBannerDismissed: false,
+          accountTipDismissed: false,
           reviewStreak: { current: 0, best: 0, lastReviewDate: null },
         });
       },
@@ -7029,7 +7048,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 42,
+      version: 43,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -7824,6 +7843,13 @@ export const useEPurseStore = create(
           state = { ...state, transactions: strip(state.transactions), archivedTransactions: strip(state.archivedTransactions) };
         }
 
+        // v43 (Oct-15-26): a flat category change (tagging a settlement, cc_bill, a plain
+        // re-pick) left the OLD picker labels, which won — a Repaid stayed in Food's budget.
+        if (version < 43) {
+          const fix = (list) => (list || []).map(fixStaleCategoryLabels);
+          state = { ...state, transactions: fix(state.transactions), archivedTransactions: fix(state.archivedTransactions) };
+        }
+
         return state;
       },
       // SQLite + MMKV, migrated once from AsyncStorage (docs/STORAGE_MIGRATION.md).
@@ -7903,6 +7929,7 @@ export const useEPurseStore = create(
         userCustomRules: state.userCustomRules,
         welcomeReviewSeen: state.welcomeReviewSeen ?? false,
         planBannerDismissed: state.planBannerDismissed ?? false,
+        accountTipDismissed: state.accountTipDismissed ?? false,
         groups: state.groups ?? [],
         activeGroupZoneId: state.activeGroupZoneId ?? null,
         declinedAccountLinks: state.declinedAccountLinks ?? [],

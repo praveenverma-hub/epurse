@@ -180,16 +180,8 @@ const LbPersonScreen = ({ route, navigation }) => {
   const lastActivityDate = displayEntries[0]?.date || null;
 
   // ── Settle the person's FULL net ────────────────────────────────────────────
-  // Either direction asks which account the money moved through (the picker IS the
-  // confirmation); "Not from an account" keeps it ledger-only.
-  const handleSettlePress = useCallback(() => {
-    if (!person || net === 0) return;
-    setSettleTarget(person);
-  }, [person, net]);
-
   /** Both committing exits of the settle picker — with an account, or ledger-only. */
-  const commitSettle = useCallback((accountId) => {
-    const target = settleTarget;
+  const commitSettle = useCallback((accountId, target = settleTarget) => {
     if (!target) return;
     // Repaying from Cash can't take it below ₹0 — the picker stays open to choose again.
     const short = target.net < 0 && accountId ? cashShortfall(accounts.find((a) => a.id === accountId), Math.abs(target.net)) : null;
@@ -205,6 +197,22 @@ const LbPersonScreen = ({ route, navigation }) => {
     );
     setSettleTarget(null);
   }, [settleTarget, settlePersonBalance, toast, freshNet, accounts]);
+
+  // Either direction asks which account the money moved through (the picker IS the
+  // confirmation); "Not from an account" keeps it ledger-only. No accounts at all →
+  // nothing to pick, so a plain confirm settles ledger-only (accounts are optional).
+  const handleSettlePress = useCallback(() => {
+    if (!person || net === 0) return;
+    if (accounts.some((a) => !a.archived)) { setSettleTarget(person); return; }
+    setConfirm({
+      title: 'Settle Up',
+      message: `${titleCaseName(person.person)} · ${formatCurrency(Math.abs(net))}`,
+      primaryText: 'Settle',
+      secondaryText: 'Cancel',
+      onSecondary: () => setConfirm(null),
+      onConfirm: () => { setConfirm(null); commitSettle(null, person); },
+    });
+  }, [person, net, accounts, commitSettle]);
 
   /**
    * Add a new row for THIS person, straight from their ledger — saves bouncing back
@@ -479,6 +487,7 @@ const LbPersonScreen = ({ route, navigation }) => {
       <LinkContactModal
         visible={!!moveEntry}
         categoryId={moveEntry?.kind}
+        amount={moveEntry?.amount}
         onConfirm={(contactInfo) => {
           const entry = moveEntry;
           setMoveEntry(null);

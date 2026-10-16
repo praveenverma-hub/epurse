@@ -28,7 +28,8 @@ import PrimaryButton from './PrimaryButton';
 import SheetCloseButton from './SheetCloseButton';
 import { fetchContactsForPicker } from '../services/contactsService';
 import { formatCurrency } from '../utils/format';
-import { useSettlePeople } from '../hooks/useSettlePeople';
+import { usePersonBalances, useSettlePeople } from '../hooks/useSettlePeople';
+import { findLbPerson, settleExtra } from '../utils/lbPeopleSearch';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,6 +74,7 @@ const looksLikePhone = (q) => /^[\d\s\+\-\(\)]{3,}$/.test(q.trim());
 const LinkContactModal = ({
   visible,
   categoryId,        // 'lent' | 'borrowed' | 'lent_settled' | 'borrow_repaid'
+  amount,            // the transaction's amount — warns when a settlement is more than what's open
   onConfirm,         // ({ person, phone, contactId }) => void
   onSkip,            // () => void
   onClose,           // () => void
@@ -81,6 +83,7 @@ const LinkContactModal = ({
   // Settling: who owes me / whom I owe, from the ledger (empty for a new lend or borrow).
   const settlePeople = useSettlePeople();
   const suggestions = useMemo(() => settlePeople(categoryId), [settlePeople, categoryId]);
+  const people = usePersonBalances();
   const [contacts, setContacts]           = useState([]);
   const [loading, setLoading]             = useState(false);
   const [query, setQuery]                 = useState('');
@@ -199,7 +202,22 @@ const LinkContactModal = ({
                 <Text style={styles.changeBtnText}>Change</Text>
               </TouchableOpacity>
             </View>
-          ) : (
+          ) : null}
+          {selected ? (() => {
+            // More than what's open with them flips who owes whom — say so before Confirm.
+            const over = settleExtra(categoryId, Number(amount) || 0, findLbPerson(people, { contactId: selected.id, phone: selected.phone, name: selected.name }));
+            if (!over) return null;
+            const who = selected.name;
+            const flips = categoryId === 'lent_settled' ? `you owing ${who}` : `${who} owing you`;
+            return (
+              <Text style={[styles.overNote, { color: colors.warning }]}>
+                {over.open > 0
+                  ? `${categoryId === 'lent_settled' ? `${who} owes you` : `You owe ${who}`} ${formatCurrency(over.open)}. The other ${formatCurrency(over.extra)} will show as ${flips}.`
+                  : `Nothing is open with ${who}. All ${formatCurrency(over.extra)} will show as ${flips}.`}
+              </Text>
+            );
+          })() : null}
+          {selected ? null : (
             <>
               {/* ── Search input ── */}
               <View style={[styles.searchRow, { backgroundColor: searchFill(theme) }]}>
@@ -338,6 +356,7 @@ const LinkContactModal = ({
 // Styles
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
+  overNote: { fontSize: 12, fontWeight: '600', lineHeight: 17, marginTop: spacing.sm },
   backdrop: { flex: 1, backgroundColor: '#0006', justifyContent: 'flex-end' },
   dismissArea: { flex: 1 },
   sheet: {

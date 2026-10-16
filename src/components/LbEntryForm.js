@@ -365,7 +365,9 @@ const LbEntryForm = ({
           once asked for — most quick adds skip it. The account is primary-preselected;
           tapping it opens the account picker sheet, which renders INSIDE this form — on
           LbPersonScreen it nests in the add sheet's own Modal, like DateField's iOS
-          picker, never beside it (§8b). */}
+          picker, never beside it (§8b). No accounts → nothing to share the row with, so
+          the note is just an inline field. */}
+      {liveAccounts.length ? (
       <View style={styles.amountRow}>
         {/* Toggles the note field below. Closing KEEPS the text (it still saves), so a
             written note shows here as a preview with the canonical pencil; + when there's
@@ -387,25 +389,24 @@ const LbEntryForm = ({
             {!noteOpen && note.trim() ? note.trim() : 'Note'}
           </Text>
         </TouchableOpacity>
-        {liveAccounts.length ? (
-          <TouchableOpacity
-            style={styles.accountBtn}
-            onPress={() => setAccountsOpen(true)}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel={`${lbAccountFieldLabel(entryKind)}: ${selectedAccount?.name || LB_NO_ACCOUNT}`}
-            accessibilityHint="Opens the account list"
-          >
-            {/* One line, no icon — the other fields are plain text too. */}
-            <Text style={styles.accountText} numberOfLines={1}>
-              <Text style={styles.accountLabel}>{lbAccountFieldLabel(entryKind)}  </Text>
-              <Text style={styles.accountValue}>{selectedAccount?.name || 'No Account'}</Text>
-            </Text>
-            <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
-          </TouchableOpacity>
-        ) : null}
+        <TouchableOpacity
+          style={styles.accountBtn}
+          onPress={() => setAccountsOpen(true)}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel={`${lbAccountFieldLabel(entryKind)}: ${selectedAccount?.name || LB_NO_ACCOUNT}`}
+          accessibilityHint="Opens the account list"
+        >
+          {/* One line, no icon — the other fields are plain text too. */}
+          <Text style={styles.accountText} numberOfLines={1}>
+            <Text style={styles.accountLabel}>{lbAccountFieldLabel(entryKind)}  </Text>
+            <Text style={styles.accountValue}>{selectedAccount?.name || 'No Account'}</Text>
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
+        </TouchableOpacity>
       </View>
-      {noteOpen ? (
+      ) : null}
+      {noteOpen || !liveAccounts.length ? (
         <TextInput
           value={note}
           onChangeText={(t) => setNote(t.slice(0, INPUT_LIMITS.NOTE_MAX))}
@@ -413,7 +414,8 @@ const LbEntryForm = ({
           placeholderTextColor={colors.textMuted}
           style={styles.input}
           maxLength={INPUT_LIMITS.NOTE_MAX}
-          autoFocus
+          // Focus only when the user opened it, not when it's simply always there.
+          autoFocus={noteOpen}
         />
       ) : null}
       <PrimaryButton

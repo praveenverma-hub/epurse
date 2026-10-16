@@ -2,7 +2,7 @@
 // LB person ledger row wording — each fact once (Oct-10-26)
 //     npm run test:lbEntry
 // =============================================================================
-import { suggestLbPeople, openBalancePeople } from '../lbPeopleSearch.ts';
+import { suggestLbPeople, openBalancePeople, findLbPerson, settleExtra } from '../lbPeopleSearch.ts';
 import { lbEntryTitle, lbEntryMeta, lbEntrySign, lbEntrySource, lbEntryTone, lbNoteText, lbEffectiveKind, lbAccountFieldLabel, lbToastTitle } from '../lbEntryDisplay.ts';
 
 let pass = 0, fail = 0;
@@ -65,6 +65,16 @@ check('repaid → people I owe', open('borrow_repaid') === 'Rohan', open('borrow
 check('settled people and rounding leftovers are left out', open('lent_settled', [{ personKey: 'x', person: 'X', net: 0.2 }, { personKey: 'y', person: 'Y', net: 0 }]) === '');
 check('a new lend or borrow suggests nobody', open('lent') === '' && open('borrowed') === '' && open(undefined) === '');
 check('balance keeps its sign (the row says who owes whom)', openBalancePeople(people, 'borrow_repaid')[0].net === -100);
+
+console.log('\n— settling more than is open —');
+const rohit = { personKey: 'a', person: 'Rohit Sharma', contactId: 'c1', phone: '+91 98765 43210', net: 500 };
+check('found by contact, number (any format) or name', findLbPerson([rohit], { contactId: 'c1' }) === rohit
+  && findLbPerson([rohit], { phone: '9876543210' }) === rohit && findLbPerson([rohit], { name: ' rohit sharma ' }) === rohit && findLbPerson([rohit], { name: 'Amit' }) === null);
+check('Rohit owed ₹500, paid ₹800 → ₹300 extra', JSON.stringify(settleExtra('lent_settled', 800, rohit)) === JSON.stringify({ open: 500, extra: 300 }));
+check('…₹500 or less fits (no warning)', settleExtra('lent_settled', 500, rohit) === null && settleExtra('lent_settled', 200, rohit) === null);
+check('nothing open → all of it flips', JSON.stringify(settleExtra('lent_settled', 800, null)) === JSON.stringify({ open: 0, extra: 800 }));
+check('repaying someone I owe: by the other sign', settleExtra('borrow_repaid', 150, { ...rohit, net: -100 })?.extra === 50 && settleExtra('borrow_repaid', 100, { ...rohit, net: -100 }) === null);
+check('not a settlement → no warning', settleExtra('lent', 800, rohit) === null);
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);
