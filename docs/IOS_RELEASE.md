@@ -14,7 +14,8 @@ Severity: **P0** = App Store blocker or the app doesn't work · **P1** = real bu
 ## P0 — blockers
 
 - [ ] **Google sign-in is mandatory, no Sign in with Apple** (Guideline 4.8, 5.1.1(v)).
-  `LoginGate.tsx:45` gates the whole app; onboarding (`OnboardingExperience.tsx:529`) can't finish without it;
+  `LoginGate.tsx:45` gates the whole app; onboarding's registration page is Google-only (since Oct-17-26 the
+  user's name also comes from Google — making Google optional means asking for a name again);
   login scope already asks `drive.file` (`googleAuth.ts:103`). **Decision needed:** make Google optional (ask only
   when the user turns on Drive backup / shared groups — fixes both guidelines) **or** add Sign in with Apple.
 - [ ] **No iOS Google OAuth client.** `backup/config.ts:32` `GOOGLE_IOS_CLIENT_ID = ''` → falls back to the Android

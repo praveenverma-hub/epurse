@@ -1,16 +1,15 @@
 // =============================================================================
 // GoogleSignInPanel — the ONE "Sign in with Google" UI, reused by LoginGate
-// (full mode: it's the only action on that screen, so it's the filled/gradient
-// PRIMARY button) and the onboarding registration page (compact mode: SECONDARY
-// there, outlined, since "Get Started" is that screen's actual primary action —
-// two filled CTAs stacked on one screen reads as neither being the point).
+// (full mode: icon + title + subtitle) and the onboarding registration page
+// (compact mode: the button alone, under that page's own title). Either way it's
+// the screen's only action, so it's the filled PRIMARY button.
 // =============================================================================
 import React from 'react';
-import { ActivityIndicator, Pressable, View, Text, StyleSheet } from 'react-native';
+import { Pressable, View, Text, StyleSheet } from 'react-native';
 import type { TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { radius, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
+import { radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { useGoogleSession } from '../hooks/useGoogleSession';
 import { IS_DEV_BUILD } from '../constants/buildVariant';
@@ -34,7 +33,7 @@ type Props = {
   title?: string;
   subtitle?: string;
   onSuccess?: (account: GoogleProfile) => void;
-  /** true = outlined secondary button, no icon/title/subtitle — for embedding beside another primary CTA. */
+  /** true = the button alone, no icon/title/subtitle — for a screen that has its own. */
   compact?: boolean;
   disabled?: boolean;
 };
@@ -72,34 +71,12 @@ const GoogleSignInPanel: React.FC<Props> = ({ title, subtitle, onSuccess, compac
     </View>
   ) : null;
 
-  const outlineButton = (
-    <Pressable
-      onPress={handlePress}
-      disabled={disabled || pending}
-      style={({ pressed }) => [
-        styles.outlineBtn,
-        { borderColor: theme.primary, opacity: disabled ? 0.5 : pressed ? 0.8 : 1 },
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel="Sign in with Google"
-    >
-      {pending ? (
-        <ActivityIndicator color={theme.primary} />
-      ) : (
-        <>
-          <Ionicons name="logo-google" size={18} color={theme.primary} />
-          <Text style={[styles.outlineBtnText, { color: theme.primary }]}>Sign In With Google</Text>
-        </>
-      )}
-    </Pressable>
-  );
-
   // In a dev build, the real button is hidden entirely — only the debug skip
   // below is shown, since real Google sign-in needs Cloud Console setup
   // (scopes, test users) that's easy to have broken mid-development and was
   // blocking work on everything else. IS_DEV_BUILD is false in preview/store
   // builds, where the real button always renders as normal.
-  const action = googleAccount ? connected : IS_DEV_BUILD ? null : compact ? outlineButton : (
+  const action = googleAccount ? connected : IS_DEV_BUILD ? null : (
     <PrimaryButton
       title="Sign In With Google"
       onPress={handlePress}
@@ -158,11 +135,6 @@ const styles = StyleSheet.create({
   },
   error: { ...typography.tiny, textAlign: 'center', fontWeight: '600', marginTop: spacing.sm },
   button: { width: '100%', marginTop: spacing.sm },
-  outlineBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
-    minHeight: BUTTON_H, borderRadius: radius.lg, borderWidth: 1.5, backgroundColor: 'transparent',
-  },
-  outlineBtnText: { fontSize: 16, fontWeight: '700' },
   connectedRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: spacing.sm, paddingVertical: spacing.sm,

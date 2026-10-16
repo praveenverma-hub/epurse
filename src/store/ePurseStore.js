@@ -10,7 +10,7 @@
 //   • lentBorrowed         — informal IOUs ("you lent ₹500 to Rohit")
 //   • smsAutoImport        — toggle for the live Android SMS listener
 //   • lastSmsSync          — timestamp of the last successful sync
-//   • userName             — collected during onboarding, shown on dashboard
+//   • userName             — from the Google sign-in (setGoogleAccount), editable in My Profile
 //   • hasOnboarded         — true after first-launch onboarding completes
 //   • smsPermissionGranted — true once OS-level SMS permission is granted
 //   • googleAccount        — { email, name, picture } | null, persisted for display
@@ -93,7 +93,7 @@ import { applyStatementPayment, statementRemaining } from '../utils/ccStatement'
 import { detectSubscriptions, getMerchantBubbles } from '../analytics/behavioralSelectors';
 import { locationKey } from '../utils/location';
 import { IS_STAGE_BUILD } from '../constants/buildVariant';
-import { INPUT_LIMITS } from '../utils/validation';
+import { INPUT_LIMITS, nameFromGoogle } from '../utils/validation';
 import { useNotificationStore } from './useNotificationStore';
 import {
   computeEqualSplit,
@@ -1776,8 +1776,16 @@ export const useEPurseStore = create(
 
       setHasOnboarded: (v) => set({ hasOnboarded: !!v }),
 
-      /** The ONE setter for Google identity — isLoggedIn always derives from it, can't desync. */
-      setGoogleAccount: (account) => set({ googleAccount: account || null, isLoggedIn: !!account }),
+      /**
+       * The ONE setter for Google identity — isLoggedIn always derives from it, can't desync.
+       * Also the only source of the user's name: filled from Google when empty, never over one
+       * already set (My Profile edit, restored backup).
+       */
+      setGoogleAccount: (account) => set((s) => ({
+        googleAccount: account || null,
+        isLoggedIn: !!account,
+        ...(account && !s.userName?.trim() ? { userName: nameFromGoogle(account) } : {}),
+      })),
       setSessionExpired: (v) => set({ sessionExpired: !!v }),
       setSyncAccount: (account) => set({ syncAccount: account || null }),
       setJustDeletedAccount: (v) => set({ justDeletedAccount: !!v }),
@@ -4632,54 +4640,39 @@ export const useEPurseStore = create(
       },
 
       /**
-       * Group-scoped settle: settle ONLY this group's portion of a person's balance.
-       * Sums the person's lentBorrowed rows tagged with this groupId and writes one
-       * counterpart settled row (also tagged groupId) for the net — leaving their
-       * balances in OTHER groups / direct splits / manual IOUs untouched. The same row
-       * also reduces the person's global net, so the LB screen stays consistent.
+       * Group-scoped settle: settle ONLY this group's portion of a person's balance —
+       * one settled row (tagged groupId) for the net of their rows in this group, leaving
+       * other groups / direct splits / manual IOUs untouched. The same row also reduces the
+       * person's global net, so the LB screen stays consistent.
+       * opts.accountId — the account the money moved through, either direction: through
+       * recordLbEntry like every other Settle, so it links a matching bank transfer or books
+       * a Repaid / Received Back transaction. Absent = ledger-only.
        */
-      // opts.accountId — for a BORROW settle (net < 0) also books a real "Repayment"
-      // expense on that account (same as settlePersonBalance).
       settleGroupPersonBalance: (groupId, personKey, opts = {}) => {
         const person = get().getPersonBalances().find((p) => p.personKey === personKey);
-        if (!person) return;
+        if (!person) return null;
         const groupEntries = (person.entries || []).filter((e) => e.groupId === groupId);
-        if (groupEntries.length === 0) return;
-        const net = groupEntries.reduce((acc, e) => {
-          if (e.kind === 'lent')          return acc + e.amount;
-          if (e.kind === 'lent_settled')  return acc - e.amount;
-          if (e.kind === 'borrowed')      return acc - e.amount;
-          if (e.kind === 'borrow_repaid') return acc + e.amount;
-          return acc;
-        }, 0);
-        if (Math.abs(net) <= 0.005) return;
+        if (groupEntries.length === 0) return null;
+        const net = groupEntries.reduce((acc, e) => acc + lbSign(e) * e.amount, 0);
+        if (Math.abs(net) <= 0.005) return null;
 
         const group = get().groups.find((g) => g.id === groupId);
-        const now = new Date().toISOString();
-        const isBorrowSettle = net < 0;
-        const booked = isBorrowSettle
-          ? bookRepaymentExpense(get(), opts.accountId, Math.abs(net), person.person, now)
-          : null;
-        const row = {
-          id: `lb_settle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        const res = get().recordLbEntry({
           kind: net > 0 ? 'lent_settled' : 'borrow_repaid',
           person: person.person,
           contactId: person.contactId || null,
           phone: person.phone || null,
-          amount: Math.abs(net),
+          amount: Math.round(Math.abs(net) * 100) / 100,
           note: `Group settle · ${group?.name || 'Group'}`,
-          date: now,
-          createdAt: new Date().toISOString(),
           groupId,
           // Which member — a live group sends it as a settlement with them (sync/settlements.ts).
           memberId: groupEntries.find((e) => e.memberId)?.memberId || null,
-          ...(booked ? { sourceTxnId: booked.txnId } : {}),
-        };
-        set((s) => ({
-          ...(booked ? { accounts: booked.accounts, transactions: booked.transactions } : {}),
-          lentBorrowed: [row, ...s.lentBorrowed],
-          groups: s.groups.map((g) => (g.id === groupId ? { ...g, lastActivityAt: now } : g)),
-        }));
+        }, { accountId: opts.accountId });
+        if (res) {
+          const now = new Date().toISOString();
+          set((s) => ({ groups: s.groups.map((g) => (g.id === groupId ? { ...g, lastActivityAt: now } : g)) }));
+        }
+        return res;
       },
 
       /**

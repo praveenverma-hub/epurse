@@ -76,10 +76,34 @@ function itemsOf(shared: GroupShared, entityId: string, e: EntryState): HistoryI
   return out;
 }
 
-/** One expense's (or settlement's) history, oldest first. Empty when the server has none. */
+/** One expense's (or settlement's) history, newest first. Empty when the server has none. */
 export function entryHistory(shared: GroupShared | undefined, entityId: string | undefined): HistoryItem[] {
   const e = entityId ? shared?.fold.entries[entityId] : undefined;
-  return shared && e ? itemsOf(shared, entityId!, e) : [];
+  return shared && e ? itemsOf(shared, entityId!, e).reverse() : [];
+}
+
+export type EntrySummary = {
+  kind: 'expense' | 'settlement';
+  title: string;
+  amountPaise: number;
+  date: string;
+  /** Who paid — "You" for me. */
+  paidBy: string;
+  deleted: boolean;
+};
+
+/** What an expense or settlement is now (or was, if deleted) — the head of its history page. */
+export function entrySummary(shared: GroupShared | undefined, entityId: string | undefined): EntrySummary | null {
+  const e = entityId ? shared?.fold.entries[entityId] : undefined;
+  if (!shared || !e || e.kind === 'correction') return null;
+  const { memberName } = namer(shared);
+  const deleted = !!e.deleted;
+  if (e.kind === 'expense') {
+    const d = e.data as ExpenseBody;
+    return { kind: 'expense', title: d.title, amountPaise: d.amountPaise, date: d.date, paidBy: memberName(d.paidBy), deleted };
+  }
+  const d = e.data as SettlementBody;
+  return { kind: 'settlement', title: `${memberName(d.from)} paid ${memberName(d.to)}`, amountPaise: d.amountPaise, date: d.date, paidBy: memberName(d.from), deleted };
 }
 
 /**

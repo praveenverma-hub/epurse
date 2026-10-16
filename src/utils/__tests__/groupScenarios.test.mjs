@@ -881,7 +881,7 @@ section('B3. Someone changes who paid my bank expense, then changes it back');
 
 section('B4. Who changed what, and when');
 {
-  const { entryHistory, groupHistory } = await import(`${PROJECT_ROOT}/src/sync/history.ts`);
+  const { entryHistory, entrySummary, groupHistory } = await import(`${PROJECT_ROOT}/src/sync/history.ts`);
   const X = phone('Kai'), Y = phone('Lea'), Z = phone('Max');
   const Rh = await makeGroup('Hist', X, Y, Z);
   await as(X, async () => { addExpense(X, localId(X, Rh), 'Dinner', 900, everyone(localId(X, Rh))); });
@@ -894,14 +894,18 @@ section('B4. Who changed what, and when');
   const dinnerId = byTitle(X, Rh, 'Dinner').syncId;
   const line = (it) => `${it.by} ${it.action}${it.changes?.length ? ` ${it.changes.join('+')}` : ''}`;
   const onX = entryHistory(groupOf(X, Rh).shared, dinnerId).map(line);
-  check('an expense\'s history: who added it, who changed what', J(onX) === J(['You added', 'Lea edited amount']), J(onX));
+  check('an expense\'s history, newest first: who changed what, who added it', J(onX) === J(['Lea edited amount', 'You added']), J(onX));
   check('…the same on every phone, from each one\'s own point of view',
-    J(entryHistory(groupOf(Y, Rh).shared, dinnerId).map(line)) === J(['Kai added', 'You edited amount']));
-  const edit = entryHistory(groupOf(Z, Rh).shared, dinnerId)[1];
+    J(entryHistory(groupOf(Y, Rh).shared, dinnerId).map(line)) === J(['You edited amount', 'Kai added']));
+  const edit = entryHistory(groupOf(Z, Rh).shared, dinnerId)[0];
   check('…with the amount before and after', edit.prevAmountPaise === 90000 && edit.amountPaise === 120000);
   const all = groupHistory(groupOf(X, Rh).shared);
   check('the group\'s history, newest first, keeps the delete — the Taxi is gone from every list but not from here',
     all[0].action === 'deleted' && all[0].title === 'Taxi' && all[0].by === 'Max' && all.length === 4, J(all.map((i) => `${i.by} ${i.action} ${i.title}`)));
+  const head = entrySummary(groupOf(Y, Rh).shared, dinnerId);
+  check('an expense\'s history page heads with what it is now, from this phone\'s point of view',
+    head?.title === 'Dinner' && head.amountPaise === 120000 && head.paidBy === 'Kai' && !head.deleted, J(head));
+  check('…a deleted one too', entrySummary(groupOf(X, Rh).shared, all[0].entityId)?.deleted === true);
 }
 
 section('Invariants, on every phone and every live group');

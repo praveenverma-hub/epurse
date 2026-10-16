@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import Modal from "./AppModal";
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
@@ -31,6 +33,9 @@ import { locationKey } from '../utils/location';
 import { CARD_CONTEXT, txnAccountLabel, txnPayerName } from '../utils/txnCardModel';
 import { LB_NO_ACCOUNT } from '../utils/lbEntryDisplay';
 import type { GroupSplit } from '../types/group';
+
+// The sheet shows the latest few changes; View All opens the rest on its own page.
+const HISTORY_PREVIEW = 3;
 
 // The JS theme widens fontWeight to `string`; re-type as TextStyle for StyleSheet spreads.
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
@@ -102,6 +107,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
   // Android's AppModal already stops above the nav bar; iOS draws under the home indicator.
   const insets = useSafeAreaInsets();
   const bottomInset = Platform.OS === 'ios' ? insets.bottom : 0;
+  const navigation = useNavigation<any>();
   const categories = useEPurseStore((s: any) => s.categories);
   const groups = useEPurseStore((s: any) => s.groups);
   const accounts = useEPurseStore((s: any) => s.accounts);
@@ -157,7 +163,13 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
     : txnAccountLabel(txn, account) || (txn.syncOrigin === 'remote' ? LB_NO_ACCOUNT : '');
   const hasSplit = !!txn.groupSplit?.shares?.length || !!txn.isSplit;
   // Shared groups: who added and changed it, and when — anyone may, so everyone can check.
+  // A lone "Added" says nothing the sheet doesn't already, so history starts at the first change.
   const history = entryHistory(group?.shared, txn.syncId);
+  const showHistory = history.length > 1;
+  const openHistory = () => {
+    onClose();
+    navigation.navigate('GroupHistory', { groupId: group!.id, entityId: txn.syncId });
+  };
   // City-only for now (per user request) — `locationKey` already falls back to
   // district/region when the geocoder couldn't name a city, so this still shows
   // SOMETHING useful rather than nothing on the rare city-less fix.
@@ -263,10 +275,18 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
                 <SplitPositionView txn={txn} group={group} accentColor={theme.primary} />
               </View>
             ) : null}
-            {history.length ? (
+            {showHistory ? (
               <View style={styles.historySection}>
-                <Text style={styles.detailLabel}>History</Text>
-                <GroupHistoryList items={history} accentColor={theme.primary} />
+                <View style={styles.historyHead}>
+                  <Text style={styles.detailLabel}>History</Text>
+                  {history.length > HISTORY_PREVIEW ? (
+                    <TouchableOpacity style={styles.viewAll} onPress={openHistory} hitSlop={10} activeOpacity={0.7}>
+                      <Text style={[styles.viewAllTxt, { color: theme.primary }]}>View All</Text>
+                      <Ionicons name="chevron-forward" size={14} color={theme.primary} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                <GroupHistoryList items={history.slice(0, HISTORY_PREVIEW)} accentColor={theme.primary} />
               </View>
             ) : null}
           </ScrollView>
@@ -321,4 +341,7 @@ const styles = StyleSheet.create({
   detailValue: { ...typography.body, color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
   splitSection: { marginTop: spacing.md },
   historySection: { marginTop: spacing.lg, gap: spacing.xs },
+  historyHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  viewAll: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  viewAllTxt: { ...typography.small, fontWeight: '700' },
 });

@@ -5094,6 +5094,73 @@ console.log('\n— LB booked Repayment: edits/deletes move its expense too (Oct-
   check('legacy repayment: recategorised off Repayment drops its row', !row() && net() === -1000, `${net()}`);
 }
 
+console.log('\n— Name comes from the Google sign-in (Oct-17-26) —');
+{
+  const S = () => useStore.getState();
+  const saved = { userName: S().userName, googleAccount: S().googleAccount, isLoggedIn: S().isLoggedIn };
+  useStore.setState({ userName: '' });
+  S().setGoogleAccount({ email: 'priya.k92@gmail.com', name: 'Priya Kapoor', picture: null });
+  check('sign-in fills an empty name from the Google profile', S().userName === 'Priya Kapoor', S().userName);
+  S().setUserName('Pri');
+  S().setGoogleAccount(null);
+  S().setGoogleAccount({ email: 'priya.k92@gmail.com', name: 'Priya Kapoor', picture: null });
+  check('…never over a name already set (My Profile edit, restored backup)', S().userName === 'Pri', S().userName);
+  useStore.setState({ userName: '' });
+  S().setGoogleAccount({ email: 'priya.k92@gmail.com', name: null, picture: null });
+  check('no profile name → the email\'s local part, Title Case', S().userName === 'Priya K', S().userName);
+  useStore.setState(saved);
+}
+
+console.log('\n— Group Settle moves an account like every other Settle (Oct-17-26) —');
+{
+  reset();
+  const S = () => useStore.getState();
+  useStore.setState({ accounts: [
+    { id: 'a1', name: 'HDFC', bankName: 'HDFC', mask: '1111', type: 'Bank Account', balance: 10000, primary: true },
+  ] });
+  const bal = () => S().accounts[0].balance;
+  const gid = S().createGroup({ name: 'Goa', type: 'shared',
+    members: [{ memberId: 'c1', name: 'Rahul', contactId: 'c1' }, { memberId: 'c2', name: 'Asha', contactId: 'c2' }] });
+  const expense = (merchant, amount, payer, payerName, ids) => S().addGroupExpense(gid, {
+    amount, merchant, categoryId: 'food', paidByMemberId: payer, paidByName: payerName,
+    shares: ids.map((id) => ({ memberId: id, shareAmount: amount / ids.length, name: id === 'me' ? 'You' : id })),
+    accountId: payer === 'me' ? 'a1' : null,
+  });
+  const person = (name) => S().getPersonBalances().find((p) => p.person === name);
+  const groupNet = (name) => (person(name)?.entries || []).filter((e) => e.groupId === gid)
+    .reduce((n, e) => n + ((e.kind === 'lent' || e.kind === 'borrow_repaid') ? 1 : -1) * e.amount, 0);
+
+  expense('Hotel', 600, 'me', 'You', ['me', 'c1']);        // Rahul owes me 300
+  expense('Dinner', 400, 'c2', 'Asha', ['me', 'c2']);      // I owe Asha 200
+  const before = bal();
+  const nTx = S().transactions.length;
+
+  let r = S().settleGroupPersonBalance(gid, person('Rahul').personKey, { accountId: 'a1' });
+  const got = S().transactions[0];
+  check('they owe you → Settle books a Received Back credit on the account (was ledger-only)',
+    S().transactions.length === nTx + 1 && got.type === 'credit' && got.amount === 300 && got.categoryId === 'lent_settled' && bal() === before + 300,
+    JSON.stringify({ n: S().transactions.length - nTx, type: got.type, cat: got.categoryId, bal: bal() - before }));
+  check('…its ledger row is the group\'s, tied to that transaction, and the group balance is ₹0',
+    S().lentBorrowed.some((l) => l.sourceTxnId === got.id && l.groupId === gid && l.kind === 'lent_settled') && Math.abs(groupNet('Rahul')) < 0.01);
+
+  S().settleGroupPersonBalance(gid, person('Asha').personKey, { accountId: 'a1' });
+  const paid = S().transactions[0];
+  check('you owe them → a Repaid debit, same as before', paid.type === 'debit' && paid.amount === 200 && paid.categoryId === 'borrow_repaid' && bal() === before + 100);
+
+  expense('Taxi', 100, 'me', 'You', ['me', 'c1']);         // Rahul owes me 50
+  S().addTransaction({ type: 'credit', amount: 50, merchant: 'UPI from Rahul', categoryId: 'transfer', accountId: 'a1', skipGroupZone: true });
+  const sms = S().transactions[0];
+  const balSms = bal(), nSms = S().transactions.length;
+  r = S().settleGroupPersonBalance(gid, person('Rahul').personKey, { accountId: 'a1' });
+  check('a matching bank transfer is LINKED, not booked twice',
+    r?.linkedTxn?.id === sms.id && S().transactions.length === nSms && bal() === balSms && S().transactions.find((t) => t.id === sms.id).categoryId === 'lent_settled');
+
+  expense('Snacks', 80, 'me', 'You', ['me', 'c1']);        // Rahul owes me 40
+  const nNone = S().transactions.length, balNone = bal();
+  S().settleGroupPersonBalance(gid, person('Rahul').personKey);
+  check('no account ("Not From an Account") stays ledger-only', S().transactions.length === nNone && bal() === balNone && Math.abs(groupNet('Rahul')) < 0.01);
+}
+
 console.log('\n— recordLbEntry: every LB entry moves an account, or links the SMS (Oct-10-26) —');
 {
   reset();

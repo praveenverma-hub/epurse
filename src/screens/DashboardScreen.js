@@ -386,7 +386,8 @@ const DashboardScreen = ({ navigation }) => {
     if (recent.length === 0) return undefined;
     const countText = `${count} ${count === 1 ? 'transaction' : 'transactions'}`;
     if (!biggest || count < 2) return countText;
-    return `${countText} · biggest ${formatCompact(biggest.amount)}${biggest.merchant ? ` at ${biggest.merchant}` : ''}`;
+    // Amount only — a merchant or person name made the line wrap.
+    return `${countText} · biggest ${formatCompact(biggest.amount)}`;
   }, [periodStats]);
 
   const homeCards = useMemo(

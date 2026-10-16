@@ -6,6 +6,10 @@ import PlusGlyph from './PlusGlyph';
 import { radius, shadows, spacing } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';
 
+const FAB_SIZE = 60;
+/** Bottom padding a scroll list needs for its last row to clear the FAB. */
+export const FAB_CLEARANCE = FAB_SIZE + spacing.md;
+
 const FAB = ({ onPress, icon = '+', bottomInset = 0, accessibilityLabel = 'Add' }) => {
   const gradient = useGradient();
   const { primary } = useTheme();
@@ -44,8 +48,8 @@ const styles = StyleSheet.create({
     ...shadows.fab,
   },
   fab: {
-    width: 60,
-    height: 60,
+    width: FAB_SIZE,
+    height: FAB_SIZE,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',

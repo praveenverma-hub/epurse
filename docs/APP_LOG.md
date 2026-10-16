@@ -2240,6 +2240,12 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   ⓘ beside YOUR SHARE → "Group Totals" sheet (Your Share = your part of every bill, whoever paid = your
   spending). Labels: ⋮ Leave (was Leave Shared Group; confirm "Leave <group>?"), member ⋮ Remove / Add
   Back. test:sync 199, test:groupScenarios 119.
+  **Oct-17: group settle, history page, Add Expense button.** Group Settle (Members tab) now goes
+  through `recordLbEntry` like Lent/Borrowed's Settle: account picker in BOTH directions, links a
+  matching bank transfer or books Received Back / Repaid — a they-owe-you settle used to create no
+  transaction at all. History: newest first, a lone "Added" hidden, latest 3 in the detail sheet +
+  View All → `GroupHistory` page (expense head + full history; ⋮ → History opens it for the whole
+  group). Group Detail got the round "+" FAB for Add Expense. test:store 933 (+8), test:groupScenarios 121.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 
@@ -2723,6 +2729,11 @@ off are DONE (see Backup).
 - Fresh-start onboarding (Jun-2026): pre-onboarding SMS archived separately, balances
   start at 0, `welcomeReviewSeen` tutorial card.
 - Restore-from-backup entry point on the registration slide.
+- Oct-17-2026: registration is Google sign-in only — the name field is gone. `setGoogleAccount` fills
+  `userName` from the Google profile (else the email's local part, `nameFromGoogle`) when it's empty,
+  never over one already set; edit it in My Profile. A sign-in goes straight to the permissions
+  disclosure; Continue shows only if already signed in (back from Restore). Covers LoginGate and
+  "start fresh" after Delete Account too. test:store.
 
 **Open**
 - None currently tracked.

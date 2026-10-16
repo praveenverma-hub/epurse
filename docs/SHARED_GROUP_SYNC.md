@@ -163,9 +163,10 @@ that stays on every phone after sharing ends.
 
 **History is shown (Oct-15-2026, `src/sync/history.ts` + `GroupHistoryList`).** With no admin,
 anyone may change anything; seeing who did is what lets the others put a wrong change right.
-- The expense's detail sheet: **History** — Added by Rahul, Edited by Priya (₹900 → ₹1,200 · Who
-  Paid · Split · Title · Date · Category), each with its time.
-- Group Detail ⋮ → **History**: every add, edit and delete in the group, newest first. Deletes
+- The expense's detail sheet: **History** — Edited by Priya (₹900 → ₹1,200 · Who Paid · Split ·
+  Title · Date · Category), Added by Rahul, each with its time, newest first. Hidden while it's only
+  "Added"; the latest 3 show, View All opens the History page (what the expense is now + every change).
+- Group Detail ⋮ → **History** (the same page, Oct-17-2026): every add, edit and delete in the group, newest first. Deletes
   matter most here: the expense is gone from every list, and this is where someone sees who
   removed it and re-adds it if that was wrong. Settlements show as "Priya paid Rahul".
 

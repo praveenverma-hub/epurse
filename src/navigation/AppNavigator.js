@@ -12,6 +12,7 @@ import AddTransactionScreen from '../screens/AddTransactionScreen';
 import AddGroupExpenseScreen from '../screens/AddGroupExpenseScreen';
 import SplitEditorScreen from '../screens/SplitEditorScreen';
 import GroupDetailScreen from '../screens/GroupDetailScreen';
+import GroupHistoryScreen from '../screens/GroupHistoryScreen';
 import GroupFormScreen from '../screens/GroupFormScreen';
 import JoinGroupScreen from '../screens/JoinGroupScreen';
 import CategoriesScreen    from '../screens/CategoriesScreen';
@@ -101,6 +102,7 @@ export default function AppNavigator() {
         {/* The split editor of both add forms; its state lives in the form underneath. */}
         <Stack.Screen name="SplitEditor"     component={SplitEditorScreen} />
         <Stack.Screen name="GroupDetail"     component={GroupDetailScreen} />
+        <Stack.Screen name="GroupHistory"    component={GroupHistoryScreen} />
         <Stack.Screen name="GroupForm"       component={GroupFormScreen} />
         <Stack.Screen name="JoinGroup"       component={JoinGroupScreen} />
         <Stack.Screen name="Categories"     component={CategoriesScreen} />

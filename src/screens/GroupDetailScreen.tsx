@@ -26,7 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
-import { hiddenBookingAccountId } from '../utils/defaultAccount';
+import { defaultAccountId, hiddenBookingAccountId } from '../utils/defaultAccount';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H, withAlpha, DIVIDER_W } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
@@ -34,7 +34,7 @@ import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, monthKey, titleCaseName } from '../utils/format';
 import { openSettleParts } from '../utils/settleAllocation';
 import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
-import { lbTagLocked } from '../utils/lbEntryDisplay';
+import { LB_NO_ACCOUNT, lbLinkedLine, lbTagLocked } from '../utils/lbEntryDisplay';
 import { countsForSpend, memberName, spendContribution } from '../utils/split';
 import { autoLinkGroupMembers, suggestByName, unlinkedMembers, type LinkCandidate } from '../sync/contactLink';
 import { fetchContactsForPicker } from '../services/contactsService';
@@ -54,18 +54,20 @@ import CenterModal from '../components/CenterModal';
 import InfoSheet from '../components/InfoSheet';
 import InfoIcon from '../components/InfoIcon';
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
-import GroupHistoryList from '../components/GroupHistoryList';
-import { groupHistory } from '../sync/history';
 import QrCode from '../components/QrCode';
 import EditIcon from '../components/EditIcon';
 import OverflowMenu from '../components/OverflowMenu';
+import FAB, { FAB_CLEARANCE } from '../components/FAB';
 import ReminderBell from '../components/ReminderBell';
 import { groupBalanceLine, groupHeroFigures } from '../utils/groupHero';
-import AccountPickerSheet from '../components/AccountPickerSheet';
+import AccountPickerSheetBase from '../components/AccountPickerSheet';
 import MonthDivider from '../components/MonthDivider';
 import WhatsAppIcon from '../components/WhatsAppIcon';
 import MonthlyBarChart from '../components/MonthlyBarChart';
 import { useToast } from '../components/Toast';
+
+// AccountPickerSheet.js has no TS declarations — its optional props read as required.
+const AccountPickerSheet = AccountPickerSheetBase as React.FC<any>;
 import type { Group, GroupMember } from '../types/group';
 import { useSyncEnabled } from '../sync/config';
 import { addBackMember, createInviteLink, flushGroup, leaveSharedGroup, removeSharedMember } from '../sync/groupSync';
@@ -126,7 +128,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
   const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => any[];
   const applySettleToGroup = useEPurseStore((s: any) => s.applySettleToGroup) as (entryId: string, groupId: string, max?: number) => boolean;
-  const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
+  const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string | null }) => { linkedTxn: any } | null;
   const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
   const activeGroupZoneId = useEPurseStore((s: any) => s.activeGroupZoneId) as string | null;
   const setGroupZone = useEPurseStore((s: any) => s.setGroupZone) as (id: string | null) => void;
@@ -164,7 +166,6 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [invite, setInvite] = useState<{ link: string; title: string } | null>(null);
   const [pickInvite, setPickInvite] = useState(false);
   const [totalsInfo, setTotalsInfo] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [settleTarget, setSettleTarget] = useState<GroupBalanceRow | null>(null);
   const [detailTxn, setDetailTxn] = useState<any | null>(null);
   const [categoryTxn, setCategoryTxn] = useState<any | null>(null);
@@ -174,7 +175,6 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const live = !!group?.shared && group.shared.status !== 'ended';
   // Sharing ended: a read-only record — new entries here would never reach anyone.
   const closed = !!group?.shared && !live;
-  const historyItems = historyOpen ? groupHistory(group?.shared) : [];
   // Send anything queued and catch up whenever the screen comes into view; offline stays quiet.
   useEffect(() => {
     if (!live || !groupId) return undefined;
@@ -434,13 +434,28 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     }
   };
 
+  /** Both exits of the settle picker — through an account (links or books a transaction), or ledger-only. */
+  const commitSettle = (pb: GroupBalanceRow, accountId: string | null) => {
+    // Repaying from Cash can't take it below ₹0 — the picker stays open to choose again.
+    const short = pb.net < 0 && accountId ? cashShortfall(accounts.find((a: any) => a.id === accountId), Math.abs(pb.net)) : null;
+    if (short != null) {
+      toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
+      return;
+    }
+    const res = settleGroupPersonBalance(group.id, pb.personKey, { accountId });
+    toast.success('Settled', res?.linkedTxn
+      ? lbLinkedLine(res.linkedTxn)
+      : `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}`);
+    setSettleTarget(null);
+  };
+
   const handleSettle = (pb: GroupBalanceRow) => {
-    // No picker when there's nothing to pick (no accounts → ledger-only) or tracking is
-    // off in Settings (→ the primary quietly, or none if that's Cash): the confirm below.
-    if (pb.net < 0 && liveAccounts.length && !accountsHidden) { setSettleTarget(pb); return; }
-    const repayFrom = pb.net < 0 ? hiddenBookingAccountId(liveAccounts) : null;
+    // Either direction asks which account the money moved through (the picker IS the
+    // confirmation). No picker when there's nothing to pick (no accounts → ledger-only) or
+    // tracking is off in Settings (→ the primary quietly, or none if that's Cash): a confirm.
+    if (liveAccounts.length && !accountsHidden) { setSettleTarget(pb); return; }
     setConfirm({
-      title: 'Settle up',
+      title: 'Settle Up',
       message:
         `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}\n\n` +
         `Settles this group's portion only — their balance in other groups and direct splits stays untouched.`,
@@ -448,9 +463,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       secondaryText: 'Cancel',
       destructive: true,
       onPrimary: () => {
-        settleGroupPersonBalance(group.id, pb.personKey, repayFrom ? { accountId: repayFrom } : undefined);
         setConfirm(null);
-        toast.success('Settled', `${titleCaseName(pb.person)} · ${formatCurrency(Math.abs(pb.net))}`);
+        commitSettle(pb, hiddenBookingAccountId(liveAccounts));
       },
       onSecondary: () => setConfirm(null),
     });
@@ -778,7 +792,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   // (a group's list is short; retention prunes it).
   // Floor = the screen left below the top block + bar, so short content fills it
   // without making the page scrollable; only longer content scrolls.
-  const bottomPad = insets.bottom + spacing.xl;
+  // The last row scrolls clear of the Add Expense "+".
+  const bottomPad = insets.bottom + spacing.xl + (closed ? 0 : FAB_CLEARANCE);
   const minPageH = Math.max(0, viewportH - headerH - tabBarH - bottomPad);
   const pageH = Math.max(sceneH[activeTab] || 0, minPageH);
   const measureScene = (key: string) => (e: LayoutChangeEvent) => {
@@ -799,7 +814,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             <EmptyState
               icon="receipt-outline"
               title="No transactions yet"
-              subtitle="Add one from the ⋮ menu above, or tag existing transactions from the Activity tab."
+              subtitle="Add one with the + button, or tag existing transactions from the Activity tab."
             />
           ) : (
             groupListData.map((item: any, index: number) => <React.Fragment key={item.id}>{renderTxnRow({ item, index })}</React.Fragment>)
@@ -885,7 +900,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                       { key: 'edit', label: 'Edit Group', icon: <EditIcon size={16} color={colors.textSecondary} />, onPress: () => navigation.navigate('GroupForm', { groupId: group.id }) },
                     ]),
                     ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: startInvite }] : []),
-                    ...(group.shared ? [{ key: 'history', label: 'History', icon: 'time-outline' as const, onPress: () => setHistoryOpen(true) }] : []),
+                    ...(group.shared ? [{ key: 'history', label: 'History', icon: 'time-outline' as const, onPress: () => navigation.navigate('GroupHistory', { groupId: group.id }) }] : []),
                     // Live: Leave keeps a read-only copy here; Delete leaves AND removes it. Both ₹0 only.
                     ...(live ? [{ key: 'leave', label: 'Leave Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }] : []),
                     { key: 'delete', label: 'Delete Group', icon: 'trash-outline' as const, destructive: true, onPress: handleDeleteGroup },
@@ -987,6 +1002,15 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         </ScrollView>
       </View>
 
+      {/* The group's main action within thumb reach (also in the ⋮ menu). */}
+      {closed ? null : (
+        <FAB
+          onPress={() => navigation.navigate('AddGroupExpense', { groupId: group.id })}
+          accessibilityLabel="Add Expense"
+          bottomInset={insets.bottom}
+        />
+      )}
+
       <TxnDetailSheet
         txn={detailTxn}
         context="group"
@@ -1051,13 +1075,6 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         onClose={() => setConfirm(null)}
       />
 
-      <InfoSheet
-        visible={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        title="History"
-        body={historyOpen && !historyItems.length ? 'Nothing has been added or changed yet.' : undefined}
-        content={historyItems.length ? <GroupHistoryList items={historyItems} withTitle accentColor={theme.primary} /> : null}
-      />
       <InfoSheet
         visible={totalsInfo}
         onClose={() => setTotalsInfo(false)}
@@ -1157,32 +1174,16 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
       <AccountPickerSheet
         visible={!!settleTarget}
-        title="Repay from which account?"
+        title={settleTarget && settleTarget.net < 0 ? 'Repay from which account?' : 'Received in which account?'}
         subtitle={settleTarget
-          ? `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))} — records a Repayment expense`
+          ? `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`
           : undefined}
         accounts={liveAccounts}
-        onSelect={(accountId: string) => {
-          if (settleTarget) {
-            // Repaying from Cash can't take it below ₹0 — stay in the picker to choose again.
-            const short = cashShortfall(accounts.find((a: any) => a.id === accountId), Math.abs(settleTarget.net));
-            if (short != null) {
-              toast.error(NOT_ENOUGH_CASH, notEnoughCashText(short, formatCurrency));
-              return;
-            }
-            settleGroupPersonBalance(group.id, settleTarget.personKey, { accountId });
-            toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
-          }
-          setSettleTarget(null);
-        }}
-        skipLabel="Just mark repaid (no expense)"
-        onSkip={() => {
-          if (settleTarget) {
-            settleGroupPersonBalance(group.id, settleTarget.personKey);
-            toast.success('Settled', `${titleCaseName(settleTarget.person)} · ${formatCurrency(Math.abs(settleTarget.net))}`);
-          }
-          setSettleTarget(null);
-        }}
+        selectedId={defaultAccountId(liveAccounts)}
+        onSelect={(accountId: string) => { if (settleTarget) commitSettle(settleTarget, accountId); }}
+        skipLabel={LB_NO_ACCOUNT}
+        onSkip={() => { if (settleTarget) commitSettle(settleTarget, null); }}
+        // Dismissing cancels outright — nothing is committed until a choice is made.
         onClose={() => setSettleTarget(null)}
       />
     </SafeAreaView>

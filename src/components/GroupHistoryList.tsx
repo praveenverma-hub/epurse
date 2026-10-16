@@ -1,8 +1,8 @@
 // =============================================================================
 // GroupHistoryList — who changed what in a shared group, and when (sync/history.ts).
-// One list for both places: an expense's own history in TxnDetailSheet, and the whole
-// group's from Group Detail's ⋮ → History. Axis `withTitle`: the group list names the
-// expense on each row; inside one expense's sheet that would only repeat its title.
+// One list for every place: an expense's latest changes in TxnDetailSheet, and the
+// GroupHistory page (one expense's, or the whole group's). Axis `withTitle`: the group
+// list names the expense on each row; for one expense that would only repeat its title.
 // =============================================================================
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';

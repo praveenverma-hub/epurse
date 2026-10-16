@@ -53,6 +53,18 @@ export const isValidName = (raw) => {
     && /[\p{L}\p{N}]/u.test(t);
 };
 
+/**
+ * The user's name from their Google sign-in — the profile name, else the email's
+ * local part ("priya.k92@…" → "Priya K"). '' when neither gives a valid name.
+ */
+export const nameFromGoogle = (account) => {
+  const raw = account?.name
+    || String(account?.email || '').split('@')[0].replace(/[\d._+-]+/g, ' ')
+      .split(' ').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  const name = sanitizeName(raw).trim();
+  return isValidName(name) ? name : '';
+};
+
 // ── Phone (Indian mobile) ──────────────────────────────────────────────────────
 /** Strip everything but digits and cap to 10. Safe per keystroke. */
 export const sanitizePhone = (raw) =>

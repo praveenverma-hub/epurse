@@ -17,13 +17,12 @@
 // react-native-svg (no icon dependency). Everything is theme-aware and responsive.
 //
 // ── STORE WIRING ─────────────────────────────────────────────────────────────
-// Uses EXISTING store actions: setUserName, setHasOnboarded,
+// Uses EXISTING store actions: setHasOnboarded,
 // setSmsPermissionGranted, setAccountAnchor, deleteAccount.
 //
-// Also reads `isLoggedIn` (set via useGoogleSession/setGoogleAccount) — the
-// registration page embeds a compact GoogleSignInPanel alongside the name
-// field, and "Get Started" stays disabled until sign-in completes. The phone
-// number is no longer collected here; it's added later from MyProfileScreen.
+// Registration is Google sign-in only: the name comes from the Google account
+// (setGoogleAccount) and is edited later in My Profile, like the phone number.
+// A successful sign-in goes straight on to the permissions disclosure.
 //
 // Add these TWO members to ePurseStore.js so the 24-hour widget rule works
 // (every call here is optional-chained, so the file is safe before you wire it):
@@ -83,7 +82,7 @@ import { requestNotificationPermissions } from '../utils/notifications';
 import { runInitialInboxSweep } from '../utils/inboxSweep';
 import { getStorageRecovery } from '../storage/appStorage';
 import { shouldShowAccountConfirmation } from '../utils/onboardingRouting';
-import { INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeAmount } from '../utils/validation';
 import { SMS_DISCLOSURE } from '../constants/permissionDisclosure';
 
 // =============================================================================
@@ -494,7 +493,6 @@ export default function OnboardingDeck({
   // This phone's saved data couldn't be unlocked, so the app started fresh.
   const storageRecovery = getStorageRecovery();
 
-  const setUserName = useEPurseStore((s: any) => s.setUserName);
   const setHasOnboarded = useEPurseStore((s: any) => s.setHasOnboarded);
   const isLoggedIn = useEPurseStore((s: any) => s.isLoggedIn) as boolean;
   const setUserOnboardedAt = useEPurseStore((s: any) => s.setUserOnboardedAt);
@@ -515,7 +513,6 @@ export default function OnboardingDeck({
   const [width, setWidth] = useState(WINDOW_W);
   const [page, setPage] = useState(0);
 
-  const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sweepLabel, setSweepLabel] = useState<string | null>(null);
   const [autoSwipePaused, setAutoSwipePaused] = useState(false);
@@ -527,13 +524,8 @@ export default function OnboardingDeck({
   // changed, only that a user now sees why before the OS dialog appears.
   const [showDisclosure, setShowDisclosure] = useState(false);
 
-  const totalPages = SLIDES.length + 1; // info slides + registration (name + Google sign-in)
+  const totalPages = SLIDES.length + 1; // info slides + registration (Google sign-in)
   const registrationIndex = SLIDES.length;
-
-  const nameValid = isValidName(name);
-  // Phone number moved to MyProfileScreen (added later, after onboarding) — this
-  // form's only gates are a valid name and a completed Google sign-in.
-  const formValid = nameValid;
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -644,11 +636,12 @@ export default function OnboardingDeck({
   // disclosure. The actual permission cascade moved to `proceedFromDisclosure`,
   // fired from that modal's own buttons, so the OS dialogs cannot appear before
   // the user has seen why (Play policy §3.5 — see DISCLOSURE_MESSAGE above).
+  // Read fresh: sign-in's onSuccess calls this before the re-render that carries isLoggedIn.
   const handleGetStarted = useCallback(() => {
-    if (!formValid || submitting || !isLoggedIn) return;
+    if (submitting || !useEPurseStore.getState().isLoggedIn) return;
     Keyboard.dismiss();
     setShowDisclosure(true);
-  }, [formValid, submitting, isLoggedIn]);
+  }, [submitting]);
 
   /**
    * @param withPermissions false when the user dismissed the disclosure
@@ -662,7 +655,6 @@ export default function OnboardingDeck({
     setSubmitting(true);
     let showAccountConfirmation = false;
     try {
-      setUserName?.(name.trim());
       // Capture the absolute onboarding timestamp — drives the 24h widget rule.
       setUserOnboardedAt?.(Date.now());
 
@@ -716,7 +708,7 @@ export default function OnboardingDeck({
       setSubmitting(false);
     }
   }, [
-    name, setUserName, setUserOnboardedAt, setSmsPermissionGranted, setHasOnboarded,
+    setUserOnboardedAt, setSmsPermissionGranted, setHasOnboarded,
     ingestMessage, setLastSmsDate, setLastSmsSync, compactTransactions,
     capOnboardingQueue, navAfter, accountFilterRoute, homeRoute,
   ]);
@@ -837,59 +829,43 @@ export default function OnboardingDeck({
                   <EPurseInlineWordmark size={24} />
                   <Text style={styles.regTitle}> yours.</Text>
                 </View>
-                <Text style={[styles.regSubtitle, { color: theme.textSecondary }]}>Add your name and connect Google to protect access and optional backups.</Text>
+                <Text style={[styles.regSubtitle, { color: theme.textSecondary }]}>Sign in with Google to protect access and optional backups.</Text>
 
-                <Text style={styles.label}>Your name</Text>
-                <TextInput
-                  style={[styles.input, name.length > 0 && !nameValid && styles.inputError]}
-                  placeholder="Enter your full name"
-                  placeholderTextColor={theme.textSecondary}
-                  value={name}
-                  onChangeText={(t) => setName(sanitizeName(t))}
-                  autoCapitalize="words"
-                  returnKeyType="done"
-                  maxLength={INPUT_LIMITS.NAME_MAX}
-                />
+                <GoogleSignInPanel compact onSuccess={handleGetStarted} />
 
-                <GoogleSignInPanel
-                  compact
-                  disabled={!nameValid}
-                  onSuccess={(account) => {
-                    if (account.name && !name) setName(sanitizeName(account.name));
-                  }}
-                />
+                {/* Signed in before reaching this page (e.g. back from Restore); a fresh sign-in goes straight on. */}
+                {isLoggedIn ? (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.primaryBtn,
+                      { backgroundColor: theme.primary },
+                      pressed && styles.primaryBtnPressed,
+                    ]}
+                    disabled={submitting}
+                    onPress={handleGetStarted}
+                    accessibilityRole="button"
+                    accessibilityLabel="Continue"
+                  >
+                    {submitting ? (
+                      <View style={styles.btnLoadingRow}>
+                        <ActivityIndicator color="#FFFFFF" />
+                        {sweepLabel ? <Text style={styles.btnLoadingText}>{sweepLabel}</Text> : null}
+                      </View>
+                    ) : (
+                      <Text style={styles.primaryBtnText}>Continue</Text>
+                    )}
+                  </Pressable>
+                ) : null}
 
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryBtn,
-                    { backgroundColor: formValid && isLoggedIn ? theme.primary : theme.divider },
-                    pressed && formValid && isLoggedIn && styles.primaryBtnPressed,
-                  ]}
-                  disabled={!formValid || submitting || !isLoggedIn}
-                  onPress={handleGetStarted}
-                  accessibilityRole="button"
-                  accessibilityLabel="Get started"
-                >
-                  {submitting ? (
-                    <View style={styles.btnLoadingRow}>
-                      <ActivityIndicator color="#FFFFFF" />
-                      {sweepLabel ? <Text style={styles.btnLoadingText}>{sweepLabel}</Text> : null}
-                    </View>
-                  ) : (
-                    <Text style={[styles.primaryBtnText, !(formValid && isLoggedIn) && { color: theme.textSecondary }]}>
-                      Continue
-                    </Text>
-                  )}
-                </Pressable>
-              </View>
-
-              <View style={styles.regTrustRow}>
-                <View style={[styles.regTrustIcon, { backgroundColor: theme.primary + '12' }]}>
-                  <ShieldCheckIcon color={theme.primary} size={18} />
-                </View>
-                <View style={styles.regTrustCopy}>
-                  <Text style={[styles.regTrustLabel, { color: theme.primary }]}>PRIVATE BY DESIGN</Text>
-                  <Text style={[styles.regTrustText, { color: theme.textSecondary }]}>Your financial ledger stays on this device by default.</Text>
+                {/* Inside the card under a divider, same as LoginGate's. */}
+                <View style={[styles.regTrustInCard, { borderTopColor: theme.divider }]}>
+                  <View style={[styles.regTrustIcon, { backgroundColor: theme.primary + '12' }]}>
+                    <ShieldCheckIcon color={theme.primary} size={18} />
+                  </View>
+                  <View style={styles.regTrustCopy}>
+                    <Text style={[styles.regTrustLabel, { color: theme.primary }]}>PRIVATE BY DESIGN</Text>
+                    <Text style={[styles.regTrustText, { color: theme.textSecondary }]}>Your financial ledger stays on this device by default.</Text>
+                  </View>
                 </View>
               </View>
 
@@ -1612,6 +1588,7 @@ const deckStyles = (t: Theme) =>
       paddingHorizontal: spacing.md,
       maxWidth: 390,
     },
+    // Centred as one block, like the info slides (visual + text).
     regScroll: {
       flexGrow: 1,
       paddingHorizontal: 24,
@@ -1636,18 +1613,6 @@ const deckStyles = (t: Theme) =>
     regTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
     regTitle: { fontSize: 24, lineHeight: 27, fontWeight: '900', letterSpacing: -0.5, color: t.textPrimary },
     regSubtitle: { fontSize: 13, lineHeight: 19, marginTop: 5, marginBottom: 10 },
-    label: { fontSize: 12, fontWeight: '800', color: t.textSecondary, marginBottom: spacing.sm, marginTop: spacing.md },
-    input: {
-      borderWidth: 1,
-      borderColor: t.divider,
-      borderRadius: radius.md,
-      paddingHorizontal: spacing.lg,
-      paddingVertical: Platform.OS === 'ios' ? 14 : 10,
-      fontSize: 16,
-      color: t.textPrimary,
-      backgroundColor: t.card,
-    },
-    inputError: { borderColor: t.danger },
     primaryBtn: {
       borderRadius: radius.lg,
       paddingVertical: spacing.xs,
@@ -1663,6 +1628,10 @@ const deckStyles = (t: Theme) =>
     regTrustRow: {
       flexDirection: 'row', alignItems: 'center', alignSelf: 'center',
       maxWidth: 350, marginTop: 16, paddingHorizontal: 8,
+    },
+    regTrustInCard: {
+      flexDirection: 'row', alignItems: 'center', borderTopWidth: 1,
+      marginTop: spacing.xl, paddingTop: spacing.lg,
     },
     regTrustIcon: {
       width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 10,
