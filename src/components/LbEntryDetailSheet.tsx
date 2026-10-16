@@ -50,6 +50,8 @@ interface Props {
   onChangePerson?: (entry: LbDisplayEntry) => void;
   /** Tagged on a bank transaction → stop counting it for this person, keep the transaction. */
   onUnlink?: (entry: LbDisplayEntry) => void;
+  /** A settlement recorded outside a group the person still has open → put it there. */
+  onApplyToGroup?: (entry: LbDisplayEntry) => void;
 }
 
 const HINT = {
@@ -60,7 +62,7 @@ const HINT = {
   group: "Comes from this group's expenses — change them in the group.",
 } as const;
 
-export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable, accountLabel, onClose, onEdit, onViewTxn, onOpenGroup, onChangePerson, onUnlink }: Props) {
+export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable, accountLabel, onClose, onEdit, onViewTxn, onOpenGroup, onChangePerson, onUnlink, onApplyToGroup }: Props) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const bottomInset = Platform.OS === 'ios' ? insets.bottom : 0;
@@ -160,8 +162,14 @@ export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable,
           ) : null}
 
           {/* Fixes for a mistake (Oct-15-26 — these rows used to be locked for good). */}
-          {onChangePerson || onUnlink ? (
+          {onChangePerson || onUnlink || onApplyToGroup ? (
             <View style={styles.fixRow}>
+              {onApplyToGroup ? (
+                <TouchableOpacity style={[styles.fixBtn, { borderColor: ctaInk }]} onPress={() => act(() => onApplyToGroup(shown))} activeOpacity={0.8} accessibilityRole="button">
+                  <Ionicons name="people-outline" size={15} color={ctaInk} />
+                  <Text style={[styles.actionTxt, { color: ctaInk }]}>Apply to Group</Text>
+                </TouchableOpacity>
+              ) : null}
               {onChangePerson ? (
                 <TouchableOpacity style={[styles.fixBtn, { borderColor: ctaInk }]} onPress={() => act(() => onChangePerson(shown))} activeOpacity={0.8} accessibilityRole="button">
                   <Ionicons name="swap-horizontal-outline" size={15} color={ctaInk} />
@@ -220,9 +228,9 @@ const styles = StyleSheet.create({
   detailLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
   detailValue: { ...typography.body, color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
   hint: { ...typography.small, color: colors.textSecondary, marginTop: spacing.md },
-  fixRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  fixRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
   fixBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    flexGrow: 1, flexBasis: '45%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     borderWidth: 1, borderRadius: radius.pill, paddingVertical: spacing.sm,
   },
 });

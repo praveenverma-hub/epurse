@@ -30,6 +30,7 @@ import { fetchContactsForPicker } from '../services/contactsService';
 import { formatCurrency } from '../utils/format';
 import { usePersonBalances, useSettlePeople } from '../hooks/useSettlePeople';
 import { findLbPerson, settleExtra } from '../utils/lbPeopleSearch';
+import SettlesChips, { useSettleChoice } from './SettlesChips';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,9 +76,10 @@ const LinkContactModal = ({
   visible,
   categoryId,        // 'lent' | 'borrowed' | 'lent_settled' | 'borrow_repaid'
   amount,            // the transaction's amount — warns when a settlement is more than what's open
-  onConfirm,         // ({ person, phone, contactId }) => void
+  onConfirm,         // ({ person, phone, contactId, allocation? }) => void
   onSkip,            // () => void
   onClose,           // () => void
+  splitSettle = true, // false for Change Person — that moves an existing row, it doesn't settle
 }) => {
   const theme = useTheme();
   // Settling: who owes me / whom I owe, from the ledger (empty for a new lend or borrow).
@@ -91,6 +93,12 @@ const LinkContactModal = ({
   const [manualPhone, setManualPhone]     = useState('');
   const [manualName, setManualName]       = useState('');
   const [phoneError, setPhoneError]       = useState('');
+  // "Settles: Goa Trip · Direct" — which of this person's balances the payment closes.
+  const selectedPerson = useMemo(
+    () => (selected ? findLbPerson(people, { contactId: selected.id, phone: selected.phone, name: selected.name }) : null),
+    [people, selected],
+  );
+  const settleChoice = useSettleChoice(splitSettle ? selectedPerson?.entries : null, categoryId, Number(amount) || 0);
 
   // Load contacts once when modal opens
   useEffect(() => {
@@ -127,8 +135,11 @@ const LinkContactModal = ({
 
   const handleConfirmContact = useCallback(() => {
     if (!selected) return;
-    onConfirm({ person: selected.name, phone: selected.phone, contactId: selected.id });
-  }, [selected, onConfirm]);
+    onConfirm({
+      person: selected.name, phone: selected.phone, contactId: selected.id,
+      ...(settleChoice.allocation ? { allocation: settleChoice.allocation } : {}),
+    });
+  }, [selected, onConfirm, settleChoice.allocation]);
 
   // Distinct copy per variant so the settlement flow doesn't ask the wrong
   // question ("Who did you lend to?" makes no sense for the closing-out step).
@@ -205,7 +216,7 @@ const LinkContactModal = ({
           ) : null}
           {selected ? (() => {
             // More than what's open with them flips who owes whom — say so before Confirm.
-            const over = settleExtra(categoryId, Number(amount) || 0, findLbPerson(people, { contactId: selected.id, phone: selected.phone, name: selected.name }));
+            const over = settleExtra(categoryId, Number(amount) || 0, selectedPerson);
             if (!over) return null;
             const who = selected.name;
             const flips = categoryId === 'lent_settled' ? `you owing ${who}` : `${who} owing you`;
@@ -217,6 +228,7 @@ const LinkContactModal = ({
               </Text>
             );
           })() : null}
+          {selected ? <SettlesChips choice={settleChoice} accentColor={theme.primary} /> : null}
           {selected ? null : (
             <>
               {/* ── Search input ── */}

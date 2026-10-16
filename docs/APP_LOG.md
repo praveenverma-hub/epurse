@@ -1991,6 +1991,22 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Groups
 
 **Done**
+- **Oct-17-26: groups ↔ people pass.** (1) **Groups list status** (`utils/groupSyncStatus.ts`): meta line shows
+  ● Live / ● Waiting to sync / Only on your phone / Ended (dot carries the colour); the group detail card shows the
+  same status AFTER the member names, which truncate first (many members used to push "Live" off the line). (2) **Delete Group always** — on a
+  live group it's Leave (₹0 only) + delete here; Leave Group kept (read-only copy). (3) **Settlements reach the group**:
+  `utils/settleAllocation.ts` (`test:settleAllocation`) + `SettlesChips` on the review "Who repaid?" picker
+  (`LinkContactModal`, not in Change Person) and the LB form — "Settles: Goa Trip ₹600 · Direct ₹200", preselected
+  (exact match, else in order), only the PAID amount is settled, overpay → Direct. One transaction can back several
+  settle rows (`settleRows`; `bookedLbTxn` no longer owns a shared txn); Unlink drops all of them. Fallbacks:
+  `applySettleToGroup` from the settlement's detail sheet (Apply to Group) and the Members tab hint "paid you ₹X
+  outside this group · Apply Here" (only the overpaid direct amount). (4) **Members ↔ my contacts**
+  (docs/SHARED_GROUP_SYNC.md §8c): phone FINGERPRINTS (`sync/phoneKey.ts`, `member.add.phoneKey` / `member.phone`,
+  `fold.phoneKeys` outside checkpoints) auto-link on the joiner's phone; `linkGroupMemberContact` re-points group
+  LB rows so the person is ONE in Lent/Borrowed; reminder banner + link sheet (exact-name suggestions, Pick Contact,
+  Not in My Contacts) + ⋮ Link/Change/Unlink Contact; `memberName()` shows my contact name locally, never sent.
+  (5) Manual group expense payer stays editable (locked only when money left my account — `isPayerLockedToMe`).
+  Tests: test:sync 217, test:store +3 blocks, test:groupScenarios 119 unchanged. NOT device-tested.
 - Two group modes (personal/shared), per-member balances derived live via the shared LB
   ledger (`buildGroupLbRows`) — no parallel in-group ledger.
 - Group Zone + location (Jun-2026): auto-tag new txns to an active trip/group.

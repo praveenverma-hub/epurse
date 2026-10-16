@@ -17,6 +17,13 @@ export interface GroupMember {
   phone?: string | null;
   /** Synced groups: left or removed at ₹0, or deleted their account — still in old expenses, not in new ones. */
   archived?: boolean;
+  /**
+   * THIS phone's contact name for them (linked to a contact) — shown instead of `name`,
+   * never sent: `name` stays what the group calls them. See memberName().
+   */
+  contactName?: string | null;
+  /** "Not in My Contacts": stop asking to link them (local only). */
+  noContact?: boolean;
 }
 
 export interface GroupShare {
@@ -74,6 +81,8 @@ export interface Group {
   /** Vestigial — superseded by the LB ledger; kept for back-compat reads. */
   settlements?: unknown[];
   shared?: GroupShared;
+  /** "Not Now" on the Members tab's contact-link reminder (local). */
+  contactLinksSnoozed?: boolean;
 }
 
 /** Minimal transaction shape the group utils need (the store txn is a superset). */

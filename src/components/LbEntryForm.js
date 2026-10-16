@@ -39,7 +39,8 @@ import {
   sanitizeAmount,
 } from '../utils/validation';
 import { formatCompact, formatCurrency, titleCaseName } from '../utils/format';
-import { openBalancePeople, suggestLbPeople } from '../utils/lbPeopleSearch';
+import { findLbPerson, openBalancePeople, suggestLbPeople } from '../utils/lbPeopleSearch';
+import SettlesChips, { useSettleChoice } from './SettlesChips';
 import PrimaryButton from './PrimaryButton';
 import ContactPickerSheet from './ContactPickerSheet';
 import DateField from './DateField';
@@ -161,6 +162,13 @@ const LbEntryForm = ({
     setContactSheetVisible(false);
   }, [clearErr]);
 
+  // A repayment: which of their balances it settles ("Settles: Goa Trip · Direct").
+  const ledgerPerson = useMemo(
+    () => (settleKind && person.trim() ? findLbPerson(people, { contactId, phone, name: person }) : null),
+    [settleKind, people, contactId, phone, person],
+  );
+  const settleChoice = useSettleChoice(ledgerPerson?.entries, settleKind, parseFloat(amount) || 0);
+
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(() => {
     const n = parseFloat(amount);
@@ -199,6 +207,7 @@ const LbEntryForm = ({
       kind,
       alreadySettled,
       accountId: selectedAccount?.id ?? null,
+      ...(settleChoice.allocation ? { allocation: settleChoice.allocation } : {}),
     }));
     // Clear for the next entry. The form owns its fields, so this has to happen
     // here: the inline panel shell stays mounted after a commit and would otherwise
@@ -217,7 +226,7 @@ const LbEntryForm = ({
       setPhone('');
       setContactId(null);
     }
-  }, [person, amount, date, note, contactId, phone, kind, alreadySettled, onSubmit, locked, submit, selectedAccount]);
+  }, [person, amount, date, note, contactId, phone, kind, alreadySettled, onSubmit, locked, submit, selectedAccount, settleChoice.allocation]);
 
   // Chip + heading use the app's own words (ENTRY_LABEL: Received back / Repaid),
   // kept short so the heading and the chip fit one line together.
@@ -366,6 +375,7 @@ const LbEntryForm = ({
         />
       </View>
       {formErr?.amount ? <Text style={styles.fieldErr}>{formErr.amount}</Text> : null}
+      <SettlesChips choice={settleChoice} accentColor={theme.primary} />
 
       {/* "+ Note" + account share one row. The note field only appears (below)
           once asked for — most quick adds skip it. The account is primary-preselected;

@@ -996,6 +996,7 @@ const DashboardScreen = ({ navigation }) => {
 
       <LinkContactModal
         visible={!!lbLinkTxn}
+        splitSettle={!lbLinkTxn?.entryId}
         categoryId={lbLinkTxn?.categoryId}
         amount={lbLinkTxn?.txn?.amount}
         onConfirm={(contactInfo) => {

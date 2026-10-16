@@ -119,7 +119,7 @@ export function txnPayerName(txn: CardTxn | null | undefined, group?: CardGroup 
   if (txn.isGroupMemo && txn.groupSplit) {
     const id = txn.groupSplit.paidByMemberId;
     const member = (group?.members || []).find((m) => m.memberId === id);
-    return firstName(member?.name || txn.groupSplit.paidByName) || 'Someone';
+    return firstName(member?.contactName || member?.name || txn.groupSplit.paidByName) || 'Someone';
   }
   if (txn.isSplitMemo) return firstName(txn.splitPaidBy?.name) || 'Someone';
   return null;

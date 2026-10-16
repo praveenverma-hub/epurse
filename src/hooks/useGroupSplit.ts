@@ -42,7 +42,10 @@ export function useGroupSplit({ group, amount, active = true, editTxn, lockPayer
     if (!isShared) return [ME];
     const split = editTxn?.groupSplit;
     const inSplit = new Set<string>(split ? [split.paidByMemberId, ...(split.shares || []).map((s: any) => s.memberId)] : []);
-    const ms = (group?.members || []).filter((m) => !m.archived || inSplit.has(m.memberId));
+    // Shown by this phone's contact name when linked (memberName) — local only, never sent.
+    const ms = (group?.members || [])
+      .filter((m) => !m.archived || inSplit.has(m.memberId))
+      .map((m) => (m.contactName ? { ...m, name: m.contactName } : m));
     return ms.some((m) => m.memberId === 'me') ? ms : [ME, ...ms];
   }, [group, isShared, editTxn]);
   const meIdx = useMemo(() => Math.max(0, allMembers.findIndex((m) => m.isMe || m.memberId === 'me')), [allMembers]);

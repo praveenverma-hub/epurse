@@ -31,7 +31,8 @@ import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import { INPUT_LIMITS, sanitizeAmount, isValidAmount } from '../utils/validation';
 import { ENTRY_LABEL, isPositiveEntry } from '../constants/lbEntries';
-import { FormField, FormTextInput, FormAmountInput, FormValueCard, FormValueRow } from '../components/FormField';
+import { FormField, FormTextInput, FormAmountInput, FormValueCard, FormValueRow, FormChip, FormChipRow } from '../components/FormField';
+import { openSettleParts } from '../utils/settleAllocation';
 import DateField from '../components/DateField';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
@@ -90,6 +91,7 @@ const LbPersonScreen = ({ route, navigation }) => {
   const lentBorrowedAccountId   = useEPurseStore((s) => s.lentBorrowedAccountId);
   const changeLbEntryPerson     = useEPurseStore((s) => s.changeLbEntryPerson);
   const unlinkLbEntry           = useEPurseStore((s) => s.unlinkLbEntry);
+  const applySettleToGroup      = useEPurseStore((s) => s.applySettleToGroup);
 
   const [detailEntry,  setDetailEntry]  = useState(null);  // the row whose sheet is open
   const [editEntry,    setEditEntry]    = useState(null);  // the row being edited
@@ -99,6 +101,8 @@ const LbPersonScreen = ({ route, navigation }) => {
   const [confirm,      setConfirm]      = useState(null);
   const [settleTarget, setSettleTarget] = useState(null);
   const [moveEntry,    setMoveEntry]    = useState(null);  // Change Person: the row being moved
+  const [applyEntry,   setApplyEntry]   = useState(null);  // Apply to Group: the settlement being moved
+  const [applyPick,    setApplyPick]    = useState(null);  // …and the group picked for it
 
   // Re-derived from `lentBorrowed` so an edit/delete/settle refreshes this screen
   // immediately — getPersonBalances reads the rows on every call, it caches nothing.
@@ -106,6 +110,14 @@ const LbPersonScreen = ({ route, navigation }) => {
     () => getPersonBalances().find((p) => p.personKey === personKey) || null,
     [getPersonBalances, lentBorrowed, personKey] // eslint-disable-line react-hooks/exhaustive-deps
   );
+  const personList = useMemo(() => (person ? [person] : []), [person]);
+  // A settlement recorded outside a group this person still has open: offer to put it there.
+  const groupsOpenFor = useCallback((entry) => (
+    person && entry && !entry.groupId && !entry.isGroupLine && (entry.kind === 'lent_settled' || entry.kind === 'borrow_repaid')
+      ? openSettleParts(person.entries, entry.kind, groups).filter((x) => x.groupId)
+      : []
+  ), [person, groups]);
+  const applyParts = useMemo(() => groupsOpenFor(applyEntry), [groupsOpenFor, applyEntry]);
 
   const groupNameById = useMemo(() => {
     const map = {};
@@ -472,7 +484,14 @@ const LbPersonScreen = ({ route, navigation }) => {
           && !(detailTxn?.isSplit || detailTxn?.isSplitMemo) ? setMoveEntry : undefined}
         // Tagged on a bank (or typed) transaction: keep the transaction, drop the tag. A
         // booked row (editable) has no transaction of its own to keep — Edit → Delete.
-        onUnlink={detailEntry && !detailEntry.groupId && detailTxn?.lbLocked && !detailTxn.isSplit
+        onApplyToGroup={groupsOpenFor(detailEntry).length ? (entry) => {
+          const parts = groupsOpenFor(entry);
+          setApplyPick((parts.find((x) => Math.abs(x.open - entry.amount) < 0.005) || parts[0]).groupId);
+          setApplyEntry(entry);
+        } : undefined}
+        // A group's SETTLEMENT unlinks too — with the rest of its transaction's settlement rows.
+        onUnlink={detailEntry && (!detailEntry.groupId || detailEntry.kind === 'lent_settled' || detailEntry.kind === 'borrow_repaid')
+          && !detailEntry.isGroupLine && detailTxn?.lbLocked && !detailTxn.lbBooked && !detailTxn.isSplit
           && !isLentBorrowedEditable(detailEntry) ? (entry) => setConfirm({
             title: `Unlink from ${firstName(titleCaseName(person.person))}?`,
             message: `The ${formatCurrency(entry.amount)} transaction stays in your account. It stops counting toward ${firstName(titleCaseName(person.person))}'s balance`
@@ -486,8 +505,36 @@ const LbPersonScreen = ({ route, navigation }) => {
           }) : undefined}
       />
 
+      <CenterModal
+        visible={!!applyEntry && applyParts.length > 0}
+        title="Apply to Group"
+        message={applyEntry ? `Which group was this ${formatCurrency(applyEntry.amount)} for?` : ''}
+        primaryText="Apply"
+        secondaryText="Cancel"
+        onSecondary={() => setApplyEntry(null)}
+        onClose={() => setApplyEntry(null)}
+        onPrimary={() => {
+          const g = applyParts.find((x) => x.groupId === applyPick);
+          if (g && applySettleToGroup(applyEntry.id, g.groupId)) toast.success(`Applied to ${g.label}`, formatOutstanding(freshNet(), firstName(person.person)));
+          setApplyEntry(null);
+        }}
+      >
+        <FormChipRow>
+          {applyParts.map((x) => (
+            <FormChip
+              key={x.key}
+              label={`${x.label} ${formatCurrency(x.open)}`}
+              active={applyPick === x.groupId}
+              onPress={() => setApplyPick(x.groupId)}
+              accentColor={theme.primary}
+            />
+          ))}
+        </FormChipRow>
+      </CenterModal>
+
       <LinkContactModal
         visible={!!moveEntry}
+        splitSettle={false}
         categoryId={moveEntry?.kind}
         amount={moveEntry?.amount}
         onConfirm={(contactInfo) => {
@@ -574,6 +621,8 @@ const LbPersonScreen = ({ route, navigation }) => {
                   phone: person.phone ?? null,
                 }}
                 accounts={accounts}
+                // Only this person — for "Settles: Goa Trip · Direct" on a repayment.
+                people={personList}
                 defaultAccountId={pickDefaultAccountId(accounts)}
                 onSubmit={handleAddEntry}
                 theme={theme}

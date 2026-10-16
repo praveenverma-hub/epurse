@@ -71,6 +71,7 @@ import {
 // disagreed with this one, which is how spend went missing from a card's ledger.
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
 import { limitPairKey } from '../utils/cardLimit';
+import { openSettleParts } from '../utils/settleAllocation';
 import {
   DAY_MS, IGNORED_RETENTION_MS, AGG_RETENTION_MS, GOAL_LIVE_WINDOW_MS, COMPACT_THROTTLE,
   CC_PROMPT_MAX_AGE_MS, RAW_SMS_RETENTION_MS, PAYMENT_HISTORY_CAP,
@@ -108,6 +109,7 @@ import {
   defaultGroupSplit,
   isGroupClosed,
   pastMemberIn,
+  memberName,
 } from '../utils/split';
 
 // =============================================================================
@@ -958,6 +960,22 @@ const isLegacyRepayment = (t) => !t.lbLocked && !t.lbBooked && t.categoryId === 
 const groupTagged = (lentBorrowed, txnId) => (lentBorrowed || []).some((l) => l.sourceTxnId === txnId && l.groupId);
 
 /**
+ * One settlement as rows — one per part it settles ("Settles: Goa Trip · Direct",
+ * utils/settleAllocation). `allocation` must add up to `amount`, else it's one plain row.
+ */
+const settleRows = (base, amount, allocation) => {
+  const parts = Array.isArray(allocation) ? allocation.filter((p) => Number(p.amount) > 0) : [];
+  const total = parts.reduce((acc, p) => acc + Number(p.amount), 0);
+  if (!parts.length || Math.abs(total - amount) > 0.01) return [{ ...base, amount }];
+  return parts.map((p, i) => ({
+    ...base,
+    id: `${base.id}_${i}`,
+    amount: Math.round(Number(p.amount) * 100) / 100,
+    ...(p.groupId ? { groupId: p.groupId, memberId: p.memberId || null } : {}),
+  }));
+};
+
+/**
  * A person-tagged transaction's ledger row follows it (Oct-15-26 — before, only booked
  * ones did and the rest were LOCKED, so a wrong person or category couldn't be fixed):
  * new amount/date; another lend/borrow kind → the row's kind; any other category → the
@@ -988,6 +1006,8 @@ const bookedLbTxn = (state, entry) => {
   if (!entry || !entry.sourceTxnId || entry.groupId) return null;
   const txn = (state.transactions || []).find((t) => t.id === entry.sourceTxnId);
   if (!txn || txn.isSplit || txn.groupId || txn.categoryId !== entry.kind) return null;
+  // One settlement split over a group and direct shares its transaction — no single row owns it.
+  if ((state.lentBorrowed || []).some((l) => l.sourceTxnId === txn.id && l.id !== entry.id)) return null;
   return txn.lbBooked || isLegacyRepayment(txn) ? txn : null;
 };
 
@@ -4118,6 +4138,37 @@ export const useEPurseStore = create(
        * Never auto-creates an account (unlike updateGroupExpense): "Rahul says you paid"
        * moves no balance of yours.
        */
+      /**
+       * Link a group member to one of MY contacts (Oct-17-26) — or `{ noContact: true }` to
+       * stop asking, or null to unlink. Local only: the group keeps its own name for them.
+       * Their group Lent/Borrowed rows take the contact (getPersonBalances merges by it), so
+       * the group's debts and my direct ones with that person net as ONE person. A linked
+       * number reaches the other phones as a fingerprint via the sync engine (member.phone).
+       */
+      linkGroupMemberContact: (groupId, memberId, link) => set((s) => {
+        const group = s.groups.find((g) => g.id === groupId);
+        if (!group || memberId === 'me' || !group.members.some((m) => m.memberId === memberId)) return s;
+        const members = group.members.map((m) => {
+          if (m.memberId !== memberId) return m;
+          if (link?.noContact) return { ...m, noContact: true };
+          const name = (link?.name || '').trim();
+          return { ...m, contactId: link?.contactId || null, phone: link?.phone || null, contactName: link && name ? name : null, noContact: false };
+        });
+        if (link?.noContact) return { groups: s.groups.map((g) => (g.id === groupId ? { ...g, members } : g)) };
+        const m = members.find((x) => x.memberId === memberId);
+        return {
+          groups: s.groups.map((g) => (g.id === groupId ? { ...g, members } : g)),
+          lentBorrowed: s.lentBorrowed.map((l) => (l.groupId === groupId && l.memberId === memberId
+            ? { ...l, person: memberName(m) || l.person, contactId: m.contactId || null, phone: m.phone || null }
+            : l)),
+        };
+      }),
+
+      /** "Not Now" on the Members tab's link reminder — per group, the ⋮ option stays. */
+      snoozeContactLinks: (groupId) => set((s) => ({
+        groups: s.groups.map((g) => (g.id === groupId ? { ...g, contactLinksSnoozed: true } : g)),
+      })),
+
       setSharedGroupState: (id, shared, { members, meta, syncIds, lbSyncIds, ops = [] } = {}) => {
         set((s) => {
           let groups = s.groups.map((g) => {
@@ -5809,19 +5860,19 @@ export const useEPurseStore = create(
           const cleared = txn.isSplit ? clearPlainSplit(txn) : null;
           const splitClear = cleared ? cleared.patch : {};
 
-          // One simple entry per transaction — kind mirrors categoryId exactly.
+          // One entry per transaction — kind mirrors categoryId exactly — or, for a
+          // settlement, one per balance it settles (contactInfo.allocation).
           // Balance is always net = Σlent - Σlent_settled - Σborrowed + Σborrow_repaid.
-          const newEntry = {
+          const newEntries = settleRows({
             id: `lb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             kind: categoryId,
             person,
-            amount: txn.amount,
             phone,
             contactId: contactInfo?.contactId || null,
             note: `From txn: ${txn.merchant || ''}`.trim(),
             date: txn.createdAt || now,
             sourceTxnId: id,
-          };
+          }, txn.amount, LB_SETTLED_CATS.has(categoryId) ? contactInfo?.allocation : null);
 
           return {
             transactions: s.transactions.map((t) =>
@@ -5834,9 +5885,35 @@ export const useEPurseStore = create(
             accounts: cleared?.restoreAccountId
               ? applyDelta(s.accounts, cleared.restoreAccountId, { ...txn, type: TRANSACTION_TYPES.DEBIT })
               : s.accounts,
-            lentBorrowed: [newEntry, ...lbList],
+            lentBorrowed: [...newEntries, ...lbList],
           };
         }),
+
+      /**
+       * A settlement recorded outside a group, put into it afterwards (Oct-17-26) — e.g. a
+       * repayment reviewed without picking the trip it was for. Moves as much as the group
+       * has open in that direction; any rest stays direct (same transaction). A live
+       * group's new row syncs as its settlement. `maxAmount` caps it further (the Members
+       * tab moves only what direct was overpaid, so a real direct debt never re-opens).
+       */
+      applySettleToGroup: (entryId, groupId, maxAmount = Infinity) => {
+        const s = get();
+        const row = s.lentBorrowed.find((l) => l.id === entryId);
+        if (!row || row.groupId || !LB_SETTLED_CATS.has(row.kind)) return false;
+        const person = s.getPersonBalances().find((p) => p.entries.some((e) => e.id === entryId));
+        const part = person && openSettleParts(person.entries, row.kind, s.groups).find((p) => p.groupId === groupId);
+        if (!part) return false;
+        const amount = Math.round(Math.min(row.amount, part.open, maxAmount) * 100) / 100;
+        if (!(amount >= 0.005)) return false;
+        const rest = Math.round((row.amount - amount) * 100) / 100;
+        const tag = { groupId, memberId: part.memberId || null };
+        set({
+          lentBorrowed: rest >= 0.005
+            ? s.lentBorrowed.flatMap((l) => (l.id !== entryId ? [l] : [{ ...l, amount: rest }, { ...l, id: `${l.id}_g`, amount, ...tag }]))
+            : s.lentBorrowed.map((l) => (l.id === entryId ? { ...l, ...tag } : l)),
+        });
+        return true;
+      },
 
       /**
        * Change Person (Oct-15-26): a ledger row recorded against the wrong person moves to
@@ -5872,13 +5949,16 @@ export const useEPurseStore = create(
       unlinkLbEntry: (entryId) => {
         const s = get();
         const row = s.lentBorrowed.find((l) => l.id === entryId);
-        if (!row?.sourceTxnId || row.groupId || bookedLbTxn(s, row)) return false;
+        // A group's settlement row unlinks too (Oct-17-26): one transaction can settle a
+        // group AND direct, and all its rows go together. A group EXPENSE row never does.
+        const settle = LB_SETTLED_CATS.has(row?.kind);
+        if (!row?.sourceTxnId || (row.groupId && !settle) || bookedLbTxn(s, row)) return false;
         const txn = s.transactions.find((t) => t.id === row.sourceTxnId);
-        if (!txn || !txn.lbLocked || txn.isSplit) return false;
+        if (!txn || !txn.lbLocked || txn.lbBooked || txn.isSplit) return false;
         const { lbLocked: _l, lbBooked: _b, parentCategory: _p, childCategory: _c, ...rest } = txn;
         const next = { ...rest, categoryId: 'other', userEditedCategory: false, ...(txn.source === 'sms' ? { isReviewed: false } : {}) };
         set({
-          lentBorrowed: s.lentBorrowed.filter((l) => l.id !== entryId),
+          lentBorrowed: s.lentBorrowed.filter((l) => (settle ? l.sourceTxnId !== txn.id : l.id !== entryId)),
           transactions: s.transactions.map((t) => (t.id === txn.id ? next : t)),
         });
         return true;
@@ -6010,10 +6090,13 @@ export const useEPurseStore = create(
           createdAt: nowIso,
           ...(entry.groupId ? { groupId: entry.groupId, memberId: entry.memberId || null } : {}),
         };
+        // A settlement split over the balances it settles: one row each, one transaction.
+        const rows = !entry.groupId && LB_SETTLED_CATS.has(entry.kind) ? settleRows(row, amount, entry.allocation) : [row];
+        const withTxn = (txnId) => rows.map((r) => ({ ...r, sourceTxnId: txnId }));
         const accountId = opts.accountId && s.accounts.some((a) => a.id === opts.accountId) ? opts.accountId : null;
         if (!accountId) {
-          set({ lentBorrowed: [row, ...s.lentBorrowed] });
-          return { entryId: row.id, linkedTxn: null };
+          set({ lentBorrowed: [...rows, ...s.lentBorrowed] });
+          return { entryId: rows[0].id, linkedTxn: null };
         }
         const match = findLbMatch(s, { accountId, kind: entry.kind, amount, dateIso: date });
         if (match) {
@@ -6022,17 +6105,17 @@ export const useEPurseStore = create(
               // Recording it IS the review — don't leave it waiting in the daily queue.
               ? { ...withFlatCategory(t, entry.kind), lbLocked: true, userEditedCategory: true, isReviewed: true }
               : t)),
-            lentBorrowed: [{ ...row, sourceTxnId: match.id }, ...s.lentBorrowed],
+            lentBorrowed: [...withTxn(match.id), ...s.lentBorrowed],
           });
-          return { entryId: row.id, linkedTxn: match };
+          return { entryId: rows[0].id, linkedTxn: match };
         }
         const booked = bookLbTxn(s, accountId, entry.kind, amount, row.person, date);
         set({
           accounts: booked.accounts,
           transactions: booked.transactions,
-          lentBorrowed: [{ ...row, sourceTxnId: booked.txnId }, ...s.lentBorrowed],
+          lentBorrowed: [...withTxn(booked.txnId), ...s.lentBorrowed],
         });
-        return { entryId: row.id, linkedTxn: null };
+        return { entryId: rows[0].id, linkedTxn: null };
       },
 
       addLentBorrowed: (entry) =>

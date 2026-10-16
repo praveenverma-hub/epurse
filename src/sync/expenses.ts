@@ -20,6 +20,7 @@ import { isUuid } from './crypto';
 import { V1_LIMITS, type ExpenseBody, type SyncEvent } from './events';
 import { buildCorrection } from './fold';
 import { planGroupChanges, toLocalMember, toRemoteMember } from './localGroup';
+import { cachedPhoneKey } from './phoneKey';
 import {
   groupSettleRows, planIncomingSettlements, projectSettlement, settlementsWithMe, type LbOp, type SyncLbRow,
 } from './settlements';
@@ -164,7 +165,7 @@ export function planOutgoing(
     if (!pending.has(key)) { pending.add(key); events.push(ev); }
   };
 
-  const people = planGroupChanges(group, shared, newId);
+  const people = planGroupChanges(group, shared, newId, (phone) => cachedPhoneKey(shared.keys, phone));
   people.events.forEach(push);
   const mapped: GroupShared = { ...shared, memberMap: people.memberMap };
 

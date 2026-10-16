@@ -41,6 +41,9 @@ export function membersFromFold(local: GroupMember[], shared: GroupShared): Grou
       name: m.name,
       contactId: prev?.contactId ?? null,
       phone: prev?.phone ?? null,
+      // Linked to a contact on this phone — local only, kept across every pull.
+      ...(prev?.contactName ? { contactName: prev.contactName } : {}),
+      ...(prev?.noContact ? { noContact: true } : {}),
       ...(gone ? { archived: true } : {}),
     });
     seen.add(localId);
@@ -71,6 +74,8 @@ export function planGroupChanges(
   group: Pick<Group, 'name' | 'emoji' | 'color' | 'members'>,
   shared: GroupShared,
   newId: () => string,
+  /** Phone → fingerprint (sync/phoneKey.ts); omitted = send none. Injected so this stays fast in tests. */
+  keyOf?: (phone: string) => string | null,
 ): { events: SyncEvent[]; memberMap: Record<string, string> } {
   const events: SyncEvent[] = [];
   const memberMap = { ...shared.memberMap };
@@ -88,12 +93,20 @@ export function planGroupChanges(
     const name = clip(m.name);
     if (!name) continue;
     const remoteId = memberMap[m.memberId] ?? (fold.members[m.memberId] ? m.memberId : null);
+    // A number known here (picked from contacts, or linked later) → its fingerprint, so the
+    // other phones can link this person to their own contacts. Slow, so only when it's sent.
+    const keyFor = () => (keyOf && m.phone ? keyOf(m.phone) : null);
     if (!remoteId) {
       const id = newId();
       memberMap[m.memberId] = id;
-      events.push({ type: 'member.add', memberId: id, name });
-    } else if (fold.members[remoteId] && fold.members[remoteId].name !== name) {
-      events.push({ type: 'member.rename', memberId: remoteId, name });
+      const key = keyFor();
+      events.push({ type: 'member.add', memberId: id, name, ...(key ? { phoneKey: key } : {}) });
+    } else if (fold.members[remoteId]) {
+      if (fold.members[remoteId].name !== name) events.push({ type: 'member.rename', memberId: remoteId, name });
+      if (m.phone && !fold.phoneKeys?.[remoteId] && !fold.members[remoteId].archived) {
+        const key = keyFor();
+        if (key) events.push({ type: 'member.phone', memberId: remoteId, phoneKey: key });
+      }
     }
   }
   return { events, memberMap };

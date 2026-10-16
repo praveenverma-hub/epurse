@@ -70,6 +70,12 @@ export type GroupFold = {
   lastAt?: string | null;
   /** Corrected expense id → its latest correction (a correction must build on it). */
   corrections?: Record<string, { head: string; deleted: boolean }>;
+  /**
+   * memberId → phone fingerprint (sync/phoneKey.ts), for linking people to contacts.
+   * Kept OUT of MemberState and checkpoints on purpose: it never decides a balance, and
+   * phones that don't know it must still build identical checkpoints.
+   */
+  phoneKeys?: Record<string, string>;
 };
 
 /** A row of `group_events`, with the ciphertext already opened (null = couldn't be). */
@@ -91,6 +97,7 @@ export const MAX_MEMBERS = 100;
 export const emptyFold = (): GroupFold => ({
   seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {},
   balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null, lastAt: null, corrections: {},
+  phoneKeys: {},
 });
 
 // Maps and arrays are copied once per fold; member/entry objects are replaced, never mutated.
@@ -104,6 +111,7 @@ const cloneFold = (f: GroupFold): GroupFold => ({
   balances: { ...f.balances },
   debts: { ...f.debts },
   corrections: { ...f.corrections },
+  phoneKeys: { ...f.phoneKeys },
 });
 
 /** The entry as the rules see it: frozen ones don't exist. */
@@ -315,6 +323,12 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       if (f.memberOrder.length >= MAX_MEMBERS) return 'too_many_members';
       f.members[ev.memberId] = { name: ev.name, userId: null, archived: false };
       f.memberOrder.push(ev.memberId);
+      if (ev.phoneKey) f.phoneKeys = { ...f.phoneKeys, [ev.memberId]: ev.phoneKey };
+      return null;
+
+    case 'member.phone':
+      if (!f.members[ev.memberId]) return 'unknown_member';
+      f.phoneKeys = { ...f.phoneKeys, [ev.memberId]: ev.phoneKey };
       return null;
 
     case 'member.claim': {

@@ -752,5 +752,56 @@ seq = 0;
   check('…and the pull puts its row back', A.lb.some((l) => l.syncId === third.syncId));
 }
 
+console.log('\n— phone fingerprints: linking group members to contacts (Oct-17-26) —');
+{
+  const { cachedPhoneKey, phoneKeySecret, isPhoneKey } = await import('../../sync/phoneKey.ts');
+  const { bytesToBase64 } = await import('../../backup/envelope.ts');
+  const newKey = () => bytesToBase64(generateGroupKey(rand));
+  const keys = { 1: newKey() };
+  const k = cachedPhoneKey(keys, '+91 98765 43210');
+  check('same number written any way → same fingerprint', isPhoneKey(k) && k === cachedPhoneKey(keys, '09876543210'));
+  check('the number itself is nowhere in it', !k.includes('9876543210') && !k.includes('43210'));
+  check('another group → a different fingerprint', k !== cachedPhoneKey({ 1: newKey() }, '9876543210'));
+  check('too short to be a mobile → none', cachedPhoneKey(keys, '12345') === null);
+  const later = { 2: newKey(), 1: keys[1] };
+  check('a rotated key keeps the fingerprint (first epoch is the secret)', cachedPhoneKey(later, '9876543210') === k);
+  check('no keys → none', phoneKeySecret({}) === null);
+
+  const add = parseEvent(encodeEvent({ type: 'member.add', memberId: M.dev, name: 'Dev', phoneKey: k }, 'x'));
+  check('member.add carries a valid fingerprint', add?.event.phoneKey === k);
+  const bad = parseEvent(encodeEvent({ type: 'member.add', memberId: M.dev, name: 'Dev', phoneKey: 'not-hex' }, 'x'));
+  check('…a malformed one is dropped, the person kept', bad && !('phoneKey' in bad.event));
+  check('member.phone needs a valid fingerprint', parseEvent(encodeEvent({ type: 'member.phone', memberId: M.dev, phoneKey: 'x' }, 'x')) === null);
+
+  const start = foldEvents(emptyFold(), base).fold;
+  const ev = (event) => ({
+    seq: start.seq + 1, eventId: randomUuid(rand), authorId: U.priya, systemType: null, systemSubject: null,
+    plaintext: encodeEvent(event, '2026-10-13T10:00:00.000Z'), createdAt: serverTime(start.seq + 1),
+  });
+  const res = foldEvents(start, [ev({ type: 'member.phone', memberId: M.amit, phoneKey: k })]);
+  check('any member\'s member.phone lands in phoneKeys', res.rejected.length === 0 && res.fold.phoneKeys[M.amit] === k, JSON.stringify(res.rejected));
+  check('…never in a checkpoint (phones without it build the same one)',
+    JSON.stringify(buildCheckpoint(res.fold)) === JSON.stringify(buildCheckpoint({ ...res.fold, phoneKeys: {} })));
+  check('…balances untouched', JSON.stringify(res.fold.balances) === JSON.stringify(start.balances));
+  check('member.phone for someone not in the group is rejected',
+    foldEvents(start, [ev({ type: 'member.phone', memberId: randomUuid(rand), phoneKey: k })]).rejected.length === 1);
+
+  const shared = { remoteId: randomUuid(rand), keys, keyEpoch: 1, myMemberId: M.rahul, memberMap: {}, fold: start, status: 'active' };
+  const keyOf = (phone) => cachedPhoneKey(keys, phone);
+  const g = (members) => ({ name: 'Goa Trip', emoji: '🏖️', color: '#7C3AED', members });
+  const amit = { memberId: M.amit, name: 'Amit', phone: '9876543210' };
+  let plan = planGroupChanges(g([{ memberId: 'me', name: 'Me', isMe: true }, { memberId: 'c_neha', name: 'Neha', phone: '9123456780' }, amit]), shared, () => M.dev, keyOf);
+  check('a new person with a number → member.add WITH their fingerprint',
+    plan.events.some((e) => e.type === 'member.add' && e.name === 'Neha' && e.phoneKey === keyOf('9123456780')), JSON.stringify(plan.events));
+  check('someone already there, now linked to a number → member.phone',
+    plan.events.some((e) => e.type === 'member.phone' && e.memberId === M.amit && e.phoneKey === k));
+  plan = planGroupChanges(g([amit]), { ...shared, fold: res.fold }, () => M.dev, keyOf);
+  check('…not again once the group has it', !plan.events.some((e) => e.type === 'member.phone'));
+  plan = planGroupChanges(g([{ ...amit, contactName: 'Amit Kumar' }]), shared, () => M.dev);
+  check('a local contact name is never sent as a rename', !plan.events.some((e) => e.type === 'member.rename'));
+  const pulled = membersFromFold([{ ...amit, contactId: 'c1', contactName: 'Amit Kumar' }], { ...shared, fold: res.fold });
+  check('a pull keeps this phone\'s contact link and name', pulled.some((m) => m.memberId === M.amit && m.contactId === 'c1' && m.contactName === 'Amit Kumar' && m.name === 'Amit'));
+}
+
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);
 if (fail) process.exit(1);

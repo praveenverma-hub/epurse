@@ -83,8 +83,9 @@ function localRowFields(group: Group, shared: GroupShared, d: SettlementBody) {
   return {
     kind: d.to === me ? 'lent_settled' : 'borrow_repaid',
     memberId,
-    person: m?.name || shared.fold.members[other]?.name || 'Member',
+    person: m?.contactName || m?.name || shared.fold.members[other]?.name || 'Member',
     contactId: m?.contactId || null,
+    phone: m?.phone || null,
     amount: d.amountPaise / 100,
     date: d.date,
   };
@@ -110,7 +111,7 @@ export function planIncomingSettlements(group: Group, lb: SyncLbRow[], pendingId
       ops.push({
         kind: 'lbCreate',
         row: {
-          id: `lb_sync_${id}`, ...want, phone: null, note: `Group settle · ${group.name}`,
+          id: `lb_sync_${id}`, ...want, note: `Group settle · ${group.name}`,
           createdAt: d.date, groupId: group.id, syncId: id, syncOrigin: 'remote',
         },
       });

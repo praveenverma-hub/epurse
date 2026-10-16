@@ -145,10 +145,11 @@ tested by `npm run test:sync`.
 | type | body | who may send |
 |---|---|---|
 | `group.meta` | `name, emoji, color` | any member |
-| `member.add` | `memberId, name` — a person in the group, joined or not | any member |
+| `member.add` | `memberId, name, phoneKey?` — a person in the group, joined or not; `phoneKey` = fingerprint of their number (§8c) | any member |
 | `member.claim` | `memberId, userId` — "this person is me" | the user themself (`userId` = author), once |
 | `member.rename` | `memberId, name` | any member |
 | `member.archive` | `memberId` — only when their balance is ₹0 at that point (§8a) | any member |
+| `member.phone` | `memberId, phoneKey` — a fingerprint for someone already in the group (§8c) | any member |
 | `expense.upsert` | `entityId, amountPaise, title, categoryId, date, paidBy, shares[{memberId, paise}]` | any member (create or edit) |
 | `settlement.upsert` | `entityId, from, to, amountPaise, date` (from ≠ to) | any member (create or edit) |
 | `expense.delete` / `settlement.delete` | `entityId` | any member |
@@ -333,6 +334,28 @@ new event (data, system or checkpoint):
   `syncOrigin`.
 - **Clean Up History** never removes a live shared group (I'd still be a member on the server);
   once sharing has ended it can go like any other group.
+
+## 8c. Members ↔ my contacts (built Oct-17-2026)
+
+Members carry the name whoever added them typed; on a joiner's phone they had no contact, so
+"Rohit" in a group and the contact "Rohit Sharma" were two Lent/Borrowed people. Now:
+
+- **Fingerprint, not number** (`sync/phoneKey.ts`): PBKDF2-SHA256 (5000 rounds) of the last 10
+  digits, salted with the group's FIRST key (stable across rotation). Sent on `member.add` when the
+  adder knows the number, or later as `member.phone` once anyone links them (`planGroupChanges`, via
+  the engine — existing groups backfill on their own). The server never sees it (ciphertext); a
+  member can't read a number back, though with the key and enough compute a 10-digit number could
+  be brute-forced — accepted (user, Oct-17-26).
+- Kept in `fold.phoneKeys`, **outside `MemberState` and checkpoints** — it never decides a
+  balance, and phones without it must build identical checkpoints. A phone that starts from a
+  checkpoint has no fingerprints → falls back to the reminder below.
+- **Auto-link** (`sync/contactLink.ts`): opening a live group hashes MY contacts (permission must
+  already be granted — never asks) and links every match. Local only: `member.contactId/phone/
+  contactName` (+ `noContact`), kept by `membersFromFold`; `name` stays the group's, so no rename is
+  ever sent. `linkGroupMemberContact` re-points that member's group LB rows at the contact →
+  getPersonBalances merges them with my direct rows.
+- The rest: Members tab reminder ("N people aren't linked…", Link / Not Now) → sheet with one-tap
+  exact-name suggestions, Pick Contact, Not in My Contacts; ⋮ Link / Change / Unlink Contact.
 
 ---
 

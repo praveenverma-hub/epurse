@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { isUuid } from './crypto';
+import { isPhoneKey } from './phoneKey';
 
 export const EVENT_VERSION = 1;
 
@@ -88,10 +89,13 @@ export type CorrectionBody = {
 
 export type SyncEvent =
   | { type: 'group.meta'; name: string; emoji: string | null; color: string | null }
-  | { type: 'member.add'; memberId: string; name: string }
+  // phoneKey (Oct-17-26): optional fingerprint of the person's number (sync/phoneKey.ts) —
+  // only links people to contacts, never touches a balance, so older phones dropping it is safe.
+  | { type: 'member.add'; memberId: string; name: string; phoneKey?: string }
   | { type: 'member.claim'; memberId: string; userId: string }
   | { type: 'member.rename'; memberId: string; name: string }
   | { type: 'member.archive'; memberId: string }
+  | { type: 'member.phone'; memberId: string; phoneKey: string }
   | ({ type: 'expense.upsert' } & ExpenseBody)
   | { type: 'expense.delete'; entityId: string }
   | ({ type: 'settlement.upsert' } & SettlementBody)
@@ -203,9 +207,17 @@ export function parseEvent(json: string | null): ParsedEvent | null {
       return { at, event: { type: o.type, name: o.name, emoji: o.emoji ?? null, color: o.color ?? null } };
 
     case 'member.add':
+      if (!isUuid(o.memberId) || !text(o.name, V1_LIMITS.NAME_MAX)) return null;
+      // A malformed fingerprint is dropped, never the person.
+      return { at, event: { type: o.type, memberId: o.memberId, name: o.name, ...(isPhoneKey(o.phoneKey) ? { phoneKey: o.phoneKey } : {}) } };
+
     case 'member.rename':
       if (!isUuid(o.memberId) || !text(o.name, V1_LIMITS.NAME_MAX)) return null;
       return { at, event: { type: o.type, memberId: o.memberId, name: o.name } };
+
+    case 'member.phone':
+      if (!isUuid(o.memberId) || !isPhoneKey(o.phoneKey)) return null;
+      return { at, event: { type: o.type, memberId: o.memberId, phoneKey: o.phoneKey } };
 
     case 'member.claim':
       if (!isUuid(o.memberId) || !isUuid(o.userId)) return null;

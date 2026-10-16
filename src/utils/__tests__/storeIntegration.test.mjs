@@ -5265,6 +5265,103 @@ console.log('\n— Person-tagged transactions are no longer locked (Oct-15-26) �
     && G().updateTransaction('grp_repay', { amount: 50, accountId: 'a1', categoryId: 'borrow_repaid' }) === null);
 }
 
+console.log('\n— A settlement split over the balances it settles: "Settles: Goa Trip · Direct" (Oct-17-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date().toISOString();
+  useStore.setState({
+    accounts: [{ id: 'a1', name: 'HDFC', type: 'Bank Account', balance: 5000 }],
+    transactions: [{ id: 'sms_in', amount: 800, type: 'credit', categoryId: 'transfer', accountId: 'a1', merchant: 'UPI ROHIT', createdAt: now, source: 'sms', isReviewed: false }],
+  });
+  const P = { person: 'Rohit', phone: '9000000001' };
+  const rows = (txnId) => G().lentBorrowed.filter((l) => l.sourceTxnId === txnId);
+  const alloc = [{ groupId: 'goa', memberId: 'm_r', amount: 600 }, { groupId: null, memberId: null, amount: 200 }];
+
+  G().updateTransactionCategoryWithContact('sms_in', 'lent_settled', { ...P, allocation: [{ groupId: 'goa', amount: 100 }] });
+  check('an allocation that doesn\'t add up to the amount → one plain row', rows('sms_in').length === 1 && !rows('sms_in')[0].groupId);
+  G().unlinkLbEntry(rows('sms_in')[0].id);
+
+  G().updateTransactionCategoryWithContact('sms_in', 'lent_settled', { ...P, allocation: alloc });
+  const r = rows('sms_in');
+  check('review tag: one row per part, all on the same transaction',
+    r.length === 2 && r.some((l) => l.groupId === 'goa' && l.memberId === 'm_r' && l.amount === 600) && r.some((l) => !l.groupId && l.amount === 200), JSON.stringify(r));
+  check('…the bank transaction is untouched', G().accounts[0].balance === 5000 && G().transactions.find((t) => t.id === 'sms_in').amount === 800);
+
+  G().updateTransactionCategoryWithContact('sms_in', 'borrowed', P);
+  check('…and with a group row in it, re-tagging is refused (fixed from the group, or Unlink)', rows('sms_in').length === 2);
+
+  check('Unlink drops every settlement row of that transaction, group one included',
+    G().unlinkLbEntry(rows('sms_in').find((l) => l.groupId).id) === true && rows('sms_in').length === 0
+    && G().transactions.find((t) => t.id === 'sms_in').categoryId === 'other');
+
+  const res = G().recordLbEntry({ ...P, kind: 'lent_settled', amount: 800, date: now, allocation: alloc }, { accountId: 'a1' });
+  const booked = G().lentBorrowed.filter((l) => l.sourceTxnId === G().lentBorrowed.find((l) => l.id === res.entryId).sourceTxnId);
+  check('LB form: the same split, ONE transaction behind both rows (here it matched the bank credit)',
+    booked.length === 2 && booked.every((l) => l.sourceTxnId === 'sms_in'), JSON.stringify(booked));
+  G().recordLbEntry({ ...P, kind: 'lent_settled', amount: 450, date: now, allocation: [{ groupId: 'goa', memberId: 'm_r', amount: 450 }] }, { accountId: 'a1' });
+  check('…with no bank match it books ONE transaction for the whole amount',
+    G().transactions.filter((t) => t.lbBooked && t.amount === 450).length === 1 && G().lentBorrowed.some((l) => l.groupId === 'goa' && l.amount === 450));
+
+  G().recordLbEntry({ ...P, kind: 'lent', amount: 300, date: now, allocation: alloc });
+  check('a lend is never split (allocation is for settlements only)',
+    G().lentBorrowed.filter((l) => l.kind === 'lent' && l.amount === 300 && !l.groupId).length === 1);
+}
+
+console.log('\n— Apply to Group: a settlement recorded outside the group, put into it later (Oct-17-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date().toISOString();
+  useStore.setState({
+    groups: [{ id: 'goa', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'm_r', name: 'Rohit' }], createdAt: now }],
+    lentBorrowed: [{ id: 'g_leg', kind: 'lent', person: 'Rohit', phone: '9000000001', amount: 600, groupId: 'goa', memberId: 'm_r', date: now }],
+  });
+  const P = { person: 'Rohit', phone: '9000000001' };
+  const net = () => G().getPersonBalances().find((p) => p.phone === P.phone)?.net ?? 0;
+  const groupOpen = () => G().lentBorrowed.filter((l) => l.groupId === 'goa').reduce((a, l) => a + (l.kind === 'lent' ? l.amount : -l.amount), 0);
+  const r = G().recordLbEntry({ ...P, kind: 'lent_settled', amount: 800, date: now });
+  check('setup: paid ₹800 outside the group — person −₹200, group still ₹600 open', net() === -200 && groupOpen() === 600, `${net()} ${groupOpen()}`);
+
+  check('Apply moves only what the group has open; the rest stays direct',
+    G().applySettleToGroup(r.entryId, 'goa') === true && groupOpen() === 0
+    && G().lentBorrowed.some((l) => l.id === r.entryId && !l.groupId && l.amount === 200), JSON.stringify(G().lentBorrowed));
+  check('…the person total is unchanged (same money, now in the right place)', net() === -200, String(net()));
+  check('…and the group row carries the member id (it syncs as their settlement)',
+    G().lentBorrowed.some((l) => l.groupId === 'goa' && l.kind === 'lent_settled' && l.memberId === 'm_r'));
+  check('nothing open in the group any more → refused', G().applySettleToGroup(r.entryId, 'goa') === false);
+  check('a lend (not a settlement) can\'t be applied', G().applySettleToGroup('g_leg', 'goa') === false);
+}
+
+console.log('\n— Link a group member to MY contact: one person in Lent/Borrowed (Oct-17-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date().toISOString();
+  // A joiner's phone: the group calls him "Rohit", no contact; I also lent my contact Rohit Sharma ₹200 directly.
+  useStore.setState({
+    groups: [{ id: 'goa', name: 'Goa Trip', type: 'shared', members: [{ memberId: 'me', name: 'Me', isMe: true }, { memberId: 'u_r', name: 'Rohit' }], createdAt: now }],
+    lentBorrowed: [
+      { id: 'g1', kind: 'lent', person: 'Rohit', amount: 600, groupId: 'goa', memberId: 'u_r', date: now },
+      { id: 'd1', kind: 'lent', person: 'Rohit Sharma', contactId: 'c9', phone: '9000000009', amount: 200, date: now },
+    ],
+  });
+  const people = () => G().getPersonBalances().filter((p) => p.net !== 0);
+  check('setup: two separate people', people().length === 2, JSON.stringify(people().map((p) => [p.person, p.net])));
+
+  G().linkGroupMemberContact('goa', 'u_r', { contactId: 'c9', phone: '9000000009', name: 'Rohit Sharma' });
+  check('linked: ONE person owing ₹800', people().length === 1 && people()[0].net === 800, JSON.stringify(people().map((p) => [p.person, p.net])));
+  const m = G().groups[0].members.find((x) => x.memberId === 'u_r');
+  check('…the member keeps the group\'s name, shows mine', m.name === 'Rohit' && m.contactName === 'Rohit Sharma' && m.contactId === 'c9');
+  check('…and the group row now carries the contact', G().lentBorrowed.find((l) => l.id === 'g1').contactId === 'c9');
+
+  G().linkGroupMemberContact('goa', 'u_r', null);
+  check('unlink: back to two people', people().length === 2);
+  G().linkGroupMemberContact('goa', 'u_r', { noContact: true });
+  check('"Not in My Contacts" only stops the asking', G().groups[0].members.find((x) => x.memberId === 'u_r').noContact === true && people().length === 2);
+  check('me can\'t be linked', (G().linkGroupMemberContact('goa', 'me', { contactId: 'c1', name: 'X' }), !G().groups[0].members[0].contactId));
+}
+
 console.log('\n— Ignore → Restore keeps a person-tagged txn\'s ledger row (Oct-10-26) —');
 {
   reset();

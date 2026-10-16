@@ -31,9 +31,15 @@ import PlainScreenHeader from '../components/PlainScreenHeader';
 import { colors, radius, spacing, typography as typographyBase, shadows, BUTTON_H, withAlpha, DIVIDER_W } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme } from '../hooks/useTheme';
-import { formatCurrency, monthKey, titleCaseName } from '../utils/format';
+import { formatCurrency, formatDate, monthKey, titleCaseName } from '../utils/format';
+import { openSettleParts } from '../utils/settleAllocation';
+import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
 import { lbTagLocked } from '../utils/lbEntryDisplay';
-import { countsForSpend, spendContribution } from '../utils/split';
+import { countsForSpend, memberName, spendContribution } from '../utils/split';
+import { autoLinkGroupMembers, suggestByName, unlinkedMembers, type LinkCandidate } from '../sync/contactLink';
+import { fetchContactsForPicker } from '../services/contactsService';
+import { normalizePhone } from '../utils/validation';
+import ContactPickerSheet, { type PickedContact } from '../components/ContactPickerSheet';
 import { buildCategoryBreakdown } from '../analytics/behavioralSelectors';
 import EmptyState from '../components/EmptyState';
 import SectionHeader from '../components/SectionHeader';
@@ -72,7 +78,11 @@ const TransactionItem = TransactionItemRaw as React.ComponentType<{
   onPressCategory?: () => void;
 }>;
 
-interface GroupBalanceRow { personKey: string; person: string; phone?: string | null; net: number }
+interface GroupBalanceRow {
+  personKey: string; person: string; phone?: string | null; net: number;
+  /** A settlement recorded OUTSIDE this group that overpaid their direct balance — likely this group's. */
+  outside?: { entryId: string; amount: number; date: string };
+}
 interface ConfirmState {
   title?: string; message?: string; primaryText?: string; secondaryText?: string;
   destructive?: boolean; onPrimary?: () => void | Promise<void>; onSecondary?: () => void;
@@ -115,6 +125,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const accountsHidden = useEPurseStore(selectAccountsHidden) as boolean;
   const deleteGroup = useEPurseStore((s: any) => s.deleteGroup) as (id: string) => void;
   const getPersonBalances = useEPurseStore((s: any) => s.getPersonBalances) as () => any[];
+  const applySettleToGroup = useEPurseStore((s: any) => s.applySettleToGroup) as (entryId: string, groupId: string, max?: number) => boolean;
   const settleGroupPersonBalance = useEPurseStore((s: any) => s.settleGroupPersonBalance) as (id: string, personKey: string, opts?: { accountId?: string }) => void;
   const updateTransactionCategory = useEPurseStore((s: any) => s.updateTransactionCategory) as (id: string, categoryId: string) => void;
   const activeGroupZoneId = useEPurseStore((s: any) => s.activeGroupZoneId) as string | null;
@@ -130,6 +141,22 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const [viewportH, setViewportH] = useState(0);
   const [tabBarH, setTabBarH] = useState(0);
   const [pastOpen, setPastOpen] = useState(false);
+  // Linking members to MY contacts (sync/contactLink.ts): the reminder's sheet, the member
+  // being picked for, and the contacts its one-tap suggestions come from.
+  const linkGroupMemberContact = useEPurseStore((s: any) => s.linkGroupMemberContact) as (g: string, m: string, link: any) => void;
+  const snoozeContactLinks = useEPurseStore((s: any) => s.snoozeContactLinks) as (g: string) => void;
+  const [linkSheetOpen, setLinkSheetOpen] = useState(false);
+  const [pickFor, setPickFor] = useState<string | null>(null);
+  const [deviceContacts, setDeviceContacts] = useState<PickedContact[]>([]);
+  const unlinkedNow = unlinkedMembers(group);
+  const phoneKeyCount = group?.shared ? Object.keys(group.shared.fold.phoneKeys || {}).length : 0;
+  // Fingerprint matches link on their own (contacts permission already given — never asks).
+  useEffect(() => {
+    if (group?.shared && phoneKeyCount > 0 && unlinkedNow.length > 0) autoLinkGroupMembers(group.id);
+  }, [group?.id, phoneKeyCount, unlinkedNow.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (linkSheetOpen) fetchContactsForPicker().then(setDeviceContacts).catch(() => {});
+  }, [linkSheetOpen]);
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(0);
   const [headerH, setHeaderH] = useState(0);
@@ -202,10 +229,24 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         if (e.kind === 'borrow_repaid') return acc + e.amount;
         return acc;
       }, 0);
-      if (Math.abs(net) > 0.005) rows.push({ personKey: p.personKey, person: p.person, phone: p.phone, net });
+      if (Math.abs(net) <= 0.005) continue;
+      // Paid outside the group: their direct balance went the OTHER way (overpaid) by at
+      // least something — offer to move that much here (never more, so a real direct debt
+      // can't re-open). Only when this group can still take it (open, not a past member).
+      const settleKind = net > 0 ? 'lent_settled' : 'borrow_repaid';
+      const dir = net > 0 ? 1 : -1;
+      const direct = (p.entries || []).filter((e: any) => !e.groupId);
+      const directSum = direct.reduce((acc: number, e: any) => acc + (e.kind === 'lent' || e.kind === 'borrow_repaid' ? 1 : e.kind === 'borrowed' || e.kind === 'lent_settled' ? -1 : 0) * e.amount, 0);
+      const overpaid = Math.round(-dir * directSum * 100) / 100;
+      const last = direct.filter((e: any) => e.kind === settleKind).sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''))[0];
+      const canTake = openSettleParts(p.entries || [], settleKind, groups).some((x) => x.groupId === groupId);
+      const outside = overpaid >= 0.5 && last && canTake
+        ? { entryId: last.id, amount: Math.round(Math.min(Math.abs(net), overpaid, last.amount) * 100) / 100, date: last.date }
+        : undefined;
+      rows.push({ personKey: p.personKey, person: p.person, phone: p.phone, net, outside });
     }
     return rows.sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
-  }, [getPersonBalances, isShared, groupId, lentBorrowed]);
+  }, [getPersonBalances, isShared, groupId, lentBorrowed, groups]);
 
   // Top card (utils/groupHero.ts): totals from the same live list as the rows
   // below, plus the outstanding balance in one line.
@@ -269,6 +310,24 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const zoneOn = activeGroupZoneId === group.id;
 
   const handleDeleteGroup = () => {
+    // Live: Delete = Leave (₹0 only — leaveSharedGroup refuses otherwise, and the toast
+    // says so) + remove it here. The others keep the group and its history.
+    if (live) {
+      setConfirm({
+        title: `Delete ${group.name}?`,
+        message: 'You\'ll leave the group and it\'s removed from this phone. The others keep it and its history.',
+        primaryText: 'Delete',
+        secondaryText: 'Cancel',
+        destructive: true,
+        onPrimary: runShared(async () => {
+          await leaveSharedGroup(group.id);
+          deleteGroup(group.id);
+          toast.success('Group deleted');
+          navigation.goBack();
+        }, 'Couldn\'t delete'),
+      });
+      return;
+    }
     setConfirm({
       title: 'Delete group?',
       message: `"${group.name}" will be removed. `
@@ -368,6 +427,13 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     }, 'Couldn\'t leave'),
   });
 
+  const applyOutside = (pb: GroupBalanceRow) => {
+    if (!pb.outside) return;
+    if (applySettleToGroup(pb.outside.entryId, group.id, pb.outside.amount)) {
+      toast.success('Applied to this group', `${titleCaseName(pb.person)} · ${formatCurrency(pb.outside.amount)}`);
+    }
+  };
+
   const handleSettle = (pb: GroupBalanceRow) => {
     // No picker when there's nothing to pick (no accounts → ledger-only) or tracking is
     // off in Settings (→ the primary quietly, or none if that's Cash): the confirm below.
@@ -404,8 +470,15 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const currentMembers = (group.members || []).filter((m) => !m.archived);
   const pastMembers = (group.members || []).filter((m) => m.archived);
   const renderMemberRow = (m: GroupMember, i: number) => {
-    const displayName = m.isMe ? 'You' : titleCaseName(m.name);
+    const displayName = m.isMe ? 'You' : titleCaseName(memberName(m));
     const st = status(m);
+    const linked = !!(m.contactId || m.phone);
+    const menu = [
+      ...(m.isMe ? [] : [{ key: 'link', label: linked ? 'Change Contact' : 'Link Contact', icon: 'link-outline' as const, onPress: () => setPickFor(m.memberId) }]),
+      ...(linked && !m.isMe ? [{ key: 'unlink', label: 'Unlink Contact', icon: 'unlink-outline' as const, onPress: () => linkGroupMemberContact(group.id, m.memberId, null) }] : []),
+      ...(st.canAddBack ? [{ key: 'addBack', label: 'Add Back', icon: 'person-add-outline' as const, onPress: () => handleAddBack(m) }] : []),
+      ...(st.canRemove && !st.canAddBack ? [{ key: 'remove', label: 'Remove', icon: 'person-remove-outline' as const, destructive: true, onPress: () => handleRemoveMember(m) }] : []),
+    ];
     return (
       <View key={m.memberId} style={[styles.memberRow, i > 0 && styles.pendingRowDivider]}>
         <View style={[styles.avatar, { backgroundColor: theme.primary + '22', marginRight: 0 }]}>
@@ -427,17 +500,33 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             <Text style={styles.memberRoleTagTxt}>{st.tag}</Text>
           </View>
         ) : null}
-        {st.canRemove || st.canAddBack ? (
+        {menu.length ? (
           <OverflowMenu
             style={styles.memberMenuBtn}
             accessibilityLabel={`More for ${displayName}`}
-            actions={st.canAddBack
-              ? [{ key: 'addBack', label: 'Add Back', icon: 'person-add-outline', onPress: () => handleAddBack(m) }]
-              : [{ key: 'remove', label: 'Remove', icon: 'person-remove-outline', destructive: true, onPress: () => handleRemoveMember(m) }]}
+            actions={menu}
           />
         ) : null}
       </View>
     );
+  };
+
+  // One-tap suggestions: an exact name match among my contacts / ledger people (never silent).
+  const linkCandidates = (): LinkCandidate[] => {
+    const out: LinkCandidate[] = deviceContacts.map((c) => ({ name: c.name, contactId: c.id, phone: normalizePhone(c.phones[0] || '') || null }));
+    const seen = new Set(out.map((c) => c.contactId));
+    for (const p of getPersonBalances()) {
+      if (!p.contactId && !p.phone) continue;
+      if (p.contactId && seen.has(p.contactId)) continue;
+      out.push({ name: p.person, contactId: p.contactId || null, phone: p.phone || null });
+    }
+    return out;
+  };
+  const linkTo = (memberId: string, c: { contactId: string | null; phone: string | null; name: string }) =>
+    linkGroupMemberContact(group.id, memberId, c);
+  const onPicked = (c: PickedContact) => {
+    if (pickFor) linkTo(pickFor, { contactId: c.id, phone: normalizePhone(c.phones[0] || '') || null, name: c.name });
+    setPickFor(null);
   };
 
   const renderMembers = () => (
@@ -448,6 +537,26 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
               <Text style={styles.mismatchTxt}>
                 Balances on this phone don&apos;t match another member&apos;s. Compare with the group before settling up.
               </Text>
+            </View>
+          ) : null}
+          {isShared && unlinkedNow.length > 0 && !group.contactLinksSnoozed ? (
+            <View style={[styles.linkBanner, { backgroundColor: theme.primary + '10', borderColor: theme.primary + '33' }]}>
+              <View style={styles.linkBannerTop}>
+                <Ionicons name="link-outline" size={16} color={theme.primary} />
+                <Text style={[styles.linkBannerTxt, { color: theme.textSecondary }]}>
+                  {unlinkedNow.length === 1
+                    ? `${titleCaseName(memberName(unlinkedNow[0]))} isn't linked to your contacts, so their balance doesn't join your Lent/Borrowed.`
+                    : `${unlinkedNow.length} people aren't linked to your contacts, so their balances don't join your Lent/Borrowed.`}
+                </Text>
+              </View>
+              <View style={styles.linkBannerActions}>
+                <TouchableOpacity onPress={() => snoozeContactLinks(group.id)} hitSlop={8} accessibilityRole="button">
+                  <Text style={[styles.linkBannerAction, { color: theme.textSecondary }]}>Not Now</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setLinkSheetOpen(true)} hitSlop={8} accessibilityRole="button">
+                  <Text style={[styles.linkBannerAction, { color: theme.primary }]}>Link</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : null}
           <View style={styles.cardShell}>
@@ -493,7 +602,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
               {groupBalances.map((pb, i) => {
                 const owesYou = pb.net > 0;
                 return (
-                  <View key={pb.personKey} style={[styles.pendingRow, i > 0 && styles.pendingRowDivider]}>
+                  <View key={pb.personKey} style={i > 0 ? styles.pendingRowDivider : undefined}>
+                  <View style={styles.pendingRow}>
                     <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
                       <Text style={[styles.avatarTxt, { color: theme.primary }]}>{(pb.person || '?').charAt(0).toUpperCase()}</Text>
                     </View>
@@ -524,6 +634,19 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                     {!owesYou && (
                       <ReminderBell personKey={pb.personKey} person={titleCaseName(pb.person)} amount={pb.net} style={styles.bellGap} />
                     )}
+                  </View>
+                  {pb.outside && !closed ? (
+                    <View style={styles.outsideRow}>
+                      <Text style={[styles.outsideTxt, { color: theme.textSecondary }]}>
+                        {owesYou
+                          ? `${titleCaseName(pb.person)} paid you ${formatCurrency(pb.outside.amount)} on ${formatDate(pb.outside.date)} outside this group.`
+                          : `You paid ${titleCaseName(pb.person)} ${formatCurrency(pb.outside.amount)} on ${formatDate(pb.outside.date)} outside this group.`}
+                      </Text>
+                      <TouchableOpacity onPress={() => applyOutside(pb)} hitSlop={8} accessibilityRole="button">
+                        <Text style={[styles.outsideAction, { color: theme.primary }]}>Apply Here</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
                   </View>
                 );
               })}
@@ -728,11 +851,29 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                 <Text style={styles.cardEmoji}>{group.emoji || (isShared ? '👥' : '📁')}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardName} numberOfLines={1}>{group.name}</Text>
-                  <Text style={styles.cardMeta} numberOfLines={1}>
-                    {isShared ? memberNamesLabel : 'Personal group'}
-                    {live ? ' · Live' : group.shared ? ' · Sharing Ended' : ''}
-                    {group.excludeFromTotals ? ' · Excluded from totals' : ''}
-                  </Text>
+                  {/* Names truncate; the status after them never does (many members used to
+                      push "Live" off the end). Same status + dot as the Groups list card. */}
+                  {(() => {
+                    const sync = groupSyncStatus(group);
+                    const dot = sync === 'live' ? theme.success : sync === 'waiting' ? theme.warning : null;
+                    return (
+                      <View style={styles.cardMetaRow}>
+                        <Text style={[styles.cardMeta, styles.cardMetaNames]} numberOfLines={1}>
+                          {isShared ? memberNamesLabel : 'Personal group'}
+                        </Text>
+                        {sync !== 'personal' ? (
+                          <>
+                            <Text style={styles.cardMeta}> · </Text>
+                            {dot ? <View style={[styles.cardSyncDot, { backgroundColor: dot }]} /> : null}
+                            <Text style={[styles.cardMeta, dot ? { color: theme.textPrimary, fontWeight: '600' } : null]} numberOfLines={1}>
+                              {GROUP_SYNC_LABEL[sync]}
+                            </Text>
+                          </>
+                        ) : null}
+                        {group.excludeFromTotals ? <Text style={styles.cardMeta} numberOfLines={1}> · Excluded</Text> : null}
+                      </View>
+                    );
+                  })()}
                 </View>
                 {/* One ⋮ for the group's actions — Add Expense, Edit, Delete. Frees the
                     row below the card for the Group Zone tile. */}
@@ -745,10 +886,9 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                     ]),
                     ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: startInvite }] : []),
                     ...(group.shared ? [{ key: 'history', label: 'History', icon: 'time-outline' as const, onPress: () => setHistoryOpen(true) }] : []),
-                    // A live group is left (₹0 only), not deleted; once ended it's a normal local group.
-                    live
-                      ? { key: 'leave', label: 'Leave', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }
-                      : { key: 'delete', label: 'Delete Group', icon: 'trash-outline' as const, destructive: true, onPress: handleDeleteGroup },
+                    // Live: Leave keeps a read-only copy here; Delete leaves AND removes it. Both ₹0 only.
+                    ...(live ? [{ key: 'leave', label: 'Leave Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }] : []),
+                    { key: 'delete', label: 'Delete Group', icon: 'trash-outline' as const, destructive: true, onPress: handleDeleteGroup },
                   ]}
                 />
               </View>
@@ -970,6 +1110,51 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         onClose={() => setInvite(null)}
       />
 
+      <CenterModal
+        visible={linkSheetOpen && unlinkedNow.length > 0}
+        title="Link to Contacts"
+        message="Linked people's group balances join your Lent/Borrowed."
+        primaryText="Done"
+        onPrimary={() => setLinkSheetOpen(false)}
+        secondaryText={undefined}
+        onSecondary={undefined}
+        onClose={() => setLinkSheetOpen(false)}
+      >
+        {(() => {
+          const candidates = linkCandidates();
+          return unlinkedNow.map((m) => {
+            const hit = suggestByName(m, candidates);
+            return (
+              <View key={m.memberId} style={styles.linkRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.linkRowName, { color: theme.textPrimary }]} numberOfLines={1}>{titleCaseName(m.name)}</Text>
+                  <TouchableOpacity onPress={() => linkGroupMemberContact(group.id, m.memberId, { noContact: true })} hitSlop={6}>
+                    <Text style={[styles.linkRowHint, { color: theme.textMuted }]}>Not in My Contacts</Text>
+                  </TouchableOpacity>
+                </View>
+                {hit ? (
+                  <TouchableOpacity onPress={() => linkTo(m.memberId, hit)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Link to ${hit.name}`}>
+                    <Text style={[styles.linkRowAction, { color: theme.primary }]} numberOfLines={1}>Link {titleCaseName(hit.name)}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  // The picker is its own sheet — close this one so the two never stack.
+                  <TouchableOpacity onPress={() => { setLinkSheetOpen(false); setPickFor(m.memberId); }} hitSlop={6} accessibilityRole="button">
+                    <Text style={[styles.linkRowAction, { color: theme.primary }]}>Pick Contact</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          });
+        })()}
+      </CenterModal>
+
+      <ContactPickerSheet
+        visible={!!pickFor}
+        title="Link to Contact"
+        onSelect={onPicked}
+        onClose={() => setPickFor(null)}
+      />
+
       <AccountPickerSheet
         visible={!!settleTarget}
         title="Repay from which account?"
@@ -1038,7 +1223,10 @@ const styles = StyleSheet.create({
   },
   cardEmoji: { fontSize: 26 },
   cardName: { ...typography.h3, color: colors.textPrimary },
-  cardMeta: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
+  cardMeta: { ...typography.small, color: colors.textSecondary },
+  cardMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, minWidth: 0 },
+  cardMetaNames: { flexShrink: 1 },
+  cardSyncDot: { width: 6, height: 6, borderRadius: 3, marginRight: 4 },
   // Icon-in-tinted-circle, same idiom as AccountDetailsScreen's stat tiles —
   // the background colour itself (danger/neutral) is set per button at the
   // call site, not here (each icon carries its own tint).
@@ -1109,6 +1297,15 @@ const styles = StyleSheet.create({
   qrWrap: { alignSelf: 'center', marginTop: spacing.md, padding: spacing.xs, borderRadius: radius.md, borderWidth: DIVIDER_W, borderColor: colors.divider },
   memberInviteTxt: { ...typography.small, fontWeight: '700' },
   memberRowName: { ...typography.bodyBold, color: colors.textPrimary, flex: 1 },
+  linkBanner: { borderWidth: 1, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md, gap: spacing.sm },
+  linkBannerTop: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
+  linkBannerTxt: { ...typography.small, flex: 1 },
+  linkBannerActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.lg },
+  linkBannerAction: { ...typography.small, fontWeight: '700' },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  linkRowName: { ...typography.bodyBold },
+  linkRowHint: { ...typography.small, fontSize: 12, marginTop: 2 },
+  linkRowAction: { ...typography.small, fontWeight: '700' },
   pastToggleTxt: { color: colors.textSecondary },
   // Light fill, no border — an inline affordance, not an outlined CTA.
   addMemberBtn: {
@@ -1131,6 +1328,12 @@ const styles = StyleSheet.create({
   pendingCard: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden' },
   pendingRow: { flexDirection: 'row', alignItems: 'center', padding: spacing.md },
   pendingRowDivider: { borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
+  outsideRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingBottom: spacing.md, marginTop: -spacing.xs,
+  },
+  outsideTxt: { ...typography.small, fontSize: 12, flex: 1 },
+  outsideAction: { ...typography.small, fontWeight: '700' },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
   avatarTxt: { fontWeight: '800', fontSize: 13 },
   // Amount leads (the headline figure); "{name} owes you"/"You owe {name}"

@@ -187,6 +187,9 @@ export function isGroupExcluded(txn, groups) {
  *   • Paid by another (memo) → one `borrowed` row for my own share (I owe the payer).
  * Returns [] for personal groups or txns without a groupSplit.
  */
+/** What THIS phone calls a group member: its contact name when linked, else the group's name. */
+export const memberName = (m) => (m && (m.contactName || m.name)) || '';
+
 export function buildGroupLbRows(group, txn) {
   if (!group || group.type !== 'shared' || !txn || !txn.groupSplit) return [];
   const { paidByMemberId, paidByName, shares } = txn.groupSplit;
@@ -204,7 +207,7 @@ export function buildGroupLbRows(group, txn) {
         return {
           id: `lb_${stamp}_${i}_${rnd()}`,
           kind: 'lent',
-          person: m.name || sh.name || 'Member',
+          person: memberName(m) || sh.name || 'Member',
           contactId: m.contactId || null,
           phone: m.phone || null,
           amount: Number(sh.shareAmount) || 0,
@@ -225,7 +228,7 @@ export function buildGroupLbRows(group, txn) {
   return [{
     id: `lb_${stamp}_0_${rnd()}`,
     kind: 'borrowed',
-    person: payer.name || paidByName || 'Member',
+    person: memberName(payer) || paidByName || 'Member',
     contactId: payer.contactId || null,
     phone: payer.phone || null,
     amount: amt,

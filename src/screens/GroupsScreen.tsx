@@ -28,6 +28,7 @@ import InfoIcon from '../components/InfoIcon';
 import SectionHeader from '../components/SectionHeader';
 import StatSplitRow from '../components/StatSplitRow';
 import type { Group } from '../types/group';
+import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
 import { useSyncEnabled } from '../sync/config';
 import { syncAllSharedGroups } from '../sync/groupSync';
 
@@ -48,6 +49,7 @@ const HEADER_BAR_H = 40;
 function GroupListCardRow({
   group, net, personalMonth, onPress,
 }: { group: Group; net: number; personalMonth: number; onPress: () => void }) {
+  const theme = useTheme();
   const isShared = group.type === 'shared';
   const accent = group.color || '#6366F1';
   const settled = Math.abs(net) < 0.005;
@@ -56,6 +58,9 @@ function GroupListCardRow({
   // fill+border ratio the settled badge elsewhere in the app already uses.
   // Personal groups have no such state, so they keep the flat card.
   const stateColor = !isShared ? null : settled ? colors.success : net > 0 ? colors.lent : colors.borrowed;
+  const sync = groupSyncStatus(group);
+  // Only live/waiting earn a coloured dot — the other states are facts, not activity.
+  const syncDot = sync === 'live' ? colors.success : sync === 'waiting' ? colors.warning : null;
   return (
     // The shadow needs its own OPAQUE shell — Android's `elevation` under a
     // translucent fill (the state wash) renders as a muddy grey/olive box
@@ -72,10 +77,20 @@ function GroupListCardRow({
       </View>
       <View style={{ flex: 1, marginRight: spacing.sm }}>
         <Text style={styles.groupCardName} numberOfLines={1}>{group.name}</Text>
-        <Text style={styles.groupCardMeta} numberOfLines={1}>
-          {isShared ? `${group.members?.length ?? 0} members` : 'Personal'}
-          {group.excludeFromTotals ? ' · Excluded' : ''}
-        </Text>
+        <View style={styles.groupCardMetaRow}>
+          <Text style={styles.groupCardMeta} numberOfLines={1}>
+            {isShared ? `${group.members?.length ?? 0} members · ` : 'Personal'}
+          </Text>
+          {sync !== 'personal' ? (
+            <>
+              {syncDot ? <View style={[styles.syncDot, { backgroundColor: syncDot }]} /> : null}
+              <Text style={[styles.groupCardMeta, syncDot ? [styles.syncLabelActive, { color: theme.textPrimary }] : null]} numberOfLines={1}>
+                {GROUP_SYNC_LABEL[sync]}
+              </Text>
+            </>
+          ) : null}
+          {group.excludeFromTotals ? <Text style={styles.groupCardMeta} numberOfLines={1}> · Excluded</Text> : null}
+        </View>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         {isShared ? (
@@ -402,7 +417,11 @@ const styles = StyleSheet.create({
   groupIconTile: { width: 48, height: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
   groupIconEmoji: { fontSize: 24 },
   groupCardName: { ...typography.h3, color: colors.textPrimary, fontWeight: '700' },
-  groupCardMeta: { ...typography.small, color: colors.textSecondary, marginTop: 3 },
+  groupCardMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3, minWidth: 0 },
+  groupCardMeta: { ...typography.small, color: colors.textSecondary, flexShrink: 1 },
+  syncDot: { width: 6, height: 6, borderRadius: 3, marginRight: 4 },
+  // The dot carries the colour; amber/green text on white would fail contrast.
+  syncLabelActive: { fontWeight: '600' },
   groupCardBalance: { ...typography.h3, fontWeight: '800' },
   groupCardBalanceLabel: { ...typography.small, color: colors.textMuted, marginTop: 2 },
 
