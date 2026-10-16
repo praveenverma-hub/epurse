@@ -1,57 +1,43 @@
 // =============================================================================
-// GroupFormScreen — full-screen create/edit for a group (Sep-25-26: replaced
-// the old CreateGroupModal bottom sheet, on user request — "add and edit group
-// now will be full screen"). Same plain-header + scroll-body + pinned-footer
-// shell as AddGroupExpenseScreen/AddTransactionScreen; the form fields
-// themselves are unchanged from the old modal.
-// Route params: { groupId? } — present = edit, absent = create.
+// GroupFormScreen — full-screen create/edit for a group, built from the shared form
+// pieces like the other entry forms (FormField.tsx, FormFooterActions,
+// InlineContactPicker). Create: Personal / Shared as folder tabs (the type is fixed
+// once made, so edit has none). Name row = the shared IconField (tile → icon + colour).
+// Route params: { groupId?, addMember? } — groupId present = edit; addMember opens
+// the contact search (Group Detail's Add Member).
 // =============================================================================
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
+  Dimensions,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { TabView } from 'react-native-tab-view';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
-import { BUTTON_H, colors, radius, searchFill, shadows, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
-const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
+import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import PlainScreenHeader from '../components/PlainScreenHeader';
-import PrimaryButtonBase from '../components/PrimaryButton';
-import { FormTextInput } from '../components/FormField';
-import AppSwitch from '../components/AppSwitch';
+import UnderlineTabBar from '../components/UnderlineTabBar';
+import { FormField, FormSwitchRow, FormTextInput, FormValueCard, FormValueRow } from '../components/FormField';
+import FormFooterActions from '../components/FormFooterActions';
+import InlineContactPicker, { type InlineContact } from '../components/InlineContactPicker';
+import { ChoiceLabel, ColorChoices, EmojiChoices, IconField, TileEmoji } from '../components/IconColorPicker';
 import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
 import { useEPurseStore } from '../store/ePurseStore';
-import { fetchContactsForPicker, getContactsPermissionStatus } from '../services/contactsService';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
-import { firstName } from '../utils/format';
+import { memberName } from '../utils/split';
+import { titleCaseName } from '../utils/format';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { useToast } from '../components/Toast';
 import type { Group, GroupMember, GroupType } from '../types/group';
-
-const PrimaryButton = PrimaryButtonBase as React.FC<{
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-  loading?: boolean;
-  style?: object;
-}>;
-
-interface PickerContact {
-  id: string;
-  name: string;
-  searchText?: string;
-  phones?: string[];
-}
 
 export interface CreateGroupData {
   name: string;
@@ -64,7 +50,14 @@ export interface CreateGroupData {
 
 const EMOJIS = ['🏠', '✈️', '🎉', '🍕', '💼', '🏋️', '🚗', '📚', '🌴', '🎮'];
 const GROUP_COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4'];
-const TYPE_OPTIONS: GroupType[] = ['personal', 'shared'];
+const TYPE_ROUTES: { key: GroupType; label: string }[] = [
+  { key: 'personal', label: 'Personal' },
+  { key: 'shared', label: 'Shared' },
+];
+const TYPE_HINT: Record<GroupType, string> = {
+  personal: 'Track what one thing costs — a house build, a solo trip.',
+  shared: 'Split costs with others and see who owes whom.',
+};
 
 export default function GroupFormScreen({ navigation, route }: { navigation: any; route: any }) {
   const groupId = route?.params?.groupId as string | undefined;
@@ -82,13 +75,10 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
   const [emoji, setEmoji] = useState('🏠');
   const [color, setColor] = useState('#6366F1');
   const [excludeFromTotals, setExcludeFromTotals] = useState(false);
-  const [members, setMembers] = useState<GroupMember[]>([]); // for shared
-  const [query, setQuery] = useState('');
-  const [contacts, setContacts] = useState<PickerContact[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [members, setMembers] = useState<GroupMember[]>([]); // for shared, without "me"
+  const [pickerOpen, setPickerOpen] = useState(!!route?.params?.addMember);
 
-  // Seed from the existing group once, on mount — a screen has no `visible`
-  // prop to re-key off like the old modal did.
+  // Seed from the existing group once, on mount.
   useEffect(() => {
     if (group) {
       setName(group.name || '');
@@ -96,40 +86,15 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
       setEmoji(group.emoji || '🏠');
       setColor(group.color || '#6366F1');
       setExcludeFromTotals(!!group.excludeFromTotals);
-      // strip the built-in "me" member before showing
       setMembers((group.members || []).filter((m) => !m.isMe));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadContacts = useCallback(async () => {
-    if (type !== 'shared') return;
-    setLoading(true);
-    try {
-      const ok = await getContactsPermissionStatus();
-      if (ok) setContacts(await fetchContactsForPicker());
-    } finally {
-      setLoading(false);
-    }
-  }, [type]);
-
-  useEffect(() => { if (type === 'shared') loadContacts(); }, [type, loadContacts]);
-
-  const filtered = contacts.filter((c) => {
-    const q = query.trim().toLowerCase();
-    if (!q) return false;
-    return (c.searchText || c.name.toLowerCase()).includes(q);
-  }).slice(0, 3);
-
-  const toggleMember = (c: PickerContact) => {
-    setMembers((prev) => {
-      const exists = prev.find((m) => m.contactId === c.id);
-      if (exists) return prev.filter((m) => m.contactId !== c.id);
-      return [...prev, { memberId: `c_${c.id}`, name: c.name, contactId: c.id }];
-    });
-    setQuery('');
-  };
-
+  const addMember = (c: InlineContact) =>
+    setMembers((prev) => (prev.some((m) => m.contactId === c.id)
+      ? prev
+      : [...prev, { memberId: `c_${c.id}`, name: c.name, contactId: c.id }]));
   // By memberId: people who joined a live group from their own phone have no contactId.
   const removeMember = (memberId: string) =>
     setMembers((prev) => prev.filter((m) => m.memberId !== memberId));
@@ -141,9 +106,12 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
 
   const handleSave = () => {
     const cleaned = sanitizeName(name);
-    if (!isValidName(cleaned)) return; // needs NAME_MIN..NAME_MAX chars
+    if (!isValidName(cleaned)) return;
     submit(() => {
-      const data: CreateGroupData = { name: cleaned, type, emoji, color, excludeFromTotals, members };
+      // People picked on the Shared tab don't come along if Personal is what's saved.
+      const data: CreateGroupData = {
+        name: cleaned, type, emoji, color, excludeFromTotals, members: type === 'shared' ? members : [],
+      };
       if (isEdit && groupId) {
         updateGroup(groupId, data);
         toast.success('Group updated');
@@ -162,259 +130,168 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
           navigation.replace('AddGroupExpense', {
             groupId: id,
             tagTxnId: returnTxnId,
-            ...(route?.params?.returnFromQueue ? { fromQueue: true } : {}),
-            ...(route?.params?.returnFromQueue ? { reviewFlow: true } : {}),
+            ...(route?.params?.returnFromQueue ? { fromQueue: true, reviewFlow: true } : {}),
           });
           return;
         }
-        // Replace, not push — the form shouldn't sit in the back stack between
-        // the list and the new group's own detail screen.
+        // Replace, not push — the form shouldn't sit between the list and the new group.
         navigation.replace('GroupDetail', { groupId: id });
       }
     });
   };
 
   const nameValid = isValidName(sanitizeName(name));
+  const nameError = name.trim().length > 0 && !nameValid;
+
+  const memberRow = (key: string, label: string, onRemove?: () => void) => (
+    <View key={key} style={styles.memberRow}>
+      <View style={[styles.avatar, { backgroundColor: theme.primary + '1A' }]}>
+        <Text style={[styles.avatarTxt, { color: theme.primary }]}>{label.charAt(0).toUpperCase()}</Text>
+      </View>
+      <Text style={styles.memberName} numberOfLines={1}>{label}</Text>
+      {onRemove ? (
+        <TouchableOpacity onPress={onRemove} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Remove ${label}`}>
+          <Ionicons name="close" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+
+  const renderBody = (bodyType: GroupType, active: boolean) => (
+    <>
+      {isEdit ? null : <Text style={styles.typeHint}>{TYPE_HINT[bodyType]}</Text>}
+
+      <FormField label="Name">
+        <IconField
+          tile={<TileEmoji emoji={emoji} />}
+          tileColor={color + '22'}
+          error={nameError ? `Use at least ${INPUT_LIMITS.NAME_MIN} characters.` : null}
+          choices={(
+            <>
+              <ChoiceLabel first>Icon</ChoiceLabel>
+              <EmojiChoices value={emoji} onChange={setEmoji} choices={EMOJIS} />
+              <ChoiceLabel>Colour</ChoiceLabel>
+              <ColorChoices value={color} onChange={(c) => c && setColor(c)} choices={GROUP_COLORS} />
+            </>
+          )}
+        >
+          <FormTextInput
+            style={nameError ? { borderColor: colors.danger } : undefined}
+            placeholder="Goa Trip, Flatmates…"
+            value={name}
+            onChangeText={(t) => setName(sanitizeName(t))}
+            maxLength={INPUT_LIMITS.NAME_MAX}
+            autoFocus={!isEdit && active && !pickerOpen}
+          />
+        </IconField>
+      </FormField>
+
+      {bodyType === 'shared' ? (
+        <FormField label="Members">
+          <FormValueCard>
+            {memberRow('me', 'You')}
+            {members.map((m) => memberRow(
+              m.memberId,
+              titleCaseName(memberName(m)),
+              onServer(m.memberId) ? undefined : () => removeMember(m.memberId),
+            ))}
+            <FormValueRow
+              icon="person-add-outline"
+              label="Add Member"
+              value=""
+              accentColor={theme.primary}
+              onPress={() => setPickerOpen((v) => !v)}
+              trailingIcon={pickerOpen ? 'chevron-up' : 'chevron-forward'}
+            >
+              {pickerOpen ? (
+                <View style={styles.pickerBody}>
+                  <InlineContactPicker
+                    onPick={addMember}
+                    excludeIds={members.map((m) => m.contactId).filter(Boolean) as string[]}
+                    accentColor={theme.primary}
+                    autoFocus={active && !!route?.params?.addMember}
+                  />
+                </View>
+              ) : null}
+            </FormValueRow>
+          </FormValueCard>
+        </FormField>
+      ) : (
+        <FormValueCard>
+          <FormSwitchRow
+            icon="eye-off-outline"
+            label="Exclude From Totals"
+            hint="Keep a one-off project out of your monthly reports and budget."
+            value={excludeFromTotals}
+            onValueChange={setExcludeFromTotals}
+            accentColor={theme.primary}
+          />
+        </FormValueCard>
+      )}
+    </>
+  );
+
+  const typeIndex = type === 'shared' ? 1 : 0;
 
   return (
     <View style={styles.root}>
       <StatusBar style="dark" />
-      {/* The header gets its OWN white SafeAreaView (matching
-          AddGroupExpenseScreen's own headerSafe) — with one shared
-          SafeAreaView for the whole screen, the status bar strip sat on
-          `root`'s gray `colors.background` instead of the header's white,
-          reading as the wrong colour up top. */}
+      {/* Its own white SafeAreaView, so the status bar strip sits on the header's white. */}
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
-        <PlainScreenHeader title={isEdit ? 'Edit Group' : 'New Group'} onBack={() => navigation.goBack()} bordered />
+        {/* With the folder tabs below, their baseline is the only edge. */}
+        <PlainScreenHeader title={isEdit ? 'Edit Group' : 'New Group'} onBack={() => navigation.goBack()} bordered hairline={isEdit} />
       </SafeAreaView>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Name — same outlined FormTextInput + labelled-section shape every
-              other form uses (AccountFormScreen, GoalFormScreen…), not a
-              filled card with oversized bold text. */}
-          <Text style={styles.sectionLabel}>Group Name</Text>
-          <FormTextInput
-            style={[styles.nameInputSpacing, name.trim().length > 0 && !nameValid && styles.nameInputError]}
-            placeholder="e.g. Goa Trip, Flatmates…"
-            value={name}
-            onChangeText={(t) => setName(sanitizeName(t))}
-            maxLength={INPUT_LIMITS.NAME_MAX}
-            autoFocus={!group}
-          />
-          {name.trim().length > 0 && !nameValid && (
-            <Text style={styles.nameError}>
-              Group name must be at least {INPUT_LIMITS.NAME_MIN} characters.
-            </Text>
-          )}
-
-          {/* Type toggle — only when CREATING. A group's type is fixed once made
-              (changing personal↔shared would orphan members/balances), so it's
-              hidden on edit. */}
-          {!group && (
-            <>
-              <View style={styles.typeRow}>
-                {TYPE_OPTIONS.map((t) => (
-                  <TouchableOpacity
-                    key={t}
-                    style={[styles.typeChip, type === t && { backgroundColor: theme.primary + '18', borderColor: theme.primary }]}
-                    onPress={() => setType(t)}
-                  >
-                    {/* Weight stays constant — only colour/border change on
-                        selection (same rule FormField's own chips follow;
-                        a weight jump resizes the text and the row shifts). */}
-                    <Text style={[styles.typeChipTxt, type === t && { color: theme.primary }]}>
-                      {t === 'personal' ? '👤 Personal' : '👥 Shared'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {type === 'personal' && (
-                <Text style={styles.typeHint}>Just you — track costs under a theme (house build, solo trip…).</Text>
-              )}
-              {type === 'shared' && (
-                <Text style={styles.typeHint}>Multiple people — split expenses and track who owes whom.</Text>
-              )}
-            </>
-          )}
-
-          {/* Emoji row — wraps across lines, same contained shape the Colour
-              row below already uses, instead of a horizontal scroll that ran
-              past the screen edge with no visual sign there was more to
-              scroll to. */}
-          <Text style={styles.sectionLabel}>Icon</Text>
-          <View style={styles.emojiRow}>
-            {/* Type any emoji — highlighted when the icon isn't one of the presets. */}
-            <TextInput
-              style={[
-                styles.emojiChip,
-                styles.emojiCustom,
-                !EMOJIS.includes(emoji) && { borderColor: theme.primary, backgroundColor: theme.primary + '14' },
-              ]}
-              value={EMOJIS.includes(emoji) ? '' : emoji}
-              // Take the LAST glyph typed so a new emoji REPLACES the current one
-              // (taking the first kept the old one, so the field looked unclearable).
-              onChangeText={(t) => {
-                const chars = Array.from(t.trim());
-                const e = chars[chars.length - 1];
-                if (e) setEmoji(e);
-              }}
-              placeholder="⌨️"
-              placeholderTextColor={colors.textMuted}
-              maxLength={8}
+        {isEdit ? (
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.scroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {renderBody(type, true)}
+          </ScrollView>
+        ) : (
+          <>
+            <UnderlineTabBar
+              variant="folder"
+              tabs={TYPE_ROUTES}
+              activeKey={type}
+              onChange={(k) => setType(k as GroupType)}
+              // Shared = the green of the "● Live" dot: this group goes live with others.
+              accentColor={type === 'shared' ? theme.success : theme.primary}
             />
-            {EMOJIS.map((e) => (
-              <TouchableOpacity
-                key={e}
-                style={[styles.emojiChip, emoji === e && { borderColor: theme.primary, backgroundColor: theme.primary + '14' }]}
-                onPress={() => setEmoji(e)}
-              >
-                <Text style={styles.emojiTxt}>{e}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Color row */}
-          <Text style={styles.sectionLabel}>Colour</Text>
-          <View style={styles.colorRow}>
-            {GROUP_COLORS.map((c) => {
-              const sel = color === c;
-              return (
-                <TouchableOpacity
-                  key={c}
-                  style={[styles.colorDot, { backgroundColor: c }, sel && styles.colorDotSelected]}
-                  onPress={() => setColor(c)}
-                  activeOpacity={0.8}
+            <TabView
+              navigationState={{ index: typeIndex, routes: TYPE_ROUTES }}
+              renderScene={({ route: r }) => (
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={styles.scroll}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
                 >
-                  {sel && <Text style={styles.colorCheck}>✓</Text>}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Members (shared only) */}
-          {type === 'shared' && (
-            <>
-              <Text style={styles.sectionLabel}>Members</Text>
-
-              {members.length > 0 && (
-                <View style={styles.membersBox}>
-                  {/* "You" is fixed (not removable) — same round-avatar +
-                      short-name-below shape as every added member, just no
-                      cross badge. */}
-                  <View style={styles.memberAvatarTile}>
-                    <View style={[styles.memberAvatar, { backgroundColor: theme.primary + '22' }]}>
-                      <Text style={[styles.memberAvatarTxt, { color: theme.primary }]}>Y</Text>
-                    </View>
-                    <Text style={styles.memberAvatarName} numberOfLines={1}>You</Text>
-                  </View>
-                  {members.map((m) => (
-                    <View key={m.memberId} style={styles.memberAvatarTile}>
-                      {/* Exactly avatar-sized, so the badge's absolute corner
-                          anchors to the CIRCLE, not the wider tile (which also
-                          has the name below it). */}
-                      <View style={styles.memberAvatarWrap}>
-                        <View style={[styles.memberAvatar, { backgroundColor: theme.primary + '22' }]}>
-                          <Text style={[styles.memberAvatarTxt, { color: theme.primary }]}>
-                            {m.name.charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                        {!onServer(m.memberId) && (
-                          <TouchableOpacity
-                            onPress={() => removeMember(m.memberId)}
-                            hitSlop={8}
-                            style={styles.memberRemoveBadge}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Remove ${m.name}`}
-                          >
-                            <Ionicons name="close" size={10} color="#fff" />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                      <Text style={styles.memberAvatarName} numberOfLines={1}>{firstName(m.name)}</Text>
-                    </View>
-                  ))}
-                </View>
+                  {renderBody(r.key as GroupType, r.key === type)}
+                </ScrollView>
               )}
-
-              <TextInput
-                style={[styles.search, { backgroundColor: searchFill(theme) }]}
-                placeholder="Search contacts…"
-                placeholderTextColor={colors.textMuted}
-                value={query}
-                onChangeText={setQuery}
-              />
-              {loading && <ActivityIndicator color={theme.primary} style={{ marginVertical: spacing.sm }} />}
-              {filtered.map((c) => {
-                const on = !!members.find((m) => m.contactId === c.id);
-                return (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[styles.contactRow, on && { backgroundColor: theme.primary + '12' }]}
-                    onPress={() => toggleMember(c)}
-                  >
-                    <View style={[styles.avatar, { backgroundColor: theme.primary + '22' }]}>
-                      <Text style={[styles.avatarTxt, { color: theme.primary }]}>{c.name.charAt(0).toUpperCase()}</Text>
-                    </View>
-                    <Text style={styles.contactName} numberOfLines={1}>{c.name}</Text>
-                    {on && <Text style={[styles.check, { color: theme.primary }]}>✓</Text>}
-                  </TouchableOpacity>
-                );
-              })}
-            </>
-          )}
-
-          {/* Exclude toggle (personal only) — same AppSwitch + bordered row
-              shape AccountFormScreen's own toggles use, not a hand-drawn
-              track/thumb pair. */}
-          {type === 'personal' && (
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLeft}>
-                <Text style={styles.toggleLabel}>Exclude from main totals</Text>
-                <Text style={styles.toggleHint}>Group spend won&apos;t count in monthly reports or budget</Text>
-              </View>
-              <AppSwitch
-                value={excludeFromTotals}
-                onValueChange={setExcludeFromTotals}
-                trackColor={{ true: theme.primary, false: colors.divider }}
-                thumbColor="#fff"
-                ios_backgroundColor={colors.divider}
-              />
-            </View>
-          )}
-        </ScrollView>
-
-        {/* Pinned footer. Create mode: single full-width primary action (the
-            back chevron already covers "Cancel"). Edit mode: an explicit
-            Cancel rides beside Save — same secondary/primary pairing
-            CenterModal's own two-button row uses (secondary left, primary
-            right, equal width). */}
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-          <View style={styles.footerRow}>
-            {isEdit && (
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => navigation.goBack()}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel"
-              >
-                <Text style={styles.cancelBtnTxt}>Cancel</Text>
-              </TouchableOpacity>
-            )}
-            <PrimaryButton
-              title={isEdit ? 'Save Changes' : 'Create Group'}
-              onPress={handleSave}
-              disabled={!nameValid}
-              loading={submitting}
-              style={isEdit ? { flex: 1 } : { width: '100%' }}
+              renderTabBar={() => null}
+              onIndexChange={(i) => setType(TYPE_ROUTES[i].key)}
+              initialLayout={{ width: Dimensions.get('window').width }}
+              swipeEnabled
+              style={{ flex: 1 }}
             />
-          </View>
+          </>
+        )}
+
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+          <FormFooterActions
+            onCancel={() => navigation.goBack()}
+            submit={nameValid ? {
+              title: isEdit ? 'Save Changes' : 'Create Group',
+              onPress: handleSave,
+              loading: submitting,
+            } : null}
+          />
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -422,130 +299,27 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
 }
 
 const styles = StyleSheet.create({
+  // Gray body under white header/footer bands, same as the other entry forms.
   root: { flex: 1, backgroundColor: colors.background },
+  headerSafe: { backgroundColor: colors.card },
   scroll: { padding: spacing.lg, paddingBottom: spacing.lg },
+  typeHint: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.lg },
 
-  // `FormTextInput` (from components/FormField) carries the base look now —
-  // these are just this screen's own spacing/error overrides.
-  nameInputSpacing: { marginBottom: spacing.md },
-  nameInputError: { borderColor: colors.danger },
-  nameError: {
-    ...typography.tiny,
-    color: colors.danger,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-    marginLeft: spacing.xs,
+  // Row height matches FormValueRow, so You / members / Add Member line up as one list.
+  memberRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: 10,
   },
-  typeRow:      { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
-  // Transparent at rest (no `colors.card` fill), 1px border — same shape
-  // AccountFormScreen's own type-picker chips use; selected state's bg/border
-  // are applied inline at the call site.
-  typeChip: {
-    flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.pill,
-    alignItems: 'center', borderWidth: 1, borderColor: colors.divider,
-  },
-  typeChipTxt:  { ...typography.body, color: colors.textSecondary },
-  typeHint:     { ...typography.tiny, color: colors.textMuted, marginBottom: spacing.sm },
-  sectionLabel: { ...typography.small, color: colors.textSecondary, fontWeight: '700', marginTop: spacing.sm, marginBottom: spacing.xs },
-  // flexWrap + gap — same shape `colorRow` below already uses; spacing comes
-  // from `gap`, not per-chip margin (that was the horizontal-scroll layout).
-  emojiRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
-  emojiChip: {
-    width: 44, height: 44, borderRadius: radius.md,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: 'transparent',
-    backgroundColor: colors.card,
-  },
-  emojiTxt:     { fontSize: 22 },
-  emojiCustom:  { fontSize: 22, textAlign: 'center', color: colors.textPrimary, padding: 0 },
-  colorRow:     { flexDirection: 'row', gap: 12, marginBottom: spacing.md, flexWrap: 'wrap' },
-  colorDot:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  // Selected = scale up + white inner ring + dark outer ring (visible on any colour) + a check.
-  colorDotSelected: {
-    borderWidth: 2, borderColor: '#fff',
-    transform: [{ scale: 1.18 }],
-    ...shadows.pop,
-  },
-  colorCheck:   { color: '#fff', fontWeight: '900', fontSize: 15 },
-  membersBox:   { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginBottom: spacing.md },
-  // Round avatar + short name below — same avatar idiom as this screen's own
-  // contact-search rows (`avatar`/`avatarTxt`) and GroupDetailScreen's Members
-  // tab, not a fresh look picked for this one row.
-  memberAvatarTile: { width: 56, alignItems: 'center' },
-  // Exactly the avatar's own footprint — the badge below anchors to THIS
-  // box's corner, not the wider tile (which also carries the name text).
-  memberAvatarWrap: { width: 44, height: 44 },
-  memberAvatar: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  memberAvatarTxt: { ...typography.body, fontWeight: '800' },
-  memberAvatarName: { ...typography.tiny, color: colors.textSecondary, marginTop: 4, maxWidth: 56 },
-  // Corner badge on the avatar — same "small circular badge, top-right corner"
-  // idiom as AccountsScreen's primary-account star / AccountCard's delete pill.
-  memberRemoveBadge: {
-    position: 'absolute', top: -4, right: -4,
-    width: 18, height: 18, borderRadius: 9,
-    backgroundColor: colors.danger,
-    alignItems: 'center', justifyContent: 'center',
-    ...shadows.pop,
-  },
-  search: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    color: colors.textPrimary,
-    ...typography.body,
-    marginBottom: spacing.xs,
-    borderWidth: 1, borderColor: colors.divider,
-  },
-  contactRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: spacing.sm, paddingHorizontal: spacing.sm,
-    borderRadius: radius.md, marginBottom: 4,
-  },
-  // selected-row tint applied inline via theme.primary
-  avatar: {
-    width: 34, height: 34, borderRadius: 17,
-    alignItems: 'center', justifyContent: 'center',
-    marginRight: spacing.sm,
-  },
-  avatarTxt:    { fontWeight: '800' },
-  contactName:  { flex: 1, ...typography.body, color: colors.textPrimary },
-  check:        { fontWeight: '800' },
-  // Bordered settings-row shape — matches AccountFormScreen's own toggle rows
-  // (a hairline above, not a floating unbounded row).
-  toggleRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    paddingVertical: spacing.md, marginTop: spacing.sm,
-    borderTopWidth: DIVIDER_W, borderTopColor: colors.divider,
-  },
-  toggleLeft:   { flex: 1 },
-  toggleLabel:  { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
-  toggleHint:   { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
+  avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  avatarTxt: { fontSize: 13, fontWeight: '700' },
+  memberName: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+  pickerBody: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     backgroundColor: colors.card,
-    borderTopWidth: 1,
+    borderTopWidth: DIVIDER_W,
     borderTopColor: colors.divider,
   },
-  footerRow: { flexDirection: 'row', gap: spacing.sm },
-  // Same outlined-secondary shape CenterModal's own secondary button uses —
-  // BUTTON_H so it lines up exactly with PrimaryButton beside it.
-  cancelBtn: {
-    flex: 1,
-    minHeight: BUTTON_H,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelBtnTxt: { ...typography.bodyBold, color: colors.textSecondary, fontWeight: '800' },
-  // Header's own SafeAreaView — white, matching AddGroupExpenseScreen's
-  // `headerSafe`, so the status bar strip sits on white, not `root`'s gray.
-  headerSafe: { backgroundColor: colors.card },
 });

@@ -24,6 +24,7 @@ import {
   selectAccountLinkSuggestions,
 } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, pinnedHeaderChrome, withAlpha } from '../constants/theme';
+import HeaderChip, { CHIP_SIZE, CHIP_FILL_ALPHA, CHIP_BORDER_ALPHA } from '../components/HeaderChip';
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { formatCurrency, formatCompact, timeAgo } from '../utils/format';
 import { netWorthTrend } from '../utils/accountFlow';
@@ -69,10 +70,6 @@ const BALANCE_SENSITIVE = new Set([ACCOUNT_TYPES.BANK, ACCOUNT_TYPES.DEBIT_CARD]
 const SCREEN_W  = Dimensions.get('window').width;
 const CARD_GAP  = 14;
 
-/** The bar's on-gradient weights, as alphas so the light-bar variants derive from
- *  the same numbers. Were `#FFFFFF22` / `#FFFFFF26` inline. */
-const ICON_BTN_ALPHA = 0x22 / 255;
-const BAL_CHIP_ALPHA = 0x26 / 255;
 const CARD_W    = Math.min(300, SCREEN_W - 88);
 const CARD_SIDE = (SCREEN_W - CARD_W) / 2;
 const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
@@ -97,7 +94,7 @@ const CARD_ITV  = CARD_W + CARD_GAP; // snap interval / one "page"
 // So the hero MEASURES itself and the gap is stated once, as the same
 // `spacing.lg` Home uses. No box slack, and the gap is exactly `heroBlock`'s
 // padding. Derived in `headerLayout.test.mjs`.
-const HEADER_BAR_H = 40;   // the row's own content: two 40pt icon buttons
+const HEADER_BAR_H = CHIP_SIZE;   // the row's own content: two HeaderChips
 
 /**
  * First frame only — the real height is measured. Roughly the gap (16) + the 13pt
@@ -312,7 +309,7 @@ export default function AccountsScreen({ navigation }) {
         <View style={styles.headerActions}>
           {onLight ? (
             <TouchableOpacity
-              style={[styles.balChip, { backgroundColor: fill(BAL_CHIP_ALPHA) }]}
+              style={[styles.balChip, { backgroundColor: fill(CHIP_FILL_ALPHA), borderColor: fill(CHIP_BORDER_ALPHA) }]}
               onPress={handleToggleBalances}
               activeOpacity={0.8}
             >
@@ -321,20 +318,20 @@ export default function AccountsScreen({ navigation }) {
               </Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity
-            style={[styles.iconBtn, { backgroundColor: fill(ICON_BTN_ALPHA) }]}
+          <HeaderChip
+            onLight={onLight}
             onPress={handleToggleBalances}
-            activeOpacity={0.7}
+            accessibilityLabel={balancesVisible ? 'Hide balances' : 'Show balances'}
           >
             <Ionicons name={balancesVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={ink} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.iconBtn, { backgroundColor: fill(ICON_BTN_ALPHA) }]}
+          </HeaderChip>
+          <HeaderChip
+            onLight={onLight}
             onPress={() => navigation.navigate('AccountForm')}
-            activeOpacity={0.7}
+            accessibilityLabel="Add account"
           >
             <Ionicons name="add" size={22} color={ink} />
-          </TouchableOpacity>
+          </HeaderChip>
         </View>
       </View>
     );
@@ -721,19 +718,16 @@ const styles = StyleSheet.create({
   nwTrendSub: { marginTop: 3, fontSize: 10 },
   assetsRow: { marginTop: spacing.md },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  // Compact balance chip — same 40px height as the icon buttons. It is in FLOW:
+  // Compact balance chip — the HeaderChips' height, fill and border. It is in FLOW:
   // it only exists on the pinned bar, so there is no invisible state to reserve
   // width for. (It used to float and fade in on scroll — see `accountsBar`.)
   balChip: {
-    height:            40,
+    height:            CHIP_SIZE,
     minWidth:          64,
     maxWidth:          140,
     paddingHorizontal: 14,
-    borderRadius:      20,
+    borderRadius:      CHIP_SIZE / 2,
+    borderWidth:       1,
     alignItems:        'center',
     justifyContent:    'center',
   },

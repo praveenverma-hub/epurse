@@ -25,6 +25,8 @@ import SectionHeader from '../components/SectionHeader';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { EMPTY_ARRAY } from '../constants/empty';
+import { ChoiceLabel, ColorChoices, EmojiChoices, IconField, TileEmoji } from '../components/IconColorPicker';
+import { isEmojiOnly } from '../utils/emojiInput';
 
 const COLOR_PALETTE = [
   '#FF5A1F', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981',
@@ -32,38 +34,6 @@ const COLOR_PALETTE = [
 ];
 
 const EMOJI_PALETTE = ['🍔', '✈️', '💡', '🛍️', '🥦', '🎬', '💊', '💰', '🎓', '🎁', '🐶', '🚗'];
-
-// "Own emoji" tile. The DEVICE's emoji keyboard does the picking — no emoji-picker
-// dependency to ship or keep current with new Unicode releases.
-//
-// Measured in UTF-16 units, not "characters": one emoji is often many code points —
-// a ZWJ family 👨‍👩‍👦‍👦 is 11 units and 👩🏻‍❤️‍💋‍👨🏿 is 15. Slicing to 1–2 would mangle exactly
-// the emoji people pick to be personal. (`Array.from` is no help — it splits code
-// points, so it breaks ZWJ sequences too.)
-const EMOJI_MAX_UNITS = 16;
-// Any cut can land INSIDE a surrogate pair or right after a joiner, leaving a lone
-// high surrogate (renders as �, and gets persisted) or a dangling ZWJ. Trim those
-// tails off until the string ends on a complete glyph.
-// NOT the variation selector U+FE0F: it is a legitimate ending on a COMPLETE emoji —
-// it's what forces colour presentation. Stripping it turned ✈️ into ✈ and ❤️ into ❤
-// (the monochrome text glyphs), which is why it's excluded here.
-const trimBrokenTail = (s) => {
-  let out = s;
-  let prev;
-  do {
-    prev = out;
-    out = out.replace(/[\uD800-\uDBFF]$/, '').replace(/‍+$/, '');
-  } while (out !== prev);
-  return out;
-};
-const sanitizeEmoji = (raw) =>
-  trimBrokenTail((raw || '').replace(/\s/g, '').slice(0, EMOJI_MAX_UNITS));
-// Deliberately a REJECT-list, not an emoji match: `\p{Extended_Pictographic}` needs
-// Unicode property escapes, and a wrong guess about Hermes support would throw at
-// runtime inside a modal. Blocking ASCII letters/digits is all that's needed — it
-// stops a name ("Pets") being used as the icon and breaking the row layout, while
-// letting through every emoji, old and new.
-const isEmojiOnly = (s) => !!s && !/[A-Za-z0-9]/.test(s);
 
 const CategoriesScreen = ({ navigation }) => {
   const theme = useTheme();
@@ -85,9 +55,6 @@ const CategoriesScreen = ({ navigation }) => {
   const [draftName, setDraftName]   = useState('');
   const [draftEmoji, setDraftEmoji] = useState(EMOJI_PALETTE[0]);
   const [draftColor, setDraftColor] = useState(COLOR_PALETTE[0]);
-  const [emojiErr,   setEmojiErr]   = useState(false);
-  // Anything not in the palette came from the user's keyboard → the custom tile owns it.
-  const usingOwnEmoji = !EMOJI_PALETTE.includes(draftEmoji);
 
   const customParentIds = new Set(customParents.map((p) => p.id));
   const customChildIds  = new Set(customChildren.map((c) => c.id));
@@ -99,7 +66,6 @@ const CategoriesScreen = ({ navigation }) => {
     setDraftName('');
     setDraftEmoji(EMOJI_PALETTE[0]);
     setDraftColor(COLOR_PALETTE[0]);
-    setEmojiErr(false);
   };
 
   const saveAdd = () => {
@@ -197,7 +163,7 @@ const CategoriesScreen = ({ navigation }) => {
                     })}
                     <TouchableOpacity
                       style={styles.addSubRow}
-                      onPress={() => openAdd({ kind: 'child', parentId: parent.id, parentLabel: parent.label })}
+                      onPress={() => openAdd({ kind: 'child', parentId: parent.id, parentLabel: parent.label, parentColor: parent.color })}
                       activeOpacity={0.7}
                     >
                       <Ionicons name="add" size={16} color={theme.primary} />
@@ -244,80 +210,33 @@ const CategoriesScreen = ({ navigation }) => {
               {isParentAdd ? 'New parent category' : `Add to ${addTarget?.parentLabel || ''}`}
             </Text>
 
-            <TextInput
-              value={draftName}
-              onChangeText={(t) => setDraftName(sanitizeName(t, INPUT_LIMITS.CATEGORY_MAX))}
-              placeholder={isParentAdd ? 'Parent name (e.g. Pets)' : 'Sub-category name (e.g. Vet)'}
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-              maxLength={INPUT_LIMITS.CATEGORY_MAX}
-              autoFocus
-            />
-
-            <Text style={styles.sub}>Pick an emoji</Text>
-            <View style={styles.row}>
-              {EMOJI_PALETTE.map((e) => (
-                <TouchableOpacity
-                  key={e}
-                  onPress={() => { setDraftEmoji(e); setEmojiErr(false); }}
-                  style={[styles.emoji, draftEmoji === e && { borderWidth: 2, borderColor: theme.primary }]}
-                >
-                  <Text style={{ fontSize: 22 }}>{e}</Text>
-                </TouchableOpacity>
-              ))}
-              {/* Own emoji — a normal input, so the OS emoji keyboard is the picker.
-                  It sits in the SAME row as the palette because it's one more way to
-                  answer one question; a separate section would imply a second choice. */}
-              <View
-                style={[
-                  styles.emoji,
-                  styles.emojiOwn,
-                  usingOwnEmoji && { borderWidth: 2, borderColor: theme.primary },
-                  emojiErr && { borderWidth: 2, borderColor: colors.danger },
-                ]}
-              >
-                <TextInput
-                  value={usingOwnEmoji ? draftEmoji : ''}
-                  onChangeText={(t) => {
-                    const e = sanitizeEmoji(t);
-                    if (!e) { setEmojiErr(false); setDraftEmoji(EMOJI_PALETTE[0]); return; }
-                    if (isEmojiOnly(e)) { setEmojiErr(false); setDraftEmoji(e); }
-                    else setEmojiErr(true);   // typed a letter — say so instead of silently ignoring
-                  }}
-                  placeholder="＋"
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.emojiOwnInput}
-                  maxLength={EMOJI_MAX_UNITS}
-                  accessibilityLabel="Use your own emoji"
-                />
-              </View>
-            </View>
-            <Text style={[styles.emojiHint, emojiErr && { color: colors.danger }]}>
-              {emojiErr
-                ? 'Emoji only — tap the 😀 key on your keyboard.'
-                : 'Tap ＋ to use any emoji from your keyboard.'}
-            </Text>
-
-            {isParentAdd && (
-              <>
-                <Text style={styles.sub}>Pick a colour</Text>
-                <View style={styles.row}>
-                  {COLOR_PALETTE.map((c) => {
-                    const sel = draftColor === c;
-                    return (
-                      <TouchableOpacity
-                        key={c}
-                        onPress={() => setDraftColor(c)}
-                        activeOpacity={0.8}
-                        style={[styles.swatch, { backgroundColor: c }, sel && styles.swatchSelected]}
-                      >
-                        {sel && <Text style={styles.swatchCheck}>✓</Text>}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </>
-            )}
+            {/* A sub-category takes its parent's colour, so it only picks an icon. */}
+            <IconField
+              tile={<TileEmoji emoji={draftEmoji} />}
+              tileColor={(isParentAdd ? draftColor : addTarget?.parentColor || colors.primary) + '22'}
+              choices={(
+                <>
+                  <ChoiceLabel first>Icon</ChoiceLabel>
+                  <EmojiChoices value={draftEmoji} onChange={setDraftEmoji} choices={EMOJI_PALETTE} />
+                  {isParentAdd ? (
+                    <>
+                      <ChoiceLabel>Colour</ChoiceLabel>
+                      <ColorChoices value={draftColor} onChange={(c) => c && setDraftColor(c)} choices={COLOR_PALETTE} />
+                    </>
+                  ) : null}
+                </>
+              )}
+            >
+              <TextInput
+                value={draftName}
+                onChangeText={(t) => setDraftName(sanitizeName(t, INPUT_LIMITS.CATEGORY_MAX))}
+                placeholder={isParentAdd ? 'Parent name (e.g. Pets)' : 'Sub-category name (e.g. Vet)'}
+                placeholderTextColor={colors.textMuted}
+                style={styles.input}
+                maxLength={INPUT_LIMITS.CATEGORY_MAX}
+                autoFocus
+              />
+            </IconField>
 
             <View style={styles.formBtns}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setAddTarget(null)} activeOpacity={0.7} disabled={submitting}>
@@ -355,7 +274,6 @@ const styles = StyleSheet.create({
   scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
-  sub: { ...typography.small, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs, fontWeight: '600' },
 
   // Tree
   parentBlock: {
@@ -434,36 +352,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     ...typography.body,
   },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  emoji: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  // A visible edge marks the "own emoji" tile as an input, not one more preset
-  // — presets carry no border at all (or a transparent/selected one).
-  emojiOwn: {
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
-  emojiOwnInput: {
-    width: '100%',
-    height: '100%',
-    textAlign: 'center',
-    fontSize: 22,
-    padding: 0,           // Android centres the glyph only without default padding
-    color: colors.textPrimary,
-  },
-  emojiHint: { ...typography.tiny, color: colors.textMuted, marginTop: spacing.xs },
-  swatch: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  swatchSelected: {
-    borderWidth: 2, borderColor: '#fff', transform: [{ scale: 1.18 }],
-    ...shadows.pop,
-  },
-  swatchCheck: { color: '#fff', fontWeight: '900', fontSize: 15 },
   formBtns: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg },
   cancelBtn: { paddingVertical: spacing.md, paddingHorizontal: spacing.lg },
   cancelText: { ...typography.body, color: colors.textSecondary, fontWeight: '600' },

@@ -594,7 +594,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
           {closed ? null : (
           <TouchableOpacity
             style={[styles.addMemberBtn, { backgroundColor: theme.primary + '14' }]}
-            onPress={() => navigation.navigate('GroupForm', { groupId: group.id })}
+            onPress={() => navigation.navigate('GroupForm', { groupId: group.id, addMember: true })}
             activeOpacity={0.85}
           >
             <Ionicons name="person-add-outline" size={16} color={theme.primary} />

@@ -12,9 +12,10 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
+import HeaderChip, { CHIP_SIZE } from '../components/HeaderChip';
 
 import { useEPurseStore } from '../store/ePurseStore';
-import { colors, radius, spacing, typography as typographyBase, shadows } from '../constants/theme';
+import { colors, radius, spacing, typography as typographyBase, shadows, pinnedHeaderChrome } from '../constants/theme';
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;
 import { useTheme, useGradient } from '../hooks/useTheme';
 import { useHeaderStatusBar } from '../hooks/useHeaderStatusBar';
@@ -34,7 +35,7 @@ import { syncAllSharedGroups } from '../sync/groupSync';
 
 type Filter = 'all' | 'owed' | 'owe';
 
-// The bar's own content: a 24pt title + one small info icon — this screen
+// The bar's own content: a 24pt title + the Join HeaderChip — this screen
 // never overrode `CollapsingHeaderScreen`'s `barHeight` prop, so it was
 // sitting on the component's generic 44pt DEFAULT_BAR_H (sized for a denser
 // row than this one actually has). That left extra blank space between the
@@ -44,7 +45,7 @@ type Filter = 'all' | 'owed' | 'owe';
 // component itself adds no fixed gap between the bar and the hero
 // (`top: insets.top + barHeight`, no extra constant), so each screen's own
 // content genuinely does need its own value here, same as those two.
-const HEADER_BAR_H = 40;
+const HEADER_BAR_H = CHIP_SIZE;
 
 function GroupListCardRow({
   group, net, personalMonth, onPress,
@@ -213,6 +214,7 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
   // ONE function for both bar states (ui-consistency §2 rule 2) — `onLight`
   // decides ink only; the row itself, the handler and the a11y contract never
   // fork. Expanded = on-gradient (white); pinned = on `theme.card` (dark).
+  const pinnedInk = useMemo(() => pinnedHeaderChrome(theme.card, theme).ink, [theme]);
   const groupsBar = (onLight: boolean) => (
     <View style={styles.barRow}>
       <Text
@@ -221,20 +223,16 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
       >
         Groups
       </Text>
+      {/* The same round HeaderChip as Home's bell and Accounts' buttons. */}
       {syncOn && (
-        <TouchableOpacity
+        <HeaderChip
+          onLight={onLight}
           onPress={() => navigation.navigate('JoinGroup')}
-          hitSlop={10}
-          style={styles.infoBtn}
-          accessibilityRole="button"
           accessibilityLabel="Join a group with an invite link"
         >
-          <Ionicons name="enter-outline" size={22} color={onLight ? colors.textSecondary : '#FFFFFFCC'} />
-        </TouchableOpacity>
+          <Ionicons name="enter-outline" size={20} color={onLight ? pinnedInk : '#fff'} />
+        </HeaderChip>
       )}
-      <TouchableOpacity onPress={() => setInfoVisible(true)} hitSlop={10} style={styles.infoBtn}>
-        <InfoIcon size={22} color={onLight ? colors.textSecondary : '#FFFFFFCC'} />
-      </TouchableOpacity>
     </View>
   );
 
@@ -252,7 +250,18 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
         estimatedHeroHeight={hasSharedGroups ? 170 : 40}
         renderHero={() => (
           <>
-            <Text style={styles.subheading}>Organise expenses across people, trips and events</Text>
+            {/* ⓘ explains this line, so it sits on it — the bar keeps one action (Join). */}
+            <View style={styles.subheadingRow}>
+              <Text style={styles.subheading}>Organise expenses across people, trips and events</Text>
+              <TouchableOpacity
+                onPress={() => setInfoVisible(true)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="About Groups"
+              >
+                <InfoIcon size={15} color="#FFFFFFCC" />
+              </TouchableOpacity>
+            </View>
             {/* The overall summary now lives IN the header — it fades and slides
                 away with the rest of the hero as the header collapses, exactly
                 like Home's Income/Refunds card, rather than sitting as the
@@ -309,10 +318,10 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
                 onPress={openCreate}
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                accessibilityLabel="New Group"
+                accessibilityLabel="Add New"
               >
                 <Ionicons name="add" size={14} color={theme.primary} />
-                <Text style={[styles.chipTxt, { color: theme.primary, fontWeight: '700' }]}>New Group</Text>
+                <Text style={[styles.chipTxt, { color: theme.primary, fontWeight: '700' }]}>Add New</Text>
               </TouchableOpacity>
             </ScrollView>
 
@@ -366,14 +375,14 @@ export default function GroupsScreen({ navigation }: { navigation: any }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
-  infoBtn: { marginLeft: spacing.xs, padding: 2 },
-  subheading: { ...typography.small, color: '#FFFFFFCC', marginTop: 0, marginBottom: spacing.sm },
+  subheadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
+  subheading: { ...typography.small, color: '#FFFFFFCC', flexShrink: 1 },
   list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
   listFill: { flexGrow: 1 },
 
   // Root-screen bar row (no back chevron) — mirrors CollapsingHeaderScreen's
   // own StandardBar layout, since a custom renderBar/renderCollapsedBar pair
-  // replaced it (needed so the info icon's ink can flip with `onLight`, which
+  // replaced it (needed so the Join icon's ink can flip with `onLight`, which
   // a single static `headerRight` node can't do).
   // minHeight matches HEADER_BAR_H — was a stale 44 (the component's generic
   // default) that outgrew the bar's own shorter content and fought the

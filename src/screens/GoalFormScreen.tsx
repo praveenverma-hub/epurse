@@ -45,7 +45,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, shadows, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import {
   INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount, parseAmount,
 } from '../utils/validation';
@@ -58,6 +58,7 @@ import {
 import { useCategoryTree } from '../hooks/useCategoryTree';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { FormSelectRow } from '../components/FormField';
+import { ChoiceLabel, ColorChoices, EmojiChoices, IconField, TileEmoji } from '../components/IconColorPicker';
 import InfoTip from '../components/InfoTip';
 import CenterModal from '../components/CenterModal';
 import GoalCategoryPickerModal from '../components/GoalCategoryPickerModal';
@@ -354,26 +355,35 @@ const GoalFormScreen = ({ navigation, route }: any) => {
         >
           {/* ── name ───────────────────────────────────────────────────── */}
           <Text style={[styles.label, { color: theme.textSecondary }]}>Name</Text>
-          <TextInput
-            value={name}
-            onChangeText={(t) => { setName(sanitizeName(t)); setShowError(false); }}
-            placeholder="Emergency Fund"
-            placeholderTextColor={theme.textMuted}
-            maxLength={INPUT_LIMITS.NAME_MAX}
-            style={[
-              styles.input,
-              {
-                color: theme.textPrimary,
-                backgroundColor: theme.cardAlt,
-                borderColor: showError && !nameOk ? theme.danger : theme.inputBorder,
-              },
-            ]}
-          />
-          {showError && !nameOk ? (
-            <Text style={[styles.err, { color: theme.danger }]}>
-              Give the goal a name of at least {INPUT_LIMITS.NAME_MIN} characters.
-            </Text>
-          ) : null}
+          <IconField
+            tile={<TileEmoji emoji={emoji} />}
+            tileColor={color + '22'}
+            error={showError && !nameOk ? `Give the goal a name of at least ${INPUT_LIMITS.NAME_MIN} characters.` : null}
+            choices={(
+              <>
+                <ChoiceLabel first>Icon</ChoiceLabel>
+                <EmojiChoices value={emoji} onChange={setEmoji} choices={EMOJI_CHOICES} />
+                <ChoiceLabel>Colour</ChoiceLabel>
+                <ColorChoices value={color} onChange={(c) => c && setColor(c)} choices={GOAL_COLORS} />
+              </>
+            )}
+          >
+            <TextInput
+              value={name}
+              onChangeText={(t) => { setName(sanitizeName(t)); setShowError(false); }}
+              placeholder="Emergency Fund"
+              placeholderTextColor={theme.textMuted}
+              maxLength={INPUT_LIMITS.NAME_MAX}
+              style={[
+                styles.input,
+                {
+                  color: theme.textPrimary,
+                  backgroundColor: theme.cardAlt,
+                  borderColor: showError && !nameOk ? theme.danger : theme.inputBorder,
+                },
+              ]}
+            />
+          </IconField>
 
           {/* ── kind ───────────────────────────────────────────────────── */}
           <InfoTip label="Type" tip={`${Object.values(GOAL_KIND_META).map((m) => `${m.label}: ${m.hint}`).join('\n')}`} labelStyle={[styles.labelText, { color: theme.textSecondary }]} style={styles.labelBlock} />
@@ -553,76 +563,6 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               Set this month's salary on the Goals screen to commit an amount here.
             </Text>
           )}
-
-          {/* ── glyph ──────────────────────────────────────────────────── */}
-          <InfoTip label="Icon" tip="Tap ⌨️ to use any emoji from your keyboard." labelStyle={[styles.labelText, { color: theme.textSecondary }]} style={styles.labelBlock} />
-          <View style={styles.wrap}>
-            {/* Type any emoji — the DEVICE keyboard is the picker, so there is no
-                emoji-picker dependency (same approach as GroupFormScreen and
-                CategoriesScreen). Highlighted whenever the goal's glyph isn't
-                one of the presets, which is the only signal that the field is
-                what's currently in use. */}
-            <TextInput
-              value={EMOJI_CHOICES.includes(emoji) ? '' : emoji}
-              // Take the LAST glyph typed so a new emoji REPLACES the current
-              // one — taking the first kept the old one and the field looked
-              // unclearable.
-              onChangeText={(t) => {
-                const chars = Array.from(t.trim());
-                const e = chars[chars.length - 1];
-                if (e) { hapticLight(); setEmoji(e); }
-              }}
-              placeholder="⌨️"
-              placeholderTextColor={theme.textMuted}
-              maxLength={8}
-              style={[
-                styles.emojiBtn,
-                styles.emojiOwn,
-                {
-                  color: theme.textPrimary,
-                  borderColor: EMOJI_CHOICES.includes(emoji) ? theme.inputBorder : theme.primary,
-                  backgroundColor: EMOJI_CHOICES.includes(emoji) ? theme.cardAlt : theme.primary + '14',
-                },
-              ]}
-              accessibilityLabel="Use your own emoji"
-            />
-            {EMOJI_CHOICES.map((e) => (
-              <TouchableOpacity
-                key={e}
-                onPress={() => { hapticLight(); setEmoji(e); }}
-                activeOpacity={0.75}
-                style={[
-                  styles.emojiBtn,
-                  {
-                    borderColor: emoji === e ? theme.primary : 'transparent',
-                    backgroundColor: emoji === e ? theme.primary + '10' : theme.cardAlt,
-                  },
-                ]}
-                accessibilityLabel={`Icon ${e}`}
-              >
-                <Text style={styles.emojiTxt} allowFontScaling={false}>{e}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* ── colour ─────────────────────────────────────────────────── */}
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Colour</Text>
-          {/* Wider gap than the emoji row: a selected swatch scales to 1.18, and
-              at the 8pt gap the neighbours it grew into looked crowded. */}
-          <View style={[styles.wrap, styles.colorWrap]}>
-            {GOAL_COLORS.map((c) => (
-              <TouchableOpacity
-                key={c}
-                onPress={() => { hapticLight(); setColor(c); }}
-                activeOpacity={0.75}
-                style={[styles.swatch, { backgroundColor: c }, color === c && styles.swatchSelected]}
-                accessibilityLabel={`Colour ${c}`}
-                accessibilityState={{ selected: color === c }}
-              >
-                {color === c ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
-              </TouchableOpacity>
-            ))}
-          </View>
 
           {/* ── auto-funding rule ──────────────────────────────────────── */}
           {/* The one place the goal namespace READS the spend tree. A goal
@@ -854,7 +794,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
   },
-  err: { ...typography.tiny, marginTop: spacing.xs },
   hint: { ...typography.tiny, marginTop: spacing.xs, lineHeight: 16 },
   targetLocked: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 
@@ -873,32 +812,6 @@ const styles = StyleSheet.create({
   kindTxt: { ...typography.tiny, fontWeight: '700', flexShrink: 1 },
 
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  colorWrap: { gap: spacing.md, paddingVertical: spacing.xs },
-  emojiBtn: {
-    width: 44, height: 44, borderRadius: radius.md,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5,
-  },
-  emojiTxt: { fontSize: 20 },
-  // A visible border marks the "own emoji" tile as an input, not one more
-  // preset (presets are transparent-bordered until selected) — the same cue
-  // CategoriesScreen uses.
-  emojiOwn: { fontSize: 20, textAlign: 'center', padding: 0 },
-
-  swatch: {
-    width: 36, height: 36, borderRadius: radius.pill,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  // The app's selected-swatch treatment (GroupFormScreen): scale up, a WHITE
-  // inner ring, and a dark drop so the ring stays visible on a pale colour.
-  // A theme-coloured border was invisible on half the palette.
-  swatchSelected: {
-    borderWidth: 2,
-    borderColor: '#fff',
-    transform: [{ scale: 1.18 }],
-    ...shadows.pop,
-  },
-
   // `stretch`, so the button is exactly as tall as the field beside it. It was
   // a hardcoded 46 against an input whose height comes from its font, padding
   // and border — about 43 — and the 3pt difference read as a misaligned

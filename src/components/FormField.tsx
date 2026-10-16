@@ -23,6 +23,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
+import AppSwitch from './AppSwitch';
 
 // ─── FormField — labelled wrapper ────────────────────────────────────────────
 
@@ -343,6 +344,44 @@ export const FormNoteField: React.FC<FormNoteFieldProps> = ({
   );
 };
 
+// ─── FormSwitchRow — an on/off option as a row ──────────────────────────────
+
+interface FormSwitchRowProps {
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  /** What switching it on does for the user, in one line. */
+  hint?: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  accentColor?: string;
+}
+
+/** Label (+ hint) left, switch right — sits in a FormValueCard like the value rows. */
+export const FormSwitchRow: React.FC<FormSwitchRowProps> = ({
+  icon,
+  label,
+  hint,
+  value,
+  onValueChange,
+  accentColor = colors.primary,
+}) => (
+  <View style={styles.valueRow}>
+    {icon ? <Ionicons name={icon} size={20} color={accentColor} /> : null}
+    <View style={styles.selectTextCol}>
+      <Text style={styles.switchLabel}>{label}</Text>
+      {hint ? <Text style={styles.switchHint}>{hint}</Text> : null}
+    </View>
+    <AppSwitch
+      value={value}
+      onValueChange={onValueChange}
+      trackColor={{ true: accentColor, false: colors.divider }}
+      thumbColor="#fff"
+      ios_backgroundColor={colors.divider}
+      accessibilityLabel={label}
+    />
+  </View>
+);
+
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 /** Border for every form control — see `colors.inputBorder` in constants/theme. */
@@ -431,6 +470,8 @@ const styles = StyleSheet.create({
   valueRight: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.xs },
   valueText: { flexShrink: 1, fontSize: 14, fontWeight: '600', color: colors.textPrimary, textAlign: 'right' },
   valueTextMuted: { color: colors.textMuted, fontWeight: '500' },
+  switchLabel: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+  switchHint: { fontSize: 12, fontWeight: '500', color: colors.textMuted, marginTop: 2 },
   valueBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
   valueBadgeText: { fontSize: 10, fontWeight: '700' },
   noteBody: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },

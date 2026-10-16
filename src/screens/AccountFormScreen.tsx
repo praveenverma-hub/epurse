@@ -40,7 +40,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
-import { radius, spacing, shadows, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
+import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import {
   ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL,
   ACCOUNT_NEEDS_MASK, ACCOUNT_NEEDS_BANK,
@@ -52,6 +52,8 @@ import { validateCardDetails } from '../utils/ccStatement';
 import { paymentGapDays, isUnusualPaymentGap } from '../utils/dueDate';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
+import { ChoiceLabel, ColorChoices, IconField, TileEmoji } from '../components/IconColorPicker';
+import { resolveAccountGradient } from '../utils/accountGradient';
 import { FormField, FormAmountInput } from '../components/FormField';
 import AppSwitch from '../components/AppSwitch';
 import CenterModal from '../components/CenterModal';
@@ -324,20 +326,41 @@ const AccountFormScreen = ({ navigation, route }: any) => {
 
           {/* ── name ───────────────────────────────────────────────────── */}
           <FormField label={isEdit ? 'Account Name' : 'Custom Name (optional)'}>
-            <TextInput
-              value={customName}
-              onChangeText={(t) => setCustomName(sanitizeName(t))}
-              placeholder={isEdit ? 'Account name' : 'Leave blank to auto-generate'}
-              placeholderTextColor={theme.textMuted}
-              style={[
-                styles.input,
-                {
-                  color: theme.textPrimary,
-                  borderColor: isEdit && !nameValid ? theme.danger : theme.inputBorder,
-                },
-              ]}
-              maxLength={INPUT_LIMITS.NAME_MAX}
-            />
+            {/* Tile = the type's emoji on the card's colour; it opens Card Colour (only
+                AccountDetailsScreen's hero card reads it — the carousel keeps its own). */}
+            <IconField
+              tile={<TileEmoji emoji={ACCOUNT_TYPE_EMOJI[typeDraft]} />}
+              tileColor={(colorKeyDraft && BANK_GRADIENTS[colorKeyDraft]
+                ? BANK_GRADIENTS[colorKeyDraft][0]
+                : resolveAccountGradient({ id: account?.id, name: customName, bankName }, theme)[0]) + '22'}
+              choices={(
+                <>
+                  <ChoiceLabel first>Card Colour</ChoiceLabel>
+                  <ColorChoices
+                    auto
+                    value={colorKeyDraft}
+                    onChange={setColorKeyDraft}
+                    choices={BANK_GRADIENT_KEYS as string[]}
+                    swatchColor={(k) => BANK_GRADIENTS[k][0]}
+                  />
+                </>
+              )}
+            >
+              <TextInput
+                value={customName}
+                onChangeText={(t) => setCustomName(sanitizeName(t))}
+                placeholder={isEdit ? 'Account name' : 'Leave blank to auto-generate'}
+                placeholderTextColor={theme.textMuted}
+                style={[
+                  styles.input,
+                  {
+                    color: theme.textPrimary,
+                    borderColor: isEdit && !nameValid ? theme.danger : theme.inputBorder,
+                  },
+                ]}
+                maxLength={INPUT_LIMITS.NAME_MAX}
+              />
+            </IconField>
           </FormField>
           {!isEdit && typeDraft === ACCOUNT_TYPES.CASH ? (
             <FormField label="Cash in Hand" hint="Spending from Cash can't go past what you have.">
@@ -444,46 +467,6 @@ const AccountFormScreen = ({ navigation, route }: any) => {
               </View>
             </>
           ) : null}
-
-          {/* ── card color — only AccountDetailsScreen's hero card reads this,
-              the Accounts-tab carousel card keeps its own independent color. */}
-          <SectionHeader
-            icon="color-palette-outline"
-            title="Card Color"
-            subtitle="Optional — pick a look for this account's detail screen."
-            accentColor={theme.primary}
-            style={styles.ccSectionHeader}
-          />
-          <View style={styles.colorSwatchRow}>
-            <TouchableOpacity
-              style={[styles.colorDot, { backgroundColor: theme.cardAlt }, !colorKeyDraft && styles.colorDotSelected]}
-              onPress={() => { hapticLight(); setColorKeyDraft(null); }}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Automatic color"
-            >
-              <Ionicons name="shuffle-outline" size={14} color={theme.textMuted} />
-            </TouchableOpacity>
-            {/* One flat shade per bank, not the full 2-stop gradient — simpler
-                to scan as a picker. Same dot/ring/checkmark treatment as every
-                other color picker in the app (Group/Category color rows). */}
-            {BANK_GRADIENT_KEYS.map((key) => {
-              const [shade] = BANK_GRADIENTS[key];
-              const selected = colorKeyDraft === key;
-              return (
-                <TouchableOpacity
-                  key={key}
-                  style={[styles.colorDot, { backgroundColor: shade }, selected && styles.colorDotSelected]}
-                  onPress={() => { hapticLight(); setColorKeyDraft(key); }}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${key} color`}
-                >
-                  {selected ? <Text style={styles.colorCheck}>✓</Text> : null}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
 
           {/* ── primary / net worth toggles ────────────────────────────── */}
           <View style={[styles.toggleRow, { borderTopColor: theme.divider }]}>
@@ -723,20 +706,6 @@ const styles = StyleSheet.create({
   // The card's own bottom padding already closes the gap — the field's usual
   // marginBottom would double up on top of that.
   ccLastField: { marginBottom: 0 },
-
-  // Same dot/ring/checkmark picker as GroupFormScreen's/CategoriesScreen's own
-  // color rows — one visual language for "pick a color" everywhere it appears.
-  colorSwatchRow: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 12,
-    marginBottom: spacing.lg,
-  },
-  colorDot: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  colorDotSelected: {
-    borderWidth: 2, borderColor: '#fff',
-    transform: [{ scale: 1.18 }],
-    ...shadows.pop,
-  },
-  colorCheck: { color: '#fff', fontWeight: '900', fontSize: 15 },
 
   dayRow: { flexDirection: 'row', gap: spacing.md },
   // Sits under the day fields (their own marginBottom already spaces them).

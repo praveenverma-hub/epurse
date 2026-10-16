@@ -312,8 +312,8 @@ console.log('\n── the pinned bar is a SECOND bar, cross-faded on opacity ─
       ? spacing[/headerRow: \{[\s\S]*?marginTop: spacing\.(\w+),/.exec(dash)[1]] : NaN);
     const screens = [
       { name: 'Home',     bar: num(dash, 'HEADER_BAR_H'),     content: dashRowTop + CHIP },
-      // Accounts' tallest row item is its 40pt icon button.
-      { name: 'Accounts', bar: num(accounts, 'HEADER_BAR_H'), content: 40 },
+      // Accounts' tallest row item is a HeaderChip (Oct-17-26; was its own 40pt button).
+      { name: 'Accounts', bar: /const HEADER_BAR_H = CHIP_SIZE;/.test(accounts) ? CHIP : num(accounts, 'HEADER_BAR_H'), content: CHIP },
     ];
     for (const sc of screens) {
       check(`${sc.name}: barHeight ${sc.bar} is exactly its bar content (${sc.content})`,

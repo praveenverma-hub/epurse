@@ -2246,6 +2246,19 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   transaction at all. History: newest first, a lone "Added" hidden, latest 3 in the detail sheet +
   View All → `GroupHistory` page (expense head + full history; ⋮ → History opens it for the whole
   group). Group Detail got the round "+" FAB for Add Expense. test:store 933 (+8), test:groupScenarios 121.
+  **Oct-17: Group form revamp.** Shared form pieces like the other entry forms: Personal / Shared folder tabs
+  (create only), icon tile in the Name row (tap → icon + colour choices below; shared `IconColorPicker`, also
+  GoalForm now), Members card with Add Member → inline contact search (asks for contacts permission — the old
+  search showed nothing without it), Exclude From Totals as `FormSwitchRow`, Cancel + Create footer. Add Member
+  on Group Detail opens the search directly.
+  **Oct-17: one icon/colour field everywhere.** `IconField` (tile in the name row → icon + colour below) now on
+  the Group, Goal, Account (type emoji + Card Colour with Auto; the separate Card Color section is gone) and
+  add-category forms. Own-emoji input shared via `utils/emojiInput.ts`: a skin-tone / family / flag emoji is
+  kept whole (Goal and Group used to keep only the last code point, e.g. the 🏽 modifier). test:emoji 11.
+  Groups tab: the ⓘ (About Groups) moved from the top bar to the end of the hero description line, so the
+  bar holds one action (Join) instead of two bare icons side by side. Shared tab on New Group = "● Live" green.
+  Header buttons now one look on every tab: Groups' Join and Accounts' eye / + use the shared round
+  `HeaderChip` (Home's bell/avatar); Accounts' balance pill matches the chip height, fill and border.
 - Spend-exclusion cross-cutting checklist lives in the groups skill — re-audit it whenever a
   new spend-summing surface is added.
 
