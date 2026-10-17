@@ -17,8 +17,9 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, StatusBar as RNStatusBar,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -92,6 +93,14 @@ const LbPersonScreen = ({ route, navigation }) => {
   const changeLbEntryPerson     = useEPurseStore((s) => s.changeLbEntryPerson);
   const unlinkLbEntry           = useEPurseStore((s) => s.unlinkLbEntry);
   const applySettleToGroup      = useEPurseStore((s) => s.applySettleToGroup);
+
+  // The declarative <StatusBar> below can lose to an earlier imperative setBarStyle
+  // (Home/Groups/Activity drive theirs by hand): RN skips the native call when its
+  // props stack thinks the value is unchanged. Re-assert on every focus.
+  useFocusEffect(useCallback(() => {
+    RNStatusBar.setBarStyle('dark-content');
+    if (Platform.OS === 'android') RNStatusBar.setBackgroundColor?.('transparent');
+  }, []));
 
   const [detailEntry,  setDetailEntry]  = useState(null);  // the row whose sheet is open
   const [editEntry,    setEditEntry]    = useState(null);  // the row being edited

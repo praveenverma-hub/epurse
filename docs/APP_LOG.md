@@ -1878,6 +1878,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Lent/Borrowed & Splits
 
 **Done**
+- **Oct-17-26: Repaid / Received Back show for ANY open balance.** User: "any amount >0". `OPEN_MIN` in
+  `lbPeopleSearch.ts` 0.5 → 0.005 (the store's own settled epsilon); also the settle pickers + overpay warning.
+- **Oct-17-26: LbPerson status bar glyphs dark.** User saw white clock/battery on the white header. The
+  declarative `<StatusBar style="dark">` can be skipped after an imperative `setBarStyle` (RN props-stack
+  quirk, status-bar skill); the screen now also sets `dark-content` on focus. NOT device-tested.
 - **Oct-15-26: category refactor — settlements under Transfers.** FIXED (found via the user's "picker shows
   another category AND Received back ticked"): a flat category write (tag as a settlement, cc_bill, a plain
   re-pick) changed only `categoryId` and left the old picker labels — which WIN in `parentCatIdForTxn`, so a
@@ -1984,13 +1989,23 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   new `storeIntegration.test.mjs` checks red.
 
 **Open**
-- None currently tracked.
+- **Oct-17-26: settled group's settle hidden on LbPerson** — every group row (expenses AND the settle) folds
+  into one group line, HIDDEN at ₹0. (The group side is fixed, see Groups.) Not asked to change yet.
+- **SMS after a booked settle double counts** (open since Oct-10): `findLbMatch` only links an SMS that is
+  ALREADY there. A later bank SMS becomes a 2nd txn; tagging it Repaid also flips the person's net (user's
+  case: the person they repaid shows under Lent). User Oct-17: no auto-merge; at most a nudge, only if needed.
+- **Delete Person** — user Oct-17: not now; per-entry delete is enough.
 
 ---
 
 ## Groups
 
 **Done**
+- **Oct-17-26: settlements show in the group's Transactions tab** (user: "just show it as another transaction
+  of group" instead of a separate Settled list). Built from the group-tagged settle LB rows (`groupSettles` in
+  GroupDetailScreen): "Repaid Rohit" / "Received from Rohit", this group's part only, newest-first among the
+  expenses. Never in totals/summary (the txn has no groupId). Tap → the real txn (view-only), or the row itself
+  for a ledger-only settle. `lbTxnMerchant` moved to `utils/lbEntryDisplay.ts`. NOT device-tested.
 - **Oct-17-26: groups ↔ people pass.** (1) **Groups list status** (`utils/groupSyncStatus.ts`): meta line shows
   ● Live / ● Waiting to sync / Only on your phone / Ended (dot carries the colour); the group detail card shows the
   same status AFTER the member names, which truncate first (many members used to push "Live" off the line). (2) **Delete Group always** — on a

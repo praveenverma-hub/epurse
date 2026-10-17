@@ -77,6 +77,12 @@ export const lbAccountFieldLabel = (kind: string) => (lbMoneyOut(kind) ? 'Paid F
 /** The account choice for a ledger-only entry (an old loan, untracked cash). */
 export const LB_NO_ACCOUNT = 'Not From an Account';
 
+/** The merchant line of the transaction behind a ledger entry ("Repaid Rohit"). */
+export function lbTxnMerchant(kind: string, who?: string | null): string {
+  if (!who) return kind === 'borrow_repaid' ? 'Loan repayment' : 'Lent / borrowed';
+  return ({ lent: `Lent to ${who}`, borrowed: `Borrowed from ${who}`, lent_settled: `Received from ${who}`, borrow_repaid: `Repaid ${who}` } as Record<string, string>)[kind];
+}
+
 export function lbToastTitle(kind: string, amount: number, who: string): string {
   const amt = formatCurrency(amount);
   switch (kind) {

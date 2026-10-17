@@ -35,8 +35,8 @@ export function suggestLbPeople(people: LbPerson[], query: string, limit = 3): L
     .map((s) => s.p);
 }
 
-/** Below this an open balance is rounding, not money owed. */
-const OPEN_MIN = 0.5;
+/** Any balance above float noise is owed (same ₹0.005 the store treats as settled). */
+const OPEN_MIN = 0.005;
 
 /**
  * Who a settlement of `kind` can close, biggest balance first: 'lent_settled' (they pay

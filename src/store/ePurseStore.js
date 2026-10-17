@@ -72,6 +72,7 @@ import {
 import { matchAccount, resolveTxnAccount } from '../utils/accountMatch';
 import { limitPairKey } from '../utils/cardLimit';
 import { openSettleParts } from '../utils/settleAllocation';
+import { lbTxnMerchant } from '../utils/lbEntryDisplay';
 import {
   DAY_MS, IGNORED_RETENTION_MS, AGG_RETENTION_MS, GOAL_LIVE_WINDOW_MS, COMPACT_THROTTLE,
   CC_PROMPT_MAX_AGE_MS, RAW_SMS_RETENTION_MS, PAYMENT_HISTORY_CAP,
@@ -880,10 +881,6 @@ const clearAccountMeta = (txn) => {
 // What a ledger kind does to an account: Lent/Repaid = money out, Borrowed/Received back = in.
 const LB_MONEY_OUT = new Set(['lent', 'borrow_repaid']);
 const LB_ENTRY_KINDS = new Set(['lent', 'borrowed', 'lent_settled', 'borrow_repaid']);
-const lbTxnMerchant = (kind, who) => {
-  if (!who) return kind === 'borrow_repaid' ? 'Loan repayment' : 'Lent / borrowed';
-  return { lent: `Lent to ${who}`, borrowed: `Borrowed from ${who}`, lent_settled: `Received from ${who}`, borrow_repaid: `Repaid ${who}` }[kind];
-};
 
 /**
  * Book the REAL transaction behind a ledger entry the user added (LB form / Settle)

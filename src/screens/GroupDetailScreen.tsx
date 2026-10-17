@@ -34,7 +34,8 @@ import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, monthKey, titleCaseName } from '../utils/format';
 import { openSettleParts } from '../utils/settleAllocation';
 import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
-import { LB_NO_ACCOUNT, lbLinkedLine, lbTagLocked } from '../utils/lbEntryDisplay';
+import { LB_NO_ACCOUNT, lbLinkedLine, lbTagLocked, lbTxnMerchant } from '../utils/lbEntryDisplay';
+import { categoryFieldsFor } from '../constants/twoTierCategories';
 import { countsForSpend, memberName, spendContribution } from '../utils/split';
 import { autoLinkGroupMembers, suggestByName, unlinkedMembers, type LinkCandidate } from '../sync/contactLink';
 import { fetchContactsForPicker } from '../services/contactsService';
@@ -201,10 +202,41 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   }, [groupTxns]);
   const currentMonthTotal = groupMonthTotals[monthKey(new Date())] || 0;
 
+  // Settlements belong to the group's story but aren't expenses (their txn carries no
+  // groupId, so totals never see them). One card each, built from the ledger row — a
+  // ledger-only settle has no txn, and one txn can settle several groups (only this
+  // group's part is shown). Tap opens the real txn when there is one.
+  const groupSettles = useMemo(() => {
+    const txnById = new Map(transactions.map((t) => [t.id, t]));
+    return lentBorrowed
+      .filter((l) => l.groupId === groupId && (l.kind === 'lent_settled' || l.kind === 'borrow_repaid'))
+      .map((l) => {
+        const txn = l.sourceTxnId ? txnById.get(l.sourceTxnId) || null : null;
+        return {
+          id: `settle_${l.id}`,
+          settleTxn: txn,
+          isSettleRow: true,
+          type: l.kind === 'lent_settled' ? 'credit' : 'debit',
+          amount: l.amount,
+          ...categoryFieldsFor(l.kind),
+          merchant: lbTxnMerchant(l.kind, titleCaseName(l.person)),
+          createdAt: l.date,
+          accountId: txn?.accountId,
+          accountMask: txn?.accountMask,
+          bankName: txn?.bankName,
+          accountType: txn?.accountType,
+          note: txn?.note,
+          syncRejected: !!l.syncRejected,
+        };
+      });
+  }, [lentBorrowed, transactions, groupId]);
+
   const groupListData = useMemo(() => {
     const out: any[] = [];
     let lastMonth: string | null = null;
-    for (const t of groupTxns) {
+    const rows = [...groupTxns, ...groupSettles]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    for (const t of rows) {
       const mk = monthKey(t.createdAt);
       if (lastMonth !== null && mk !== lastMonth) {
         out.push({ _divider: true, id: `div-${mk}`, monthKey: mk, total: groupMonthTotals[mk] || 0 });
@@ -213,7 +245,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       out.push(t);
     }
     return out;
-  }, [groupTxns, groupMonthTotals]);
+  }, [groupTxns, groupSettles, groupMonthTotals]);
 
   // Per-person balances within THIS group, from the global LB ledger.
   const groupBalances = useMemo<GroupBalanceRow[]>(() => {
@@ -772,8 +804,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         <TransactionItem
           txn={item}
           context="group"
-          onPress={() => setDetailTxn(item)}
-          onPressCategory={() => setCategoryTxn(item)}
+          onPress={() => setDetailTxn(item.settleTxn || item)}
+          onPressCategory={item.isSettleRow ? undefined : () => setCategoryTxn(item)}
         />
       </View>
     );
@@ -1015,7 +1047,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         txn={detailTxn}
         context="group"
         onClose={() => setDetailTxn(null)}
-        onEdit={(t: any) => {
+        // A group's settle is fixed from the group (lbTagLocked); a ledger-only one has no txn.
+        onEdit={detailTxn?.isSettleRow || lbTagLocked(detailTxn, lentBorrowed) ? undefined : (t: any) => {
           setDetailTxn(null);
           navigation.navigate('AddTransaction', { editTxnId: t.id });
         }}
