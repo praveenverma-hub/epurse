@@ -24,6 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
+import { useUnchanged } from '../hooks/useUnchanged';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import UnderlineTabBar from '../components/UnderlineTabBar';
 import { FormField, FormSwitchRow, FormTextInput, FormValueCard, FormValueRow } from '../components/FormField';
@@ -141,6 +142,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
   };
 
   const nameValid = isValidName(sanitizeName(name));
+  const unchanged = useUnchanged({ name: name.trim(), type, emoji, color, excludeFromTotals, members: members.map((m) => m.memberId) }, isEdit);
   const nameError = name.trim().length > 0 && !nameValid;
 
   const memberRow = (key: string, label: string, onRemove?: () => void) => (
@@ -216,18 +218,21 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
             </FormValueRow>
           </FormValueCard>
         </FormField>
-      ) : (
-        <FormValueCard>
-          <FormSwitchRow
-            icon="eye-off-outline"
-            label="Exclude From Totals"
-            hint="Keep a one-off project out of your monthly reports and budget."
-            value={excludeFromTotals}
-            onValueChange={setExcludeFromTotals}
-            accentColor={theme.primary}
-          />
-        </FormValueCard>
-      )}
+      ) : null}
+
+      {/* Mine only — never synced. A shared group's repayments follow it (spendExcluded). */}
+      <FormValueCard>
+        <FormSwitchRow
+          icon="eye-off-outline"
+          label="Exclude From Totals"
+          hint={bodyType === 'shared'
+            ? 'Keep a work trip out of your reports and budget, your repayments too. Only on your phone.'
+            : 'Keep a one-off project out of your monthly reports and budget.'}
+          value={excludeFromTotals}
+          onValueChange={setExcludeFromTotals}
+          accentColor={theme.primary}
+        />
+      </FormValueCard>
     </>
   );
 
@@ -286,7 +291,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           <FormFooterActions
             onCancel={() => navigation.goBack()}
-            submit={nameValid ? {
+            submit={nameValid && !unchanged ? {
               title: isEdit ? 'Save Changes' : 'Create Group',
               onPress: handleSave,
               loading: submitting,

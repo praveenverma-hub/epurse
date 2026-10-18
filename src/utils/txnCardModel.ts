@@ -42,6 +42,8 @@ export interface CardTxn {
   isGroupMemo?: boolean;
   /** Live shared group: the server's rules skipped this change (sync/expenses.ts). */
   syncRejected?: string;
+  /** Was in a group that's since been deleted (deleteGroup). */
+  formerGroup?: { name: string; emoji?: string | null; myShare?: number; excludeFromTotals?: boolean };
 }
 /** Only the members matter here — resolves payer / share names. */
 export interface CardGroup { members?: GroupMember[] }
@@ -68,6 +70,8 @@ export interface TxnCard {
   splitCount: number;
   hasNote: boolean;
   showGroupRibbon: boolean;
+  /** "From Goa Trip" — the deleted group it was in, else null. */
+  fromGroup: string | null;
 }
 
 /** Where the card is shown — each drops what that screen already says. */
@@ -226,5 +230,6 @@ export function buildTxnCard(
     splitCount: txn.isSplit && !txn.groupId ? (txn.splitWith || []).length + 1 : 0,
     hasNote: !!(txn.note && txn.note.trim()),
     showGroupRibbon: !!group && context !== CARD_CONTEXT.GROUP,
+    fromGroup: !txn.groupId && txn.formerGroup?.name ? `From ${txn.formerGroup.name}` : null,
   };
 }

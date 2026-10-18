@@ -855,7 +855,8 @@ section('B2. Delete Group keeps only what was paid from my accounts');
   check('what someone else paid goes — it never counted as my spend', !left.some((t) => t.merchant === 'Hotel'));
   check('my own expense stays as a plain one on its account, the account untouched',
     left.some((t) => t.merchant === 'Cab' && t.accountId === Y.acc && !t.groupId) && accBal(Y) === bal);
-  check('…so spend grows only by the rest of MY bill, not by theirs', await as(Y, async () => S().getMonthlySpend()) === spend + 500, `${spend} → ${await as(Y, async () => S().getMonthlySpend())}`);
+  // Oct-18-26 (user): a deleted group's bills keep counting MY share — deleting changes no totals.
+  check('…and spend doesn\'t move: my bill still counts only my share', await as(Y, async () => S().getMonthlySpend()) === spend, `${spend} → ${await as(Y, async () => S().getMonthlySpend())}`);
 }
 
 section('B3. Someone changes who paid my bank expense, then changes it back');

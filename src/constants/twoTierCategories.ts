@@ -276,10 +276,11 @@ export const SPLIT_BLOCKED_CHILD_LABELS = new Set(Object.keys(LB_CHILD_LABEL_TO_
  * me. One already on the transaction always stays (it's what's selected).
  */
 export function lbChildAllowed(
-  label: string, { type, owesMe, iOwe, current }: { type?: string; owesMe: boolean; iOwe: boolean; current?: string },
+  label: string, { type, owesMe, iOwe, current, sharedBill = false }: { type?: string; owesMe: boolean; iOwe: boolean; current?: string; sharedBill?: boolean },
 ): boolean {
   const id = LB_CHILD_LABEL_TO_ID[label];
   if (!id || id === current) return true;
+  if (sharedBill) return false;   // a group / split bill's debts come from its split (isSharedBill)
   const out = type ? type !== 'credit' : null;   // null: direction unknown
   if (id === 'lent') return out !== false;
   if (id === 'borrowed') return out !== true;

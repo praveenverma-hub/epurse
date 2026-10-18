@@ -117,6 +117,10 @@ console.log('\n— one category, three fields (Oct-15-26) —');
   check('what the transaction already is stays shown', ok('Received Back', { type: 'credit', current: 'lent_settled' }));
   check('direction unknown: still no settlement without a balance', ok('Lent', {}) && !ok('Repaid', {}) && ok('Repaid', { iOwe: true }));
   check('other categories are never filtered', ok('Restaurants', { type: 'credit' }) && ok('P2P Transfer', { type: 'debit' }));
+  check('a group / split bill gets no lend/borrow options (Repaid + LENT on one card)',
+    !ok('Repaid', { type: 'debit', iOwe: true, sharedBill: true }) && !ok('Lent', { type: 'debit', sharedBill: true })
+    && ok('Restaurants', { type: 'debit', sharedBill: true }));
+  check('…but one it already is stays shown', ok('Repaid', { type: 'debit', sharedBill: true, current: 'borrow_repaid' }));
 }
 
 console.log(`\n${C.bold}${fail ? C.red : C.green}${pass}/${pass + fail} passed${C.reset}`);

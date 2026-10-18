@@ -90,7 +90,7 @@ import { applyCategoryPickerDraft } from '../utils/manageTransactionDraft';
 import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import LinkContactModal from '../components/LinkContactModal';
 import { useToast } from '../components/Toast';
-import { countsForSpend, debitDisplayAmount, isPayerLockedToMe } from '../utils/split';
+import { countsForSpend, debitDisplayAmount, isPayerLockedToMe, isSharedBill } from '../utils/split';
 import EpcClaimBottomSheet from '../components/EpcClaimBottomSheet';
 
 import { useAutoModalQueue } from '../hooks/useAutoModalQueue';
@@ -944,6 +944,7 @@ const DashboardScreen = ({ navigation }) => {
         isRefund={!!activeTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(activeTxn?.isSplit || activeTxn?.isSplitMemo)}
+        sharedBill={isSharedBill(activeTxn)}
         onClose={() => setActiveTxn(null)}
         onDone={(draft) => {
           if (!activeTxn) return;

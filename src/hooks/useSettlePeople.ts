@@ -24,14 +24,15 @@ export function useSettlePeople(): (kind: string | null | undefined) => LbPerson
 /**
  * Which Transfers › Lent / Borrowed / Received Back / Repaid options a transaction may
  * pick (lbChildAllowed): its direction, and for a settlement, someone to settle with.
+ * None on a group / split bill (`sharedBill`, isSharedBill).
  * Non-lend/borrow labels always pass.
  */
-export function useLbChildAllowed(txnType: string | undefined, currentCategoryId: string | undefined): (label: string) => boolean {
+export function useLbChildAllowed(txnType: string | undefined, currentCategoryId: string | undefined, sharedBill = false): (label: string) => boolean {
   const settlePeople = useSettlePeople();
   const owesMe = settlePeople('lent_settled').length > 0;
   const iOwe = settlePeople('borrow_repaid').length > 0;
   return useCallback(
-    (label: string) => lbChildAllowed(label, { type: txnType, owesMe, iOwe, current: currentCategoryId }),
-    [txnType, owesMe, iOwe, currentCategoryId],
+    (label: string) => lbChildAllowed(label, { type: txnType, owesMe, iOwe, current: currentCategoryId, sharedBill }),
+    [txnType, owesMe, iOwe, currentCategoryId, sharedBill],
   );
 }

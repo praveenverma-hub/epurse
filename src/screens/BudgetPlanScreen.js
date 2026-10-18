@@ -35,6 +35,7 @@ import { useToast } from '../components/Toast';
 import SheetCloseButton from '../components/SheetCloseButton';
 import PrimaryButton from '../components/PrimaryButton';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { useUnchanged } from '../hooks/useUnchanged';
 
 // Categories pre-added when creating the very first plan (no history to seed from).
 const DEFAULT_BUDGET_IDS = ['food', 'travel', 'bills', 'shopping'];
@@ -88,6 +89,8 @@ const BudgetPlanScreen = ({ navigation }) => {
 
   const [localCats, setLocalCats] = useState(() => (isEdit ? seedFromSavedPlan() : seedFromHistory()));
   const [pickerOpen, setPickerOpen] = useState(false);
+  // An existing plan opened and left as it was: nothing to save. A new one saves the suggestion.
+  const unchanged = useUnchanged(localCats, isEdit);
   const [confirm, setConfirm] = useState(null);
   const [removeConfirm, setRemoveConfirm] = useState(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
@@ -288,7 +291,7 @@ const BudgetPlanScreen = ({ navigation }) => {
             >
               <Text style={[styles.resetBtnText, { color: colors.danger }]}>Reset</Text>
             </TouchableOpacity>
-            <PrimaryButton title="Save Plan" onPress={requestSavePlan} loading={submitting} style={styles.saveBtn} />
+            <PrimaryButton title="Save Plan" onPress={requestSavePlan} loading={submitting} disabled={unchanged} style={styles.saveBtn} />
           </View>
         </View>
       </SafeAreaView>

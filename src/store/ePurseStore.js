@@ -100,6 +100,7 @@ import {
   computeEqualSplit,
   computePercentSplit,
   canSplitTransaction,
+  wasGroupShared,
   debitDisplayAmount,
   isGroupExcluded,
   isMemoTxn,
@@ -1278,8 +1279,38 @@ const excludedExpenseSet = () => {
   return _exclSet;
 };
 
+// Settle txn id → the groupIds its ledger rows settle (null = direct). Same lazy
+// state read as above, rebuilt only when the ledger array changes.
+let _lbArrRef = null;
+let _settleGroups = new Map();
+const settleGroupIdsOf = (txnId) => {
+  const lb = useEPurseStore?.getState?.().lentBorrowed || [];
+  if (lb !== _lbArrRef) {
+    _lbArrRef = lb;
+    _settleGroups = new Map();
+    for (const l of lb) {
+      if (!l.sourceTxnId || (l.kind !== 'borrow_repaid' && l.kind !== 'lent_settled')) continue;
+      const ids = _settleGroups.get(l.sourceTxnId) || [];
+      ids.push(l.groupId || null);
+      _settleGroups.set(l.sourceTxnId, ids);
+    }
+  }
+  return _settleGroups.get(txnId) || null;
+};
+
+/**
+ * A Repaid whose every part settles an EXCLUDED group: it's that group's spend coming due,
+ * so it stays out too. Its txn carries no groupId (it isn't a group expense) — the ledger
+ * rows say which group. Mixed with a direct part → still counted (one txn, one yes/no).
+ */
+export const settlesExcludedGroup = (t, groups) => {
+  if (!t || t.categoryId !== 'borrow_repaid') return false;
+  const ids = settleGroupIdsOf(t.id);
+  return !!ids && ids.every((id) => !!id && !!(groups || []).find((g) => g.id === id)?.excludeFromTotals);
+};
+
 export const spendExcluded = (t, groups) => {
-  if (isGroupExcluded(t, groups)) return true;
+  if (isGroupExcluded(t, groups) || settlesExcludedGroup(t, groups)) return true;
   const ex = excludedExpenseSet();
   return ex.size > 0 && ex.has(parentCatId(t));
 };
@@ -4283,18 +4314,51 @@ export const useEPurseStore = create(
       /** Turn a group zone on (groupId) or off (null). Exclusive — one zone at a time. */
       setGroupZone: (groupId) => set({ activeGroupZoneId: groupId || null }),
 
+      /**
+       * Delete a group (the screen allows it only at ₹0 with everyone — GroupDetailScreen).
+       * Real money stays: my bills and the settle txns are unlinked and keep `formerGroup`
+       * ({ name, emoji, myShare?, excludeFromTotals? }) so they're still recognisable, my bills
+       * keep counting my SHARE (debitDisplayAmount) and an excluded group's stay excluded
+       * (isGroupExcluded). What someone else paid goes. The group's ledger rows go too —
+       * at ₹0 they net to nothing per person.
+       */
       deleteGroup: (id) => {
         set((s) => {
-          // Drop this group's debt rows; clearing groupSplit + rows together keeps spend/debt
-          // consistent. My own expenses revert to plain spends; what someone else paid goes —
-          // kept, it would count as my spend (detachFromGroup).
+          const group = s.groups.find((g) => g.id === id);
+          const former = group ? { name: group.name, emoji: group.emoji || null } : null;
+          const excluded = !!group?.excludeFromTotals;
+          // Settle txns → were ALL their rows this group's? (a mixed one keeps a direct part)
+          const settles = new Map();
+          for (const l of s.lentBorrowed) {
+            if (!l.sourceTxnId || (l.kind !== 'lent_settled' && l.kind !== 'borrow_repaid')) continue;
+            const cur = settles.get(l.sourceTxnId) || { here: false, elsewhere: false };
+            if (l.groupId === id) cur.here = true; else cur.elsewhere = true;
+            settles.set(l.sourceTxnId, cur);
+          }
           let accounts = s.accounts;
           const transactions = [];
           for (const t of s.transactions) {
-            if (t.groupId !== id) { transactions.push(t); continue; }
-            const kept = detachFromGroup(t, accounts);
-            accounts = kept.accounts;
-            if (kept.txn) transactions.push(kept.txn);
+            if (t.groupId === id) {
+              const share = !t.isGroupMemo && t.groupSplit ? debitDisplayAmount(t) : null;
+              const kept = detachFromGroup(t, accounts);
+              accounts = kept.accounts;
+              if (!kept.txn) continue;
+              transactions.push(former ? {
+                ...kept.txn,
+                formerGroup: {
+                  ...former,
+                  ...(share != null && share !== t.amount ? { myShare: share } : {}),
+                  ...(excluded ? { excludeFromTotals: true } : {}),
+                },
+              } : kept.txn);
+              continue;
+            }
+            const st = settles.get(t.id);
+            if (former && st?.here) {
+              transactions.push({ ...t, formerGroup: { ...former, ...(excluded && !st.elsewhere ? { excludeFromTotals: true } : {}) } });
+              continue;
+            }
+            transactions.push(t);
           }
           return {
             groups: s.groups.filter((g) => g.id !== id),
@@ -4320,7 +4384,7 @@ export const useEPurseStore = create(
           // lentBorrowed entry (sourceTxnId match) with nothing to replace it — the
           // debt record just vanishes. Groups already have their own independent
           // who-owes-whom via split legs; the two systems must not mix.
-          if (txn.lbLocked) return s;
+          if (txn.lbLocked || wasGroupShared(txn)) return s;
           // Groups track spending: money IN (refund, salary) would inflate the group's
           // total spend, so credits never join a group.
           if (txn.type === TRANSACTION_TYPES.CREDIT) return s;
@@ -4335,6 +4399,7 @@ export const useEPurseStore = create(
           // plain split), so a plain-split MEMO doesn't stay a memo under a group that
           // says I paid (no account would ever be debited).
           let updatedTxn = { ...txn, groupId };
+          delete updatedTxn.formerGroup;   // in a group again — its split decides now
           // Moved from another group: that group's server copy is deleted — this is a new one here.
           if (txn.groupId && txn.groupId !== groupId) { delete updatedTxn.syncId; delete updatedTxn.syncRejected; }
           let accounts = s.accounts;
@@ -4588,7 +4653,9 @@ export const useEPurseStore = create(
         if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
         if (groupSplit)  updatedTxn.groupSplit  = groupSplit;  else delete updatedTxn.groupSplit;
         if (isGroupMemo) updatedTxn.isGroupMemo = true;        else delete updatedTxn.isGroupMemo;
-        if (isGroupMemo && prevAccountId) updatedTxn.memoAccountId = prevAccountId; else delete updatedTxn.memoAccountId;
+        // My own manual entry moved to another payer: its account was just the form's pick,
+        // nothing to park (detachFromGroup would book it back on Delete Group).
+        if (isGroupMemo && prevAccountId && old.source !== 'manual') updatedTxn.memoAccountId = prevAccountId; else delete updatedTxn.memoAccountId;
         if (isGroupMemo) {
           delete updatedTxn.accountId;
           clearAccountMeta(updatedTxn);
@@ -5523,6 +5590,12 @@ export const useEPurseStore = create(
         if (parentCategory) updatedTxn.parentCategory = parentCategory; else delete updatedTxn.parentCategory;
         if (childCategory)  updatedTxn.childCategory  = childCategory;  else delete updatedTxn.childCategory;
 
+        // A deleted group's bill: the others paid back on the old amount, so the change is mine.
+        if (newAmount !== old.amount && wasGroupShared(old)) {
+          const share = old.formerGroup.myShare + newAmount - (Number(old.amount) || 0);
+          updatedTxn.formerGroup = { ...old.formerGroup, myShare: Math.round(Math.min(newAmount, Math.max(0, share)) * 100) / 100 };
+        }
+
         // A category the split can't live on clears it (matching updateTransactionCategory's
         // guard). An AMOUNT change keeps it and rescales the shares below — clearing it there
         // dropped a "Rohit paid" memo's payer and booked the whole bill as my own debit.
@@ -5617,6 +5690,7 @@ export const useEPurseStore = create(
           const txn = s.transactions.find((t) => t.id === txnId);
           if (!txn) return s;
           if (txn.lbLocked) return s; // LB-tagged transactions cannot be split
+          if (wasGroupShared(txn) && others?.length) return s;
           const lb = s.lentBorrowed.filter((l) => l.sourceTxnId !== txnId);
 
           const wasMemo = !!txn.isSplitMemo;
@@ -8676,7 +8750,9 @@ export const selectMonthlyReport = (mk, opts = {}) => (state) => {
       if (NON_SPEND_CATEGORY_IDS.has(t.categoryId)) name = NON_SPEND_LABEL[t.categoryId] || 'Other transfers';
       else if (spendExcluded(t, state.groups) && t.type === TRANSACTION_TYPES.DEBIT) {
         const g = t.groupId ? (state.groups || []).find((x) => x.id === t.groupId) : null;
-        name = g && isGroupExcluded(t, state.groups) ? `${g.name} (excluded group)` : `${findParentById(parentCatId(t))?.label || 'Other'} (excluded by you)`;
+        name = g && isGroupExcluded(t, state.groups) ? `${g.name} (excluded group)`
+          : settlesExcludedGroup(t, state.groups) ? 'Repaid for excluded groups'
+          : `${findParentById(parentCatId(t))?.label || 'Other'} (excluded by you)`;
       }
       if (!name) return;
       const r = byReason[name] || (byReason[name] = { name, out: 0, in: 0, count: 0 });

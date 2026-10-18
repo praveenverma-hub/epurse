@@ -28,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 import { colors, radius, spacing, typography, shadows, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
+import { useUnchanged } from '../hooks/useUnchanged';
 import { formatCurrency, formatDate, formatOutstanding, firstName, titleCaseName } from '../utils/format';
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import { INPUT_LIMITS, sanitizeAmount, isValidAmount } from '../utils/validation';
@@ -713,7 +714,8 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
   const [note,   setNote]   = useState(() => lbNoteText(entry.note));
   const [date,   setDate]   = useState(() => new Date(entry.date));
 
-  const canSave = isValidAmount(amount);
+  const unchanged = useUnchanged({ amount, accountId, note: note.trim(), date });
+  const canSave = isValidAmount(amount) && !unchanged;
 
   // No `statusBarTranslucent` — see the add sheet above; it breaks Android keyboard
   // avoidance for any sheet with a text input.
@@ -793,7 +795,7 @@ const EntrySheetBody = ({ entry, personName, accounts, accountId: initialAccount
                 <Text style={styles.deleteBtnText}>Delete</Text>
               </TouchableOpacity>
               <PrimaryButton
-                title="Save changes"
+                title="Save Changes"
                 disabled={!canSave}
                 onPress={() => onSave({
                   amount: Number(amount),

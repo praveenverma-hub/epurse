@@ -4888,6 +4888,7 @@ console.log('\n— group edge cases —');
   // 4. The payer-lock rule every group sheet now shares.
   check('payer lock: a real account debit is locked to You', isPayerLockedToMe({ accountId: 'aE' }));
   check('payer lock: a memo is not', !isPayerLockedToMe({ isSplitMemo: true, memoAccountId: 'aE' }) && !isPayerLockedToMe({ isGroupMemo: true }));
+  check('payer lock: a MANUAL entry on my account is not (user picked the account)', !isPayerLockedToMe({ accountId: 'aE', source: 'manual' }) && isPayerLockedToMe({ accountId: 'aE', source: 'sms' }));
   check('defaultGroupSplit: personal group → no split', defaultGroupSplit({ type: 'personal' }, 100) === null);
 }
 
@@ -5940,6 +5941,79 @@ console.log('\n— shared-group sync: settlements (Oct-14-26) —');
   const before = S().lentBorrowed.length;
   S().settlePersonBalance(S().getPersonBalances().find((p) => p.contactId === '42').personKey);
   check('no live group → one settle row, as before', S().lentBorrowed.length === before + 1 && !S().lentBorrowed[0].groupId);
+}
+
+
+console.log('\n— Excluded shared group + Delete Group keeps what stayed recognisable (Oct-18-26) —');
+{
+  reset();
+  const S = () => useStore.getState();
+  const { spendExcluded } = mod;
+  useStore.setState({ accounts: [
+    { id: 'a1', name: 'HDFC', bankName: 'HDFC', mask: '1111', type: 'Bank Account', balance: 10000, primary: true },
+  ] });
+  const gid = S().createGroup({ name: 'Goa', type: 'shared', emoji: '🏖',
+    members: [{ memberId: 'c1', name: 'Rahul', contactId: 'c1' }, { memberId: 'c2', name: 'Asha', contactId: 'c2' }] });
+  const expense = (merchant, amount, payer, payerName, ids) => S().addGroupExpense(gid, {
+    amount, merchant, categoryId: 'food', paidByMemberId: payer, paidByName: payerName,
+    shares: ids.map((id) => ({ memberId: id, shareAmount: amount / ids.length, name: id === 'me' ? 'You' : id })),
+    accountId: payer === 'me' ? 'a1' : null,
+  });
+  const person = (name) => S().getPersonBalances().find((p) => p.person === name);
+  const spend = () => S().getMonthlySpend(new Date());
+
+  expense('Hotel', 600, 'me', 'You', ['me', 'c1']);        // my share 300, Rahul owes 300
+  expense('Dinner', 400, 'c2', 'Asha', ['me', 'c2']);      // I owe Asha 200
+  const hotel = S().transactions.find((t) => t.merchant === 'Hotel');
+  check('a bill I paid counts my share (300)', spend() === 300, `${spend()}`);
+  S().settleGroupPersonBalance(gid, person('Asha').personKey, { accountId: 'a1' });
+  const repaid = S().transactions.find((t) => t.categoryId === 'borrow_repaid');
+  check('repaying Asha counts (300 + 200)', spend() === 500, `${spend()}`);
+
+  S().updateGroup(gid, { excludeFromTotals: true });
+  check('shared group excluded → its bill AND the Repaid that settled it drop out', spend() === 0 && spendExcluded(repaid, S().groups), `${spend()}`);
+  S().updateGroup(gid, { excludeFromTotals: false });
+
+  S().settleGroupPersonBalance(gid, person('Rahul').personKey, { accountId: 'a1' });
+  const nBefore = S().transactions.length;
+  S().deleteGroup(gid);
+  const kept = (id) => S().transactions.find((t) => t.id === id);
+  check('delete: my bill stays, unlinked, named after the group', !kept(hotel.id).groupId && kept(hotel.id).formerGroup?.name === 'Goa' && kept(hotel.id).formerGroup?.emoji === '🏖');
+  check('…and still counts my SHARE, not the whole bill', spend() === 500, `${spend()}`);
+  check('…the settle txns stay, named too', kept(repaid.id)?.formerGroup?.name === 'Goa');
+  check('…what Asha paid is gone, the group\'s rows too, people at ₹0',
+    !S().transactions.some((t) => t.merchant === 'Dinner') && S().transactions.length === nBefore - 1
+    && !S().lentBorrowed.some((l) => l.groupId === gid) && S().getPersonBalances().every((p) => Math.abs(p.net) < 0.01));
+  // Rahul paid back 300 on the old 600 — a correction to 700 is mine: share 300 → 400.
+  check('…editing its amount moves only MY share by the difference',
+    !!S().updateTransaction(hotel.id, { amount: 700 }) && kept(hotel.id).formerGroup?.myShare === 400 && spend() === 600, `${spend()} ${kept(hotel.id).formerGroup?.myShare}`);
+  S().updateTransaction(hotel.id, { amount: 50 });
+  check('…never below ₹0', kept(hotel.id).formerGroup?.myShare === 0, `${kept(hotel.id).formerGroup?.myShare}`);
+  S().updateTransaction(hotel.id, { amount: 700 });
+  const { canSplitTransaction } = await import(`${PROJECT_ROOT}/src/utils/split.js`);
+  const g4 = S().createGroup({ name: 'Next', type: 'personal' });
+  S().setTransactionSplit(hotel.id, [{ name: 'Rahul', contactId: 'c1', shareAmount: 350 }], { myShareAmount: 350 });
+  S().tagTransactionToGroup(hotel.id, g4);
+  check('…no new split or group on it (the others already paid back)',
+    !canSplitTransaction(kept(hotel.id)) && !kept(hotel.id).isSplit && !kept(hotel.id).groupId && kept(hotel.id).formerGroup?.name === 'Goa');
+
+  const g2 = S().createGroup({ name: 'Work', type: 'personal', excludeFromTotals: true });
+  S().addGroupExpense(g2, { amount: 150, merchant: 'Cab', categoryId: 'food', paidByMemberId: 'me', shares: [], accountId: 'a1' });
+  const before = spend();
+  S().deleteGroup(g2);
+  const g3 = S().createGroup({ name: 'Flat', type: 'shared', members: [{ memberId: 'c1', name: 'Rahul', contactId: 'c1' }] });
+  const bal = () => S().accounts[0].balance;
+  const b0 = bal();
+  const rent = S().addGroupExpense(g3, { amount: 1000, merchant: 'Rent', categoryId: 'food', paidByMemberId: 'me', paidByName: 'You',
+    shares: [{ memberId: 'me', shareAmount: 500 }, { memberId: 'c1', shareAmount: 500 }], accountId: 'a1' });
+  const rentId = typeof rent === 'string' ? rent : S().transactions.find((t) => t.merchant === 'Rent').id;
+  S().updateGroupExpense(rentId, { amount: 1000, merchant: 'Rent', categoryId: 'food', paidByMemberId: 'c1', paidByName: 'Rahul', shares: [{ memberId: 'me', shareAmount: 500 }, { memberId: 'c1', shareAmount: 500 }] });
+  check('manual expense: switching payer to Rahul puts the money back, parks nothing', bal() === b0 && !S().transactions.find((t) => t.id === rentId).memoAccountId, `${b0} → ${bal()}`);
+  S().settleGroupPersonBalance(g3, person('Rahul').personKey);
+  S().deleteGroup(g3);
+  check('…and Delete Group doesn\'t book it back on my account', bal() === b0 && !S().transactions.some((t) => t.id === rentId), `${b0} → ${bal()}`);
+
+  check('an EXCLUDED group\'s bills stay excluded after delete', spend() === before && S().transactions.find((t) => t.merchant === 'Cab')?.formerGroup?.excludeFromTotals === true, `${before} → ${spend()}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

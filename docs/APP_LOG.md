@@ -2001,6 +2001,31 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Groups
 
 **Done**
+- **Oct-18-26: Exclude From Totals on SHARED groups too** (local only, never synced). The Repaids that settle
+  it drop out with it: `settlesExcludedGroup` (store) reads the txn's settle LB rows — the txn has no groupId.
+  Mixed (excluded group + direct part on one txn) still counts: one yes/no per txn. Ledger reason "excluded
+  groups"; breakdown "Repaid for excluded groups".
+- **Oct-18-26: "No one joined yet" status** (`groupSyncStatus` 'invited'): a live group whose only claimed
+  member is me used to say "Live". No dot.
+- **Oct-18-26: Delete Group (user-agreed rules).** Only at ₹0 with everyone (GroupDetail: "Settle Up First"
+  modal listing who owes whom → View Members); live still also Leaves. `deleteGroup`: my bills + settle txns
+  stay, unlinked, stamped `formerGroup` {name, emoji, myShare?, excludeFromTotals?} → card "· From Goa Trip",
+  detail sheet "Group: 🏖 Goa Trip · Deleted"; my bills keep counting my SHARE (`debitDisplayAmount`), an
+  excluded group's stay excluded (`isGroupExcluded`). User-agreed follow-up: an amount edit moves only MY share
+  by the difference (others paid back on the old amount; clamped 0…amount); a bill others had a share in
+  (`wasGroupShared`) gets no Split / Add to Group (hidden in Manage + edit form, refused by the store).
+  Was: bills jumped to the FULL amount, debts + settlement rows silently erased. `formerGroup` on the backup
+  allow-list. Also: switching MY manual expense to another payer no longer parks its account (memoAccountId),
+  so a delete can't book it back. Tests: test:store (+11), groupScenarios B2 updated (spend no longer moves).
+- **Oct-18-26: manual group expense payer editable again.** `isPayerLockedToMe` locked ANY txn with an account,
+  so a manual expense (primary account preselected) couldn't switch payer on edit — against the Oct-17 rule. Now
+  locked only when the bank said so (`source !== 'manual'`, same as the plain split's `amountLocked`);
+  `updateGroupExpense` already reverses the account debit when the payer moves off me. test:store.
+- **Oct-18-26: no Lent/Borrowed/Received Back/Repaid on a group or split bill** (`isSharedBill`, `sharedBill`
+  on `lbChildAllowed` / `useLbChildAllowed` / `CategoryTreeList` / `CategoryPickerModal` / Manage). User saw
+  REPAID + LENT on one card: the group screen's picker offered Repaid on a group expense and kept its split
+  (no person, no ledger row). Manage hid it only behind "All ›", which is why it looked group-only. Existing
+  mixed txns are left as they are. test:categoryQuickPick.
 - **Oct-17-26: settlements show in the group's Transactions tab** (user: "just show it as another transaction
   of group" instead of a separate Settled list). Built from the group-tagged settle LB rows (`groupSettles` in
   GroupDetailScreen): "Repaid Rohit" / "Received from Rohit", this group's part only, newest-first among the
@@ -2893,6 +2918,9 @@ off are DONE (see Backup).
 ## UI Consistency / Navigation
 
 **Done**
+- **Oct-18-26: edit forms don't offer Save when nothing changed** (`useUnchanged`): footer forms hide the submit,
+  single-button forms grey it — Add/Edit Transaction, Group, Goal, Goals plan, Account, Reminder, LB entry,
+  Budget Plan. Labels to Title Case: "Save Changes" (Account, LB entry, Reminder), "Set Reminder". NOT device-tested.
 - Oct-10-2026: **Lent/Borrowed entries move your accounts** — every entry from the LB form or Settle now names the account its money moved through (primary preselected; a "Paid From" / "Received In" one-line button beside "+ Note", opening the account picker; the note field appears below only when asked for): Lent/Repaid debit it, Borrowed/Received back credit it (spend/income rules unchanged). If a matching untouched UPI transfer is already there (same account, amount, direction, ±3 days) it's LINKED instead, so the balance doesn't move twice. "Not From an Account" keeps an entry ledger-only (old loans, cash). Booked entries are edited from the ledger (amount/date/account move the transaction; can be moved onto or off an account). Form: name + contact pick (no phone field — the number comes from the picked contact), no asterisks, "Already Received" / "Already Repaid" (headings "Received back" / "Repaid"), shared submit button; picking a contact with no number keeps the link; errors sit under each field (like the other forms); typing a name suggests people already on the ledger (picking one reuses their contact/number, so no duplicate person). Settle asks for the account in both directions. **Known gap:** an SMS arriving AFTER the form entry isn't de-duplicated yet.
 - Oct-10-2026: **LB repaid entries: account shown + editable** — a Repaid entry booked on an account (settle / already-repaid borrow) is now edited here with its expense: amount, date and a "Paid From" account, all moving the real Repayment expense + balance; delete removes both (confirm says so). Detail sheet shows the Account for any transaction-backed entry. Plain Lent/Borrowed entries stay ledger-only (no account). **Bug fixed:** editing that Repayment expense from Activity left the ledger row at the old amount — it now follows (and drops if recategorised off Repayment).
 - Oct-10-2026: **LB entry edit: no Person field** — editing the name on one entry respelt it (contact-linked) or silently moved it to another person (name-only); removed, the sheet title names the person ("Edit Lent · Rohit"). "From txn: Swiggy" rows read "Swiggy"; settle rows' "Manual settlement" placeholder no longer pre-fills Note; toast "Entry updated".

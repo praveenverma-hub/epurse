@@ -18,7 +18,7 @@ import { useFocusBorder } from './FormField';
 import { INPUT_LIMITS } from '../utils/validation';
 import { buildCategoryHistory, suggestCategory } from '../utils/categorySuggest';
 import { quickPicks, searchCategories } from '../utils/categoryQuickPick';
-import { canSplitTransaction, pastMemberIn } from '../utils/split';
+import { canSplitTransaction, pastMemberIn, wasGroupShared } from '../utils/split';
 import { formatCurrency } from '../utils/format';
 import { applyManageDraft, createManageDraft, manageDraftChanged } from '../utils/manageTransactionDraft';
 import { setReviewFlowDraft } from '../utils/reviewFlowDraft';
@@ -77,7 +77,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
   // Groups are for money out, and never on top of a direct split (picking a group
   // would silently drop it — remove the split first).
   const groupAllowed = !draft.isIgnored && !txn.lbLocked && !draft.specialCategory
-    && txn.type !== 'credit' && !directSplit && !pastMember;
+    && txn.type !== 'credit' && !directSplit && !pastMember && !wasGroupShared(txn);
   const splitTransaction = useMemo(() => ({ ...txn, categoryId: draft.categoryId,
     isIgnored: draft.isIgnored, groupId: draft.groupId }), [txn, draft.categoryId, draft.isIgnored, draft.groupId]);
 
@@ -132,7 +132,8 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
     categories.find((item) => item.id === 'cc_bill') || { id: 'cc_bill', name: 'Credit Card Bill', emoji: '💳' },
   ], [categories]);
   // Same rule as the full list: lend/borrow options by direction and open balances.
-  const lbAllowed = useLbChildAllowed(txn.type, txn.categoryId);
+  const sharedBill = !!draft.groupId || directSplit || !!txn.isSplitMemo;
+  const lbAllowed = useLbChildAllowed(txn.type, txn.categoryId, sharedBill);
   // A pick made via search / the full list joins the chips (front), so it shows as selected.
   const draftParent = tree.find((item) => item.label === draft.parentCategory);
   const draftChild = draftParent?.children.find((c) => c.label === draft.childCategory);
@@ -329,6 +330,7 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
                   onSelectTwoTier={chooseChild}
                   onSelectCategory={chooseSpecial}
                   txnType={txn.type}
+                  sharedBill={sharedBill}
                 />
               </> : panel === 'group' ? <>
                 {/* Same list as the standalone Add to Group sheet. "No Group" only once there's a group to leave. */}

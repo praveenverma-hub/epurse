@@ -9,8 +9,18 @@ export const SPLIT_BLOCKED_CATEGORY_IDS = new Set([
   'borrow_repaid',
 ]);
 
+/**
+ * A bill from a deleted group that others had a share in (deleteGroup's `myShare`). They
+ * already paid back on it, so a new split / group would recount their part from the full
+ * bill — Split and Add to Group are hidden, the store refuses both.
+ */
+export function wasGroupShared(txn) {
+  return typeof txn?.formerGroup?.myShare === 'number';
+}
+
 export function canSplitTransaction(txn) {
   if (!txn || txn.isIgnored) return false;
+  if (wasGroupShared(txn)) return false;
   if (txn.type !== TRANSACTION_TYPES.DEBIT) return false;
   if (SPLIT_BLOCKED_CATEGORY_IDS.has(txn.categoryId)) return false;
   // A group-tagged expense is managed through its GROUP (set "who owes" on the group
@@ -19,6 +29,15 @@ export function canSplitTransaction(txn) {
   // second independent split would wipe/double-track the group's lent rows. Block both.
   if (txn.groupId || txn.groupSplit) return false;
   return true;
+}
+
+/**
+ * A bill shared with people (any group, or a plain split): its debts come from the split,
+ * so it can't also be a Lent / Borrowed / Received Back / Repaid entry — the store refuses
+ * to group an LB txn (tagTransactionToGroup) and the pickers hide LB options on these.
+ */
+export function isSharedBill(txn) {
+  return !!txn && !!(txn.groupId || txn.groupSplit || txn.isSplit || txn.isSplitMemo);
 }
 
 /**
@@ -111,6 +130,8 @@ export function debitDisplayAmount(t) {
       return mine.shareAmount;
     }
   }
+  // From a deleted group: still only my share (deleteGroup).
+  if (typeof t.formerGroup?.myShare === 'number') return t.formerGroup.myShare;
   return t.amount;
 }
 
@@ -174,7 +195,7 @@ export function isMemoTxn(txn) {
 export function isGroupExcluded(txn, groups) {
   if (!txn) return false;
   if (isMemoTxn(txn)) return true;
-  if (!txn.groupId) return false;
+  if (!txn.groupId) return !!txn.formerGroup?.excludeFromTotals;   // a deleted excluded group's
   const g = (groups || []).find((gr) => gr.id === txn.groupId);
   return !!(g && g.excludeFromTotals);
 }
@@ -286,12 +307,13 @@ export function splitParticipantsLabel(splitWith) {
 
 /**
  * Whether a transaction's payer must stay "You" when it's added to / edited in a
- * group: real money already left one of my accounts (it has an `accountId` and
- * isn't a memo), so naming someone else as payer would book a debt that never
+ * group: the bank says money left one of my accounts (an `accountId`, not a memo,
+ * not a manual entry), so naming someone else as payer would book a debt that never
  * happened on top of a debit that did. The ONE rule for every group sheet.
  */
 export function isPayerLockedToMe(txn) {
-  return !!txn && !isMemoTxn(txn) && !!txn.accountId;
+  // A manual entry's account is the user's own pick — they can still say someone else paid.
+  return !!txn && !isMemoTxn(txn) && !!txn.accountId && txn.source !== 'manual';
 }
 
 /**

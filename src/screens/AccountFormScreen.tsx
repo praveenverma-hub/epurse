@@ -40,6 +40,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import { useUnchanged } from '../hooks/useUnchanged';
 import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import {
   ACCOUNT_TYPES, ACCOUNT_TYPE_EMOJI, ACCOUNT_TYPE_LABEL,
@@ -136,6 +137,9 @@ const AccountFormScreen = ({ navigation, route }: any) => {
   const typeChanged = isEdit && typeDraft !== account.type;
 
   const nameValid = isEdit ? isValidName(customName) : true;
+  const unchanged = useUnchanged({ typeDraft, customName: customName.trim(), bankName, mask, primaryDraft, includeDraft,
+    colorKeyDraft, creditLimit, minimumDue, statementDay, dueDay }, isEdit);
+  const canSave = nameValid && !unchanged;
 
   const computedAddName = () => {
     const custom = customName.trim();
@@ -537,13 +541,13 @@ const AccountFormScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: (isEdit ? nameValid : true) ? theme.primary : theme.disabledBackground }]}
+              style={[styles.saveBtn, { backgroundColor: canSave ? theme.primary : theme.disabledBackground }]}
               onPress={handleSave}
-              disabled={submitting}
+              disabled={submitting || unchanged}
               activeOpacity={0.85}
             >
-              <Text style={[styles.saveTxt, { color: (isEdit ? nameValid : true) ? '#fff' : theme.disabledText }]}>
-                {isEdit ? 'Save changes' : isCC ? 'Next' : 'Add Account'}
+              <Text style={[styles.saveTxt, { color: canSave ? '#fff' : theme.disabledText }]}>
+                {isEdit ? 'Save Changes' : isCC ? 'Next' : 'Add Account'}
               </Text>
             </TouchableOpacity>
           </View>

@@ -36,6 +36,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import { useUnchanged } from '../hooks/useUnchanged';
 import { colors, radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import { INPUT_LIMITS, sanitizeName, sanitizeAmount, isValidName } from '../utils/validation';
 import { formatCurrency } from '../utils/format';
@@ -172,7 +173,8 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
   // A repeating reminder is always schedulable; a one-off must still be ahead of
   // now, which a preset can stop being if the form is left open past 9pm.
   const nextFire = nextOccurrence(when.getTime(), repeat, Date.now());
-  const canSave = titleValid && !!nextFire && !saving;
+  const unchanged = useUnchanged({ title: title.trim(), when, repeat, personDraft, amountDraft }, isEdit);
+  const canSave = titleValid && !!nextFire && !saving && !unchanged;
 
   const pickPreset = useCallback((key: string, days: number, at: number) => {
     hapticLight();
@@ -450,7 +452,7 @@ const ReminderFormScreen: React.FC<Props> = ({ navigation, route }) => {
               activeOpacity={0.85}
             >
               <Text style={[styles.saveTxt, { color: canSave ? '#fff' : theme.disabledText }]}>
-                {saving ? 'Setting…' : isEdit ? 'Save changes' : 'Set reminder'}
+                {saving ? 'Setting…' : isEdit ? 'Save Changes' : 'Set Reminder'}
               </Text>
             </TouchableOpacity>
           </View>

@@ -65,7 +65,8 @@ export function computeLedgerTotals(txns, groups, spendExcluded) {
       reasons.add(
         nonSpend                     ? (NON_SPEND_LABEL[t.categoryId] || 'transfers')
           : isMemoTxn(t)             ? 'paid by someone else'
-          : isGroupExcluded(t, groups) ? 'excluded groups'
+          // A Repaid can only be excluded by its group: Spend Rules never cover Transfers.
+          : isGroupExcluded(t, groups) || t.categoryId === 'borrow_repaid' ? 'excluded groups'
           : 'categories excluded in Spend Rules',
       );
       continue;

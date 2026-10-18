@@ -67,7 +67,7 @@ import CCBillPaymentSheet from '../components/CCBillPaymentSheet';
 import ExportSheet from '../components/ExportSheet';
 import DateField from '../components/DateField';
 import TxnDetailSheet from '../components/TxnDetailSheet';
-import { isPayerLockedToMe } from '../utils/split';
+import { isPayerLockedToMe, isSharedBill } from '../utils/split';
 import { computeLedgerTotals } from '../utils/ledgerTotals';
 import { spendExcluded, firstDataMonthKey } from '../store/ePurseStore';
 import { useCategoryMaps } from '../hooks/useCategoryTree';
@@ -1100,6 +1100,7 @@ const TransactionsScreen = ({ navigation, route }) => {
         isRefund={!!activeTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(activeTxn?.isSplit || activeTxn?.isSplitMemo)}
+        sharedBill={isSharedBill(activeTxn)}
         txnType={activeTxn?.type}
         categoryLocked={lbTagLocked(activeTxn, lentBorrowed)}
         linkedPerson={linkedLbEntry?.person || null}

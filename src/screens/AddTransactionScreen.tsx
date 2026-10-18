@@ -73,6 +73,7 @@ const PrimaryButton: React.FC<{
 import InlineContactPicker from '../components/InlineContactPicker';
 import GroupPickerSheet from '../components/GroupPickerSheet';
 import { useGroupSplit } from '../hooks/useGroupSplit';
+import { useUnchanged } from '../hooks/useUnchanged';
 import { useAutoCategory } from '../hooks/useAutoCategory';
 import type { Group } from '../types/group';
 import LinkContactModal from '../components/LinkContactModal';
@@ -80,7 +81,7 @@ import CenterModal from '../components/CenterModal';
 import AppSwitch from '../components/AppSwitch';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
-import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe, pastMemberIn } from '../utils/split';
+import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe, pastMemberIn, wasGroupShared } from '../utils/split';
 import { formatCurrency, titleCaseName } from '../utils/format';
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import {
@@ -427,7 +428,8 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   const canSplitHere =
     type === TRANSACTION_TYPES.DEBIT &&
     !SPLIT_BLOCKED_CHILD_LABELS.has(childCategory) &&
-    !SPLIT_BLOCKED_CATEGORY_IDS.has(legacyCategoryId);
+    !SPLIT_BLOCKED_CATEGORY_IDS.has(legacyCategoryId) &&
+    !wasGroupShared(editTxn);   // also hides the Group row (groupAllowed)
 
   /**
    * Split is only meaningful once the user has supplied enough context for
@@ -1550,7 +1552,13 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     return () => clearTimeout(id);
   }, [isEdit, route?.params?.openSplit, editTxn?.id, fromQueue]);
 
-  const canSubmit = !editTxn?.isIgnored && (parseFloat(amount) || 0) > 0 && merchant.trim().length > 0;
+  // Edit with nothing changed → no Save. The queue's hand-off carries an unsaved draft: always a change.
+  const unchanged = useUnchanged({
+    amount, date, merchant, type, accountId, parentCategory, childCategory, note,
+    privateDraft, refundDraft, ignoreDraft, groupId, isSplit, splitPicks, mySplitPercent, mySplitAmount, splitPaidBy,
+    groupShares: activeGroup ? groupSplit.resolveShares() : null,
+  }, isEdit && !fromQueue);
+  const canSubmit = !editTxn?.isIgnored && (parseFloat(amount) || 0) > 0 && merchant.trim().length > 0 && !unchanged;
   const typeIndex = type === TRANSACTION_TYPES.CREDIT ? 1 : 0;
 
   if (fromQueue && route?.params?.openSplit) {

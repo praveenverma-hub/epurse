@@ -76,6 +76,8 @@ interface Props {
   isSplitTxn: boolean;
   /** 'debit' | 'credit' — which lend/borrow options fit. */
   txnType?: string;
+  /** A group / split bill (isSharedBill): no lend/borrow options. */
+  sharedBill?: boolean;
   /** A group's settle (`lbTagLocked`): hides the picker and says where it changes instead. */
   categoryLocked?: boolean;
   /** Who this person-tagged txn is linked to — shown above the list. */
@@ -250,6 +252,8 @@ interface CategoryTreeListProps {
   onSelectCategory: (categoryId: string) => void;
   /** 'debit' | 'credit' — which lend/borrow options fit (useLbChildAllowed). */
   txnType?: string;
+  /** A group / split bill (isSharedBill): no lend/borrow options. */
+  sharedBill?: boolean;
 }
 
 export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
@@ -261,12 +265,13 @@ export const CategoryTreeList: React.FC<CategoryTreeListProps> = ({
   onSelectTwoTier,
   onSelectCategory,
   txnType,
+  sharedBill = false,
 }) => {
   const theme = useTheme();
   const fullTree = useCategoryTree();   // built-ins + user's custom categories
   // Lend/borrow options only where they fit: the money's direction, and a settlement
   // only with someone to settle with.
-  const lbAllowed = useLbChildAllowed(txnType, selectedCategoryId);
+  const lbAllowed = useLbChildAllowed(txnType, selectedCategoryId, sharedBill);
   const categoryTree = useMemo(
     () => fullTree.map((p) => ({ ...p, children: p.children.filter((c) => lbAllowed(c.label)) })),
     [fullTree, lbAllowed],
@@ -363,6 +368,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   isSplitTxn,
   categoryLocked = false,
   txnType,
+  sharedBill = false,
   linkedPerson,
   onEditPerson,
   onPressSplit,
@@ -515,6 +521,7 @@ const CategoryPickerModal: React.FC<Props> = ({
                 }}
                 onSelectCategory={onSelectCategory}
                 txnType={txnType}
+                sharedBill={sharedBill}
               />
             </ScrollView>
             </>

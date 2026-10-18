@@ -36,7 +36,7 @@ import { openSettleParts } from '../utils/settleAllocation';
 import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
 import { LB_NO_ACCOUNT, lbLinkedLine, lbTagLocked, lbTxnMerchant } from '../utils/lbEntryDisplay';
 import { categoryFieldsFor } from '../constants/twoTierCategories';
-import { countsForSpend, memberName, spendContribution } from '../utils/split';
+import { countsForSpend, isSharedBill, memberName, spendContribution } from '../utils/split';
 import { autoLinkGroupMembers, suggestByName, unlinkedMembers, type LinkCandidate } from '../sync/contactLink';
 import { fetchContactsForPicker } from '../services/contactsService';
 import { normalizePhone } from '../utils/validation';
@@ -342,12 +342,26 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const zoneOn = activeGroupZoneId === group.id;
 
   const handleDeleteGroup = () => {
+    // Only at ₹0 with everyone — deleting would otherwise erase what's owed (deleteGroup).
+    if (groupBalances.length) {
+      setConfirm({
+        title: 'Settle Up First',
+        message: groupBalances
+          .map((b) => (b.net > 0 ? `${titleCaseName(b.person)} owes you ${formatCurrency(b.net)}` : `You owe ${titleCaseName(b.person)} ${formatCurrency(-b.net)}`))
+          .join('\n') + '\n\nYou can delete the group once everyone is at ₹0.',
+        primaryText: 'View Members',
+        secondaryText: 'Cancel',
+        onPrimary: () => { setConfirm(null); goTab('members'); },
+        onSecondary: () => setConfirm(null),
+      });
+      return;
+    }
     // Live: Delete = Leave (₹0 only — leaveSharedGroup refuses otherwise, and the toast
     // says so) + remove it here. The others keep the group and its history.
     if (live) {
       setConfirm({
         title: `Delete ${group.name}?`,
-        message: 'You\'ll leave the group and it\'s removed from this phone. The others keep it and its history.',
+        message: 'You\'ll leave the group and it\'s removed from this phone. The others keep it. Your expenses and settlements stay in Activity, marked with its name.',
         primaryText: 'Delete',
         secondaryText: 'Cancel',
         destructive: true,
@@ -363,7 +377,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
     setConfirm({
       title: 'Delete group?',
       message: `"${group.name}" will be removed. `
-        + (isShared ? 'Your own expenses stay, untagged. Ones someone else paid are removed.' : 'Its transactions stay, untagged.'),
+        + (isShared ? 'Your expenses and settlements stay in Activity, marked with its name. Ones someone else paid are removed.' : 'Its transactions stay in Activity, marked with its name.'),
       primaryText: 'Delete',
       secondaryText: 'Cancel',
       destructive: true,
@@ -1067,6 +1081,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         isRefund={!!categoryTxn?.isRefund}
         canSplit={false}
         isSplitTxn={!!(categoryTxn?.isSplit || categoryTxn?.isSplitMemo)}
+        sharedBill={isSharedBill(categoryTxn)}
         txnType={categoryTxn?.type}
         categoryLocked={lbTagLocked(categoryTxn, lentBorrowed)}
         onSelectCategory={(categoryId: string) => {

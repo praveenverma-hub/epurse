@@ -68,6 +68,7 @@ interface Txn {
   myShareAmount?: number;
   splitWith?: SplitShare[];
   groupId?: string;
+  formerGroup?: { name: string; emoji?: string | null };
   groupSplit?: GroupSplit;
   /** Someone else in the group paid — no money left my account. */
   isGroupMemo?: boolean;
@@ -157,6 +158,10 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
 
   const group = txn.groupId ? groups.find((g: any) => g.id === txn.groupId) || null : null;
   const showGroup = !!group && context !== CARD_CONTEXT.GROUP;
+  // Its group was deleted (deleteGroup) — still named, so the user knows where it came from.
+  const formerGroup = !group && txn.formerGroup?.name ? txn.formerGroup : null;
+  const groupLabel = group ? (group.emoji ? `${group.emoji} ${group.name}` : group.name)
+    : formerGroup ? `${formerGroup.emoji ? `${formerGroup.emoji} ` : ''}${formerGroup.name} · Deleted` : '';
   // Someone else paid ⇒ no account of mine moved; the split list's first row names the payer.
   const account = txn.accountId ? accounts.find((a: any) => a.id === txn.accountId) : null;
   const accountLabel = txnPayerName(txn as any, group) ? ''
@@ -175,7 +180,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
   // SOMETHING useful rather than nothing on the rare city-less fix.
   const place = locationKey(txn.location);
   // The last row drops its divider — unless the split list follows (then it's the separator).
-  const rowKeys = ['category', matchedGoals.length > 0 && 'goals', showGroup && 'group', accountLabel && 'account', place && 'place', txn.note && 'note'].filter(Boolean);
+  const rowKeys = ['category', matchedGoals.length > 0 && 'goals', (showGroup || formerGroup) && 'group', accountLabel && 'account', place && 'place', txn.note && 'note'].filter(Boolean);
   const lastRow = hasSplit ? null : rowKeys[rowKeys.length - 1];
   const rowStyle = (key: string) => [styles.detailRow, key === lastRow && styles.detailRowLast];
 
@@ -235,12 +240,10 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
                 </Text>
               </View>
             ) : null}
-            {showGroup ? (
+            {showGroup || formerGroup ? (
               <View style={rowStyle('group')}>
                 <Text style={styles.detailLabel}>Group</Text>
-                <Text style={styles.detailValue} numberOfLines={1}>
-                  {group.emoji ? `${group.emoji} ${group.name}` : group.name}
-                </Text>
+                <Text style={styles.detailValue} numberOfLines={1}>{groupLabel}</Text>
               </View>
             ) : null}
             {accountLabel ? (

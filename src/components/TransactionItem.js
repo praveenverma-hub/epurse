@@ -78,6 +78,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         {card.meta ? <Text style={styles.meta} numberOfLines={1}>{card.meta}</Text> : null}
         <View style={styles.footerRow}>
           <Text style={styles.time} numberOfLines={1}>{formatDateTime(txn.createdAt)}</Text>
+          {card.fromGroup ? <Text style={[styles.time, styles.fromGroup]} numberOfLines={1}>· {card.fromGroup}</Text> : null}
           {card.hasNote ? (
             <Ionicons name="document-text-outline" size={12} color={colors.textMuted} style={styles.noteMark}
               accessibilityLabel="Has a note" />
@@ -176,6 +177,7 @@ const styles = StyleSheet.create({
   footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: spacing.xs },
   time: { ...typography.tiny, color: colors.textMuted, flexShrink: 1 },
   noteMark: { marginLeft: -2 },
+  fromGroup: { flexShrink: 2 },   // truncates before the time does
   right: { alignItems: 'flex-end', maxWidth: '42%' },
   // The ribbon hangs 26px from the top-right edge: start the column just below it, so a
   // lone amount (personal group) sits exactly where a shared card's amount does.

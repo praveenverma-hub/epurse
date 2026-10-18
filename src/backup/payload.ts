@@ -58,6 +58,8 @@ export const TXN_FIELDS = [
   'isSplit', 'splitWith', 'myShareAmount', 'myPercent', 'isSplitMemo', 'splitPaidBy', 'memoAccountId',
   // groups
   'groupId', 'groupSplit', 'isGroupMemo',
+  // a deleted group's name / my share / exclusion, kept on what stayed (deleteGroup)
+  'formerGroup',
   // live shared groups: server id, "came from another member", and a change the server rejected
   'syncId', 'syncOrigin', 'syncRejected',
   // self-transfer hints — still needed AFTER a restore, because ingesting new SMS

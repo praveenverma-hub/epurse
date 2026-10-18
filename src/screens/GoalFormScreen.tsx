@@ -45,6 +45,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
+import { useUnchanged } from '../hooks/useUnchanged';
 import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
 import {
   INPUT_LIMITS, sanitizeName, isValidName, sanitizeAmount, parseAmount,
@@ -176,6 +177,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
 
   const nameOk = isValidName(name);
+  const unchanged = useUnchanged({ name: name.trim(), emoji, color, kind, duration, target, monthly, parentIds, categoryIds, merchants }, isEdit);
   const ruleCount = parentIds.length + categoryIds.length + merchants.length;
 
   // What's already moved toward this goal THIS month — a lower bound on the
@@ -697,12 +699,12 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: nameOk ? theme.primary : theme.disabledBackground }]}
+              style={[styles.saveBtn, { backgroundColor: nameOk && !unchanged ? theme.primary : theme.disabledBackground }]}
               onPress={handleSave}
-              disabled={submitting}
+              disabled={submitting || unchanged}
               activeOpacity={0.85}
             >
-              <Text style={[styles.saveTxt, { color: nameOk ? '#fff' : theme.disabledText }]}>
+              <Text style={[styles.saveTxt, { color: nameOk && !unchanged ? '#fff' : theme.disabledText }]}>
                 {isEdit ? 'Save' : 'Add Goal'}
               </Text>
             </TouchableOpacity>

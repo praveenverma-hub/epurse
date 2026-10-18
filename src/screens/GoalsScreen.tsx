@@ -80,6 +80,7 @@ import InfoSheet from '../components/InfoSheet';
 import GoalAchievedModal from '../components/GoalAchievedModal';
 import { useGoalAchievement } from '../hooks/useGoalAchievement';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
+import { useUnchanged } from '../hooks/useUnchanged';
 import { useToast } from '../components/Toast';
 import { hapticLight } from '../utils/haptics';
 
@@ -191,6 +192,8 @@ const GoalsScreen = ({ navigation }: any) => {
   useEffect(() => { seed(); }, [seed]);
 
   const salary = parseAmount(salaryText);
+  // This month's plan opened and left as it was: nothing to save (a new month's plan always saves).
+  const unchanged = useUnchanged({ salary, alloc }, editing && planIsCurrent);
   const budgetCap = Number(budget?.totalCap) || 0;
 
   // Non-archived AND not discontinued — the split bar, its steppers, and the
@@ -919,7 +922,7 @@ const GoalsScreen = ({ navigation }: any) => {
                 title={planIsCurrent ? 'Save Changes' : `Save ${MONTH_LABEL(thisMonth).split(' ')[0]} Plan`}
                 onPress={savePlan}
                 loading={submitting}
-                disabled={over || salary <= 0}
+                disabled={over || salary <= 0 || unchanged}
                 style={styles.flex1}
               />
             </View>
