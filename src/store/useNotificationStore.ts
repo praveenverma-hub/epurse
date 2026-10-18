@@ -1,11 +1,12 @@
 // =============================================================================
 // useNotificationStore.ts — in-app activity feed for the header bell.
 // -----------------------------------------------------------------------------
-// Persisted Zustand slice that records events the user should know about:
+// Persisted Zustand slice that records events the user should know about.
+// How they're laid out (and what lights the bell) is `analytics/bellFeed`.
 //   • cc_due                — bank-issued credit-card bill reminders
-//   • aware_check_in        — daily Aware Run check-in reward
+//   • aware_check_in        — Aware Run multiplier step-up (milestones only)
 //   • aware_streak_reset    — Aware Run broken / new streak started
-//   • aware_savings_claimed — zero-spend bonus actually credited
+//   • aware_savings_claimed — no longer written; kept for persisted entries
 //   • goal_achieved         — a goal's lifetime target reached (bonus credited)
 //   • level_up              — Profile Level advanced
 //   • app_update            — a newer build is on the store (the SOFT update
@@ -15,7 +16,7 @@
 //   1. Each entry has a `dedupeKey`; adding a new entry with an existing key
 //      REPLACES the older one (so banks resending updated bill totals just
 //      refresh the existing chip).
-//   2. Entries older than 15 calendar days are pruned on hydrate and on add.
+//   2. Entries older than NOTIFICATION_MAX_AGE_MS are pruned on hydrate and on add.
 //   3. Hard cap of 80 entries to keep storage lean.
 // =============================================================================
 
@@ -148,9 +149,6 @@ export const useNotificationStore = create<State>()(
 // ─── Selectors ──────────────────────────────────────────────────────────────
 
 export const selectNotificationEntries = (s: State): NotificationEntry[] => s.entries;
-
-export const selectHasUnreadNotifications = (s: State): boolean =>
-  s.entries.some((e) => !e.isRead);
 
 export const selectUnreadNotificationCount = (s: State): number =>
   s.entries.reduce((n, e) => (e.isRead ? n : n + 1), 0);

@@ -142,6 +142,32 @@ const OVERDUE_GRACE_DAYS = 3;
 const DUE_SOON_DAYS = 7;
 
 /**
+ * Every credit-card bill still owed, soonest first (undated ones last). Shared
+ * by the carousel card below and the bell's Money Due section, so the two can't
+ * disagree about what's open. `key` is the `ccBills` key (= the `cc_due:<key>`
+ * feed dedupeKey); `when` is lower-case ("due in 3 days").
+ */
+export const openCcBills = (ccBills, nowMs) =>
+  Object.entries(ccBills || {})
+    // `remaining` = what's still owed after a PARTIAL payment (the store stamps
+    // it); a bill nobody has paid against owes its full amount.
+    .map(([key, b]) => ({ ...b, key, owed: b.remaining ?? b.amount, days: daysUntilDue(b.dueDate, nowMs) }))
+    .filter((b) => b.owed > 0 && (b.days == null || b.days >= -OVERDUE_GRACE_DAYS))
+    .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity))
+    .map((b) => ({
+      ...b,
+      card: b.cardLast4 ? `${b.bankName || 'Credit card'} •• ${b.cardLast4}` : (b.bankName || 'Credit card'),
+      // "Due date passed", never "overdue": the app only reads SMS, so a bill paid
+      // some other way can still look open here — state the date, not a verdict.
+      when: b.days == null ? null
+        : b.days < 0 ? `due ${Math.abs(b.days)} ${Math.abs(b.days) === 1 ? 'day' : 'days'} ago`
+        : b.days === 0 ? 'due today'
+        : b.days === 1 ? 'due tomorrow'
+        : `due in ${b.days} days`,
+      partlyPaid: b.remaining != null && b.remaining < b.amount,
+    }));
+
+/**
  * The nearest credit-card bill that's actually actionable.
  *
  * `ccBills` is a map keyed by card, so at most one bill per card; this picks the
@@ -149,34 +175,12 @@ const DUE_SOON_DAYS = 7;
  * has a handful of slots and two bill cards would crowd out everything else.
  */
 const ccBillCard = (ccBills, nowMs) => {
-  const bills = Object.values(ccBills || {});
-  if (bills.length === 0) return null;
-
-  const dated = bills
-    // `remaining` = what's still owed after a PARTIAL payment (the store stamps
-    // it); a bill nobody has paid against owes its full amount.
-    .map((b) => ({ ...b, owed: b.remaining ?? b.amount, days: daysUntilDue(b.dueDate, nowMs) }))
-    // A bill with an unparseable date can't say "due in N days", and a vague
-    // "you have a bill" isn't worth a slot.
-    .filter((b) => b.days != null && b.owed > 0)
-    .filter((b) => b.days <= DUE_SOON_DAYS && b.days >= -OVERDUE_GRACE_DAYS)
-    .sort((a, b) => a.days - b.days);
-
-  const bill = dated[0];
+  // A bill with an unparseable date can't say "due in N days", and a vague
+  // "you have a bill" isn't worth a slot.
+  const bill = openCcBills(ccBills, nowMs).find((b) => b.days != null && b.days <= DUE_SOON_DAYS);
   if (!bill) return null;
 
-  const card = bill.cardLast4
-    ? `${bill.bankName || 'Credit card'} •• ${bill.cardLast4}`
-    : (bill.bankName || 'Credit card');
-
-  // "Due date passed", never "overdue": the app only reads SMS, so a bill paid
-  // some other way can still look open here — state the date, not a verdict.
-  const when = bill.days < 0
-    ? `due ${Math.abs(bill.days)} ${Math.abs(bill.days) === 1 ? 'day' : 'days'} ago`
-    : bill.days === 0 ? 'due today'
-    : bill.days === 1 ? 'due tomorrow'
-    : `due in ${bill.days} days`;
-  const partlyPaid = bill.remaining != null && bill.remaining < bill.amount;
+  const { card, when, partlyPaid } = bill;
 
   return {
     id: 'cc_bill_due',

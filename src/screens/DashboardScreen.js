@@ -71,10 +71,8 @@ import NotificationsSheet from '../components/NotificationsSheet';
 import AppBrandFooter from '../components/AppBrandFooter';
 import EmptyState from '../components/EmptyState';
 import StatSplitRow from '../components/StatSplitRow';
-import {
-  useNotificationStore,
-  selectHasUnreadNotifications,
-} from '../store/useNotificationStore';
+import { useNotificationStore, selectNotificationEntries } from '../store/useNotificationStore';
+import { bellHasUnread } from '../analytics/bellFeed';
 import { REWARD_CONFIG, vaultTierForStreak, multiplierForStreak, labelForStreak } from '../config/rewardConfig';
 import InfoSheet from '../components/InfoSheet';
 import { selectAwareStreak } from '../store/useRewardStore';
@@ -287,7 +285,7 @@ const DashboardScreen = ({ navigation }) => {
 
   // Notifications
   const [notificationsVisible, setNotificationsVisible] = useState(false);
-  const hasUnreadNotifications = useNotificationStore(selectHasUnreadNotifications);
+  const notificationEntries = useNotificationStore(selectNotificationEntries);
 
   // ── Period-aware expense stats (centralized selector) ────────────────────
   // Returns { debits, credits, net, count, recent }.
@@ -339,6 +337,19 @@ const DashboardScreen = ({ navigation }) => {
     [transactions, categories, groups]
   );
   const ccBills     = useEPurseStore((s) => s.ccBills);
+  const hasUnreadNotifications = useMemo(
+    () => bellHasUnread(notificationEntries, ccBills, Date.now()),
+    [notificationEntries, ccBills],
+  );
+  // Carousel cards and bell rows name a [route, params] target; this resolves it.
+  const navigateToTarget = (route, params) => {
+    if (route === 'Accounts' && !accountsTracked) {
+      const card = params?.cardLast4 && useEPurseStore.getState().accounts.find((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD && a.mask === params.cardLast4);
+      if (card) navigation.navigate('AccountDetails', { accountId: card.id });
+      return;
+    }
+    navigation.navigate(route, params);
+  };
 
   // detectSubscriptions has no access to `groups`, so the exclusion has to be
   // applied to its INPUT — the same pre-filter maybeFireSubscriptionAlerts uses
@@ -804,14 +815,7 @@ const DashboardScreen = ({ navigation }) => {
           // card was inset twice — 16pt gutter + 28pt peek = 44pt from the edge,
           // against 16pt for every other card on the page.
           bleed={spacing.lg}
-          onNavigate={(route, params) => {
-            if (route === 'Accounts' && !accountsTracked) {
-              const card = params?.cardLast4 && useEPurseStore.getState().accounts.find((a) => a.type === ACCOUNT_TYPES.CREDIT_CARD && a.mask === params.cardLast4);
-              if (card) navigation.navigate('AccountDetails', { accountId: card.id });
-              return;
-            }
-            navigation.navigate(route, params);
-          }}
+          onNavigate={navigateToTarget}
         />
 
         {/* ═══ "YOUR MONEY" group ═══
@@ -1137,6 +1141,7 @@ const DashboardScreen = ({ navigation }) => {
           setExplicitModal(true);
           setActiveAutoModal(modal);
         }}
+        onNavigate={navigateToTarget}
       />
 
     </View>

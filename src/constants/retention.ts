@@ -34,8 +34,8 @@ export const RAW_SMS_RETENTION_MS = 3 * DAY_MS;
 // ── Per-item caps ────────────────────────────────────────────────────────────
 /** Payments remembered per credit card (oldest dropped first). */
 export const PAYMENT_HISTORY_CAP = 24;
-/** Notification-feed entries are dropped after this long… */
-export const NOTIFICATION_MAX_AGE_MS = 15 * DAY_MS;
+/** Notification-feed entries are dropped after this long — one billing cycle / budget month… */
+export const NOTIFICATION_MAX_AGE_MS = 30 * DAY_MS;
 /** …and only this many are kept (newest first). */
 export const NOTIFICATION_MAX_ENTRIES = 80;
 /** Unreviewed SMS shown to a new user at onboarding; the rest are marked reviewed. */

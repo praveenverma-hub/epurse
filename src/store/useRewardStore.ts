@@ -329,19 +329,16 @@ export const useRewardStore = create<RewardState>()(
           lastCheckInResult:  result,
         });
 
-        // Notification feed entries — skip entirely on first-ever check-in
-        // (no prior streak to celebrate or reset, and the welcome flow is
-        // already surfaced by WelcomeStreakModal).
+        // Feed entries for milestones only — the daily "Day N" is the Home
+        // banner's job, and one per day piled up in the bell. Skipped on the
+        // first-ever check-in (WelcomeStreakModal covers it).
         if (!isFirstCheckIn) {
-          if (type === 'NEW_DAY') {
+          if (type === 'NEW_DAY' && multiplier > multiplierForStreak(newStreak - 1)) {
             useNotificationStore.getState().add({
               kind:      'aware_check_in',
-              title:     `Day ${newStreak} Aware Run locked in`,
-              body:
-                multiplier > 1
-                  ? `Earnings multiplier now ${multiplier}× — review your queue to bank RP & EPC.`
-                  : `Review your queue today to bank RP & EPC.`,
-              dedupeKey: `aware_check_in:${today}`,
+              title:     `${multiplier}× multiplier unlocked`,
+              body:      `Day ${newStreak} of your Aware Run — reviews now earn more RP & EPC.`,
+              dedupeKey: `aware_multiplier:${today}`,
               meta:      { newStreak, multiplier },
             });
           } else if (type === 'STREAK_RESET') {
@@ -374,14 +371,8 @@ export const useRewardStore = create<RewardState>()(
           lastClaimedBonusDate: pending.forDate,
           pendingSavingsReward: null,
         });
+        // No "claimed" entry: the claim sheet already confirmed it.
         useNotificationStore.getState().dismissByDedupeKey(`pending:aware_savings:${pending.forDate}`);
-        useNotificationStore.getState().add({
-          kind:      'aware_savings_claimed',
-          title:     `Zero-spend bonus claimed`,
-          body:      `+${pending.rpAmount} RP and +${pending.epcAmount} EPC credited for ${pending.forDate}.`,
-          dedupeKey: `aware_savings_claimed:${pending.forDate}`,
-          meta:      { rp: pending.rpAmount, epc: pending.epcAmount, forDate: pending.forDate },
-        });
         if (nextLvl > prevLvl) {
           useNotificationStore.getState().add({
             kind:      'level_up',

@@ -2666,6 +2666,18 @@ off are DONE (see Backup).
 - Also fixed while cross-checking: the WhatsApp screen lost the card background its fields' grey
   fills depend on (grey-on-grey, visible only by their borders), and its Send button wasn't
   paying the bottom safe-area inset now that it's a screen with `edges={['top']}`.
+- **Oct-19-2026 — bell sheet rebuilt as a finance feed** (`analytics/bellFeed.ts`, `test:bellFeed`).
+  Was one flat list where a daily "Day N Aware Run locked in" + "bonus claimed" piled up 15 deep and
+  kept the dot lit. Now: **Money Due** (live from `ccBills` via shared `openCcBills` — same source as
+  the Home bill card — plus the card-payment review), then **Today / Yesterday / Earlier** with the
+  figure right-aligned (budget actual/cap, price from → to), then ONE pinned **Rewards** row (live
+  streak/level, pending zero-spend claim). Paid bills show as "bill paid ✓" rows read from each card's
+  `paymentHistory`. Bell dot = unread money entries only; a `cc_due` entry stops counting once its bill
+  is paid (was lit forever — nothing removed it). Reward writes cut to milestones: daily check-in entry
+  → multiplier step-up only, "claimed" entry dropped. Rows now open their screen (budget, Insights,
+  card, Goals). Filters considered and rejected (too little volume; would hide a bill).
+  Same day: feed window 15 → 30 days (`NOTIFICATION_MAX_AGE_MS`) so last month's "bill paid" and this
+  month's budget alerts are still there; the permanent record stays in Activity / payment history.
 
 **Open**
 - Reminders set before this build (via the old borrow sheet) still fire, but can no longer be

@@ -156,7 +156,7 @@ const syncCcReviewNotification = (queue = []) => {
       ? `${formatCurrency(queue[0].amount)} was detected — tap to reconcile it.`
       : 'Review the detected payments and keep your card balances accurate.',
     dedupeKey: CC_REVIEW_NOTIFICATION_KEY,
-    meta: { count },
+    meta: { count, amount: count === 1 ? queue[0].amount : null },
   });
 };
 
@@ -3189,8 +3189,8 @@ export const useEPurseStore = create(
             key: `sub_hike:${key}`,
             bell: {
               kind:  'subscription_hike',
-              title: `📈 ${sub.merchant} price went up`,
-              body:  `Rose from ₹${Math.round(sub.hikeFrom).toLocaleString('en-IN')} to ₹${Math.round(sub.hikeTo).toLocaleString('en-IN')}. Still using it?`,
+              title: `${sub.merchant} price went up`,
+              body:  'Still using it?',
               dedupeKey: `sub_hike:${sub.merchantKey}`,
               meta:  { merchant: sub.merchant, hikeFrom: sub.hikeFrom, hikeTo: sub.hikeTo, dayOfMonth: sub.dayOfMonth },
             },
@@ -3247,7 +3247,7 @@ export const useEPurseStore = create(
             key: `cc_cycle:${a.id}:${thisMonth}`,
             bell: {
               kind:  'cc_cycle_heads_up',
-              title: `💳 ${cardLabel} cycle closed`,
+              title: `${cardLabel} cycle closed`,
               body:  'Your billing cycle likely just closed — a new statement should arrive soon.',
               dedupeKey: `cc_cycle:${a.id}:${thisMonth}`,
               meta:  { accountId: a.id, statementDay: a.statementDay },
@@ -3307,9 +3307,10 @@ export const useEPurseStore = create(
           key: `budget:${month}:${id}`,
           bell: {
             kind:  'budget_breach',
-            title: `🚨 ${scope === 'total' ? monthName : name} budget crossed`,
-            body:  `${formatCurrency(actual)} of ${formatCurrency(cap)} — ${formatCurrency(Math.max(0, actual - cap))} over your ${monthName} cap`,
+            title: `${scope === 'total' ? monthName : name} budget crossed`,
+            body:  `${formatCurrency(Math.max(0, actual - cap))} over your ${monthName} cap.`,
             dedupeKey: `budget:${month}:${id}`,
+            meta:  { actual, cap },
           },
           push: (fireAt) => fireBudgetBreachNotification({ scope, categoryName: name, actual, cap, fireAt }),
         });
