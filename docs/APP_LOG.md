@@ -2930,6 +2930,13 @@ off are DONE (see Backup).
 ## UI Consistency / Navigation
 
 **Done**
+- **Oct-19-2026 — Settings sub-screens: one section division.** Seven different ways of splitting
+  groups found across Settings/Profile sub-screens. Settings' own list kept as is (user); every
+  sub-screen with 2+ groups now uses the Notifications band, extracted as `components/SectionBand.tsx`:
+  Monthly Recap (was grey label + hairline; rows now `NavListRow` + `AppSwitch`, was RN `Switch`),
+  Expense Inclusions (was hairline + SectionHeader with subtitle), Help & Support (was FAQ h3 title +
+  loose row). Categories (one group) drops its heading that repeated the screen title → hint line.
+  Cards rejected for Settings (user).
 - **Oct-18-26: edit forms don't offer Save when nothing changed** (`useUnchanged`): footer forms hide the submit,
   single-button forms grey it — Add/Edit Transaction, Group, Goal, Goals plan, Account, Reminder, LB entry,
   Budget Plan. Labels to Title Case: "Save Changes" (Account, LB entry, Reminder), "Set Reminder". NOT device-tested.

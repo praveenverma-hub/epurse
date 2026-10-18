@@ -20,7 +20,6 @@ import PrimaryButton from '../components/PrimaryButton';
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
-import SectionHeader from '../components/SectionHeader';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { EMPTY_ARRAY } from '../constants/empty';
@@ -107,12 +106,10 @@ const CategoriesScreen = ({ navigation }) => {
 
       <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Category tree ───────────────────────────────────────────── */}
-        <SectionHeader
-          icon="grid-outline"
-          title="Categories"
-          accentColor={theme.primary}
-          subtitle="Tap a category to see its sub-categories. Add your own sub-categories or a whole new parent — they work everywhere and stay saved across updates."
-        />
+        {/* One group, so no heading — the screen title already says Categories. */}
+        <Text style={styles.hint}>
+          Tap a category to see its sub-categories. Add your own sub-categories or a whole new parent — they work everywhere and stay saved across updates.
+        </Text>
 
         {tree.map((parent) => {
             const isOpen = !!expanded[parent.id];
@@ -272,7 +269,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.card },
   scrollBody: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  hint: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.md },
+  hint: { ...typography.small, color: colors.textSecondary, lineHeight: 18, marginBottom: spacing.md },
 
   // Tree
   parentBlock: {

@@ -23,9 +23,9 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { pushEnabled } from '../constants/notificationPolicy';
 import { useSyncEnabled } from '../sync/config';
 import { getNotificationPermission, requestNotificationPermissions } from '../utils/notifications';
-import { radius, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
+import { radius, spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
-import SectionHeader from '../components/SectionHeader';
+import SectionBand from '../components/SectionBand';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import AppSwitch from '../components/AppSwitch';
 import NavListRow from '../components/NavListRow';
@@ -163,12 +163,7 @@ const NotificationsScreen: React.FC<Props> = ({ navigation }) => {
 
         {GROUPS.filter((group) => syncOn || group.title !== 'Shared Groups').map((group) => (
           <View key={group.title} style={styles.group}>
-            <SectionHeader
-              icon={group.icon}
-              title={group.title}
-              accentColor={theme.primary}
-              style={[styles.sectionBand, { backgroundColor: theme.card, borderColor: theme.divider }]}
-            />
+            <SectionBand icon={group.icon} title={group.title} />
             {group.rows.map(({ key, icon, label, hint }, i) => {
               const on = pushEnabled(notificationPrefs, key);
               return (
@@ -216,14 +211,6 @@ const styles = StyleSheet.create({
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2, gap: spacing.lg },
   hint: { ...typography.small, lineHeight: 18 },
   group: { gap: spacing.xs },
-  // Bleeds past the scroll padding to the screen edges.
-  sectionBand: {
-    marginHorizontal: -spacing.lg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-    borderTopWidth: DIVIDER_W,
-    borderBottomWidth: DIVIDER_W,
-  },
 
   banner: { borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
   bannerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

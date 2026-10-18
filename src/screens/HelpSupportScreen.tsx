@@ -10,6 +10,7 @@ import { SUPPORT_EMAIL } from '../constants/appMeta';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import FaqAccordion, { type FaqItem } from '../components/FaqAccordion';
 import NavListRow from '../components/NavListRow';
+import SectionBand from '../components/SectionBand';
 import { hapticLight } from '../utils/haptics';
 
 const APP_FAQ: FaqItem[] = [
@@ -70,9 +71,13 @@ const HelpSupportScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        <FaqAccordion title="FAQs" items={APP_FAQ} />
+        <View style={styles.group}>
+          <SectionBand icon="help-circle-outline" title="FAQs" />
+          <FaqAccordion items={APP_FAQ} />
+        </View>
 
-        <View style={styles.contactWrap}>
+        <View style={styles.group}>
+          <SectionBand icon="mail-outline" title="Contact Us" />
           <NavListRow
             icon="mail-outline"
             label="Contact Support"
@@ -88,8 +93,8 @@ const HelpSupportScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollBody: { flex: 1 },
-  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  contactWrap: { marginTop: spacing.lg },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl * 2, gap: spacing.lg },
+  group: { gap: spacing.xs },
 });
 
 export default HelpSupportScreen;
