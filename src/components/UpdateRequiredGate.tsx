@@ -22,7 +22,8 @@
 // threat to someone's records.
 // =============================================================================
 import React from 'react';
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';

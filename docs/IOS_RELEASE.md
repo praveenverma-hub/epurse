@@ -43,8 +43,8 @@ Severity: **P0** = App Store blocker or the app doesn't work · **P1** = real bu
   first) across `reconcileReminders` and the push plan.
 - [ ] **Keychain survives uninstall.** Google refresh token in SecureStore (`googleAuth.ts`) outlives a reinstall →
   app looks signed in with empty data. Clear SecureStore on first run when an MMKV/SQLite sentinel is missing.
-- [ ] **iPad.** `supportsTablet: true` + portrait-only + phone layouts (`Dimensions.get` in 23 files) → set
-  `supportsTablet: false` for v1.
+- [x] **iPad.** `supportsTablet: true` + portrait-only + phone layouts (`Dimensions.get` in 23 files) → set
+  `supportsTablet: false` for v1. Done Oct-18-26 (`app.base.json`); iPads run the phone layout.
 - [ ] **Placeholder features visible** (2.1/2.2): Invite & Earn "coming soon", Shop "Coming soon", Rate row
   "Coming soon". Hide on iOS. Remote config can switch on `shop` / `inviteEarn` / `smsDiagnostic` after review
   (`config/remoteConfig.ts:128`) — keep those off on iOS (2.3.1).

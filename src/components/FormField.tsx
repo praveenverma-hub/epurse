@@ -13,13 +13,12 @@
 import React from 'react';
 import {
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
+import { Text, TextInput } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';

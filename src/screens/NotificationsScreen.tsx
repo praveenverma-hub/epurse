@@ -12,7 +12,8 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, AppState, Linking } from 'react-native';
+import { View, StyleSheet, ScrollView, AppState, Linking } from 'react-native';
+import { Text } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

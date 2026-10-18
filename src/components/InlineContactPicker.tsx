@@ -4,7 +4,8 @@
 // does; the caller owns what "picking" means.
 // =============================================================================
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
 import { useFocusBorder } from './FormField';

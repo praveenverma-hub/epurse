@@ -11,7 +11,8 @@ import React, { useEffect, useRef, useState } from 'react';
 // RN-core Animated, aliased because `Animated` in this file is reanimated's (used by
 // the bar fill above). The classic ring deliberately uses RN core — see the note on
 // ClassicProgressRing for why reanimated is the wrong tool for an SVG geometry prop here.
-import { Animated as RNAnimated, Easing as RNEasing, StyleSheet, Text, View } from 'react-native';
+import { Animated as RNAnimated, Easing as RNEasing, StyleSheet, View } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, {
   Easing,
@@ -167,8 +168,10 @@ export const BudgetRingWidget: React.FC<BudgetRingWidgetProps> = ({
   size = HERO_RING_SIZE,
   discColor,
   replayKey,
-  children,
+  children: label,
 }) => {
+  // The ring is a fixed size, so its centre label can't grow with the OS font size.
+  const children = <FixedTextScale>{label}</FixedTextScale>;
   const isGauge = useGaugeWidgetActive();
   const color   = budgetRingColor(pct, daysElapsedPct, hasCap, isGauge);
 

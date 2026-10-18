@@ -5,7 +5,8 @@
 // keeps its own footer band, this is only the row inside it.
 // =============================================================================
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './AppText';
 import { BUTTON_H, radius, spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import PrimaryButtonBase from './PrimaryButton';

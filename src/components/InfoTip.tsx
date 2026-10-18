@@ -9,7 +9,8 @@
 // from the icon's window position (`measureInWindow`), clamped to the screen.
 // =============================================================================
 import React, { useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, Modal, Platform, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, TouchableOpacity, Pressable, Modal, Platform, StyleSheet, useWindowDimensions } from 'react-native';
+import { Text } from './AppText';
 import type { StyleProp, TextStyle, ViewStyle } from 'react-native';
 import InfoIcon from './InfoIcon';
 import { useTheme } from '../hooks/useTheme';

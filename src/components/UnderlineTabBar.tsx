@@ -16,7 +16,8 @@
 // coloured surface rather than the page's white one.
 // =============================================================================
 import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { Text } from './AppText';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { colors, radius, readableOn, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 

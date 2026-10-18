@@ -15,9 +15,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
   Platform,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';

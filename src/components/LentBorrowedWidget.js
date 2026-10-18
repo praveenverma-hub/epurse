@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { Text } from './AppText';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radius, shadows, spacing, typography } from '../constants/theme';
@@ -42,9 +43,13 @@ const Card = ({ title, amount, helper, palette, onPress }) => (
       end={{ x: 1, y: 1 }}
       style={styles.card}
     >
-      <Text style={[styles.title, { color: palette.text }]}>{title}</Text>
-      <Text style={[styles.amount, { color: palette.amount }]}>{formatCompact(amount)}</Text>
-      <Text style={[styles.helper, { color: palette.text }]}>{helper}</Text>
+      {/* One line each, shrunk to fit: a half-width card on a 320dp phone is
+          ~106pt of text, narrower than "₹12.35k" at 26pt. */}
+      <Text style={[styles.title, { color: palette.text }]} numberOfLines={1} adjustsFontSizeToFit>{title}</Text>
+      <Text style={[styles.amount, { color: palette.amount }]} numberOfLines={1} adjustsFontSizeToFit>
+        {formatCompact(amount)}
+      </Text>
+      <Text style={[styles.helper, { color: palette.text }]} numberOfLines={1} adjustsFontSizeToFit>{helper}</Text>
     </LinearGradient>
   </TouchableOpacity>
 );

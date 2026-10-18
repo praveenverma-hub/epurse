@@ -11,7 +11,8 @@
 // Wording rule lives with the model (utils/splitPosition.ts).
 // =============================================================================
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import { colors, radius, readableOn, spacing } from '../constants/theme';
 import { formatCurrency } from '../utils/format';
 import { splitPosition, splitRelationLabel } from '../utils/splitPosition';

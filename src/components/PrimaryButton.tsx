@@ -17,7 +17,8 @@
 // (not darkened: the LB tab's coral "Add" must stay the brand coral — user call).
 // =============================================================================
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import { Text } from './AppText';
 import type { StyleProp, TextStyle, ViewStyle } from 'react-native';
 import { colors, radius, readableOn, spacing, typography as typographyBase, BUTTON_H } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';

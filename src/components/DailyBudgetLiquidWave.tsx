@@ -12,7 +12,8 @@
 // =============================================================================
 
 import React, { useEffect, useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import {
   BlurMask,
   Canvas,
@@ -281,6 +282,7 @@ export const DailyBudgetLiquidWave: React.FC<Props> = ({
         </Canvas>
 
         {/* Percentage overlay (RN text — avoids Skia font loading) */}
+        <FixedTextScale>
         <View style={styles.textOverlay} pointerEvents="none">
           <Text style={[styles.pctText, { color: state === 'safe' ? '#FFFFFF' : cfg.fillTop }]}>
             {state === 'bleeding' ? `−${overshoot}%` : `${displayPct}%`}
@@ -289,6 +291,7 @@ export const DailyBudgetLiquidWave: React.FC<Props> = ({
             {state === 'bleeding' ? 'over budget' : 'left today'}
           </Text>
         </View>
+        </FixedTextScale>
       </View>
 
       {caption ? <Text style={styles.caption}>{caption}</Text> : null}

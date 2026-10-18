@@ -2,7 +2,8 @@
 // Lent/Borrowed rows. The ink is MEASURED against the card so amber/green stay legible
 // (raw warning amber is ~2:1 on white).
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import { colors, radius, readableOn } from '../constants/theme';
 
 export type ChipTone = 'warning' | 'income' | 'lent' | 'borrowed' | 'neutral';

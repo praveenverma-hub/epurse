@@ -5,7 +5,8 @@
 // the screen's only action, so it's the filled PRIMARY button.
 // =============================================================================
 import React from 'react';
-import { Pressable, View, Text, StyleSheet } from 'react-native';
+import { Pressable, View, StyleSheet } from 'react-native';
+import { Text } from './AppText';
 import type { TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 

@@ -12,10 +12,10 @@ import {
   Alert,
   Pressable,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 import PrimaryButton from './PrimaryButton';

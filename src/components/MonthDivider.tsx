@@ -10,7 +10,8 @@
 // (Activity + Account Details). Purely presentational.
 // =============================================================================
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from './AppText';
 import { colors, radius, spacing, typography as typographyBase } from '../constants/theme';
 import { formatCompact } from '../utils/format';
 

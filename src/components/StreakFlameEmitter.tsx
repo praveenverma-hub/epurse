@@ -15,7 +15,8 @@
 // =============================================================================
 
 import React, { useCallback, useMemo, useRef } from 'react';
-import { StyleSheet, Text, Vibration, View } from 'react-native';
+import { StyleSheet, Vibration, View } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import {
   Canvas,
   Circle,
@@ -508,6 +509,7 @@ const StreakFlameEmitter: React.FC<Props> = ({ streak, onTap }) => {
         </Canvas>
 
         {/* RN overlay — streak number + tier badge */}
+        <FixedTextScale>
         <View pointerEvents="none" style={styles.overlay}>
           <Text style={[styles.tierLabel, { color: tierColor }]}>{tierLabel}</Text>
           <View style={styles.numberRow}>
@@ -515,6 +517,7 @@ const StreakFlameEmitter: React.FC<Props> = ({ streak, onTap }) => {
             <Text style={styles.streakUnit}>day{streak === 1 ? '' : 's'}</Text>
           </View>
         </View>
+        </FixedTextScale>
       </View>
       </View>
     </GestureDetector>

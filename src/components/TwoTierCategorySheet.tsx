@@ -9,11 +9,11 @@ import {
   Dimensions,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import Animated, {
   Easing,

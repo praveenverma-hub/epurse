@@ -9,8 +9,16 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Linking, Platform,
+  AppState,
+  View,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Dimensions,
+  Linking,
+  Platform,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';

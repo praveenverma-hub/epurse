@@ -7,7 +7,8 @@
 // goal; the carousel's `promo_goals` introduces the feature.
 // =============================================================================
 import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Text } from './AppText';
 import type { TextStyle } from 'react-native';
 
 import { useEPurseStore, buildGoalMonthFacts, isGoalInactive } from '../store/ePurseStore';
@@ -15,6 +16,7 @@ import { goalsBehindPlan } from '../analytics/nudgeFacts';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, typography as typographyBase } from '../constants/theme';
 import { CARD_SHADOW_PAD } from '../constants/carousel';
+import { gridItemWidth } from '../constants/layout';
 import { formatCurrency } from '../utils/format';
 import SectionHeader from './SectionHeader';
 import GoalCard from './GoalCard';
@@ -37,7 +39,7 @@ export default function GoalsStrip({ onOpenGoal, onViewAll }: Props) {
   const theme = useTheme();
   // Same width as a tile in GoalsScreen's two-column grid.
   const { width } = useWindowDimensions();
-  const cardW = Math.floor((width - spacing.lg * 2 - GAP) / 2);
+  const cardW = gridItemWidth(width - spacing.lg * 2, 2, GAP);
   const goals = useEPurseStore((s: any) => s.goals) as any[];
   const goalPlan = useEPurseStore((s: any) => s.goalPlan);
   const lastGoalPlan = useEPurseStore((s: any) => s.lastGoalPlan);

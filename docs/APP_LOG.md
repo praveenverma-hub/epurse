@@ -3109,8 +3109,19 @@ off are DONE (see Backup).
   length set to the full circumference so the ring draws as a plain solid arc; not visually
   dashed at all); `WhatsAppReminderScreen.js`'s decorative "stamp/seal" SVG in a promotional
   banner illustration (a real stamp's perforated edge is the whole point of the shape).
+- **Device consistency (Oct-18-2026)**: OS font size capped at 1.2× app-wide — every `Text`/`TextInput` now comes
+  from `components/AppText` (129 files swapped; `test:parse` blocks react-native's). `FixedTextScale` (1.0×) on the
+  tab bar, `HomeCarousel`/`GroupInsightCarousel` cards, the review card and `AccountCard`; uncapped text was what turned
+  banners near-square on narrow phones. `AccountCard` height now from width (`ratioHeight`, `ACCOUNT_CARD_RATIO` = 300×170,
+  floor 150) — was a fixed 170 at any width. `constants/layout.ts` + `test:layout`. iPad support off.
+  Home `LentBorrowedWidget` lines are one line + `adjustsFontSizeToFit` (amount overflowed at 320dp); `HomeCarousel`
+  eyebrow/CTA pinned to one line, so the card is 138–163pt tall on every phone. Ring/gauge centres fixed-scale
+  (Budget ring + gauge, `ConcentricSpendingRings` — its "₹1,23,456" also shrinks to fit the ~100pt hole —
+  streak flame, liquid wave, `BudgetSummary`). Audited, already fine: `GoalCard`, `MonthlyRecapCard` stats.
 
 **Open**
+- Device consistency: NOT yet checked on a 320dp Android at Display size Large + max font, or on iPhone SE at max
+  Dynamic Type. `DailyQueueStack`/`AccountsScreen` still read `Dimensions.get` once (fine while portrait-only).
 - Depth-1 gaps found incidentally during the depth-2+ sweep, NOT fixed (out of scope):
   `AccountDetailsScreen.tsx`'s header (`styles.navBar`) has no `backgroundColor` at all,
   so it shows through to the page background rather than a distinct bar; and

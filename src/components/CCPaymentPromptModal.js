@@ -17,9 +17,16 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, View, Text, StyleSheet, TouchableOpacity,
-  Animated, Easing, Pressable, ScrollView,
+  ActivityIndicator,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  Easing,
+  Pressable,
+  ScrollView,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 
 import { radius, spacing, shadows, BUTTON_H } from '../constants/theme';

@@ -1,6 +1,7 @@
 // FaqAccordion — shared question/answer list; tapping one closes any other open.
 import React, { useState } from 'react';
-import { LayoutAnimation, Platform, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { LayoutAnimation, Platform, StyleSheet, TouchableOpacity, UIManager, View } from 'react-native';
+import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 import type { StyleProp, TextStyle, ViewStyle } from 'react-native';
 

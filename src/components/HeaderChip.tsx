@@ -17,7 +17,8 @@
 // =============================================================================
 
 import React, { useMemo, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Text } from './AppText';
 
 import { badgeOnGradient, pinnedHeaderChrome, typography as typographyBase } from '../constants/theme';
 import { useGradient, useTheme } from '../hooks/useTheme';

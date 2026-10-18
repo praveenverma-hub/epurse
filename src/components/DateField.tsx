@@ -12,7 +12,8 @@
 //             every tap, which would otherwise commit half-made selections).
 // =============================================================================
 import React, { useState } from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';

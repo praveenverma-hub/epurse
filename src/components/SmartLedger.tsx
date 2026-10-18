@@ -17,13 +17,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Pressable,
   TextInput,
   type StyleProp,
   type TextStyle,
 } from 'react-native';
+import { Text } from './AppText';
+import { FONT_SCALE_MAX } from '../constants/layout';
 import Animated, {
   Easing,
   useAnimatedProps,
@@ -101,7 +102,9 @@ const AnimatedAmount: React.FC<{ value: number; style?: StyleProp<TextStyle> }> 
   const animatedProps = useAnimatedProps(() => ({ text: formatINRWorklet(sv.value) } as any));
 
   return (
+    // RN's own TextInput (reanimated drives its native `text` prop), so AppText's cap is set by hand.
     <AnimatedTextInput
+      maxFontSizeMultiplier={FONT_SCALE_MAX}
       editable={false}
       underlineColorAndroid="transparent"
       pointerEvents="none"

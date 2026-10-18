@@ -15,12 +15,12 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   StyleProp,
   ViewStyle,
 } from 'react-native';
+import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radius, spacing, typography, BUTTON_H } from '../constants/theme';

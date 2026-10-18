@@ -13,8 +13,14 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Linking,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
+import { Text, TextInput } from './AppText';
 import Modal from "./AppModal";
 
 import { radius, searchFill, spacing, shadows, typography as typographyBase, DIVIDER_W, BUTTON_H } from '../constants/theme';

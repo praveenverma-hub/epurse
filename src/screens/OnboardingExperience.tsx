@@ -57,10 +57,9 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';

@@ -10,10 +10,10 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';

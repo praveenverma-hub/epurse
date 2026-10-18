@@ -5,7 +5,8 @@
 // component instead of a second hand-rolled copy (see feedback_shared_components).
 // =============================================================================
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from './AppText';
 import { spacing, typography as typographyBase } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { formatCompact } from '../utils/format';

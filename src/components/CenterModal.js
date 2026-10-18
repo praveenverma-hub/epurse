@@ -1,5 +1,6 @@
 import React from 'react';
-import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, TouchableOpacity } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 
 import { colors, radius, spacing, typography, shadows, BUTTON_H } from '../constants/theme';

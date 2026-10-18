@@ -7,11 +7,11 @@
 import React from 'react';
 import {
   StyleSheet,
-  Text,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import SheetCloseButton from './SheetCloseButton';

@@ -1,15 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   ActivityIndicator,
   Platform,
   Linking,
 } from 'react-native';
+import { Text, TextInput } from './AppText';
 import Modal from "./AppModal";
 
 import { radius, searchFill, spacing, typography, BUTTON_H } from '../constants/theme';

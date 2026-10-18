@@ -38,8 +38,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  View,
+  StyleSheet,
+  TouchableOpacity,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 // `ScrollView` comes from gesture-handler, NOT plain react-native (Sep-14-26
 // follow-up to the `failOffsetY` fix below) — `AllocationBar`'s divider is a

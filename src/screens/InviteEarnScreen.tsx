@@ -6,7 +6,8 @@
 // STATIC_CONFIG.inviteEarn.enabled until there's a backend to verify an invite
 // actually converted (ePurse has none today — fully on-device + Drive backup).
 import React from 'react';
-import { Share, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Share, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

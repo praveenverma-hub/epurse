@@ -6,8 +6,13 @@
 
 import React, { useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Pressable,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Pressable,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 

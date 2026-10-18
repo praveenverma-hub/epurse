@@ -21,7 +21,8 @@
 // for why hasOnboarded is left untouched and this is the overlay it relies on).
 // =============================================================================
 import React, { useEffect } from 'react';
-import { Platform, ScrollView, StatusBar as RNStatusBar, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StatusBar as RNStatusBar, StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';

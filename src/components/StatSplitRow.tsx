@@ -8,7 +8,8 @@
 // the way independently-padded pills can.
 // =============================================================================
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from './AppText';
 import { spacing, radius, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 
 const typography = typographyBase as unknown as Record<string, import('react-native').TextStyle>;

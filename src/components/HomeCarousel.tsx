@@ -47,9 +47,15 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, Pressable, StyleSheet, Text, View,
-  type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent,
+  AccessibilityInfo,
+  Pressable,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import Animated, {
   Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle,
   useSharedValue, type SharedValue,
@@ -168,7 +174,10 @@ const CarouselCard: React.FC<{
   return (
     // The slot keeps its full width; only the visual card scales, so the snap
     // stride stays exact while the neighbours shrink.
+    // FixedTextScale: the card's height follows its text, so a large OS font
+    // size made it near-square on narrow phones.
     <Animated.View style={[{ width: cardW }, animStyle]}>
+    <FixedTextScale>
     <Pressable
       onPress={() => onNavigate(item.target[0], item.target[1])}
       accessibilityRole="button"
@@ -200,7 +209,7 @@ const CarouselCard: React.FC<{
 
         <View style={styles.row}>
           <View style={styles.copy}>
-            <Text style={[styles.eyebrow, { color: accentInk }]}>
+            <Text style={[styles.eyebrow, { color: accentInk }]} numberOfLines={1}>
               {item.eyebrow.toUpperCase()}
             </Text>
             {/* Capped at 2 lines like the body: card height is content-driven,
@@ -211,7 +220,7 @@ const CarouselCard: React.FC<{
             <Text style={[styles.body, { color: bodyInk }]} numberOfLines={2}>{item.body}</Text>
 
             <View style={styles.ctaRow}>
-              <Text style={[styles.cta, { color: accentInk }]}>{item.cta}</Text>
+              <Text style={[styles.cta, { color: accentInk }]} numberOfLines={1}>{item.cta}</Text>
               <Ionicons name="arrow-forward" size={13} color={accentInk} />
             </View>
           </View>
@@ -226,6 +235,7 @@ const CarouselCard: React.FC<{
         </View>
       </LinearGradient>
     </Pressable>
+    </FixedTextScale>
     </Animated.View>
   );
 });

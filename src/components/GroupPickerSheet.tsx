@@ -5,10 +5,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore } from '../store/ePurseStore';

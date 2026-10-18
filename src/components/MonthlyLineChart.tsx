@@ -7,7 +7,8 @@
 // a plain trailing series like a Balance Trend.
 // =============================================================================
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { View, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { Text } from './AppText';
 import Svg, {
   Path, Line, Circle, Text as SvgText, Defs, LinearGradient as SvgGrad, Stop,
 } from 'react-native-svg';

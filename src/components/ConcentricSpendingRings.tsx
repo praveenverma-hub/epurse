@@ -12,7 +12,8 @@
 // =============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import ProgressBar from './ProgressBar';
 import {
   Canvas,
@@ -325,6 +326,8 @@ const ConcentricSpendingRings: React.FC<Props> = ({
       : null;
 
   const centerAmount  = selectedRing ? selectedRing.amount : total;
+  // Inside the innermost ring at MAX_RINGS, minus its stroke and a margin.
+  const centerTextW = 2 * radiusFor(size, MAX_RINGS - 1) - STROKE - 8;
   const centerHeading = selectedRing ? selectedRing.parentCategory : centerLabel;
   const centerColor   = selectedRing ? selectedRing.color : '#1C1C1E';
 
@@ -360,13 +363,19 @@ const ConcentricSpendingRings: React.FC<Props> = ({
             ))}
           </View>
 
-          {/* Centre label */}
+          {/* Centre label — fixed scale and shrink-to-fit: four rings leave a
+              ~108pt hole, narrower than "₹1,23,456" at 28pt. */}
+          <FixedTextScale>
           <View
             style={[StyleSheet.absoluteFill, styles.centerOverlay]}
             pointerEvents="none"
           >
             <Text style={styles.centerLabel}>{centerHeading}</Text>
-            <Text style={[styles.centerAmount, { color: centerColor }]}>
+            <Text
+              style={[styles.centerAmount, { color: centerColor, maxWidth: centerTextW }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
               {formatCurrency(centerAmount)}
             </Text>
             {selectedRing ? (
@@ -375,6 +384,7 @@ const ConcentricSpendingRings: React.FC<Props> = ({
               <Text style={styles.centerHint}>tap a ring</Text>
             )}
           </View>
+          </FixedTextScale>
         </View>
       </GestureDetector>
 

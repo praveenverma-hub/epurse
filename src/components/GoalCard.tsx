@@ -26,7 +26,8 @@
 // =============================================================================
 
 import React, { useId } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
+import { Text } from './AppText';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import type { TextStyle, ViewStyle, StyleProp } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';

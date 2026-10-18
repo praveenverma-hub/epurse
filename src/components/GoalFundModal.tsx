@@ -16,7 +16,8 @@
 // =============================================================================
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
+import { TouchableOpacity, View, StyleSheet } from 'react-native';
+import { Text, TextInput } from './AppText';
 
 import { useEPurseStore, selectAccountsHidden } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';

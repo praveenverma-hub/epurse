@@ -31,8 +31,12 @@
 
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -133,6 +137,31 @@ const AccountFormScreen = ({ navigation, route }: any) => {
 
   const needsMask = ACCOUNT_NEEDS_MASK.has(typeDraft);
   const needsBank = ACCOUNT_NEEDS_BANK.has(typeDraft);
+  const bankRowShown = !isEdit && needsBank;
+  // Tile = the type's emoji on the card's colour; it opens Card Colour (only AccountDetailsScreen's
+  // hero card reads it — the carousel keeps its own). On the Bank Name row, else on the name row.
+  const withCardTile = (input: React.ReactElement) => (
+    <IconField
+      tile={<TileEmoji emoji={ACCOUNT_TYPE_EMOJI[typeDraft]} />}
+      tileColor={(colorKeyDraft && BANK_GRADIENTS[colorKeyDraft]
+        ? BANK_GRADIENTS[colorKeyDraft][0]
+        : resolveAccountGradient({ id: account?.id, name: customName, bankName }, theme)[0]) + '22'}
+      choices={(
+        <>
+          <ChoiceLabel first>Card Colour</ChoiceLabel>
+          <ColorChoices
+            auto
+            value={colorKeyDraft}
+            onChange={setColorKeyDraft}
+            choices={BANK_GRADIENT_KEYS as string[]}
+            swatchColor={(k) => BANK_GRADIENTS[k][0]}
+          />
+        </>
+      )}
+    >
+      {input}
+    </IconField>
+  );
   const isCC      = typeDraft === ACCOUNT_TYPES.CREDIT_CARD;
   const typeChanged = isEdit && typeDraft !== account.type;
 
@@ -300,17 +329,19 @@ const AccountFormScreen = ({ navigation, route }: any) => {
           </View>
 
           {/* ── bank/wallet name + mask — creation only ───────────────── */}
-          {!isEdit && needsBank ? (
+          {bankRowShown ? (
             <FormField label={typeDraft === ACCOUNT_TYPES.WALLET ? 'Wallet / Provider Name' : 'Bank Name'}>
-              <TextInput
-                value={bankName}
-                onChangeText={(t) => setBankName(sanitizeName(t))}
-                maxLength={INPUT_LIMITS.NAME_MAX}
-                placeholder={typeDraft === ACCOUNT_TYPES.WALLET ? 'e.g. Paytm, PhonePe' : 'e.g. HDFC, ICICI, SBI'}
-                placeholderTextColor={theme.textMuted}
-                style={[styles.input, { color: theme.textPrimary, borderColor: theme.inputBorder }]}
-                autoCapitalize="characters"
-              />
+              {withCardTile(
+                <TextInput
+                  value={bankName}
+                  onChangeText={(t) => setBankName(sanitizeName(t))}
+                  maxLength={INPUT_LIMITS.NAME_MAX}
+                  placeholder={typeDraft === ACCOUNT_TYPES.WALLET ? 'e.g. Paytm, PhonePe' : 'e.g. HDFC, ICICI, SBI'}
+                  placeholderTextColor={theme.textMuted}
+                  style={[styles.input, { color: theme.textPrimary, borderColor: theme.inputBorder }]}
+                  autoCapitalize="characters"
+                />,
+              )}
             </FormField>
           ) : null}
 
@@ -330,26 +361,7 @@ const AccountFormScreen = ({ navigation, route }: any) => {
 
           {/* ── name ───────────────────────────────────────────────────── */}
           <FormField label={isEdit ? 'Account Name' : 'Custom Name (optional)'}>
-            {/* Tile = the type's emoji on the card's colour; it opens Card Colour (only
-                AccountDetailsScreen's hero card reads it — the carousel keeps its own). */}
-            <IconField
-              tile={<TileEmoji emoji={ACCOUNT_TYPE_EMOJI[typeDraft]} />}
-              tileColor={(colorKeyDraft && BANK_GRADIENTS[colorKeyDraft]
-                ? BANK_GRADIENTS[colorKeyDraft][0]
-                : resolveAccountGradient({ id: account?.id, name: customName, bankName }, theme)[0]) + '22'}
-              choices={(
-                <>
-                  <ChoiceLabel first>Card Colour</ChoiceLabel>
-                  <ColorChoices
-                    auto
-                    value={colorKeyDraft}
-                    onChange={setColorKeyDraft}
-                    choices={BANK_GRADIENT_KEYS as string[]}
-                    swatchColor={(k) => BANK_GRADIENTS[k][0]}
-                  />
-                </>
-              )}
-            >
+            {(bankRowShown ? (input: React.ReactElement) => input : withCardTile)(
               <TextInput
                 value={customName}
                 onChangeText={(t) => setCustomName(sanitizeName(t))}
@@ -363,8 +375,8 @@ const AccountFormScreen = ({ navigation, route }: any) => {
                   },
                 ]}
                 maxLength={INPUT_LIMITS.NAME_MAX}
-              />
-            </IconField>
+              />,
+            )}
           </FormField>
           {!isEdit && typeDraft === ACCOUNT_TYPES.CASH ? (
             <FormField label="Cash in Hand" hint="Spending from Cash can't go past what you have.">

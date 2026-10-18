@@ -8,7 +8,8 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import Animated, {
   useSharedValue,
@@ -200,7 +201,9 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
   const isDebit = txn.type === 'debit';
   const amountColor = isDebit ? colors.expense : colors.income;
 
+  // CARD_H is fixed, so the card's text can't grow with the OS font size.
   return (
+    <FixedTextScale>
     <View
       style={[
         styles.cardSlot,
@@ -301,6 +304,7 @@ const SwipeableCard = ({ txn, index, categories, groupName, onApprove, onPickCat
         </Animated.View>
       )}
     </View>
+    </FixedTextScale>
   );
 };
 

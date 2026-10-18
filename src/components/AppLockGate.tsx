@@ -3,7 +3,8 @@
 // Re-locks on backgrounding and re-prompts on return; mirrors the same
 // LocalAuthentication pattern AccountDetailsScreen uses per-screen.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './AppText';
 import type { AppStateStatus, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';

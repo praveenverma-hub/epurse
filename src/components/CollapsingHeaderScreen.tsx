@@ -56,13 +56,13 @@ import {
   Animated,
   StyleSheet,
   View,
-  Text,
   TouchableOpacity,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { Text } from './AppText';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';

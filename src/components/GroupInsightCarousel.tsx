@@ -20,13 +20,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Dimensions,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -340,8 +340,10 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
 
   if (stats.length === 0) return null;
 
+  // CARD_H is fixed, so card text can't grow with the OS font size.
   return (
     <View onLayout={onBoxLayout}>
+      <FixedTextScale>
       <Animated.FlatList
         ref={listRef}
         data={items}
@@ -376,6 +378,7 @@ const GroupInsightCarousel: React.FC<GroupInsightCarouselProps> = ({
           />
         )}
       />
+      </FixedTextScale>
     </View>
   );
 };

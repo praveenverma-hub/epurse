@@ -18,10 +18,10 @@ import React, { useCallback, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
-  Text,
   View,
   type ViewStyle,
 } from 'react-native';
+import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radius, spacing } from '../constants/theme';

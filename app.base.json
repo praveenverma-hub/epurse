@@ -69,7 +69,7 @@
       ]
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.epurse.app",
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "ePurse uses notifications to detect financial messages and auto-categorise them.",

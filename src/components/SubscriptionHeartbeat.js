@@ -7,12 +7,12 @@
 import React, { useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   View,
-  Text,
   ScrollView,
   StyleSheet,
   Dimensions,
   Vibration,
 } from 'react-native';
+import { Text } from './AppText';
 import Svg, { Path, Circle as SvgCircle } from 'react-native-svg';
 import Animated, {
   useSharedValue,

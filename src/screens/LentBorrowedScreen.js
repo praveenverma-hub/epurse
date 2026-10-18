@@ -1,13 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
   Platform,
   Dimensions,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import { TabView } from 'react-native-tab-view';
 import { Ionicons } from '@expo/vector-icons';

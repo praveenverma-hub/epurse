@@ -14,10 +14,10 @@ import {
   Share,
   StyleSheet,
   Switch,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import type { LayoutChangeEvent } from 'react-native';
 import { TabView } from 'react-native-tab-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';

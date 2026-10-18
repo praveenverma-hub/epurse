@@ -8,7 +8,8 @@
 // twice. Adding an EXPENSE lives inside a group's own detail screen.
 // =============================================================================
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from '../components/AppText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';

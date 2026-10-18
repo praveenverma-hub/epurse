@@ -17,9 +17,13 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Platform,
+  View,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

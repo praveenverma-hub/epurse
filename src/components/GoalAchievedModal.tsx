@@ -19,7 +19,8 @@
 // =============================================================================
 
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import type { TextStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';

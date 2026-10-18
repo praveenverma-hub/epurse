@@ -11,13 +11,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   AppState,
   Keyboard,
 } from 'react-native';
+import { FixedTextScale, Text, TextInput } from './AppText';
+import { ACCOUNT_CARD_RATIO, ratioHeight } from '../constants/layout';
 import type { AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -130,7 +130,8 @@ const AccountCard: React.FC<Props> = ({
   active = true,
   holderName,
   width = 280,
-  height = 170,
+  // From width, so a narrow phone's card stays card-shaped; 150 is the floor its content needs.
+  height = ratioHeight(width, ACCOUNT_CARD_RATIO, { min: 150 }),
 }) => {
   const palette = useMemo(() => paletteFor(account), [account?.id]);
   const subtitle = TYPE_SUBTITLE[account.type] || 'CARD';
@@ -256,6 +257,7 @@ const AccountCard: React.FC<Props> = ({
   }));
 
   return (
+    <FixedTextScale>
     <View style={{ position: 'relative' }}>
       <View style={[styles.flipContainer, { width, height }]}>
         {/* ── Front face ── */}
@@ -316,6 +318,7 @@ const AccountCard: React.FC<Props> = ({
         </TouchableOpacity>
       ) : null}
     </View>
+    </FixedTextScale>
   );
 };
 

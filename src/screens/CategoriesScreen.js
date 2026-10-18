@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Pressable,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import Modal from "../components/AppModal";
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

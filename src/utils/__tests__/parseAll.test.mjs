@@ -239,6 +239,33 @@ if (partialSpring.length) {
   pass++;
 }
 
+// ── Text/TextInput come from components/AppText ────────────────────────────
+// AppText caps the OS font-size multiplier (FONT_SCALE_MAX). A file importing
+// react-native's Text skips the cap, and at the largest system font its text
+// doubles: cards went near-square and labels overflowed (Oct-18-26).
+// SmartLedger's TextInput is exempt: reanimated drives its native `text` prop,
+// so it sets the cap by hand.
+const RAW_TEXT_OK = { 'src/components/AppText.tsx': ['Text', 'TextInput'], 'src/components/SmartLedger.tsx': ['TextInput'] };
+const rawText = [];
+for (const f of files) {
+  const src = readFileSync(f, 'utf8');
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]react-native['"]/g)) {
+    const names = m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]);
+    for (const n of names) {
+      if ((n === 'Text' || n === 'TextInput') && !(RAW_TEXT_OK[f] || []).includes(n)) {
+        rawText.push(`${f}  ${n} — import it from components/AppText`);
+      }
+    }
+  }
+}
+if (rawText.length) {
+  failures.push({ f: 'raw-text', msg: "react-native's Text imported directly — see below" });
+  rawText.forEach((l) => console.log(`  ${C.red}✗ uncapped font scaling${C.reset}\n      ${l}`));
+} else {
+  console.log(`  ${C.green}✓ every Text/TextInput comes from AppText${C.reset}`);
+  pass++;
+}
+
 console.log(`\n${'─'.repeat(34)}`);
-console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 4} passed${C.reset}`);
+console.log(`  ${failures.length === 0 ? C.green : C.red}${pass}/${files.length + 5} passed${C.reset}`);
 process.exit(failures.length === 0 ? 0 : 1);

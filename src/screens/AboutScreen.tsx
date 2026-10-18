@@ -1,7 +1,8 @@
 // AboutScreen — app identity + version. No legal docs yet (Terms/Privacy) —
 // add rows for those once real ones exist, rather than linking to nothing.
 import React from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

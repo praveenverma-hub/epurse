@@ -2,7 +2,8 @@
 // AppLockGate at the app root. This screen only owns the toggle + device
 // capability check; the actual gate lives in App.js so it covers every screen.
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

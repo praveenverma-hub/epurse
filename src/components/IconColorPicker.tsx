@@ -6,7 +6,8 @@
 // those choices. An emoji here is DATA, so it stays an emoji.
 // =============================================================================
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadows, spacing, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';

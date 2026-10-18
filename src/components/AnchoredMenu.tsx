@@ -10,7 +10,8 @@
 // menu; it flips above the trigger when there's no room below.
 // =============================================================================
 import React from 'react';
-import { Dimensions, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import type { TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Modal from './AppModal';

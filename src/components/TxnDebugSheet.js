@@ -7,9 +7,16 @@
 
 import React, { useRef, useEffect } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet,
-  TouchableOpacity, Animated, Easing, Pressable, Clipboard,
+  View,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  Easing,
+  Pressable,
+  Clipboard,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 
 import { radius, spacing, typography } from '../constants/theme';

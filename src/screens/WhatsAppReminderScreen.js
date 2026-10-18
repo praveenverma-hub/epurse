@@ -22,9 +22,14 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ScrollView, Linking, Dimensions,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Linking,
+  Dimensions,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { captureRef } from 'react-native-view-shot';

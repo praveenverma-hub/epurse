@@ -9,7 +9,8 @@
 // =============================================================================
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Pressable } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Pressable } from 'react-native';
+import { Text } from '../components/AppText';
 import Modal from "../components/AppModal";
 import { TabView } from 'react-native-tab-view';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';

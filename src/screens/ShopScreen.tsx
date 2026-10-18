@@ -23,9 +23,9 @@ import {
   StatusBar,
   StyleSheet,
   Switch,
-  Text,
   View,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';

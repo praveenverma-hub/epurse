@@ -12,13 +12,12 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { INPUT_LIMITS, sanitizeName } from '../utils/validation';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   FlatList,
   ActivityIndicator,
 } from 'react-native';
+import { Text, TextInput } from './AppText';
 import Modal from "./AppModal";
 
 import { Ionicons } from '@expo/vector-icons';

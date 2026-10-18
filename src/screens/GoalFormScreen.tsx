@@ -36,8 +36,12 @@
 
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
 } from 'react-native';
+import { Text, TextInput } from '../components/AppText';
 import type { TextStyle } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';

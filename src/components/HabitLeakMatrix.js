@@ -7,11 +7,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Dimensions,
   Pressable,
 } from 'react-native';
+import { Text } from './AppText';
 import Svg, { Line, Text as SvgText, Rect } from 'react-native-svg';
 import Animated, {
   useSharedValue,

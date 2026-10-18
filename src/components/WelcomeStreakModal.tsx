@@ -17,9 +17,9 @@ import {
   Dimensions,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {

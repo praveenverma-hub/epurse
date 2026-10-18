@@ -14,7 +14,8 @@
 // =============================================================================
 
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, Dimensions } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, FlatList, Dimensions } from 'react-native';
+import { Text } from '../components/AppText';
 import type { TextStyle, LayoutChangeEvent } from 'react-native';
 import { TabView } from 'react-native-tab-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';

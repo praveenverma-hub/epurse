@@ -5,7 +5,8 @@
 // Preselected (utils/settleAllocation); only the paid amount is ever settled.
 // =============================================================================
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import type { TextStyle } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
 import { spacing, typography as typographyBase } from '../constants/theme';

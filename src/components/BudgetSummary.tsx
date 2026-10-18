@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import Modal from "./AppModal";
 import { Ionicons } from '@expo/vector-icons';
 import { useEPurseStore, carryableBudgetPlan } from '../store/ePurseStore';
@@ -252,9 +253,12 @@ export const BudgetSummary: React.FC<BudgetSummaryProps> = ({ onPress }) => {
         <View style={styles.leftColumn}>
           <View style={styles.ringContainer}>
             <ProgressRing progress={progressRatio} size={60} strokeWidth={6} color={ringColorValue} />
+            {/* 48pt hole: the % can't grow with the OS font size. */}
+            <FixedTextScale>
             <View style={styles.ringCenter}>
               <Text style={[styles.percentText, { color: theme.textPrimary }]}>{Math.round(progressRatio * 100)}%</Text>
             </View>
+            </FixedTextScale>
           </View>
           <View style={[styles.statusPill, { backgroundColor: status.color + '18' }]}>
             <Text style={styles.statusEmoji}>{status.emoji}</Text>

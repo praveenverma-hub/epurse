@@ -32,7 +32,8 @@
 // =============================================================================
 
 import React, { useEffect, useMemo } from 'react';
-import { View, TouchableOpacity, Text, Animated, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, Animated, StyleSheet } from 'react-native';
+import { FixedTextScale, Text } from './AppText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -100,7 +101,9 @@ export default function AnimatedTabBar({ state, navigation, onCenterPress }) {
   // card-coloured strips that cards scroll under, and they must not drift apart.
   const hairline = useMemo(() => chromeHairline(theme.card, theme), [theme]);
 
+  // Fixed height bar: labels don't grow with the OS font size.
   return (
+    <FixedTextScale>
     <Animated.View
       style={[
         styles.container,
@@ -149,6 +152,7 @@ export default function AnimatedTabBar({ state, navigation, onCenterPress }) {
         )];
       })}
     </Animated.View>
+    </FixedTextScale>
   );
 }
 

@@ -27,9 +27,9 @@ import React, {
 import {
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from './AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   Easing,

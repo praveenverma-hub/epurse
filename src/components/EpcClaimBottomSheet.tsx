@@ -20,13 +20,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Pressable,
   Dimensions,
   ViewStyle,
   TextStyle,
 } from 'react-native';
+import { Text } from './AppText';
 import Modal from "./AppModal";
 import LottieView from 'lottie-react-native';
 import Animated, {

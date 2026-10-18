@@ -17,8 +17,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, StatusBar as RNStatusBar,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { Text } from '../components/AppText';
 import { useFocusEffect } from '@react-navigation/native';
 import Modal from "../components/AppModal";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
