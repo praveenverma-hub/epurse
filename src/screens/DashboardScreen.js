@@ -39,7 +39,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
-import { useEPurseStore, selectAccountsTracked, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive, carryableGoalPlan } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsTracked, selectUnreviewedQueue, selectExpenseStats, selectHomeRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive, carryableGoalPlan, selectPrevMonthFallback } from '../store/ePurseStore';
 import { goalsBehindPlan, goalsNearTarget } from '../analytics/nudgeFacts';
 import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import {
@@ -71,6 +71,7 @@ import BellIcon from '../components/BellIcon';
 import NotificationsSheet from '../components/NotificationsSheet';
 import AppBrandFooter from '../components/AppBrandFooter';
 import EmptyState from '../components/EmptyState';
+import MonthDivider from '../components/MonthDivider';
 import StatSplitRow from '../components/StatSplitRow';
 import { useNotificationStore, selectNotificationEntries } from '../store/useNotificationStore';
 import { bellHasUnread } from '../analytics/bellFeed';
@@ -237,7 +238,8 @@ const DashboardScreen = ({ navigation }) => {
   const budget              = useEPurseStore((s) => s.budget);
   const groups                  = useEPurseStore((s) => s.groups);
   const showMonthlyRecap     = useEPurseStore((s) => s.showMonthlyRecap);
-  const latestRecapMonth     = useEPurseStore(selectLatestRecapMonth);
+  // Returns a string or null, so it's safe as a bare selector (zustand v5).
+  const latestRecapMonth     = useEPurseStore((s) => selectHomeRecapMonth(s));
   const recapCardDismissed   = useEPurseStore((s) => s.monthlyRecapCardDismissed);
   const dismissMonthlyRecapCard = useEPurseStore((s) => s.dismissMonthlyRecapCard);
   // Off → the tab bar's center "+" adds instead of the FAB, and there's no Accounts tab.
@@ -297,6 +299,11 @@ const DashboardScreen = ({ navigation }) => {
   const periodStats = useMemo(
     () => selectExpenseStats(period)({ transactions, monthlyAggregates: monthlyAggs, groups }),
     [period, transactions, monthlyAggs, groups]
+  );
+  // A new month with nothing yet: last month's newest rows instead of an empty list.
+  const prevMonth = useMemo(
+    () => selectPrevMonthFallback(period, periodStats.count)({ transactions, groups }),
+    [period, periodStats.count, transactions, groups]
   );
 
   // ── Carousel cards ───────────────────────────────────────────────────────
@@ -399,6 +406,19 @@ const DashboardScreen = ({ navigation }) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goals, goalPlan, goalContributions, goalHistory, transactions, groups, getGoalLifetimeSaved]);
+
+  const renderTxn = (t) => (
+    <TransactionItem
+      key={t.id}
+      txn={t}
+      // View-first, then edit — ONE TxnDetailSheet for plain, split and group
+      // transactions alike. The category-icon tap opens the focused picker.
+      onPress={() => setDetailTxn(t)}
+      onPressCategory={() => setActiveTxn(t)}
+      onPressSplitChip={() => setDetailTxn(t)}
+      onLongPress={IS_STAGE_BUILD ? () => setDebugTxn(t) : undefined}
+    />
+  );
 
   const txnSubtitle = useMemo(() => {
     const { count, recent, biggest } = periodStats;
@@ -938,7 +958,18 @@ const DashboardScreen = ({ navigation }) => {
               style={periodStats.recent.length === 0 && styles.recentHeader}
             />
 
-            {periodStats.recent.length === 0 ? (
+            {periodStats.recent.length === 0 && prevMonth ? (
+              <>
+                <EmptyState
+                  inline
+                  icon="calendar-outline"
+                  title="Nothing yet this month"
+                  subtitle="New spends show up here as they happen."
+                />
+                <MonthDivider monthKey={prevMonth.monthKey} />
+                {prevMonth.txns.map(renderTxn)}
+              </>
+            ) : periodStats.recent.length === 0 ? (
               <EmptyState
                 compact
                 icon="receipt-outline"
@@ -950,20 +981,7 @@ const DashboardScreen = ({ navigation }) => {
                 style={styles.recentEmpty}
               />
             ) : (
-              periodStats.recent.map((t) => (
-                <TransactionItem
-                  key={t.id}
-                  txn={t}
-                  onPress={() => {
-                    // View-first, then edit — ONE TxnDetailSheet for plain, split and group
-                    // transactions alike. The category-icon tap opens the focused picker.
-                    setDetailTxn(t);
-                  }}
-                  onPressCategory={() => setActiveTxn(t)}
-                  onPressSplitChip={() => setDetailTxn(t)}
-                  onLongPress={IS_STAGE_BUILD ? () => setDebugTxn(t) : undefined}
-                />
-              ))
+              periodStats.recent.map(renderTxn)
             )}
           </View>
         </View>

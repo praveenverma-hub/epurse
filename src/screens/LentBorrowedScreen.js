@@ -22,6 +22,7 @@ import { formatCurrency, formatOutstanding, firstName, titleCaseName } from '../
 import CenterModal from '../components/CenterModal';
 import { useToast } from '../components/Toast';
 import LbEntryForm from '../components/LbEntryForm';
+import { animateNextLayout } from '../utils/layoutAnimation';
 import { defaultAccountId as pickDefaultAccountId } from '../utils/defaultAccount';
 import { lbEffectiveKind, lbLinkedLine, lbToastTitle } from '../utils/lbEntryDisplay';
 import InfoIcon from '../components/InfoIcon';
@@ -262,6 +263,10 @@ const LentBorrowedScreen = ({ route, navigation }) => {
 
   // Form + empty state are rendered per panel (both scenes are mounted). They
   // take the panel's kind `k` so the offscreen page shows the correct copy.
+  const [formOpen, setFormOpen] = useState({ lent: false, borrowed: false });
+  const hasPeople = (k) => (balancesByKind[k] || []).length > 0;
+  const toggleForm = () => { animateNextLayout(); setFormOpen((cur) => ({ ...cur, [kind]: !cur[kind] })); };
+
   const renderForm = (k) => (
     <LbEntryForm
       // `kind` comes from the panel, so no direction selector here.
@@ -272,6 +277,11 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       onSubmit={handleAdd}
       theme={theme}
       submitOutlined
+      // Open while the panel is empty (adding is the obvious first step); once it lists
+      // people, the header's tab opens it — the list is what the screen is for.
+      collapsible={hasPeople(k)}
+      open={formOpen[k]}
+      onOpenChange={(v) => setFormOpen((cur) => ({ ...cur, [k]: v }))}
     />
   );
 
@@ -293,6 +303,14 @@ const LentBorrowedScreen = ({ route, navigation }) => {
       gradientColors={grad}
       onBack={() => navigation.goBack()}
       title={kind === 'lent' ? 'You Lent' : 'You Borrowed'}
+      // The add form's trigger, tucked under the header's curve — no row of the list spent on it.
+      attachedTab={hasPeople(kind) ? {
+        label: `Add ${kind === 'lent' ? 'Lent' : 'Borrowed'} Entry`,
+        onPress: toggleForm,
+        color: grad[0],
+        trailingIcon: formOpen[kind] ? undefined : 'chevron-down',
+        accessibilityLabel: formOpen[kind] ? `Close the ${kind} entry form` : `Add ${kind} entry`,
+      } : undefined}
       headerRight={
         <TouchableOpacity
           onPress={() => setInfoVisible(true)}

@@ -8,7 +8,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography as typographyBase } from '../constants/theme';
+import { colors, spacing, typography as typographyBase, DIVIDER_W } from '../constants/theme';
 import { formatCurrency, formatDateTime, titleCaseName } from '../utils/format';
 import type { HistoryChange, HistoryItem } from '../sync/history';
 
@@ -45,10 +45,13 @@ export default function GroupHistoryList({ items, withTitle = false, accentColor
         return (
           <View key={`${it.entityId}-${it.seq}-${it.action}`} style={[styles.row, i > 0 && styles.divider]}>
             <Ionicons name={ICON[it.action]} size={18} color={it.action === 'deleted' ? colors.danger : accentColor} />
+            {/* Two lines at most: what happened / the change · when. The time never shrinks. */}
             <View style={styles.body}>
-              <Text style={styles.head} numberOfLines={2}>{head}</Text>
-              {more ? <Text style={styles.sub} numberOfLines={2}>{more}</Text> : null}
-              <Text style={styles.when}>{formatDateTime(it.at)}</Text>
+              <Text style={styles.head} numberOfLines={1}>{head}</Text>
+              <View style={styles.subRow}>
+                {more ? <Text style={styles.sub} numberOfLines={1}>{more}</Text> : null}
+                <Text style={styles.when} numberOfLines={1}>{more ? ' · ' : ''}{formatDateTime(it.at)}</Text>
+              </View>
             </View>
           </View>
         );
@@ -59,9 +62,10 @@ export default function GroupHistoryList({ items, withTitle = false, accentColor
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: spacing.sm },
-  divider: { borderTopWidth: 1, borderTopColor: colors.divider },
+  divider: { borderTopWidth: DIVIDER_W, borderTopColor: colors.divider },
   body: { flex: 1 },
   head: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
-  sub: { ...typography.small, color: colors.textSecondary, marginTop: 2 },
-  when: { ...typography.tiny, color: colors.textMuted, marginTop: 2 },
+  subRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 2 },
+  sub: { ...typography.small, color: colors.textSecondary, flexShrink: 1 },
+  when: { ...typography.tiny, color: colors.textMuted, flexShrink: 0 },
 });

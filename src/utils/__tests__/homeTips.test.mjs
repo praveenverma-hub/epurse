@@ -5,7 +5,8 @@ import { buildHomeTips, HOME_TIP_LIMIT, SAVE_MIN_YEARLY } from '../../analytics/
 import { PROMO_CARDS } from '../../analytics/homeCards.js';
 import { contrastRatio, mix, readableOn } from '../../constants/theme.js';
 import { THEMES, DARK_NEUTRALS } from '../../constants/themes.js';
-import { TIP_BAND_MIN_WHITE, TIP_BAND_VARIANTS, tipBandShade } from '../../constants/tipBand.js';
+import { TIP_BAND_VARIANTS, tipBandHue, tipBandWash } from '../../constants/tipBand.js';
+import { buildPalette } from '../../constants/themes.js';
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m' };
 let pass = 0, fail = 0;
@@ -86,28 +87,28 @@ console.log('\n── our own words ──');
   check("feature slides reuse the promo's own eyebrow", feature?.eyebrow === PROMO_CARDS.find((p) => p.id === 'promo_backup').eyebrow);
 }
 
-console.log('\n── the slide colours on every theme ──');
+console.log('\n── the slide colours on every theme (LIGHT washes) ──');
 {
-  for (const [id, t] of Object.entries(THEMES)) {
-    const shades = TIP_BAND_VARIANTS.map((_, i) => tipBandShade(t.primary, i));
-    const ok = shades.every((band) => {
-      const chip = mix('#FFFFFF', 0.1, band);
-      return contrastRatio('#FFFFFF', band) >= TIP_BAND_MIN_WHITE
-        && contrastRatio(readableOn(chip, t.primary, 3), chip) >= 3
-        && contrastRatio(readableOn(band, t.primary), band) >= 4.5;
+  for (const id of Object.keys(THEMES)) {
+    const p = buildPalette(id, false);
+    const bands = TIP_BAND_VARIANTS.map((_, i) => tipBandWash(p.primary, i, p.card));
+    const ok = bands.every((band, i) => {
+      const hue = tipBandHue(p.primary, i);
+      return contrastRatio(readableOn(band, p.textPrimary), band) >= 4.5
+        && contrastRatio(readableOn(band, p.textSecondary), band) >= 4.5
+        && contrastRatio(readableOn(p.card, hue, 3), p.card) >= 3
+        && contrastRatio(readableOn(band, hue), band) >= 4.5;
     });
-    check(`${id}: every slide holds white ≥ ${TIP_BAND_MIN_WHITE}, icon ≥ 3, action ≥ 4.5`, ok, shades.join(' '));
-    // A charcoal accent (Platinum) gives charcoal steps by design — its header is the same ramp.
-    const charcoal = contrastRatio(t.primary, DARK_NEUTRALS.background) < 2;
-    check(`${id}: no slide is black — each is visibly the theme's tint${charcoal ? ' (charcoal accent: depth steps)' : ''}`,
-      shades.every((b) => contrastRatio(b, DARK_NEUTRALS.background) > (charcoal ? 1.08 : 1.15)),
-      shades.map((b) => contrastRatio(b, DARK_NEUTRALS.background).toFixed(2)).join(' '));
-    check(`${id}: neighbouring slides differ`, shades.every((b, i) => i === 0 || b !== shades[i - 1]));
+    check(`${id}: title / eyebrow / action ≥ 4.5, icon ≥ 3 on every slide`, ok, bands.join(' '));
+    check(`${id}: LIGHT — every slide close to the card surface, never a dark band`,
+      bands.every((b) => contrastRatio(b, p.card) < 1.35), bands.map((b) => contrastRatio(b, p.card).toFixed(2)).join(' '));
+    check(`${id}: …but visibly tinted, and neighbours differ`,
+      bands.every((b) => b.toLowerCase() !== String(p.card).toLowerCase()) && bands.every((b, i) => i === 0 || b !== bands[i - 1]));
   }
   check('hue nudges stay within ±12° — wider left the family (olive orange, green Carbon)',
     TIP_BAND_VARIANTS.every((v) => Math.abs(v.hue) <= 12));
   check('slide colours cycle when there are more slides than variants',
-    tipBandShade('#5B3CC4', TIP_BAND_VARIANTS.length) === tipBandShade('#5B3CC4', 0));
+    tipBandWash('#5B3CC4', TIP_BAND_VARIANTS.length, '#FFFFFF') === tipBandWash('#5B3CC4', 0, '#FFFFFF'));
 }
 
 console.log('\n── the strip never moves on its own ──');
@@ -121,11 +122,11 @@ console.log('\n── the strip never moves on its own ──');
   check('Home waits for both stores before showing slides', /<TipStrip[^>]*loading=\{!hydrated \|\| !rewardsHydrated\}/.test(dash));
   check('Home breaks the band out of its gutter', /<TipStrip[^>]*bleed=\{spacing\.lg\}/.test(dash));
   check('a band, not a card: no radius, no shadow, no card fill', !/borderRadius:\s*radius|shadows\.|backgroundColor:\s*t\.card/.test(src));
-  check('each slide paints its own theme shade (clones wear their original\'s)',
-    /const band = tipBandShade\(theme\.primary, i\)/.test(src) && /inks\[realIndexFor\(listIndex, count, canLoop\)\]/.test(src)
+  check('each slide paints its own light wash (clones wear their original\'s)',
+    /const band = tipBandWash\(theme\.primary, i, theme\.card\)/.test(src) && /inks\[realIndexFor\(listIndex, count, canLoop\)\]/.test(src)
     && /backgroundColor: ink\.band/.test(src) && !/'#[0-9A-Fa-f]{3,8}'/.test(src));
-  check('the icon and action word are measured on each slide', /icon: readableOn\(chip, theme\.primary, 3\)/.test(src)
-    && /action: readableOn\(band, theme\.primary\)/.test(src));
+  check('every ink measured on its own slide; no border (user)',
+    /icon: readableOn\(theme\.card, hue, 3\)/.test(src) && /action: readableOn\(band, hue\)/.test(src) && !/border(Top|Bottom)?Width/.test(src));
   check('compact: no separate CTA line under the title', !/item\.cta\}<\/Text>/.test(src));
   check('it loops: the clones and the wrap come from the carousel helpers', /wrapTarget\(at, count, canLoop\)/.test(src) && /__tail/.test(src) && /__head/.test(src));
 }

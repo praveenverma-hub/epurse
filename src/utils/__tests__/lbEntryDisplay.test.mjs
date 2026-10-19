@@ -77,5 +77,32 @@ check('nothing open → all of it flips', JSON.stringify(settleExtra('lent_settl
 check('repaying someone I owe: by the other sign', settleExtra('borrow_repaid', 150, { ...rohit, net: -100 })?.extra === 50 && settleExtra('borrow_repaid', 100, { ...rohit, net: -100 }) === null);
 check('not a settlement → no warning', settleExtra('lent', 800, rohit) === null);
 
+console.log('\n— the LB tab: add form opens from a tab under the header\'s curve (Oct-20-26) —');
+{
+  const { readFileSync } = await import('node:fs');
+  const rd = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
+  const form = rd('components/LbEntryForm.js');
+  const screen = rd('screens/LentBorrowedScreen.js');
+  const header = rd('components/CollapsingHeaderScreen.tsx');
+  check('collapsed: the form renders nothing (the header tab is the trigger) but stays mounted',
+    /if \(!isOpen\) return null;/.test(form) && /const isOpen = !collapsible \|\| open;/.test(form));
+  check('ONE button in the form: Cancel while nothing is typed, Add once something is',
+    /title=\{cancels \? 'Cancel' : submitLabel\}/.test(form) && /const cancels = collapsible && !typed;/.test(form));
+  check('Cancel and a save both close it, eased', /const close = useCallback\(\(\) => \{ animateNextLayout\(\); onOpenChange\?\.\(false\); \}/.test(form)
+    && /animateNextLayout\(\);\s*if \(collapsible\) onOpenChange\?\.\(false\);/.test(form));
+  check('opened from the tab → name focused', /autoFocus=\{collapsible\}/.test(form));
+  check('the screen: tab only when the panel lists people, ⌄ collapsed, no arrow open',
+    /attachedTab=\{hasPeople\(kind\) \?/.test(screen) && /trailingIcon: formOpen\[kind\] \? undefined : 'chevron-down'/.test(screen));
+  check('…the tab toggles with the shared accordion ease', /const toggleForm = \(\) => \{ animateNextLayout\(\);/.test(screen));
+  check('header tab: tucked UNDER the curve (same radius), below the header in both stacking orders',
+    /marginTop: -curveRadius,\s*paddingTop: curveRadius,/.test(header) && /zIndex: 9,\s*elevation: 5,/.test(header));
+  check('…a 44pt target: 36 showing + 8 slop', /const ATTACHED_TAB_H = 36;/.test(header) && /const ATTACHED_TAB_SLOP = 8;/.test(header)
+    && /minHeight: curveRadius \+ ATTACHED_TAB_H/.test(header));
+  check('…its ink measured on its own wash', /const ink = readableOn\(surface, attachedTab\.color\);/.test(header));
+  check('the person screen\'s sheet is untouched (never collapsible)', !/collapsible/.test(rd('screens/LbPersonScreen.js')));
+  const faq = rd('components/FaqAccordion.tsx');
+  check('ONE accordion motion app-wide: FaqAccordion uses the same helper', /animateNextLayout\(\)/.test(faq) && !/LayoutAnimation\.configureNext/.test(faq));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

@@ -1,33 +1,28 @@
 // Home tip-strip slide colours. Pure data + maths, outside TipStrip so the
 // headless suite can measure every theme × variant (homeTips.test.mjs).
 //
-// Each slide is a TONAL variation of the accent sunk into the dark base: mostly a
-// different depth (`share`), with at most a ±12° hue nudge. Wider rotations were
-// tried and left the family (orange → olive, Carbon's mint → "income" green).
-import { contrastRatio, mix, rotateHue } from './theme';
-import { DARK_NEUTRALS } from './themes';
+// LIGHT on purpose: a deep band below the header was the heaviest thing on a page
+// of white cards and read as a second header (the carousel learned the same, see
+// HomeCarousel). Each slide is a light WASH of a tonal variant of the accent — a
+// ≤ ±12° hue nudge (wider left the family: orange → olive, Carbon's mint → "income"
+// green) and its own wash depth — so slides still differ, calmly.
+import { mix, rotateHue } from './theme';
 
 export const TIP_BAND_VARIANTS = [
-  { hue: 0,   share: 0.40 },
-  { hue: -12, share: 0.54 },
-  { hue: 10,  share: 0.30 },
-  { hue: -6,  share: 0.47 },
-  { hue: 6,   share: 0.35 },
+  { hue: 0,   wash: 0.12 },
+  { hue: -12, wash: 0.15 },
+  { hue: 10,  wash: 0.09 },
+  { hue: -6,  wash: 0.14 },
+  { hue: 6,   wash: 0.10 },
 ];
 
-/** White on every slide clears this; a bright accent (Carbon's mint) gets its share pulled back to reach it. */
-export const TIP_BAND_MIN_WHITE = 5;
-
-/** The surface for slide `i` (cycles through the variants). */
-export const tipBandShade = (primary, i) => {
+const variant = (i) => {
   const n = TIP_BAND_VARIANTS.length;
-  const v = TIP_BAND_VARIANTS[((i % n) + n) % n];
-  const hue = rotateHue(primary, v.hue);
-  let share = v.share;
-  let shade = mix(hue, share, DARK_NEUTRALS.background);
-  while (share > 0.1 && contrastRatio('#FFFFFF', shade) < TIP_BAND_MIN_WHITE) {
-    share -= 0.02;
-    shade = mix(hue, share, DARK_NEUTRALS.background);
-  }
-  return shade;
+  return TIP_BAND_VARIANTS[((i % n) + n) % n];
 };
+
+/** Slide `i`'s own hue — the accent nudged; inks for the icon / action derive from it. */
+export const tipBandHue = (primary, i) => rotateHue(primary, variant(i).hue);
+
+/** Slide `i`'s surface: a light wash of its hue over `base` (the card surface). */
+export const tipBandWash = (primary, i, base) => mix(tipBandHue(primary, i), variant(i).wash, base);

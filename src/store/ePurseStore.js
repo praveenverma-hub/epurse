@@ -8251,6 +8251,12 @@ export const selectGapTransactionCount = (s, lastCheckedInDate) => {
  * a second Activity tab — see the note at the `recent` slice below.
  */
 const HOME_RECENT_LIMIT = 10;
+/** Rows of last month Home shows while this month has none yet. */
+export const HOME_PREV_MONTH_LIMIT = 5;
+
+/** What Home's list may show: not ignored, not private, not Lent/Borrowed / self, not group-excluded. */
+const homeListEligible = (t, groups) =>
+  !t.isIgnored && !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !spendExcluded(t, groups);
 
 const periodStartMs = (key) => {
   const now = new Date();
@@ -8284,9 +8290,7 @@ export const selectExpenseStats = (period) => (state) => {
   );
 
   // For the chips/header, also exclude private + Lent/Borrowed + self transfers + group exclusions.
-  const eligible = inPeriod.filter(
-    (t) => !t.isHidden && !NON_SPEND_CATEGORY_IDS.has(t.categoryId) && !spendExcluded(t, state.groups)
-  );
+  const eligible = inPeriod.filter((t) => homeListEligible(t, state.groups));
 
   // Gross expenses (debit share), refunds (isRefund credits) that net them down,
   // and received = income + P2P-in (credits that are NOT refunds).
@@ -8353,6 +8357,28 @@ export const selectExpenseStats = (period) => (state) => {
     recent,
     biggest,             // { id, amount, merchant } | null
   };
+};
+
+/**
+ * Home on M with nothing yet this month: last month's newest rows, so a new month
+ * doesn't open on an empty list. Null on any other period or once this month has one.
+ * @returns {{ monthKey: string, txns: object[] } | null}
+ */
+export const selectPrevMonthFallback = (period, monthCount) => (state) => {
+  if (period !== 'M' || monthCount > 0) return null;
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+  const to = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const txns = state.transactions
+    .filter((t) => {
+      const at = new Date(t.createdAt).getTime();
+      return at >= from && at < to && homeListEligible(t, state.groups);
+    })
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, HOME_PREV_MONTH_LIMIT);
+  if (!txns.length) return null;
+  const d = new Date(from);
+  return { monthKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, txns };
 };
 
 // Weekday letters, Monday-first — matches the perDay order in selectWeeklySummary.
@@ -8463,12 +8489,19 @@ export const selectWeeklySummary = (state, anchor) => {
  * that has any data — from monthlyAggregates or raw transactions. Drives the
  * persistent dashboard recap card. Returns null when there's no prior month.
  */
-export const selectLatestRecapMonth = (state) => {
-  const curMk = monthKey(new Date());
-  const set = new Set(Object.keys(state.monthlyAggregates || {}));
-  (state.transactions || []).forEach((t) => { if (!t.isIgnored) set.add(monthKey(t.createdAt)); });
-  const past = [...set].filter((k) => k < curMk).sort();
-  return past.length ? past[past.length - 1] : null;
+/** Days into a new month that Home shows last month's recap card; after that the tip strip's slide carries it. */
+export const RECAP_CARD_DAYS = 7;
+
+/**
+ * The month Home's recap card is for: the month that JUST ended, during the first
+ * RECAP_CARD_DAYS of this one, and only if it has data — never an older month (a quiet
+ * last month used to surface a recap from months ago). Null otherwise.
+ */
+export const selectHomeRecapMonth = (state, now = new Date()) => {
+  if (now.getDate() > RECAP_CARD_DAYS) return null;
+  const prevMk = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 15));
+  if (state.monthlyAggregates?.[prevMk]) return prevMk;
+  return (state.transactions || []).some((t) => !t.isIgnored && monthKey(t.createdAt) === prevMk) ? prevMk : null;
 };
 
 /**
@@ -8489,7 +8522,7 @@ export const firstDataMonthKey = (state) => {
 /**
  * Every completed month that has data, newest first — the list behind Settings →
  * Monthly Recap → Past Summaries, so a summary stays reachable after its dashboard
- * card is dismissed. Same month set as `selectLatestRecapMonth`. Returns a NEW array,
+ * card is gone (dismissed, or past RECAP_CARD_DAYS). Returns a NEW array,
  * so call it from a useMemo over the raw slices — never as a bare zustand selector.
  */
 export const selectRecapMonths = (state, limit = 12) => {

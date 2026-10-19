@@ -2,10 +2,9 @@
 // TipStrip — Home's slim tip band. Presentation only: the slides come from
 // `buildHomeTips()` (analytics/homeTips.js).
 //
-// A deep, theme-tinted full-bleed band, not a card. Each slide has its own
-// tonal shade of the accent (constants/tipBand.js), so the strip changes colour
-// as it's swiped while staying the theme's family — never black, never the
-// bright accent. Swipe-only,
+// A LIGHT full-bleed band, not a card: each slide a calm wash of its own tonal
+// variant of the accent (constants/tipBand.js), so it shifts as it's swiped while
+// sitting IN the page of white cards rather than on top of it. Swipe-only,
 // never auto-advancing — a slide can carry an action, and an action must not
 // slide away while it's being read. Loops both ways with a clone at each end
 // (same index maths as HomeCarousel, constants/carousel.js).
@@ -21,8 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { FixedTextScale, Text } from './AppText';
 import CardSkeleton from './CardSkeleton';
 import { useTheme } from '../hooks/useTheme';
-import { mix, readableOn, spacing, typography as typographyBase, withAlpha } from '../constants/theme';
-import { tipBandShade } from '../constants/tipBand';
+import { readableOn, spacing, typography as typographyBase, withAlpha } from '../constants/theme';
+import { tipBandHue, tipBandWash } from '../constants/tipBand';
 import { listIndexFor, realIndexFor, wrapTarget } from '../constants/carousel';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
@@ -59,21 +58,19 @@ export default function TipStrip({ tips, onPressTip, loading = false, bleed = 0 
   const listRef = useRef<FlatList<HomeTip>>(null);
 
   const count = tips.length;
-  // One ink set per slide, each measured on that slide's shade: a raw accent on its own dark shade is unreadable.
+  // One ink set per slide, each measured on that slide's wash.
   const inks = useMemo(() => tips.map((_, i) => {
-    const white = theme.textOnGradient;
-    const band = tipBandShade(theme.primary, i);
-    const chip = mix(white, 0.1, band);
+    const hue = tipBandHue(theme.primary, i);
+    const band = tipBandWash(theme.primary, i, theme.card);
     return {
       band,
-      chip,
-      title: readableOn(band, white),
-      eyebrow: readableOn(band, mix(white, 0.7, band)),
-      icon: readableOn(chip, theme.primary, 3),
-      action: readableOn(band, theme.primary),
-      chevron: readableOn(band, mix(white, 0.55, band), 3),
+      title: readableOn(band, theme.textPrimary),
+      eyebrow: readableOn(band, theme.textSecondary),
+      icon: readableOn(theme.card, hue, 3),
+      action: readableOn(band, hue),
+      chevron: readableOn(band, theme.textMuted, 3),
     };
-  }), [tips, theme.primary, theme.textOnGradient]);
+  }), [tips, theme.primary, theme.card, theme.textPrimary, theme.textSecondary, theme.textMuted]);
 
   const canLoop = count > 1;
   const data = useMemo(() => (canLoop
@@ -114,7 +111,7 @@ export default function TipStrip({ tips, onPressTip, loading = false, bleed = 0 
         pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.iconChip, { backgroundColor: ink.chip }]}>
+      <View style={[styles.iconChip, { backgroundColor: theme.card }]}>
         <Ionicons name={item.icon} size={16} color={ink.icon} />
       </View>
       <View style={styles.copy}>
@@ -169,7 +166,7 @@ export default function TipStrip({ tips, onPressTip, loading = false, bleed = 0 
             {tips.map((t, i) => (
               <View
                 key={t.id}
-                style={[styles.segment, { backgroundColor: i === active ? theme.textOnGradient : withAlpha(theme.textOnGradient, 0.25) }]}
+                style={[styles.segment, { backgroundColor: withAlpha(theme.textPrimary, i === active ? 0.55 : 0.12) }]}
               />
             ))}
           </View>
@@ -193,7 +190,7 @@ const styles = StyleSheet.create({
   eyebrow: { ...typography.tiny, fontWeight: '700', letterSpacing: 0.8, marginBottom: 2 },
   title: { ...typography.small, fontSize: 14, fontWeight: '600', lineHeight: 18 },
   action: { ...typography.small, fontWeight: '700' },
-  // Decorative, over a slide colour that changes mid-swipe — so translucent white rather than a measured ink.
+  // Decorative, over a slide colour that changes mid-swipe — so translucent ink rather than a measured one.
   segments: { position: 'absolute', bottom: spacing.sm, flexDirection: 'row', gap: 4 },
   segment: { flex: 1, height: 2, borderRadius: 1 },
 });

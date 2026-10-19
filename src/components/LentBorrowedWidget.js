@@ -56,7 +56,10 @@ const Card = ({ title, amount, helper, palette, onPress }) => (
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: spacing.md },
-  cardWrap: { flex: 1, ...shadows.elevated, borderRadius: radius.lg },
+  // `card`, not `elevated`: these rest on the page like every Home card (ui-consistency §6b-i).
+  // `elevated` reached ~22pt below — past the 16pt group gap, onto the budget card, which then
+  // read as tucked under these.
+  cardWrap: { flex: 1, ...shadows.card, borderRadius: radius.lg },
   card: { borderRadius: radius.lg, padding: spacing.lg, overflow: 'hidden' },
   title: { ...typography.small, fontWeight: '600' },
   amount: {

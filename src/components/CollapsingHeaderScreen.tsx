@@ -68,11 +68,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { spacing, radius, pinnedHeaderChrome } from '../constants/theme';
+import { spacing, radius, pinnedHeaderChrome, mix, readableOn } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { STATIC_CONFIG } from '../config/staticConfig';
 
 type Interp = Animated.AnimatedInterpolation<number>;
+
+/** Visible height of `attachedTab` (below the curve) and the extra touch area under it. */
+const ATTACHED_TAB_H = 36;
+const ATTACHED_TAB_SLOP = 8;
 
 /** Default pinned-bar height (excl. safe-area inset) when a caller omits one. */
 const DEFAULT_BAR_H = 44;
@@ -206,6 +210,19 @@ export interface CollapsingHeaderScreenProps {
    * it statically under the bar.
    */
   renderHero?: () => ReactNode;
+  /**
+   * FIXED mode only: a thin tab tucked under the header's curve — a second layer that
+   * follows the same bottom curve and peeks out below it (Lent/Borrowed's "Add Lent
+   * Entry"). An action that belongs to the header without costing a row of the page.
+   * `color` tints it (a light wash of it; its ink is measured on that wash).
+   */
+  attachedTab?: {
+    label: string;
+    onPress: () => void;
+    color: string;
+    trailingIcon?: React.ComponentProps<typeof Ionicons>['name'];
+    accessibilityLabel?: string;
+  };
   /** Body. Collapsing: inside the owned ScrollView. Fixed: below the header. */
   children?: ReactNode;
   /** Extra style for the scroll content container (paddingTop is managed here). */
@@ -306,6 +323,7 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
   renderCollapsedBar,
   collapsedSurface,
   renderHero,
+  attachedTab,
   children,
   contentContainerStyle,
   scrollRef,
@@ -382,6 +400,35 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
               top-margins reproduce its original bar↔content spacing exactly. */}
           {renderHero ? renderHero() : null}
         </View>
+        {attachedTab ? (() => {
+          const surface = mix(attachedTab.color, 0.14, theme.card);
+          const ink = readableOn(surface, attachedTab.color);
+          return (
+            <TouchableOpacity
+              onPress={attachedTab.onPress}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={attachedTab.accessibilityLabel || attachedTab.label}
+              // 36pt showing + 8pt below = the 44pt touch target (§8).
+              hitSlop={{ bottom: ATTACHED_TAB_SLOP }}
+              style={[
+                styles.attachedTab,
+                {
+                  backgroundColor: surface,
+                  // Tucked UNDER the curve: the top `curveRadius` hides behind the header.
+                  marginTop: -curveRadius,
+                  paddingTop: curveRadius,
+                  minHeight: curveRadius + ATTACHED_TAB_H,
+                  borderBottomLeftRadius: curveRadius,
+                  borderBottomRightRadius: curveRadius,
+                },
+              ]}
+            >
+              <Text style={[styles.attachedTabText, { color: ink }]} numberOfLines={1}>{attachedTab.label}</Text>
+              {attachedTab.trailingIcon ? <Ionicons name={attachedTab.trailingIcon} size={16} color={ink} /> : null}
+            </TouchableOpacity>
+          );
+        })() : null}
         {children != null ? <View style={styles.fill}>{children}</View> : null}
       </View>
     );
@@ -727,6 +774,17 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 6,
   },
+  // Below the header in both stacking orders (zIndex for iOS, elevation for Android),
+  // so the header's own shadow falls onto it — two layers, one curve.
+  attachedTab: {
+    zIndex: 9,
+    elevation: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  attachedTabText: { fontSize: 13, fontWeight: '700' },
   // Standard bar
   stdBar: { flexDirection: 'row', alignItems: 'center', minHeight: DEFAULT_BAR_H },
   stdBackBtn: { marginRight: spacing.sm, marginLeft: -4 },

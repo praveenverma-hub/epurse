@@ -1878,6 +1878,16 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Lent/Borrowed & Splits
 
 **Done**
+- **Oct-20-2026 — LB add form opens from a tab tucked under the header's curve** (`CollapsingHeaderScreen
+  attachedTab`): "Add Lent Entry ⌄" peeks below the header as a second curved layer; tap → the form unfolds
+  (accordion ease), no arrow while open. Replaces the in-list collapsed button below (superseded same day).
+- **Oct-20-2026 — LB tab form collapses once a panel lists people** (`LbEntryForm collapsible`). Collapsed = one
+  outlined "Add Lent/Borrowed Entry" button; the SAME button then reads Cancel while nothing is typed (collapses)
+  and Add once something is (saves → clears → collapses). Empty panel keeps the open form. Person-screen sheet
+  unchanged. User's idea (button as the toggle) over a separate "Add" row. Follow-up: opens/closes as an
+  accordion (shared `animateNextLayout`, also FaqAccordion's) with a ⌄ on the collapsed button only, label left / arrow right
+  like an accordion header; no arrow once open (user).
+  Not device-verified.
 - **Oct-17-26: Repaid / Received Back show for ANY open balance.** User: "any amount >0". `OPEN_MIN` in
   `lbPeopleSearch.ts` 0.5 → 0.005 (the store's own settled epsilon); also the settle pickers + overpay warning.
 - **Oct-17-26: LbPerson status bar glyphs dark.** User saw white clock/battery on the white header. The
@@ -2001,6 +2011,8 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Groups
 
 **Done**
+- **Oct-20-2026 — group history rows: 2 lines max** (`GroupHistoryList`, both the History page and the detail
+  sheet): line 1 = who did what (ellipsis), line 2 = change · time (time never shrinks). Was up to 5 lines.
 - **Oct-20-2026 — my own number for shared groups.** Required (inline `FormPhoneInput`, saved to profile) when
   creating a shared group and when joining; an older group's first invite without one → "Add Your Number First" →
   My Profile. `planGroupChanges` now sends MY `member.phone` fingerprint (was skipped: "me" never had one), so the
@@ -2357,7 +2369,15 @@ off are DONE (see Backup).
 - **Open:** Phase B (only ~13 months in memory) when start-up gets slow — STORAGE_MIGRATION §8.
 
 **Done**
-- **Oct-19-2026 — tip strip on Home (`TipStrip` + `analytics/homeTips.js`).** Deep theme-shade full-bleed band, a different tonal shade per slide (`constants/tipBand.js`; deep violet / indigo / plum on Violet; not a card; ~74pt) between
+- **Oct-20-2026 — LB cards' shadow no longer falls on the budget card below.** `LentBorrowedWidget` was on the
+  `elevated` rung (~22pt reach in a 16pt gap) → `card`, like every resting Home card. Guarded in test:elevation.
+- **Oct-20-2026 — monthly recap card on Home: first 7 days only** (`selectHomeRecapMonth`, `RECAP_CARD_DAYS`),
+  and only for the month that just ended (an empty last month no longer surfaces an older recap). After day 7
+  the tip strip's "Last month" slide carries it. Replaces `selectLatestRecapMonth`.
+- **Oct-20-2026 — new month: Home's Transactions shows last month instead of empty.** On M with no rows yet:
+  "Nothing yet this month" (new `EmptyState inline` row in the list's muted-card shape, GREYED as a blank state: neutral tile, one muted ink), a `MonthDivider`, last month's 5 newest (same filter as the list; same tap/detail).
+  No "View October" link (user). `selectPrevMonthFallback` + shared `homeListEligible`. Not device-verified.
+- **Oct-19-2026 — tip strip on Home (`TipStrip` + `analytics/homeTips.js`).** LIGHT full-bleed band (was deep/dark — read as a second header on a page of white cards), each slide a calm wash of its own tonal hue, no border (user) (`constants/tipBand.js`; not a card; ~74pt) between
   the "your money" and "activity" groups; swipe-only (no auto-advance), loops past either end, segmented dashes. Slides: keep last
   month's goal split (one tap, new store action `keepLastGoalPlan` — Goals screen uses it too), "10% less on
   <last month's top category> saves ₹X a year", RP to next level, last month's spend vs the month before (hidden while the recap card shows), monthly

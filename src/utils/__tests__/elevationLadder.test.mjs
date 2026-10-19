@@ -223,6 +223,18 @@ check('most shadows come from the ladder, not from private numbers',
 check('`shadows.sheet` and `shadows.pop` have real callers (a rung nobody uses is a rung that drifts)',
   blocks.some((b) => b.token === 'sheet') && blocks.some((b) => b.token === 'pop'));
 
+// Home's resting cards sit 16pt apart (the group gap). `elevated` reaches ~22pt below a card, so on
+// one of them it lands on the NEXT card, which then reads as tucked under it (Oct-20-26: the LB
+// cards over "Plan your month"). The review stack is the exception — it's dragged.
+{
+  const resting = ['components/LentBorrowedWidget.js', 'components/BudgetSummary.tsx', 'components/MonthlyRecapCard.tsx',
+    'components/GoalCard.tsx', 'components/TransactionItem.js', 'components/HomeCarousel.tsx', 'components/WeeklySummaryCard.tsx'];
+  const offenders = resting.filter((f) => /shadows\.elevated/.test(read(f)));
+  check('Home\'s resting cards use the `card` rung, never `elevated`', offenders.length === 0, offenders.join(', '));
+  const reach = (t) => t.offsetY + t.radius;
+  check(`…and the card rung's reach (${reach(CARD)}pt) fits inside Home's 16pt group gap`, reach(CARD) < 16, String(reach(CARD)));
+}
+
 console.log(`\n${C.bold}──────────────────────────────────${C.reset}`);
 console.log(`  ${fail ? C.red : C.green}${C.bold}${pass}/${pass + fail} passed${C.reset}\n`);
 process.exit(fail ? 1 : 0);

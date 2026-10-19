@@ -1,6 +1,6 @@
 // FaqAccordion — shared question/answer list; tapping one closes any other open.
 import React, { useState } from 'react';
-import { LayoutAnimation, Platform, StyleSheet, TouchableOpacity, UIManager, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 import type { StyleProp, TextStyle, ViewStyle } from 'react-native';
@@ -10,9 +10,7 @@ import { useTheme } from '../hooks/useTheme';
 
 const typography = typographyBase as unknown as Record<string, TextStyle>;
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+import { animateNextLayout } from '../utils/layoutAnimation';
 
 /** One step in a short pictorial flow (e.g. "how a reminder fires"). */
 export interface FaqFlowStep {
@@ -49,7 +47,7 @@ const FaqAccordion: React.FC<Props> = ({ items, title, style }) => {
   const [openId, setOpenId] = useState<string | null>(null);
 
   const toggle = (id: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    animateNextLayout();
     setOpenId((cur) => (cur === id ? null : id));
   };
 

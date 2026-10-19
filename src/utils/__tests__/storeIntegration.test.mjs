@@ -399,8 +399,17 @@ check('No-mask bank debit: transaction still recorded', txns().length === 1, `go
     rep.paymentMethods && rep.paymentMethods[0] && Math.round(rep.paymentMethods[0].total) === 1500,
     JSON.stringify(rep.paymentMethods));
 
-  check('selectLatestRecapMonth → previous month', mod.selectLatestRecapMonth(useStore.getState()) === prevMk,
-    `got ${mod.selectLatestRecapMonth(useStore.getState())}`);
+  // Home's recap card: the month that just ended, first RECAP_CARD_DAYS days only (Oct-20-26).
+  {
+    const st = useStore.getState();
+    const [py, pm] = prevMk.split('-').map(Number);
+    const day = (d) => new Date(py, pm, d, 10);   // a day in the month AFTER prevMk
+    check(`recap card on day 1 and day ${mod.RECAP_CARD_DAYS} → the month that just ended`,
+      mod.selectHomeRecapMonth(st, day(1)) === prevMk && mod.selectHomeRecapMonth(st, day(mod.RECAP_CARD_DAYS)) === prevMk);
+    check(`…gone from day ${mod.RECAP_CARD_DAYS + 1}`, mod.selectHomeRecapMonth(st, day(mod.RECAP_CARD_DAYS + 1)) === null);
+    check('…and never an OLDER month when the one that just ended is empty',
+      mod.selectHomeRecapMonth(st, new Date(py, pm + 1, 2, 10)) === null);
+  }
 
   // maybeQueueMonthlyRecap: queues once, then is idempotent (guarded).
   useStore.getState().maybeQueueMonthlyRecap();
@@ -5599,6 +5608,36 @@ console.log('\n— Keep Last Month\'s Plan on a new month (Oct-11-26) —');
   check('keep → lastBudgetPlan now this month (offer disappears)', mod.carryableBudgetPlan(G().lastBudgetPlan) === null);
   const before = G().budget;
   check('keep again with a budget in place is a no-op', G().keepLastBudgetPlan() === false && G().budget === before);
+}
+
+console.log('\n— New month: Home shows last month instead of an empty list (Oct-20-26) —');
+{
+  const now = new Date();
+  const lastMonth = (day) => new Date(now.getFullYear(), now.getMonth() - 1, day, 12).toISOString();
+  const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 5).toISOString();
+  const twoAgo = new Date(now.getFullYear(), now.getMonth() - 2, 20).toISOString();
+  const d = (id, at, extra = {}) => ({ id, type: 'debit', amount: 100, merchant: id, categoryId: 'food', createdAt: at, ...extra });
+  const st = (txns) => ({ transactions: txns, groups: [] });
+  const txns = [
+    ...[1, 3, 5, 7, 9, 11, 13].map((day) => d(`m${day}`, lastMonth(day))),
+    d('hidden', lastMonth(20), { isHidden: true }),
+    d('ignored', lastMonth(21), { isIgnored: true }),
+    d('lent', lastMonth(22), { categoryId: 'lent' }),
+    d('older', twoAgo),
+  ];
+  const fb = mod.selectPrevMonthFallback('M', 0)(st(txns));
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  check('empty month on M → last month\'s newest rows, capped', fb && fb.txns.length === mod.HOME_PREV_MONTH_LIMIT && fb.txns[0].id === 'm13',
+    JSON.stringify(fb?.txns.map((t) => t.id)));
+  check('…labelled with last month', fb?.monthKey === `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
+  check('…with the same filter as Home\'s list (no private / ignored / Lent-Borrowed)',
+    fb && !fb.txns.some((t) => ['hidden', 'ignored', 'lent'].includes(t.id)));
+  check('…and nothing from two months back', fb && !fb.txns.some((t) => t.id === 'older'));
+  check('this month has one → back to the normal list', mod.selectPrevMonthFallback('M', 1)(st([...txns, d('now', thisMonth)])) === null);
+  check('D / W / Y keep their own empty state', ['D', 'W', 'Y'].every((p) => mod.selectPrevMonthFallback(p, 0)(st(txns)) === null));
+  check('nothing last month either → the normal empty state', mod.selectPrevMonthFallback('M', 0)(st([d('older', twoAgo)])) === null);
+  const stats = mod.selectExpenseStats('M')(st([...txns, d('now', thisMonth)]));
+  check('the shared filter didn\'t change Home\'s own list', stats.count === 1 && stats.recent[0].id === 'now');
 }
 
 console.log('\n— Keep last month\'s GOAL split from Home (Oct-19-26) —');

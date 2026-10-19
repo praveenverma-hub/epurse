@@ -20,6 +20,7 @@
 // =============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { animateNextLayout } from '../utils/layoutAnimation';
 import {
   StyleSheet,
   TouchableOpacity,
@@ -83,6 +84,11 @@ const ContactPickIcon = ({ size = 18, color = colors.primary }) => (
  *                       the LB tab's inline form uses this; the add SHEET
  *                       (LbPersonScreen) keeps the filled button, since it's the one
  *                       clear action in a focused sheet. Both in theme[kind].
+ * @param collapsible    The shell opens/closes the form (`open` + `onOpenChange`) from its own
+ *                       trigger — the LB tab's header tab, once a panel lists people. Closed it
+ *                       renders nothing but stays mounted, so a typed draft survives. The ONE
+ *                       button then says what a tap does: Cancel while nothing is typed
+ *                       (closes), Add once something is (saves, then closes).
  */
 const LbEntryForm = ({
   kind,
@@ -96,9 +102,15 @@ const LbEntryForm = ({
   submitLabel = 'Add',
   submitOutlined = false,
   hideHeading = false,
+  collapsible = false,
+  open = false,
+  onOpenChange,
   style,
 }) => {
   const locked = !!lockedPerson;
+  const isOpen = !collapsible || open;
+  // Every close eases like an accordion (the shell animates its own opens).
+  const close = useCallback(() => { animateNextLayout(); onOpenChange?.(false); }, [onOpenChange]);
   const [person, setPerson] = useState(lockedPerson?.person || '');
   const [phone, setPhone] = useState(lockedPerson?.phone || '');
   const [contactId, setContactId] = useState(lockedPerson?.contactId ?? null);
@@ -225,7 +237,10 @@ const LbEntryForm = ({
       setPhone('');
       setContactId(null);
     }
-  }, [person, amount, date, note, contactId, phone, kind, alreadySettled, onSubmit, locked, submit, selectedAccount, settleChoice.allocation]);
+    // The list below changes too (a new row, or the panel's first person) — ease it.
+    animateNextLayout();
+    if (collapsible) onOpenChange?.(false);
+  }, [person, amount, date, note, contactId, phone, kind, alreadySettled, onSubmit, locked, submit, selectedAccount, settleChoice.allocation, collapsible, onOpenChange]);
 
   // Chip + heading use the app's own words (ENTRY_LABEL: Received back / Repaid),
   // kept short so the heading and the chip fit one line together.
@@ -234,6 +249,10 @@ const LbEntryForm = ({
     ? (kind === 'lent' ? 'Received back' : 'Repaid')
     : (kind === 'lent' ? 'Lend to someone' : 'Borrow from someone');
   const entryKind = lbEffectiveKind(kind, alreadySettled);
+  const typed = (!locked && !!person.trim()) || !!amount.trim() || !!note.trim();
+  const cancels = collapsible && !typed;
+
+  if (!isOpen) return null;
 
   return (
     <View style={[styles.formCard, style]}>
@@ -310,6 +329,8 @@ const LbEntryForm = ({
               placeholderTextColor={colors.textMuted}
               style={[styles.input, styles.personInput, formErr?.person && styles.inputError]}
               maxLength={INPUT_LIMITS.NAME_MAX}
+              // Opened on purpose from the shell's trigger → straight to the name.
+              autoFocus={collapsible}
             />
             {/* Gray at rest, accent wash once a contact is linked. (The date button
                 beside the amount deliberately does NOT wash — a date always holds a
@@ -434,11 +455,11 @@ const LbEntryForm = ({
         />
       ) : null}
       <PrimaryButton
-        title={submitLabel}
-        onPress={handleSubmit}
+        title={cancels ? 'Cancel' : submitLabel}
+        onPress={cancels ? () => { setFormErr(null); setAlreadySettled(false); close(); } : handleSubmit}
         loading={submitting}
-        variant={submitOutlined ? 'outline' : 'filled'}
-        color={theme[kind]}
+        variant={submitOutlined || cancels ? 'outline' : 'filled'}
+        color={cancels ? colors.textSecondary : theme[kind]}
         style={{ marginTop: spacing.sm }}
       />
 
