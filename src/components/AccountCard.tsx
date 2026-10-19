@@ -1,5 +1,5 @@
 // =============================================================================
-// AccountCard — CRED-style realistic card with 3D "Balance Adjustment" flip.
+// AccountCard — realistic card with 3D "Balance Adjustment" flip.
 //
 // Tapping the EMV chip or the BALANCE field on a Savings-Bank card flips the
 // card 180° around the Y-axis to reveal the adjustment matrix on the back —

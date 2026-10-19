@@ -28,14 +28,11 @@ That is precisely what ePurse is. It also survives into the upcoming policy revi
 SMS-based money management on the list. So this is a **declaration to prepare carefully,
 not a wall to design around.**
 
-**Precedent.** Axio — the Amazon-owned Indian fintech, formerly Capital Float, and the app
-formerly known as **Walnut** (`com.daamitt.walnut.app`) — is the best-known SMS expense
-tracker in India and is live on Play today. Its own permission disclosure says SMS is used
-by Money Manager to analyse transactional SMS for spend detection, bills and budgeting,
-and states that it does not read personal SMS or upload sensitive data. That is the same
-exception, argued the same way. (Note that Axio also runs lending products; "fraud
-prevention" is *not* a standalone exception, so it is the money-management use case that
-carries the expense tracker.)
+**Precedent.** Established SMS expense trackers are live on Play today under this exception.
+Their permission disclosures say SMS is used to analyse transactional messages for spend
+detection, bills and budgeting, and that personal SMS is not read or uploaded. That is the
+same exception, argued the same way. ("Fraud prevention" is *not* a standalone exception, so
+it is the money-management use case that carries an expense tracker.)
 
 **What approval actually turns on.** Being eligible is not the same as being approved. The
 declaration is judged on whether the permission is *core* and whether an alternative would

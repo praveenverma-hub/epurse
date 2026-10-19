@@ -157,15 +157,29 @@ console.log('\n── the pinned bar is a SECOND bar, cross-faded on opacity ─
 // whole props node to the native driver and then THROWS on any JS-driven value
 // sharing it. Two bars cross-fading on opacity need none of that.
 {
-  const heroFadeEnd  = Number(/const HERO_FADE_END = ([\d.]+);/.exec(header)?.[1]);
-  const lightenStart = /const LIGHTEN_START = (\w+);/.exec(header)?.[1];
-  check(`the hero has finished fading at ${heroFadeEnd} of the collapse`,
-    heroFadeEnd > 0 && heroFadeEnd < 1, String(heroFadeEnd));
-  check('the light bar starts coming in exactly where the hero ends',
-    lightenStart === 'HERO_FADE_END',
-    'white hero text over a whitening background for the length of any overlap');
-  check('the hero fade uses that constant, not a second literal',
-    /inputRange: \[0, FULL \* HERO_FADE_END\]/.test(header));
+  const heroFadeStart = Number(/const HERO_FADE_START = ([\d.]+);/.exec(header)?.[1]);
+  const lightenStart  = Number(/const LIGHTEN_START = ([\d.]+);/.exec(header)?.[1]);
+  check(`the hero starts fading at ${heroFadeStart} of the collapse`,
+    heroFadeStart >= 0.5 && heroFadeStart < 1, String(heroFadeStart));
+  check('…and finishes only at full collapse, so no empty gradient is left on screen',
+    /inputRange: \[FULL \* HERO_FADE_START, FULL\]/.test(header),
+    'fading out before the header has risen leaves a tall blank gradient');
+  check(`the light bar starts coming in at ${lightenStart}`,
+    lightenStart > 0 && lightenStart < 1, String(lightenStart));
+  // The two fades may overlap because the light bar covers only the hero's top
+  // HEADER_PAD_B, which both screens leave as padding (checked below).
+  check('the light bar overlaps the hero by exactly HEADER_PAD_B',
+    /const pinnedTotal = collapsedTotal \+ HEADER_PAD_B;/.test(header)
+    && /top: insets\.top \+ barHeight,/.test(header));
+  check('…and both screens open their hero with spacing.lg (= HEADER_PAD_B) of padding',
+    /balanceBlock: \{ marginTop: spacing\.lg \}/.test(dash)
+    && /heroBlock: {5}\{ paddingTop: spacing\.lg \}/.test(accounts),
+    'hero text would sit under the whitening bar');
+  // The hero's content must not scroll with the screen: it counter-translates by
+  // exactly what the header rises, so it holds still while fading and clipping.
+  check('the hero is held in place (counter-translated by barCounter)',
+    /opacity: heroOpacity,\s*transform: \[\{ translateY: barCounter \}\]/.test(header),
+    'the hero would slide up with the header instead of fading in place');
 
   // ── The rule the whole design exists to satisfy ───────────────────────────
   // Every animated value in this component must be one the NATIVE driver can
@@ -201,12 +215,13 @@ console.log('\n── the pinned bar is a SECOND bar, cross-faded on opacity ─
 
   // Model both fades.
   const FULL = 200;
-  const heroAt      = (y) => Math.max(0, 1 - Math.min(1, y / (FULL * heroFadeEnd)));
-  const collapsedAt = (y) => Math.min(1, Math.max(0, (y - FULL * heroFadeEnd) / (FULL - FULL * heroFadeEnd)));
+  const heroAt      = (y) => Math.min(1, Math.max(0, 1 - (y - FULL * heroFadeStart) / (FULL - FULL * heroFadeStart)));
+  const collapsedAt = (y) => Math.min(1, Math.max(0, (y - FULL * lightenStart) / (FULL - FULL * lightenStart)));
   check('at rest the pinned bar is fully transparent and the hero fully visible',
     collapsedAt(0) === 0 && heroAt(0) === 1);
-  check('the hero is gone before the pinned bar starts appearing',
-    [0, 40, 80, 109, 110, 150, 200].every((y) => heroAt(y) === 0 || collapsedAt(y) === 0));
+  check('the hero is still fully visible halfway through the collapse',
+    heroAt(FULL * 0.5) === 1);
+  check('fully collapsed, the hero is gone', heroAt(FULL) === 0);
   check('fully collapsed, the pinned bar is opaque', collapsedAt(FULL) === 1);
   check('it is a cross-fade, not a snap',
     collapsedAt(FULL * 0.78) > 0.4 && collapsedAt(FULL * 0.78) < 0.6);
@@ -500,9 +515,9 @@ console.log('\n── a release never rests in a half-collapsed header ──');
   const snapAt = Number(/const SNAP_AT = ([\d.]+);/.exec(header)?.[1]);
   check(`the threshold is ${snapAt}, below the hero's fade-out`,
     snapAt > 0 && snapAt < 1, String(snapAt));
-  const heroFadeEnd = Number(/const HERO_FADE_END = ([\d.]+);/.exec(header)?.[1]);
-  check('…and below HERO_FADE_END, so reopening never fades a text block back IN',
-    snapAt < heroFadeEnd, `${snapAt} vs ${heroFadeEnd}`);
+  const heroFadeStart = Number(/const HERO_FADE_START = ([\d.]+);/.exec(header)?.[1]);
+  check('…and below HERO_FADE_START, so reopening never fades a text block back IN',
+    snapAt < heroFadeStart, `${snapAt} vs ${heroFadeStart}`);
 
   // Mirror the component's resolution.
   const FULL = 200;

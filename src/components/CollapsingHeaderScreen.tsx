@@ -13,7 +13,8 @@
 //     "bar" remains — a sticky title strip,
 //   • the body scrolls UNDER the curved header (the header moves at `parallax`×
 //     the scroll speed, so the faster content tucks beneath the curve),
-//   • the tall "hero" region fades + slides away,
+//   • the tall "hero" region holds still and fades, the rising header edge
+//     clipping it from below — its content never scrolls,
 //   • a SEPARATE light bar cross-fades in over it, so what is left pinned at the
 //     top is chrome (card + hairline + elevation — the tab bar's surface
 //     language) rather than a saturated band sitting on the content,
@@ -81,24 +82,25 @@ const DEFAULT_BAR_H = 44;
 const HEADER_PAD_B = spacing.lg;
 
 /**
- * Where in the collapse (0 = expanded, 1 = pinned) the hero has finished fading
- * and the light bar starts coming in.
- *
- * One constant for both deliberately: the hero is white-on-gradient, so it must
- * be GONE before anything starts turning light behind it.
+ * Where in the collapse (0 = expanded, 1 = pinned) the hero STARTS fading; it
+ * reaches 0 at full collapse. The hero holds still while the header's edge rises
+ * over it, so the clip does most of the hiding — an earlier fade left a tall,
+ * empty gradient on screen.
  */
-const HERO_FADE_END = 0.55;
-const LIGHTEN_START = HERO_FADE_END;
+const HERO_FADE_START = 0.6;
+/**
+ * Where the light bar starts coming in. Free to overlap the hero fade: the light
+ * bar covers only the hero's top `HEADER_PAD_B`, which both screens leave as
+ * padding, so no white hero text ever sits on the whitening surface.
+ */
+const LIGHTEN_START = 0.55;
 
 /**
  * How far down the collapse a release has to be before the header finishes
  * collapsing rather than reopening.
  *
- * Below half on purpose: the hero has faded out entirely by `HERO_FADE_END`
- * (0.55), so past ~0.4 the user is looking at a header whose tall content is
- * nearly gone — reopening it from there would fade a block of text back IN, which
- * reads as the app undoing the scroll. Under 0.4 the hero is still substantially
- * there and opening is the smaller move.
+ * Below `HERO_FADE_START` on purpose, so reopening never fades text back IN —
+ * that reads as the app undoing the scroll.
  */
 const SNAP_AT = 0.4;
 
@@ -200,7 +202,7 @@ export interface CollapsingHeaderScreenProps {
    */
   collapsedSurface?: string;
   /**
-   * Hero content. Collapsing mode fades + parallaxes it out; fixed mode renders
+   * Hero content. Collapsing mode fades it out in place; fixed mode renders
    * it statically under the bar.
    */
   renderHero?: () => ReactNode;
@@ -412,8 +414,8 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
   const barCounter      = scrollY.interpolate({ inputRange: [0, FULL], outputRange: [0, heroH], ...clamp });
   // 0 → 1 collapse progress handed to the caller's bar.
   const progress        = scrollY.interpolate({ inputRange: [0, FULL], outputRange: [0, 1], ...clamp });
-  // Hero fades a touch faster than it collapses so it's gone before it tucks behind the bar.
-  const heroOpacity     = scrollY.interpolate({ inputRange: [0, FULL * HERO_FADE_END], outputRange: [1, 0], ...clamp });
+  // Hero fades only at the end; until then the rising header edge clips it.
+  const heroOpacity     = scrollY.interpolate({ inputRange: [FULL * HERO_FADE_START, FULL], outputRange: [1, 0], ...clamp });
 
   // ── The gradient → light cross-fade ─────────────────────────────────────────
   // Opacity ONLY, on the native driver, in both directions. That is the whole
@@ -573,7 +575,8 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
           style={StyleSheet.absoluteFill}
         />
 
-        {/* Hero — fades + slides up with the header. */}
+        {/* Hero — counter-translated like the bar, so its content stays put and
+            fades while the header's bottom edge rises over it. */}
         {renderHero ? (
           <Animated.View
             pointerEvents="box-none"
@@ -589,6 +592,7 @@ const CollapsingHeaderScreen: React.FC<CollapsingHeaderScreenProps> = ({
               paddingHorizontal: gutter,
               justifyContent: 'center',
               opacity: heroOpacity,
+              transform: [{ translateY: barCounter }],
             }}
           >
             {renderHero()}

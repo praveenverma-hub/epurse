@@ -599,7 +599,7 @@ const GoalFormScreen = ({ navigation, route }: any) => {
               onChangeText={(t) => setMerchantText(sanitizeName(t, INPUT_LIMITS.MERCHANT_MAX))}
               onSubmitEditing={addMerchant}
               returnKeyType="done"
-              placeholder="Zerodha, Groww, LIC…"
+              placeholder="Broker, fund or insurer…"
               placeholderTextColor={theme.textMuted}
               maxLength={INPUT_LIMITS.MERCHANT_MAX}
               style={[

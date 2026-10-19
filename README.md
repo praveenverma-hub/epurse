@@ -4,7 +4,7 @@ A premium personal-finance mobile app built with **React Native + Expo**.
 
 ePurse merges multiple simulated accounts (Bank, Credit Card, Digital Wallet, Cash) into a single "purse" view, auto-categorises spending from SMS / notification messages, and tracks informal IOUs between you and friends.
 
-> Inspired by the clean, card-based aesthetic of apps like Swiggy — soft shadows, gradient headers, boxed white cards on a light grey background, and emoji-driven iconography (no heavy bitmaps).
+> A clean, card-based aesthetic — soft shadows, gradient headers, boxed white cards on a light grey background, and emoji-driven iconography (no heavy bitmaps).
 
 ---
 

@@ -1,5 +1,5 @@
 // =============================================================================
-// AnimatedTabBar — Swiggy-inspired bottom tab bar.
+// AnimatedTabBar — the bottom tab bar.
 //
 // Behaviour:
 //   • Outlined icons at rest, filled + accent-derived ink when selected.

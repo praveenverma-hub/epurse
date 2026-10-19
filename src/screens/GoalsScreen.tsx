@@ -65,7 +65,7 @@ import { radius, spacing, typography as typographyBase, shadows, withAlpha, DIVI
 import { formatCurrency, monthKey } from '../utils/format';
 import {
   ALLOCATION_STEP, allocatedTotal, snapAmount, allocationWithinSalary,
-  rescaleAllocations, monthsToTarget,
+  monthsToTarget,
 } from '../utils/goalPlan';
 import { GOAL_TEMPLATES, MAX_ACTIVE_GOALS, TEMPLATE_DURATION, type GoalTemplate } from '../constants/goals';
 import { INPUT_LIMITS, sanitizeAmount, parseAmount } from '../utils/validation';
@@ -149,6 +149,7 @@ const GoalsScreen = ({ navigation }: any) => {
   const transactions = useEPurseStore((s: any) => s.transactions);
   const budget = useEPurseStore((s: any) => s.budget);
   const setGoalPlan = useEPurseStore((s: any) => s.setGoalPlan);
+  const keepLastGoalPlan = useEPurseStore((s: any) => s.keepLastGoalPlan);
   const rolloverGoalPlanIfNeeded = useEPurseStore((s: any) => s.rolloverGoalPlanIfNeeded);
   const getGoalPlanUsage = useEPurseStore((s: any) => s.getGoalPlanUsage);
   const getGoalLifetimeSaved = useEPurseStore((s: any) => s.getGoalLifetimeSaved);
@@ -415,8 +416,7 @@ const GoalsScreen = ({ navigation }: any) => {
   });
 
   const keepLastPlan = () => submit(() => {
-    const scaled = rescaleAllocations(lastGoalPlan?.allocations, lastGoalPlan?.salary, lastGoalPlan?.salary);
-    setGoalPlan({ salary: lastGoalPlan?.salary || 0, allocations: scaled });
+    keepLastGoalPlan();
     setEditing(false);
     toast.success(`${MONTH_LABEL(thisMonth)} plan saved`, "Last month's split, carried over.");
   });

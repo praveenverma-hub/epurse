@@ -54,6 +54,7 @@ import {
   hasAutoRule,
   ruleMatchesTxn,
   goalIsAchieved,
+  rescaleAllocations,
 } from '../utils/goalPlan';
 import { MAX_ALLOWED_AMOUNT } from '../constants/limits';
 import { parseMessageDetailed, isLimitStatementNotice } from '../utils/messageParser';
@@ -2582,6 +2583,17 @@ export const useEPurseStore = create(
           });
           return { goals, goalPlan: plan, lastGoalPlan: plan };
         }),
+
+      /** One tap on a new month: re-applies last month's goal split. False when there's nothing to keep. */
+      keepLastGoalPlan: () => {
+        const last = carryableGoalPlan(get());
+        if (!last) return false;
+        get().setGoalPlan({
+          salary: last.salary || 0,
+          allocations: rescaleAllocations(last.allocations, last.salary, last.salary),
+        });
+        return true;
+      },
 
       /**
        * Set ONE goal's monthly allocation, clamped to what's actually free —
@@ -8152,6 +8164,14 @@ export const carryableBudgetPlan = (lastBudgetPlan, now = new Date()) => {
   const ids = Object.keys(perCategory);
   if (ids.length === 0) return null;
   return { perCategory, totalCap: sumCaps(perCategory), monthKey: lastBudgetPlan.monthKey, count: ids.length };
+};
+
+/** Last month's goal plan when this month has none yet and there's an active goal to plan for. */
+export const carryableGoalPlan = (state, now = new Date()) => {
+  const mk = monthKey(now);
+  const last = state.lastGoalPlan;
+  if (state.goalPlan?.monthKey === mk || !last?.monthKey || last.monthKey >= mk) return null;
+  return (state.goals || []).some((g) => !isGoalInactive(g)) ? last : null;
 };
 
 export const selectUnreviewedQueue = (s) =>

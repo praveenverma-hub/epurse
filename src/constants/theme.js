@@ -1,4 +1,4 @@
-// Premium Swiggy-inspired theme
+// Premium theme
 /**
  * ⚠ THIS PALETTE IS FROZEN LIGHT — and it is the one thing blocking dark mode.
  *
@@ -394,6 +394,30 @@ const toRgb = (color) => {
 };
 
 const toHex = (rgb) => `#${rgb.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`;
+
+/** Rotate a colour's hue by `deg`, keeping saturation and lightness (HSL). Non-hex input comes back unchanged. */
+export const rotateHue = (color, deg) => {
+  const rgb = toRgb(color);
+  if (!rgb) return color;
+  const [r, g, b] = rgb.map((c) => c / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return toHex(rgb);
+  const sat = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (((h * 60 + deg) % 360) + 360) % 360 / 360;
+  const q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat;
+  const p = 2 * l - q;
+  const ch = (t) => {
+    const x = ((t % 1) + 1) % 1;
+    if (x < 1 / 6) return p + (q - p) * 6 * x;
+    if (x < 1 / 2) return q;
+    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+    return p;
+  };
+  return toHex([ch(h + 1 / 3), ch(h), ch(h - 1 / 3)].map((c) => c * 255));
+};
 
 /**
  * Flatten `fg` at `alpha` over `bg` into a SOLID colour.

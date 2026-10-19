@@ -3,7 +3,7 @@
 //
 // Layout:
 //   • Gradient header with total balance + eye toggle + add button
-//   • CRED-style horizontal card scroll (same cards as before)
+//   • realistic-card horizontal scroll (same cards as before)
 //   • Plain account list below for quick balance scanning
 // =============================================================================
 
@@ -468,7 +468,7 @@ export default function AccountsScreen({ navigation }) {
           </View>
         ))}
 
-        {/* CRED-style cards — centered, looping peek carousel (hidden when none) */}
+        {/* Realistic cards — centered, looping peek carousel (hidden when none) */}
         {sortedAccounts.length > 0 ? (
           <ScrollView
             ref={carouselRef}

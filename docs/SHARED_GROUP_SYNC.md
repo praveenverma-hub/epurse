@@ -383,7 +383,7 @@ The app guarantees two things only:
 | Someone deleted their account | Their member is a past member on every phone (`membersFromFold`): tagged Deleted Account, under Past Members, out of new splits, and the money of their old expenses locked like anyone who left. Their balance can still be settled. |
 | Delete Group (a local or "Sharing Ended" copy) | `detachFromGroup`: an expense paid from my account stays as my plain expense; one someone else paid, or a synced "you paid" never linked to an account, goes — kept, it counted as my spend (found Oct-15-2026: a ₹1,000 "Rahul paid" became ₹1,000 of mine). The group's Lent/Borrowed rows go with it, as before. |
 | A "Sharing Ended" copy goes live again (Add Back, rejoin) | It takes the server's history first (`resync`): what was changed in the ended copy is overwritten, never sent. |
-| Someone added later belongs in an earlier expense | Allowed: edit that expense and add them (Splitwise does the same). |
+| Someone added later belongs in an earlier expense | Allowed: edit that expense and add them. |
 | Expense edited after someone settled | Allowed; balances recompute — **unless someone in it has left** (below). |
 | Expense or settlement involving someone who has LEFT (decided Oct-15-2026) | Nothing may move their balance: they left at ₹0 and aren't there to see it. Fold rule `movesPastMember` → `past_member` for an edit, delete or correction that changes their net. Title, category, date and note still edit. The app enforces it first (`pastMemberIn` in split.js): the edit form locks amount/split/group with a reason, the review card hides Ignore/Delete/group change, and the store refuses delete/ignore/untag/move and keeps the money in `updateGroupExpense`. **Add Back** unlocks it. Once sharing has ended on this phone it's a local group again. Replaces "settle with someone who left" — that case can no longer arise. |
 | Duplicate expense or settlement, overpayment | Nothing special — counted as entered. |
@@ -625,7 +625,7 @@ groups therefore recover past the backup point; personal data only up to it.
 
 ## 13. Defaults to confirm
 
-- Any member can invite (Splitwise-style); there is no admin (§1).
+- Any member can invite; there is no admin (§1).
 - The note is never shared; the title (merchant) is.
 - Someone records that **I** paid: on my phone it books my "lent" rows with no account movement.
   **Built Oct-15-2026:** the detail sheet's Account row says "Not From an Account"; Edit starts on

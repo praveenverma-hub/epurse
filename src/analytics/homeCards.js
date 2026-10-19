@@ -39,10 +39,12 @@ export const HOME_CARD_LIMIT = 5;
  * last because it matters most to people who already have data in here. They
  * live in this module rather than in the carousel because `buildHomeCards` is
  * what decides whether they appear at all.
+ * `tip` is the one-line version for Home's tip strip (analytics/homeTips.js).
  */
 export const PROMO_CARDS = [
   {
     id: 'promo_sms',
+    tip: 'Bank SMS are read and sorted for you — no typing',
     icon: 'flash-outline',
     eyebrow: 'No typing',
     title: 'Your bank SMS,\nread automatically',
@@ -52,6 +54,7 @@ export const PROMO_CARDS = [
   },
   {
     id: 'promo_split',
+    tip: 'Split a bill once and settle with one balance per person',
     icon: 'people-outline',
     eyebrow: 'Shared spending',
     title: 'Split a bill,\nsettle just once',
@@ -61,6 +64,7 @@ export const PROMO_CARDS = [
   },
   {
     id: 'promo_lb',
+    tip: 'Lent and borrowed money nets to one figure per person',
     icon: 'swap-horizontal-outline',
     eyebrow: 'Never forget',
     title: 'Who owes you,\nkept straight',
@@ -70,6 +74,7 @@ export const PROMO_CARDS = [
   },
   {
     id: 'promo_budget',
+    tip: 'Budgets count only the categories you choose',
     icon: 'options-outline',
     eyebrow: 'Your rules',
     title: 'Budgets that count\nwhat you say counts',
@@ -79,6 +84,7 @@ export const PROMO_CARDS = [
   },
   {
     id: 'promo_goals',
+    tip: 'Goals can fill themselves from the spends you pick',
     icon: 'flag-outline',
     eyebrow: 'Plan ahead',
     title: 'Set money aside,\nwatch it grow',
@@ -88,6 +94,7 @@ export const PROMO_CARDS = [
   },
   {
     id: 'promo_backup',
+    tip: 'Back up to your own Google Drive, locked with your password',
     icon: 'shield-checkmark-outline',
     eyebrow: 'Private by design',
     title: 'Encrypted backup,\nonly you hold the key',

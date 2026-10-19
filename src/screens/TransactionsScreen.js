@@ -321,7 +321,7 @@ const TransactionsScreen = ({ navigation, route }) => {
     [activeTxn, lentBorrowed],
   );
 
-  // ── Sticky chip bar (Swiggy-style) ────────────────────────────────────────
+  // ── Sticky chip bar ────────────────────────────────────────
   // Chips live inside the FlatList (scroll away naturally). A fixed copy sits
   // above the list at opacity 0. It only appears when the user scrolls back DOWN
   // after the inline chips have left the viewport, and hides again once the

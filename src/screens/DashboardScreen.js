@@ -39,12 +39,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import CollapsingHeaderScreen from '../components/CollapsingHeaderScreen';
 
-import { useEPurseStore, selectAccountsTracked, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive } from '../store/ePurseStore';
+import { useEPurseStore, selectAccountsTracked, selectUnreviewedQueue, selectExpenseStats, selectLatestRecapMonth, selectWeeklySummary, spendExcluded, buildGoalMonthFacts, isGoalInactive, carryableGoalPlan } from '../store/ePurseStore';
 import { goalsBehindPlan, goalsNearTarget } from '../analytics/nudgeFacts';
 import { EPurseInlineWordmark } from '../components/EPurseBrandLockup';
 import {
   useRewardStore,
   selectLevel,
+  selectTotalRP,
 } from '../store/useRewardStore';
 const selectPendingSavings = (s) => s.pendingSavingsReward;
 import { colors, radius, readableOn, spacing, typography, shadows, pinnedHeaderChrome } from '../constants/theme';
@@ -73,7 +74,7 @@ import EmptyState from '../components/EmptyState';
 import StatSplitRow from '../components/StatSplitRow';
 import { useNotificationStore, selectNotificationEntries } from '../store/useNotificationStore';
 import { bellHasUnread } from '../analytics/bellFeed';
-import { REWARD_CONFIG, vaultTierForStreak, multiplierForStreak, labelForStreak } from '../config/rewardConfig';
+import { REWARD_CONFIG, vaultTierForStreak, multiplierForStreak, labelForStreak, levelFromRP, rpForNextLevel } from '../config/rewardConfig';
 import InfoSheet from '../components/InfoSheet';
 import { selectAwareStreak } from '../store/useRewardStore';
 import WelcomeStreakModal from '../components/WelcomeStreakModal';
@@ -100,6 +101,8 @@ import TxnDetailSheet from '../components/TxnDetailSheet';
 import SectionHeader from '../components/SectionHeader';
 import HeaderChip from '../components/HeaderChip';
 import HomeCarousel from '../components/HomeCarousel';
+import TipStrip from '../components/TipStrip';
+import { buildHomeTips } from '../analytics/homeTips';
 import { buildHomeCards, PROMO_CARDS } from '../analytics/homeCards';
 import { useStoreHydrated } from '../hooks/useStoreHydrated';
 import { detectSubscriptions } from '../analytics/behavioralSelectors';
@@ -190,6 +193,7 @@ const DashboardScreen = ({ navigation }) => {
   const ignoreTransaction = useEPurseStore((s) => s.ignoreTransaction);
   const level              = useRewardStore(selectLevel);
   const awareStreak        = useRewardStore(selectAwareStreak);
+  const totalRP            = useRewardStore(selectTotalRP);
   const claimSavingsBonus  = useRewardStore((s) => s.claimSavingsBonus);
   const pendingSavingsReward = useRewardStore(selectPendingSavings);
   // One auto-opening modal at a time, in a fixed order — see the hook. The claim
@@ -423,6 +427,46 @@ const DashboardScreen = ({ navigation }) => {
     ),
     [budgetUsage, topCategory, subscriptions, uncategorised, weekSummary, ccBills, goalFacts],
   );
+
+  const lastGoalPlan = useEPurseStore((s) => s.lastGoalPlan);
+  const keepLastGoalPlan = useEPurseStore((s) => s.keepLastGoalPlan);
+  const getMonthlySpend = useEPurseStore((s) => s.getMonthlySpend);
+  const recapCardShowing = !!(showMonthlyRecap && latestRecapMonth && recapCardDismissed !== latestRecapMonth);
+  const homeTips = useMemo(() => {
+    const now = new Date();
+    const rp = totalRP || 0;
+    const lastDate = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    return buildHomeTips(
+      {
+        goalCarry: carryableGoalPlan({ goals, goalPlan, lastGoalPlan }, now),
+        lastMonthTop: getCategoryBreakdown(lastDate)[0] || null,
+        // The recap card already says this when it's on screen.
+        lastMonth: recapCardShowing ? null : {
+          monthKey: `${lastDate.getFullYear()}-${String(lastDate.getMonth() + 1).padStart(2, '0')}`,
+          spent: getMonthlySpend(lastDate),
+          prevSpent: getMonthlySpend(new Date(now.getFullYear(), now.getMonth() - 2, 15)),
+        },
+        subscriptions,
+        rewards: {
+          toNext: rpForNextLevel(rp) - rp,
+          nextLevel: levelFromRP(rp) + 1,
+          perReview: Math.round(REWARD_CONFIG.REVIEW_RP_BASE * multiplierForStreak(awareStreak)),
+        },
+        carouselIds: homeCards.map((c) => c.id),
+      },
+      PROMO_CARDS,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goals, goalPlan, lastGoalPlan, transactions, groups, excludedExpenseParents, getCategoryBreakdown, getMonthlySpend, recapCardShowing, subscriptions, totalRP, awareStreak, homeCards]);
+
+  const onPressTip = (tip) => {
+    if (tip.action === 'keepGoalPlan') {
+      const month = new Date().toLocaleDateString('en-IN', { month: 'long' });
+      if (keepLastGoalPlan()) toast.success(`${month} plan saved`, "Last month's split, carried over.");
+      return;
+    }
+    if (tip.target) navigateToTarget(tip.target[0], tip.target[1]);
+  };
 
   // The ledger row a person-tagged transaction carries — "Linked to X" + Change Person
   // in the category sheet (a group's settle row is fixed from the group, not here).
@@ -851,6 +895,8 @@ const DashboardScreen = ({ navigation }) => {
           {/* Monthly budget — empty CTA or active progress */}
           <BudgetSummary onPress={() => navigation.navigate('Insights', { defaultTab: 'budget', openPlan: !budget })} />
         </View>
+
+        <TipStrip tips={homeTips} onPressTip={onPressTip} loading={!hydrated || !rewardsHydrated} bleed={spacing.lg} />
 
         {/* Weekly spend recap is no longer an inline card — it appears once, after
             a week ends, as a centered modal (WeeklyRecapModal below). */}

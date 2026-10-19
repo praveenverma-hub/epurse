@@ -1241,7 +1241,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
               <FormTextInput
                 value={merchant}
                 onChangeText={(t: string) => setMerchant(sanitizeName(t, INPUT_LIMITS.MERCHANT_MAX))}
-                placeholder="e.g. Zomato, Petrol, Salary"
+                placeholder="e.g. Groceries, Petrol, Salary"
                 maxLength={INPUT_LIMITS.MERCHANT_MAX}
               />
             </FormField>

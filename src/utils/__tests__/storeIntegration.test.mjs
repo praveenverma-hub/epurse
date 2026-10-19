@@ -5601,6 +5601,29 @@ console.log('\n— Keep Last Month\'s Plan on a new month (Oct-11-26) —');
   check('keep again with a budget in place is a no-op', G().keepLastBudgetPlan() === false && G().budget === before);
 }
 
+console.log('\n— Keep last month\'s GOAL split from Home (Oct-19-26) —');
+{
+  reset();
+  const G = () => useStore.getState();
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMk = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+  const thisMk = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const goal = { id: 'g1', name: 'Trip', duration: 'recurring' };
+  const last = { monthKey: prevMk, salary: 60000, allocations: { g1: 5000 } };
+
+  useStore.setState({ goals: [goal], goalPlan: null, lastGoalPlan: last });
+  check('carryable: last month\'s plan, none this month, an active goal', mod.carryableGoalPlan(G()) === last);
+  check('no active goal → nothing to carry', mod.carryableGoalPlan({ ...G(), goals: [{ ...goal, archivedAt: 1 }] }) === null);
+  check('this month\'s own lastGoalPlan is not offered', mod.carryableGoalPlan({ ...G(), lastGoalPlan: { ...last, monthKey: thisMk } }) === null);
+
+  check('keep → this month\'s plan = last month\'s split', G().keepLastGoalPlan() === true
+    && G().goalPlan?.monthKey === thisMk && G().goalPlan.salary === 60000 && G().goalPlan.allocations.g1 === 5000, JSON.stringify(G().goalPlan));
+  check('…and the offer is gone', mod.carryableGoalPlan(G()) === null);
+  const before = G().goalPlan;
+  check('keep again is a no-op', G().keepLastGoalPlan() === false && G().goalPlan === before);
+}
+
 console.log('\n— notify(): one gate for every app-decided push (Oct-11-26) —');
 {
   const RN = await import('react-native');

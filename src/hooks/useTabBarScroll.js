@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTabBarVisibility } from '../context/TabBarVisibilityContext';
 
 /**
- * Wire this to a ScrollView / FlatList to get Swiggy-style hide-on-scroll:
+ * Wire this to a ScrollView / FlatList to get hide-on-scroll:
  *   const scrollProps = useTabBarScroll();
  *   <ScrollView {...scrollProps} ...>
  *

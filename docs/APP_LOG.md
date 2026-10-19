@@ -243,7 +243,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   (`ManageAccountModal.tsx`) consolidating rename, type change, link-to-bank, read-only
   details (bank/mask, linked cards, CC bill cycle if known), and delete. Opened from the
   flat account list's left type-icon (mirrors tapping a transaction card's icon), and from
-  a new pencil icon on `AccountDetailsScreen`'s header; the CRED-style carousel cards are
+  a new pencil icon on `AccountDetailsScreen`'s header; the realistic-card carousel is
   unchanged. New `renameAccount` store action (names were create-time-only before).
   `deleteAccount` now also prunes `archivedTransactions`, stale `declinedAccountLinks`
   entries naming the account's mask, and — for a Credit Card — its `ccBills` entry,
@@ -2344,6 +2344,13 @@ off are DONE (see Backup).
 - **Open:** Phase B (only ~13 months in memory) when start-up gets slow — STORAGE_MIGRATION §8.
 
 **Done**
+- **Oct-19-2026 — tip strip on Home (`TipStrip` + `analytics/homeTips.js`).** Deep theme-shade full-bleed band, a different tonal shade per slide (`constants/tipBand.js`; deep violet / indigo / plum on Violet; not a card; ~74pt) between
+  the "your money" and "activity" groups; swipe-only (no auto-advance), loops past either end, segmented dashes. Slides: keep last
+  month's goal split (one tap, new store action `keepLastGoalPlan` — Goals screen uses it too), "10% less on
+  <last month's top category> saves ₹X a year", RP to next level, last month's spend vs the month before (hidden while the recap card shows), monthly
+  subscriptions (hidden while the carousel shows them), and feature tips the carousel isn't showing; up to 7.
+  Shown only when one of the first four (live facts) exists — rewards/feature tips alone don't keep it up.
+  Budget renew stays on BudgetSummary's existing carry card (not duplicated). Not device-verified.
 - Oct-11-2026: **Android keyboard covered sheets and forms.** On Android 15+ (edge-to-edge) the
   window no longer shrinks for the keyboard, so the Manage modal's chips/actions/Done and the
   Backup password sheet sat behind it. `AppKeyboardAvoidingView` now pads by the keyboard height
@@ -2930,6 +2937,11 @@ off are DONE (see Backup).
 ## UI Consistency / Navigation
 
 **Done**
+- **Oct-19-2026 — Collapsing header: hero content stays put.** The hero no longer scrolls up with the
+  header; it counter-translates by `barCounter` (like the bar) and fades in place while the header's
+  bottom edge rises over it (`CollapsingHeaderScreen`). Applies to Home and Accounts. Not device-verified.
+  Same day: the fade moved to the END of the collapse (`HERO_FADE_START` 0.6 → 1) — fading by 55% left a
+  blank gradient while the header was still tall.
 - **Oct-19-2026 — Settings sub-screens: one section division.** Seven different ways of splitting
   groups found across Settings/Profile sub-screens. Settings' own list kept as is (user); every
   sub-screen with 2+ groups now uses the Notifications band, extracted as `components/SectionBand.tsx`:
@@ -3250,7 +3262,7 @@ off are DONE (see Backup).
   **Corrected Sep-19-2026:** budget tracking IS a named permitted use case —
   *"SMS-based money management / apps that track and manage budget"*, eligible for
   `READ_SMS`+`RECEIVE_SMS`, and it survives the policy revision effective Jan-27-2027.
-  Same exception Axio/Walnut (`com.daamitt.walnut.app`) ships under. Approval still turns
+  Established SMS expense trackers ship under the same exception. Approval still turns
   on the declaration quality: core-functionality framing, demo video, prominent
   disclosure, and the on-device argument (the backup allow-list proves raw SMS never
   leaves the device). Fallbacks (notification listener / manual-only) are insurance now,
