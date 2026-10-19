@@ -97,6 +97,13 @@ const STUBS = {
     'export const writeAside=(k,v)=>AsyncStorage.setItem(k,v);export const readAside=(k)=>AsyncStorage.getItem(k);' +
     'export const removeAside=(k)=>AsyncStorage.removeItem(k);export const wipeAppStorage=async()=>{};' +
     "export const getStorageMode=()=>'legacy';export const getStorageRecovery=()=>null;",
+  // The phone's address book: `globalThis.__contacts[user]`, per signed-in phone (scenario suite).
+  contactsService:
+    'const book=()=>(globalThis.__contacts||{})[globalThis.__syncUser]||[];' +
+    'export const getContactsPermissionStatus=async()=>book().length>0;' +
+    'export const requestContactsPermission=async()=>book().length>0;' +
+    'export const requestContactsPermissionMeta=async()=>({granted:book().length>0,canAskAgain:false});' +
+    'export const fetchContactsForPicker=async()=>book();',
   // MMKV for the small stores — same idea: the AsyncStorage stub behind a StateStorage.
   appKv:
     "import AsyncStorage from '@react-native-async-storage/async-storage';" +
@@ -119,6 +126,7 @@ function stubFor(specifier) {
   if (/services\/locationService$/.test(specifier)) return STUBS.locationService;
   if (/storage\/appStorage$/.test(specifier)) return STUBS.appStorage;
   if (/storage\/appKv$/.test(specifier)) return STUBS.appKv;
+  if (/services\/contactsService$/.test(specifier)) return STUBS.contactsService;
   return null;
 }
 

@@ -154,6 +154,7 @@ export const UNSENDABLE = 'unsendable';
  */
 export function planOutgoing(
   group: Group, txns: SyncTxn[], newId: () => string, builtIns: Set<string>, at: string, lb: SyncLbRow[] = [],
+  myPhone: string | null = null,
 ): { shared: GroupShared; syncIds: Record<string, string>; lbSyncIds: Record<string, string>; flags: Record<string, string | null> } | null {
   const shared = group.shared;
   if (!shared || shared.status === 'ended' || !shared.myMemberId || shared.resync) return null;
@@ -165,7 +166,7 @@ export function planOutgoing(
     if (!pending.has(key)) { pending.add(key); events.push(ev); }
   };
 
-  const people = planGroupChanges(group, shared, newId, (phone) => cachedPhoneKey(shared.keys, phone));
+  const people = planGroupChanges(group, shared, newId, (phone) => cachedPhoneKey(shared.keys, phone), myPhone);
   people.events.forEach(push);
   const mapped: GroupShared = { ...shared, memberMap: people.memberMap };
 

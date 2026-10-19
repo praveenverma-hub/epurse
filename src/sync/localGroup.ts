@@ -76,6 +76,8 @@ export function planGroupChanges(
   newId: () => string,
   /** Phone → fingerprint (sync/phoneKey.ts); omitted = send none. Injected so this stays fast in tests. */
   keyOf?: (phone: string) => string | null,
+  /** My own number (Profile) — without its fingerprint nobody else can show me under their contact name. */
+  myPhone?: string | null,
 ): { events: SyncEvent[]; memberMap: Record<string, string> } {
   const events: SyncEvent[] = [];
   const memberMap = { ...shared.memberMap };
@@ -86,6 +88,13 @@ export function planGroupChanges(
   const colorChanged = fold.meta?.color != null && fold.meta.color !== meta.color;
   if (meta.name && (!fold.meta || fold.meta.name !== meta.name || fold.meta.emoji !== meta.emoji || colorChanged)) {
     events.push(meta);
+  }
+
+  // Sent again when I change my number — the group must hold the CURRENT one.
+  const me = shared.myMemberId;
+  if (me && myPhone && keyOf && fold.members[me] && !fold.members[me].archived) {
+    const key = keyOf(myPhone);
+    if (key && fold.phoneKeys?.[me] !== key) events.push({ type: 'member.phone', memberId: me, phoneKey: key });
   }
 
   for (const m of group.members) {

@@ -27,13 +27,13 @@ import { useTheme } from '../hooks/useTheme';
 import { useUnchanged } from '../hooks/useUnchanged';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import UnderlineTabBar from '../components/UnderlineTabBar';
-import { FormField, FormSwitchRow, FormTextInput, FormValueCard, FormValueRow } from '../components/FormField';
+import { FormField, FormPhoneInput, FormSwitchRow, FormTextInput, FormValueCard, FormValueRow } from '../components/FormField';
 import FormFooterActions from '../components/FormFooterActions';
 import InlineContactPicker, { type InlineContact } from '../components/InlineContactPicker';
 import { ChoiceLabel, ColorChoices, EmojiChoices, IconField, TileEmoji } from '../components/IconColorPicker';
 import { peekReviewFlowDraft, setReviewFlowDraft } from '../utils/reviewFlowDraft';
 import { useEPurseStore } from '../store/ePurseStore';
-import { INPUT_LIMITS, sanitizeName, isValidName } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeName, isValidName, isValidPhone, normalizePhone } from '../utils/validation';
 import { memberName } from '../utils/split';
 import { titleCaseName } from '../utils/format';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
@@ -78,6 +78,12 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
   const [excludeFromTotals, setExcludeFromTotals] = useState(false);
   const [members, setMembers] = useState<GroupMember[]>([]); // for shared, without "me"
   const [pickerOpen, setPickerOpen] = useState(!!route?.params?.addMember);
+  // A shared group needs MY number: it's how the others' phones show me under the name they saved.
+  const myPhone = useEPurseStore((s: any) => s.userPhones?.[0] || '') as string;
+  const setUserPhones = useEPurseStore((s: any) => s.setUserPhones) as (p: string[]) => void;
+  const [phoneDraft, setPhoneDraft] = useState('');
+  const askPhone = !isEdit && !myPhone;
+  const phoneOk = !(askPhone && type === 'shared') || isValidPhone(phoneDraft);
 
   // Seed from the existing group once, on mount.
   useEffect(() => {
@@ -95,7 +101,9 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
   const addMember = (c: InlineContact) =>
     setMembers((prev) => (prev.some((m) => m.contactId === c.id)
       ? prev
-      : [...prev, { memberId: `c_${c.id}`, name: c.name, contactId: c.id }]));
+      // Linked from the start: my contact name shows even if the group renames them, and
+      // the number's fingerprint lets the others' phones link them too.
+      : [...prev, { memberId: `c_${c.id}`, name: c.name, contactId: c.id, contactName: c.name, phone: normalizePhone(c.phones[0] || '') || null }]));
   // By memberId: people who joined a live group from their own phone have no contactId.
   const removeMember = (memberId: string) =>
     setMembers((prev) => prev.filter((m) => m.memberId !== memberId));
@@ -110,6 +118,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
     if (!isValidName(cleaned)) return;
     submit(() => {
       // People picked on the Shared tab don't come along if Personal is what's saved.
+      if (askPhone && type === 'shared') setUserPhones([phoneDraft]);
       const data: CreateGroupData = {
         name: cleaned, type, emoji, color, excludeFromTotals, members: type === 'shared' ? members : [],
       };
@@ -220,6 +229,12 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
         </FormField>
       ) : null}
 
+      {bodyType === 'shared' && askPhone ? (
+        <FormField label="Your Mobile Number" hint="So everyone in the group sees you under the name they saved for you. Saved to your profile.">
+          <FormPhoneInput value={phoneDraft} onChangeText={setPhoneDraft} error={phoneDraft.length > 0 && !isValidPhone(phoneDraft)} />
+        </FormField>
+      ) : null}
+
       {/* Mine only — never synced. A shared group's repayments follow it (spendExcluded). */}
       <FormValueCard>
         <FormSwitchRow
@@ -291,7 +306,7 @@ export default function GroupFormScreen({ navigation, route }: { navigation: any
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           <FormFooterActions
             onCancel={() => navigation.goBack()}
-            submit={nameValid && !unchanged ? {
+            submit={nameValid && phoneOk && !unchanged ? {
               title: isEdit ? 'Save Changes' : 'Create Group',
               onPress: handleSave,
               loading: submitting,

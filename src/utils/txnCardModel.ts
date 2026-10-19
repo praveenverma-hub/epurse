@@ -12,7 +12,7 @@
 //   tier 3  date [note]  CHIP CHIP +N .................. Split · 3
 // =============================================================================
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABEL, TRANSACTION_TYPES } from '../constants/categories';
-import { debitDisplayAmount, groupLbChipKind, splitLbChipKind } from './split';
+import { debitDisplayAmount, groupLbChipKind, memberName, splitLbChipKind } from './split';
 import type { GroupMember, GroupSplit } from '../types/group';
 
 /** The fields a card / split view reads (the store txn is a superset). */
@@ -46,7 +46,7 @@ export interface CardTxn {
   formerGroup?: { name: string; emoji?: string | null; myShare?: number; excludeFromTotals?: boolean };
 }
 /** Only the members matter here — resolves payer / share names. */
-export interface CardGroup { members?: GroupMember[] }
+export interface CardGroup { name?: string; members?: GroupMember[] }
 export interface CardAccount { name?: string; mask?: string; type?: string; bankName?: string }
 
 export type CardContext = (typeof CARD_CONTEXT)[keyof typeof CARD_CONTEXT];
@@ -70,8 +70,8 @@ export interface TxnCard {
   splitCount: number;
   hasNote: boolean;
   showGroupRibbon: boolean;
-  /** "From Goa Trip" — the deleted group it was in, else null. */
-  fromGroup: string | null;
+  /** The group the card is in — or was in, `deleted`, so the card keeps the mark in grey. */
+  ribbon: { name: string; deleted: boolean } | null;
 }
 
 /** Where the card is shown — each drops what that screen already says. */
@@ -123,7 +123,7 @@ export function txnPayerName(txn: CardTxn | null | undefined, group?: CardGroup 
   if (txn.isGroupMemo && txn.groupSplit) {
     const id = txn.groupSplit.paidByMemberId;
     const member = (group?.members || []).find((m) => m.memberId === id);
-    return firstName(member?.contactName || member?.name || txn.groupSplit.paidByName) || 'Someone';
+    return firstName(memberName(member) || txn.groupSplit.paidByName) || 'Someone';
   }
   if (txn.isSplitMemo) return firstName(txn.splitPaidBy?.name) || 'Someone';
   return null;
@@ -216,6 +216,10 @@ export function buildTxnCard(
     lbKind ? CHIP[lbKind] : lent > 0 ? { ...CHIP.lent, amount: lent } : null,
     !txn.isIgnored && txn.isHidden && CHIP.private,
   ].filter((c): c is CardChip => !!c);
+  const ribbon = context === CARD_CONTEXT.GROUP ? null
+    : group ? { name: group.name || '', deleted: false }
+    : !txn.groupId && txn.formerGroup?.name ? { name: txn.formerGroup.name, deleted: true }
+    : null;
   // A category LENT and a split's LENT framing are the same fact — show it once.
   const chips = candidates.filter((c, i) => candidates.findIndex((x) => x.label === c.label) === i);
 
@@ -229,7 +233,7 @@ export function buildTxnCard(
     // People on the bill, me included. A group split is shown by the group ribbon.
     splitCount: txn.isSplit && !txn.groupId ? (txn.splitWith || []).length + 1 : 0,
     hasNote: !!(txn.note && txn.note.trim()),
-    showGroupRibbon: !!group && context !== CARD_CONTEXT.GROUP,
-    fromGroup: !txn.groupId && txn.formerGroup?.name ? `From ${txn.formerGroup.name}` : null,
+    showGroupRibbon: !!ribbon,
+    ribbon,
   };
 }

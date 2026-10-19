@@ -2001,6 +2001,19 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Groups
 
 **Done**
+- **Oct-20-2026 — my own number for shared groups.** Required (inline `FormPhoneInput`, saved to profile) when
+  creating a shared group and when joining; an older group's first invite without one → "Add Your Number First" →
+  My Profile. `planGroupChanges` now sends MY `member.phone` fingerprint (was skipped: "me" never had one), so the
+  others' phones link me to their contacts; re-planned on `userPhones` change. MyProfile's +91 input → shared
+  `FormPhoneInput`. Not device-verified.
+- **Oct-20-2026 — member names from MY contacts everywhere.** Audit found 9 paths showing the group's/server's
+  name instead of `memberName`: group history (by / "X paid Y" / payer), the detail sheet's split section, the
+  Earlier-balance LB row, Group Detail (header, contribution chart, invite/add-back/remove copy, invite picker),
+  edit-restored share rows, "has left this group" toasts, untag-to-plain-split names, and GroupForm's contact pick
+  (no contactName/phone stored). All fixed; tests in test:txnCard / test:groupScenarios.
+  Edge pass: changed number re-sends my fingerprint; members picked before the fix get `contactName` backfilled
+  (past members too); contacts renamed on the phone refresh on Group Detail open; linking also runs from the sync
+  engine when a fingerprint lands (Home cards / Lent/Borrowed no longer wait for the group to be opened).
 - **Oct-18-26: Exclude From Totals on SHARED groups too** (local only, never synced). The Repaids that settle
   it drop out with it: `settlesExcludedGroup` (store) reads the txn's settle LB rows — the txn has no groupId.
   Mixed (excluded group + direct part on one txn) still counts: one yes/no per txn. Ledger reason "excluded
@@ -2009,7 +2022,7 @@ one line where possible; link a file/symbol name (greppable) instead of describi
   member is me used to say "Live". No dot.
 - **Oct-18-26: Delete Group (user-agreed rules).** Only at ₹0 with everyone (GroupDetail: "Settle Up First"
   modal listing who owes whom → View Members); live still also Leaves. `deleteGroup`: my bills + settle txns
-  stay, unlinked, stamped `formerGroup` {name, emoji, myShare?, excludeFromTotals?} → card "· From Goa Trip",
+  stay, unlinked, stamped `formerGroup` {name, emoji, myShare?, excludeFromTotals?} → card "· From Goa Trip" (Oct-20: now the group ribbon kept in disabled grey instead),
   detail sheet "Group: 🏖 Goa Trip · Deleted"; my bills keep counting my SHARE (`debitDisplayAmount`), an
   excluded group's stay excluded (`isGroupExcluded`). User-agreed follow-up: an amount edit moves only MY share
   by the difference (others paid back on the old amount; clamped 0…amount); a bill others had a share in

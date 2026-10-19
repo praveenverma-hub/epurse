@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, DIVIDER_W } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import AppSwitch from './AppSwitch';
+import { INPUT_LIMITS, sanitizePhone } from '../utils/validation';
 
 // ─── FormField — labelled wrapper ────────────────────────────────────────────
 
@@ -109,6 +110,38 @@ export const FormAmountInput: React.FC<TextInputProps & { locked?: boolean; comp
       onBlur={focus.onBlur}
       {...rest}
     />
+  );
+};
+
+/**
+ * Indian mobile number: fixed +91 prefix, digits only, 10 max. `onChangeText` gets the
+ * sanitised digits. `style` restyles the outlined surface (My Profile's filled inputs).
+ */
+export const FormPhoneInput: React.FC<{
+  value: string;
+  onChangeText: (digits: string) => void;
+  error?: boolean;
+  autoFocus?: boolean;
+  style?: ViewStyle;
+}> = ({ value, onChangeText, error, autoFocus, style }) => {
+  const focus = useFocusBorder();
+  return (
+    <View style={[styles.input, styles.phoneRow, style, focus.focusStyle, error && { borderColor: colors.danger }]}>
+      <Text style={styles.phonePrefix}>+91</Text>
+      <View style={styles.phoneDivider} />
+      <TextInput
+        style={styles.phoneInput}
+        placeholder="10-digit number"
+        placeholderTextColor={colors.textMuted}
+        value={value}
+        onChangeText={(t) => onChangeText(sanitizePhone(t))}
+        keyboardType="number-pad"
+        maxLength={INPUT_LIMITS.PHONE_LEN}
+        autoFocus={autoFocus}
+        onFocus={focus.onFocus}
+        onBlur={focus.onBlur}
+      />
+    </View>
   );
 };
 
@@ -418,6 +451,10 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   inputMultiline: { minHeight: 60, textAlignVertical: 'top' },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 0 },
+  phonePrefix: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  phoneDivider: { width: 1, height: 20, marginHorizontal: spacing.md, backgroundColor: colors.divider },
+  phoneInput: { flex: 1, fontSize: 15, paddingVertical: spacing.md, color: colors.textPrimary },
   // Locked needs a recessed fill, and with no base fill it must be a translucent
   // wash (not `cardAlt`) so it darkens on gray and white alike.
   inputLocked: {

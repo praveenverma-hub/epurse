@@ -83,7 +83,7 @@ function tick() {
   for (const g of S().groups) {
     if (!g.shared || g.shared.status === 'ended') continue;
     const now = S();
-    const plan = planOutgoing(now.groups.find((x) => x.id === g.id), now.transactions, G.newSyncId, G.BUILT_IN_CATEGORIES, new Date().toISOString(), now.lentBorrowed);
+    const plan = planOutgoing(now.groups.find((x) => x.id === g.id), now.transactions, G.newSyncId, G.BUILT_IN_CATEGORIES, new Date().toISOString(), now.lentBorrowed, now.userPhones?.[0] ?? null);
     if (!plan) continue;
     const ops = Object.entries(plan.flags).map(([txnId, syncRejected]) => ({ kind: 'flag', txnId, syncRejected }));
     now.setSharedGroupState(g.id, plan.shared, { syncIds: plan.syncIds, lbSyncIds: plan.lbSyncIds, ops });
@@ -92,7 +92,8 @@ function tick() {
 // The engine's subscription itself: every store write on the acting phone re-plans, as in the app.
 let ticking = false;
 useStore.subscribe((st, prev) => {
-  if (swapping || ticking || (st.transactions === prev.transactions && st.groups === prev.groups && st.lentBorrowed === prev.lentBorrowed)) return;
+  if (swapping || ticking || (st.transactions === prev.transactions && st.groups === prev.groups && st.lentBorrowed === prev.lentBorrowed
+    && st.userPhones === prev.userPhones)) return;
   ticking = true;
   try { tick(); } finally { ticking = false; }
 });
@@ -907,6 +908,85 @@ section('B4. Who changed what, and when');
   check('an expense\'s history page heads with what it is now, from this phone\'s point of view',
     head?.title === 'Dinner' && head.amountPaise === 120000 && head.paidBy === 'Kai' && !head.deleted, J(head));
   check('…a deleted one too', entrySummary(groupOf(X, Rh).shared, all[0].entityId)?.deleted === true);
+  // Oct-20-26: a person linked to MY contacts shows under my contact name, here too.
+  const gX = groupOf(X, Rh);
+  const linked = gX.members.map((m) => (m.name === 'Lea' ? { ...m, contactName: 'Lea Sharma' } : m));
+  check('history names a linked person by MY contact name', J(entryHistory(gX.shared, dinnerId, linked).map(line)) === J(['Lea Sharma edited amount', 'You added']),
+    J(entryHistory(gX.shared, dinnerId, linked).map(line)));
+  check('…in the group history too', groupHistory(gX.shared, 100, linked).some((i) => i.by === 'Lea Sharma'));
+  const onZ = groupOf(Z, Rh);
+  const zLinked = onZ.members.map((m) => (m.name === 'Kai' ? { ...m, contactName: 'Kai Mehta' } : m));
+  check('…and as the payer heading an expense\'s page', entrySummary(onZ.shared, dinnerId, zLinked)?.paidBy === 'Kai Mehta');
+  check('…the group\'s own name when not linked', entrySummary(onZ.shared, dinnerId, onZ.members)?.paidBy === 'Kai');
+}
+
+section('B5. Names from MY contacts, seen from the other phone (Oct-20-26)');
+{
+  const { autoLinkGroupMembers } = await import(`${PROJECT_ROOT}/src/sync/contactLink.ts`);
+  const { txnPayerName } = await import(`${PROJECT_ROOT}/src/utils/txnCardModel.ts`);
+  const { splitPosition } = await import(`${PROJECT_ROOT}/src/utils/splitPosition.ts`);
+  const { entryHistory } = await import(`${PROJECT_ROOT}/src/sync/history.ts`);
+  const A = phone('Arjun'), B = phone('Bharat');
+  A.state.userPhones = ['9811111111'];
+  B.state.userPhones = ['9822222222'];
+  // Each phone's own address book: A saved B as "Bunty", B saved A as "Arjun Bhaiya" (+91, spaced).
+  globalThis.__contacts = {
+    [A.user]: [{ id: 'kb', name: 'Bunty', phones: ['9822222222'] }],
+    [B.user]: [{ id: 'ka', name: 'Arjun Bhaiya', phones: ['+91 98111 11111'] }],
+  };
+  let link, remote;
+  await as(A, async () => {
+    // As GroupForm now stores a contact pick: linked from the start.
+    const id = S().createGroup({ name: 'Trip', type: 'shared', members: [{ memberId: 'c_kb', name: 'Bunty', contactId: 'kb', contactName: 'Bunty', phone: '9822222222' }] });
+    link = await G.createInviteLink(id, 'c_kb');
+    remote = S().groups.find((g) => g.id === id).shared.remoteId;
+  });
+  await as(B, () => joinLikeScreen(link));
+  await syncAll(A, B);
+
+  const meOnA = groupOf(A, remote).shared.myMemberId;
+  check('the creator\'s OWN fingerprint reached the other phone', !!groupOf(B, remote).shared.fold.phoneKeys?.[meOnA]);
+  check('…and the joiner\'s own too', !!groupOf(A, remote).shared.fold.phoneKeys?.[groupOf(B, remote).shared.myMemberId]);
+
+  await as(B, () => autoLinkGroupMembers(localId(B, remote)));   // engine followLinks, run by hand
+  const arjunOnB = () => groupOf(B, remote).members.find((m) => !m.isMe && m.memberId !== 'me');
+  check('B links A to B\'s own contact by fingerprint — no prompt', arjunOnB()?.contactId === 'ka' && arjunOnB()?.contactName === 'Arjun Bhaiya', J(arjunOnB()));
+  check('…while the group (and the server) still call A "Arjun"', arjunOnB()?.name === 'Arjun');
+
+  await as(A, async () => { addExpense(A, localId(A, remote), 'Hotel', 2000, ['me', 'c_kb']); tick(); });
+  await syncAll(A, B);
+  const hotel = byTitle(B, remote, 'Hotel');
+  const gB = groupOf(B, remote);
+  check('B\'s card: "Arjun paid" from B\'s contact name', txnPayerName(hotel, gB) === 'Arjun', txnPayerName(hotel, gB));
+  const payerRow = splitPosition(hotel, { group: gB })?.people.find((x) => x.isPayer);
+  check('B\'s split section lists the payer by B\'s contact name', payerRow?.name === 'Arjun Bhaiya', J(payerRow));
+  check('B\'s history too', entryHistory(gB.shared, hotel.syncId, gB.members)[0]?.by === 'Arjun Bhaiya', J(entryHistory(gB.shared, hotel.syncId, gB.members)[0]));
+  const lbB = B.state.lentBorrowed.filter((l) => l.groupId === gB.id);
+  check('B\'s Lent/Borrowed row is under B\'s contact name, with the contact', lbB.length > 0 && lbB.every((l) => l.person === 'Arjun Bhaiya' && l.contactId === 'ka'), J(lbB.map((l) => [l.person, l.contactId])));
+  const lbA = A.state.lentBorrowed.filter((l) => l.groupId === groupOf(A, remote).id);
+  check('A\'s side shows B as A saved them', lbA.length > 0 && lbA.every((l) => l.person === 'Bunty'), J(lbA.map((l) => l.person)));
+
+  // B renames the contact on B's phone → shows after the next open of the group.
+  globalThis.__contacts[B.user][0].name = 'Arjun Sir';
+  await as(B, () => autoLinkGroupMembers(localId(B, remote), { refreshNames: true }));
+  check('a contact renamed on B\'s phone shows its new name, ledger included',
+    arjunOnB()?.contactName === 'Arjun Sir' && B.state.lentBorrowed.filter((l) => l.groupId === gB.id).every((l) => l.person === 'Arjun Sir'));
+
+  // A changes number → the group gets the new fingerprint; B, who has the NEW number saved, still links.
+  const oldKey = groupOf(B, remote).shared.fold.phoneKeys[meOnA];
+  await as(A, async () => { S().setUserPhones(['9833333333']); tick(); });
+  await syncAll(A, B);
+  check('a changed number replaces the fingerprint on the other phone', groupOf(B, remote).shared.fold.phoneKeys[meOnA] && groupOf(B, remote).shared.fold.phoneKeys[meOnA] !== oldKey);
+  check('…and isn\'t sent again and again', pendingOf(A, remote) === 0);
+
+  // A member picked from contacts BEFORE the fix: contactId, no contactName → filled from A's book.
+  await as(A, async () => {
+    const g = S().groups.find((x) => x.id === localId(A, remote));
+    S().updateGroup(g.id, { members: g.members.map((m) => (m.memberId === 'c_kb' ? { ...m, contactName: null } : m)) });
+    await autoLinkGroupMembers(g.id);
+  });
+  check('an old contact-linked member gets its contact name back', groupOf(A, remote).members.find((m) => m.memberId === 'c_kb')?.contactName === 'Bunty');
+  globalThis.__contacts = {};
 }
 
 section('Invariants, on every phone and every live group');

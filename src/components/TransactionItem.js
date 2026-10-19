@@ -48,6 +48,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
   );
   const cardPressable = typeof onPress === 'function';
   const amountColor = AMOUNT_INK[card.amount.tone];
+  const ribbonColor = card.ribbon?.deleted ? colors.disabledText : (group?.color || colors.info);
 
   return (
     <TouchableOpacity
@@ -58,7 +59,7 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
     >
       {/* Group watermark — the group's own emoji (data), oversized and faint, bleeding
           off the right edge behind the amount, so the card reads as "in this group". */}
-      {card.showGroupRibbon && group.emoji ? (
+      {card.showGroupRibbon && !card.ribbon.deleted && group?.emoji ? (
         <View style={styles.groupWatermarkClip} pointerEvents="none">
           <Text style={styles.groupWatermark} allowFontScaling={false}>{group.emoji}</Text>
         </View>
@@ -79,7 +80,6 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         {card.meta ? <Text style={styles.meta} numberOfLines={1}>{card.meta}</Text> : null}
         <View style={styles.footerRow}>
           <Text style={styles.time} numberOfLines={1}>{formatDateTime(txn.createdAt)}</Text>
-          {card.fromGroup ? <Text style={[styles.time, styles.fromGroup]} numberOfLines={1}>· {card.fromGroup}</Text> : null}
           {card.hasNote ? (
             <Ionicons name="document-text-outline" size={12} color={colors.textMuted} style={styles.noteMark}
               accessibilityLabel="Has a note" />
@@ -117,10 +117,11 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
       </View>
 
       {/* Group ribbon — hangs from the card's top-right edge: group colour folding
-          behind at the top, fading into the card where the name sits. */}
+          behind at the top, fading into the card where the name sits. A deleted
+          group keeps its ribbon in the disabled grey. */}
       {card.showGroupRibbon ? (
         <LinearGradient
-          colors={[group.color || colors.info, '#FFFFFF00', '#FFFFFF00', '#FFFFFF00']}
+          colors={[ribbonColor, '#FFFFFF00', '#FFFFFF00', '#FFFFFF00']}
           locations={[0, 0.3, 0.85, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 0, y: 1 }}
@@ -129,8 +130,8 @@ const TransactionItem = ({ txn, onPress, onLongPress, onPressCategory, onPressSp
         >
           <View style={styles.groupBannerRow}>
             {/* Name sits on the faded (≈ card) end — measure it, raw amber/cyan are ~2:1 there. */}
-            <Text style={[styles.groupBannerText, { color: readableOn(colors.card, group.color || colors.info) }]} numberOfLines={1}>
-              {truncateGroupName(group.name)}
+            <Text style={[styles.groupBannerText, { color: readableOn(colors.card, ribbonColor) }]} numberOfLines={1}>
+              {truncateGroupName(card.ribbon.name)}
             </Text>
           </View>
         </LinearGradient>
@@ -178,7 +179,6 @@ const styles = StyleSheet.create({
   footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: spacing.xs },
   time: { ...typography.tiny, color: colors.textMuted, flexShrink: 1 },
   noteMark: { marginLeft: -2 },
-  fromGroup: { flexShrink: 2 },   // truncates before the time does
   right: { alignItems: 'flex-end', maxWidth: '42%' },
   // The ribbon hangs 26px from the top-right edge: start the column just below it, so a
   // lone amount (personal group) sits exactly where a shared card's amount does.

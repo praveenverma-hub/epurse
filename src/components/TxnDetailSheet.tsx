@@ -169,7 +169,7 @@ export default function TxnDetailSheet({ txn, onClose, onEdit, context = CARD_CO
   const hasSplit = !!txn.groupSplit?.shares?.length || !!txn.isSplit;
   // Shared groups: who added and changed it, and when — anyone may, so everyone can check.
   // A lone "Added" says nothing the sheet doesn't already, so history starts at the first change.
-  const history = entryHistory(group?.shared, txn.syncId);
+  const history = entryHistory(group?.shared, txn.syncId, group?.members);
   const showHistory = history.length > 1;
   const openHistory = () => {
     onClose();

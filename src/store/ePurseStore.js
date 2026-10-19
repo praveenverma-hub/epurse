@@ -4489,13 +4489,13 @@ export const useEPurseStore = create(
                   isSplitMemo: true,
                   splitPaidBy: {
                     contactId: memberOf(txn.groupSplit.paidByMemberId).contactId ?? null,
-                    name: memberOf(txn.groupSplit.paidByMemberId).name
+                    name: memberName(memberOf(txn.groupSplit.paidByMemberId))
                       || txn.groupSplit.paidByName || 'Friend',
                   },
                 } : {}),
                 splitWith: owing.map((sh) => ({
                   contactId: memberOf(sh.memberId).contactId ?? null,
-                  name: (memberOf(sh.memberId).name || sh.name || 'Friend').trim(),
+                  name: (memberName(memberOf(sh.memberId)) || sh.name || 'Friend').trim(),
                   shareAmount: Number(sh.shareAmount) || 0,
                 })),
               }

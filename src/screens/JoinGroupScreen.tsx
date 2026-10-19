@@ -13,13 +13,15 @@ import { StatusBar } from 'expo-status-bar';
 import KeyboardAvoidingView from '../components/AppKeyboardAvoidingView';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import PrimaryButtonBase from '../components/PrimaryButton';
-import { FormField, FormTextInput } from '../components/FormField';
+import { FormField, FormPhoneInput, FormTextInput } from '../components/FormField';
 import { useToast } from '../components/Toast';
 import { useSubmitGuard } from '../hooks/useSubmitGuard';
 import { colors, spacing } from '../constants/theme';
 import { parseInviteLink } from '../sync/invite';
 import { titleCaseName } from '../utils/format';
 import { joinFromLink } from '../sync/groupSync';
+import { useEPurseStore } from '../store/ePurseStore';
+import { isValidPhone } from '../utils/validation';
 
 const PrimaryButton = PrimaryButtonBase as React.FC<{
   title: string; onPress: () => void; disabled?: boolean; loading?: boolean; style?: object; variant?: 'filled' | 'outline';
@@ -31,6 +33,12 @@ export default function JoinGroupScreen({ navigation, route }: { navigation: any
   const { submit, submitting } = useSubmitGuard();
   const [link, setLink] = useState<string>(route?.params?.link ?? '');
   const [asNew, setAsNew] = useState(false);
+  // My number's fingerprint is how the others' phones show me under their own contact name.
+  const myPhone = useEPurseStore((s: any) => s.userPhones?.[0] || '') as string;
+  const setUserPhones = useEPurseStore((s: any) => s.setUserPhones) as (p: string[]) => void;
+  const [phoneDraft, setPhoneDraft] = useState('');
+  const askPhone = !myPhone;
+  const phoneOk = !askPhone || isValidPhone(phoneDraft);
 
   // Another invite tapped while this screen is open arrives as new params, not a new screen.
   const paramLink = route?.params?.link as string | undefined;
@@ -43,6 +51,7 @@ export default function JoinGroupScreen({ navigation, route }: { navigation: any
 
   const join = (newPerson: boolean) => submit(async () => {
     setAsNew(newPerson);
+    if (askPhone) setUserPhones([phoneDraft]);
     try {
       const id = await joinFromLink(link, { asNew: newPerson });
       toast.success('You joined the group');
@@ -71,6 +80,11 @@ export default function JoinGroupScreen({ navigation, route }: { navigation: any
               multiline
             />
           </FormField>
+          {askPhone ? (
+            <FormField label="Your Mobile Number" hint="So everyone in the group sees you under the name they saved for you. Saved to your profile.">
+              <FormPhoneInput value={phoneDraft} onChangeText={setPhoneDraft} error={phoneDraft.length > 0 && !isValidPhone(phoneDraft)} />
+            </FormField>
+          ) : null}
         </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
@@ -80,14 +94,14 @@ export default function JoinGroupScreen({ navigation, route }: { navigation: any
                 title={`I'm Not ${forName}`}
                 variant="outline"
                 onPress={() => join(true)}
-                disabled={submitting && !asNew}
+                disabled={!phoneOk || (submitting && !asNew)}
                 loading={submitting && asNew}
                 style={styles.half}
               />
               <PrimaryButton
                 title={`Join as ${forName}`}
                 onPress={() => join(false)}
-                disabled={submitting && asNew}
+                disabled={!phoneOk || (submitting && asNew)}
                 loading={submitting && !asNew}
                 style={styles.half}
               />
@@ -96,7 +110,7 @@ export default function JoinGroupScreen({ navigation, route }: { navigation: any
             <PrimaryButton
               title="Join Group"
               onPress={() => join(false)}
-              disabled={!parsed}
+              disabled={!parsed || !phoneOk}
               loading={submitting}
               style={{ width: '100%' }}
             />

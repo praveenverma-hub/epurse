@@ -38,7 +38,7 @@ import { colors, radius, readableOn, spacing, typography, shadows, DIVIDER_W } f
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDateTime, titleCaseName } from '../utils/format';
 import { lbTagLocked } from '../utils/lbEntryDisplay';
-import { canSplitTransaction, pastMemberIn } from '../utils/split';
+import { canSplitTransaction, memberName, pastMemberIn } from '../utils/split';
 import CategoryPickerModal from './ManageTransactionModal';
 import CCBillPaymentSheet from './CCBillPaymentSheet';
 import LinkContactModal from './LinkContactModal';
@@ -507,7 +507,7 @@ const DailyQueueStack = () => {
     setPickerTxn(null);
     const past = pastMemberIn(t, groups);
     if (past) {
-      toast.info(`${titleCaseName(past.name)} has left this group`, 'This expense can\'t be removed now. Add them back to change it.');
+      toast.info(`${titleCaseName(memberName(past))} has left this group`, 'This expense can\'t be removed now. Add them back to change it.');
       return;
     }
     setConfirm({
@@ -527,7 +527,7 @@ const DailyQueueStack = () => {
     setPickerTxn(null);
     const past = pastMemberIn(t, groups);
     if (past) {
-      toast.info(`${titleCaseName(past.name)} has left this group`, 'This expense can\'t be removed now. Add them back to change it.');
+      toast.info(`${titleCaseName(memberName(past))} has left this group`, 'This expense can\'t be removed now. Add them back to change it.');
       return;
     }
     setConfirm({

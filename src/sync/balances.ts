@@ -16,6 +16,7 @@ import { debtList } from './fold';
 import { itemIds, type SyncTxn } from './expenses';
 import { toLocalMember, toRemoteMember } from './localGroup';
 import { SETTLE_KINDS, lbRowMember, type LbOp, type SyncLbRow } from './settlements';
+import { memberName } from '../utils/split';
 
 export const EARLIER_BALANCE_PREFIX = 'lb_earlier_';
 /** + = they owe me. */
@@ -68,7 +69,7 @@ export function planBalanceRows(group: Group, txns: SyncTxn[], lb: SyncLbRow[], 
       kind: 'lbCreate',
       row: {
         id: `${EARLIER_BALANCE_PREFIX}${group.id}_${localId}`, kind, amount, memberId: localId,
-        person: m?.name || shared.fold.members[id]?.name || 'Member', contactId: m?.contactId || null, phone: null,
+        person: memberName(m) || shared.fold.members[id]?.name || 'Member', contactId: m?.contactId || null, phone: m?.phone || null,
         note: `Earlier balance · ${group.name}`, date: at, createdAt: at, groupId: group.id, syncOrigin: 'remote',
       },
     });

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from '../utils/format';
 import { evenAmounts, fullOwedShares } from '../utils/splitShares';
+import { memberName } from '../utils/split';
 import { SPLIT_MODE_LABEL, type SplitMode, type SplitPageRow } from '../components/SplitPage';
 import type { Group, GroupShare } from '../types/group';
 
@@ -45,7 +46,7 @@ export function useGroupSplit({ group, amount, active = true, editTxn, lockPayer
     // Shown by this phone's contact name when linked (memberName) — local only, never sent.
     const ms = (group?.members || [])
       .filter((m) => !m.archived || inSplit.has(m.memberId))
-      .map((m) => (m.contactName ? { ...m, name: m.contactName } : m));
+      .map((m) => (m.contactName ? { ...m, name: memberName(m) } : m));
     return ms.some((m) => m.memberId === 'me') ? ms : [ME, ...ms];
   }, [group, isShared, editTxn]);
   const meIdx = useMemo(() => Math.max(0, allMembers.findIndex((m) => m.isMe || m.memberId === 'me')), [allMembers]);
@@ -63,7 +64,8 @@ export function useGroupSplit({ group, amount, active = true, editTxn, lockPayer
       setShares(
         eg.shares.map((sh: any) => ({
           memberId: sh.memberId,
-          name: sh.name,
+          // The name stamped on the expense may be the server's; the member list has mine.
+          name: allMembers.find((m) => m.memberId === sh.memberId)?.name || sh.name,
           shareAmount: Number(sh.shareAmount) || 0,
           percent: amt > 0 ? Math.round(((Number(sh.shareAmount) || 0) / amt) * 100) : 0,
         })),

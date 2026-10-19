@@ -154,8 +154,15 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const unlinkedNow = unlinkedMembers(group);
   const phoneKeyCount = group?.shared ? Object.keys(group.shared.fold.phoneKeys || {}).length : 0;
   // Fingerprint matches link on their own (contacts permission already given — never asks).
+  // The first run per open also re-reads linked contacts' names (renamed on this phone).
+  // ONE effect: autoLink drops a call while another for the same group is running.
+  const namesRefreshedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (group?.shared && phoneKeyCount > 0 && unlinkedNow.length > 0) autoLinkGroupMembers(group.id);
+    if (!group?.shared) return;
+    const refreshNames = namesRefreshedFor.current !== group.id;
+    if (!refreshNames && !(phoneKeyCount > 0 && unlinkedNow.length > 0)) return;
+    namesRefreshedFor.current = group.id;
+    autoLinkGroupMembers(group.id, { refreshNames });
   }, [group?.id, phoneKeyCount, unlinkedNow.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (linkSheetOpen) fetchContactsForPicker().then(setDeviceContacts).catch(() => {});
@@ -290,7 +297,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
   const memberNamesLabel = useMemo(() => {
     if (!isShared || !group) return '';
-    const names = (group.members || []).map((m) => (m.isMe ? 'You' : titleCaseName(m.name)));
+    const names = (group.members || []).map((m) => (m.isMe ? 'You' : titleCaseName(memberName(m))));
     if (names.length <= 3) return names.join(', ');
     return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
   }, [group, isShared]);
@@ -315,9 +322,9 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       const gs = t.groupSplit;
       if (!gs) continue;
       const id = gs.paidByMemberId;
-      // The group's CURRENT member name (renames show), not the one stamped on the txn.
+      // The member's CURRENT name (my contact name if linked), not the one stamped on the txn.
       const member = (group?.members || []).find((m) => m.memberId === id);
-      const name = id === 'me' ? 'You' : titleCaseName(member?.name || gs.paidByName || 'Member');
+      const name = id === 'me' ? 'You' : titleCaseName(memberName(member) || gs.paidByName || 'Member');
       if (!totals[id]) totals[id] = { memberId: id, name, total: 0 };
       totals[id].total += Number(t.amount) || 0;
     }
@@ -404,18 +411,25 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
 
   // Inviting is how a group goes live: the first invite puts it on the server.
   const canInvite = isShared && syncOn && (live || !group.shared);
-  const handleInvite = (forMember?: { memberId: string; name: string }) => setConfirm({
-    title: forMember ? `Invite ${titleCaseName(forMember.name)}` : 'Invite People',
+  const myPhone = useEPurseStore((s: any) => s.userPhones?.[0] || '') as string;
+  const handleInvite = (forMember?: Pick<GroupMember, 'memberId' | 'name' | 'contactName'>) => (!myPhone ? setConfirm({
+    title: 'Add Your Number First',
+    message: 'Everyone in the group sees you under the name they saved for you, and that needs your number. It goes on your profile.',
+    primaryText: 'Add Number',
+    secondaryText: 'Not Now',
+    onPrimary: () => { setConfirm(null); navigation.navigate('MyProfile', { focusPhone: true }); },
+  }) : setConfirm({
+    title: forMember ? `Invite ${titleCaseName(memberName(forMember))}` : 'Invite People',
     message: (live ? '' : 'Inviting makes this group live: people you invite see its expenses and balances, and add their own. Everything else stays on your phone.\n\n')
-      + `The invite works once, for 48 hours. Share it only with ${forMember ? titleCaseName(forMember.name) : 'the person you\'re inviting'}.`,
+      + `The invite works once, for 48 hours. Share it only with ${forMember ? titleCaseName(memberName(forMember)) : 'the person you\'re inviting'}.`,
     primaryText: 'Create Invite',
     secondaryText: 'Cancel',
     onPrimary: runShared(async () => {
       const link = await createInviteLink(group.id, forMember?.memberId);
       setConfirm(null);
-      setInvite({ link, title: forMember ? `Invite ${titleCaseName(forMember.name)}` : 'Invite People' });
+      setInvite({ link, title: forMember ? `Invite ${titleCaseName(memberName(forMember))}` : 'Invite People' });
     }, 'Couldn\'t create the invite'),
-  });
+  }));
   // In person: they scan the QR (it holds the same link). Remote: Share Link.
   const shareInvite = (link: string) => { void Share.share({ message: `Join "${group.name}" on ePurse: ${link}` }); };
 
@@ -427,8 +441,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   const startInvite = () => (notJoined.length ? setPickInvite(true) : handleInvite());
   const inviteFor = (m?: GroupMember) => { setPickInvite(false); setTimeout(() => handleInvite(m), 350); };
 
-  const handleAddBack = (m: { memberId: string; name: string }) => {
-    const name = titleCaseName(m.name);
+  const handleAddBack = (m: Pick<GroupMember, 'memberId' | 'name' | 'contactName'>) => {
+    const name = titleCaseName(memberName(m));
     setConfirm({
       title: `Add ${name} Back?`,
       message: `${name} sees this group again, including what was added meanwhile, and can be in new expenses.`,
@@ -442,7 +456,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
   };
 
   const handleRemoveMember = (m: GroupMember) => {
-    const name = titleCaseName(m.name);
+    const name = titleCaseName(memberName(m));
     if (memberBalancePaise(group.shared!, m.memberId) !== 0) {
       toast.info(`${name} isn't settled up`, 'Someone can be removed once their balance in this group is ₹0.');
       return;
@@ -548,7 +562,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         {canInvite && !m.isMe && !m.archived && !st.joined ? (
           <TouchableOpacity
             style={[styles.memberInviteBtn, { borderColor: theme.primary }]}
-            onPress={() => handleInvite({ memberId: m.memberId, name: m.name })}
+            onPress={() => handleInvite(m)}
             activeOpacity={0.8}
             accessibilityRole="button"
             accessibilityLabel={`Invite ${displayName}`}
@@ -1141,7 +1155,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         body="They join as that person, with nothing to choose on their phone."
         content={(
           <View style={styles.pickList}>
-            {[...notJoined.map((m) => ({ key: m.memberId, label: titleCaseName(m.name), icon: 'person-outline' as const, m })),
+            {[...notJoined.map((m) => ({ key: m.memberId, label: titleCaseName(memberName(m)), icon: 'person-outline' as const, m })),
               { key: 'new', label: 'Someone New', icon: 'person-add-outline' as const, m: undefined }].map((row, i) => (
               <TouchableOpacity
                 key={row.key}
@@ -1192,7 +1206,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
             return (
               <View key={m.memberId} style={styles.linkRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.linkRowName, { color: theme.textPrimary }]} numberOfLines={1}>{titleCaseName(m.name)}</Text>
+                  <Text style={[styles.linkRowName, { color: theme.textPrimary }]} numberOfLines={1}>{titleCaseName(memberName(m))}</Text>
                   <TouchableOpacity onPress={() => linkGroupMemberContact(group.id, m.memberId, { noContact: true })} hitSlop={6}>
                     <Text style={[styles.linkRowHint, { color: theme.textMuted }]}>Not in My Contacts</Text>
                   </TouchableOpacity>

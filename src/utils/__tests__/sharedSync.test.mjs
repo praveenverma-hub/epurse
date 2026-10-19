@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 // =============================================================================
 // Shared-group sync — crypto, invite links, event parsing, fold rules
 //     npm run test:sync
@@ -801,6 +802,28 @@ console.log('\n— phone fingerprints: linking group members to contacts (Oct-17
   check('a local contact name is never sent as a rename', !plan.events.some((e) => e.type === 'member.rename'));
   const pulled = membersFromFold([{ ...amit, contactId: 'c1', contactName: 'Amit Kumar' }], { ...shared, fold: res.fold });
   check('a pull keeps this phone\'s contact link and name', pulled.some((m) => m.memberId === M.amit && m.contactId === 'c1' && m.contactName === 'Amit Kumar' && m.name === 'Amit'));
+
+  // My OWN number (Oct-20-26): without its fingerprint nobody can show me under their contact name.
+  const mine = (sh, phone) => planGroupChanges(g([]), sh, () => M.dev, keyOf, phone).events.filter((e) => e.type === 'member.phone' && e.memberId === M.rahul);
+  check('my number in Profile → member.phone for MY member', mine(shared, '9000000001').length === 1 && mine(shared, '9000000001')[0].phoneKey === keyOf('9000000001'));
+  check('…none without a number', mine(shared, null).length === 0 && mine(shared, '').length === 0);
+  const withMine = { ...shared, fold: { ...start, phoneKeys: { [M.rahul]: keyOf('9000000001') } } };
+  check('…not again once the group has mine', mine(withMine, '9000000001').length === 0);
+  check('…but a CHANGED number goes out again (the group must hold the current one)',
+    mine(withMine, '9000000002').length === 1 && mine(withMine, '9000000002')[0].phoneKey === keyOf('9000000002'));
+  check('a +91 / spaced number fingerprints the same as its 10 digits', keyOf('+91 90000 00001') === keyOf('9000000001'));
+  check('…not before I am in the group (no claim yet)', mine({ ...shared, myMemberId: null }, '9000000001').length === 0);
+  const archivedMe = { ...shared, fold: { ...start, members: { ...start.members, [M.rahul]: { ...start.members[M.rahul], archived: true } } } };
+  check('…not once I have left', mine(archivedMe, '9000000001').length === 0);
+  const engineSrc = readFileSync(new URL('../../sync/engine.ts', import.meta.url), 'utf8');
+  check('the engine re-plans when my number changes, and passes it in',
+    /s\.userPhones === prev\?\.userPhones/.test(engineSrc) && /now\.userPhones\?\.\[0\] \?\? null/.test(engineSrc));
+  check('the engine links people to my contacts when a fingerprint lands, not only when the group is opened',
+    /useEPurseStore\.subscribe\(followLinks\)/.test(engineSrc) && /void autoLinkGroupMembers\(g\.id\)/.test(engineSrc));
+  const linkSrc = readFileSync(new URL('../../sync/contactLink.ts', import.meta.url), 'utf8');
+  check('autoLink fills / refreshes the contact name of members linked by contact id',
+    /contactLinkedMembers\(group, refreshNames\)/.test(linkSrc) && /old\.contactName !== c\.name/.test(linkSrc));
+  check('…and never drops a call that arrives mid-run', /again\.set\(groupId/.test(linkSrc) && /void autoLinkGroupMembers\(groupId, \{ refreshNames: refresh \}\)/.test(linkSrc));
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);

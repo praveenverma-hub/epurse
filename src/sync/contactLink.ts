@@ -16,8 +16,19 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { fetchContactsForPicker } from '../services/contactsService';
 import { toRemoteMember } from './localGroup';
 import { cachedPhoneKey } from './phoneKey';
+import { normalizePhone } from '../utils/validation';
 
 export interface LinkCandidate { name: string; contactId: string | null; phone: string | null }
+
+/**
+ * Linked by contact id but missing my contact's name (picked before Oct-20-26) — or, with
+ * `all`, every contact-linked member, so a contact renamed on this phone shows its new name.
+ */
+export const contactLinkedMembers = (group: Group | null | undefined, all = false): GroupMember[] =>
+  group?.type === 'shared'
+    // Past members too: their names still show on old expenses and in history.
+    ? (group.members || []).filter((m) => !m.isMe && m.memberId !== 'me' && !!m.contactId && (all || !m.contactName))
+    : [];
 
 /** Members still to link: not me, not a past member, not linked, not marked "Not in My Contacts". */
 export const unlinkedMembers = (group: Group | null | undefined): GroupMember[] =>
@@ -36,14 +47,19 @@ export function suggestByName(member: Pick<GroupMember, 'name'>, candidates: Lin
 }
 
 const running = new Set<string>();
+/** A call that arrived mid-run — run once more after, so a fingerprint landing then isn't lost. */
+const again = new Map<string, boolean>();
 
 /**
  * Step 1: link every unlinked member whose fingerprint matches one of my contacts. Needs
  * contacts permission ALREADY granted — never asks. Hashing is slow, so it yields to the
  * UI as it goes. Returns how many were linked.
  */
-export async function autoLinkGroupMembers(groupId: string): Promise<number> {
-  if (running.has(groupId)) return 0;
+export async function autoLinkGroupMembers(groupId: string, { refreshNames = false }: { refreshNames?: boolean } = {}): Promise<number> {
+  if (running.has(groupId)) {
+    again.set(groupId, (again.get(groupId) ?? false) || refreshNames);
+    return 0;
+  }
   running.add(groupId);
   try {
     const group = (useEPurseStore.getState() as any).groups.find((g: Group) => g.id === groupId) as Group | undefined;
@@ -54,23 +70,39 @@ export async function autoLinkGroupMembers(groupId: string): Promise<number> {
       const key = shared.fold.phoneKeys?.[toRemoteMember(shared, m.memberId)];
       if (key) want.set(key, m.memberId);
     }
-    if (!want.size) return 0;
+    const byId = new Map(contactLinkedMembers(group, refreshNames).map((m) => [m.contactId!, m]));
+    if (!want.size && !byId.size) return 0;
     const contacts = await fetchContactsForPicker();
     let linked = 0;
     let n = 0;
     for (const c of contacts) {
+      const old = byId.get(c.id);
+      if (old) {
+        if (old.contactName !== c.name) {
+          (useEPurseStore.getState() as any).linkGroupMemberContact(groupId, old.memberId, {
+            contactId: c.id, phone: old.phone || normalizePhone(c.phones[0] || '') || null, name: c.name,
+          });
+          linked += 1;
+        }
+        byId.delete(c.id);
+      }
       for (const phone of c.phones) {
         if (++n % 15 === 0) await new Promise((r) => setTimeout(r, 0));
         const memberId = want.get(cachedPhoneKey(shared.keys, phone) || '');
         if (!memberId) continue;
-        (useEPurseStore.getState() as any).linkGroupMemberContact(groupId, memberId, { contactId: c.id, phone, name: c.name });
+        (useEPurseStore.getState() as any).linkGroupMemberContact(groupId, memberId, { contactId: c.id, phone: normalizePhone(phone) || phone, name: c.name });
         want.delete(cachedPhoneKey(shared.keys, phone)!);
         linked += 1;
-        if (!want.size) return linked;
+        if (!want.size && !byId.size) return linked;
       }
     }
     return linked;
   } finally {
     running.delete(groupId);
+    if (again.has(groupId)) {
+      const refresh = again.get(groupId)!;
+      again.delete(groupId);
+      void autoLinkGroupMembers(groupId, { refreshNames: refresh });
+    }
   }
 }

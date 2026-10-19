@@ -20,16 +20,19 @@ import { useEPurseStore } from '../store/ePurseStore';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../components/Toast';
 import { radius, spacing, typography as typographyBase, BUTTON_H, DIVIDER_W } from '../constants/theme';
-import { INPUT_LIMITS, sanitizeName, isValidName, sanitizePhone, isValidPhone } from '../utils/validation';
+import { INPUT_LIMITS, sanitizeName, isValidName, isValidPhone } from '../utils/validation';
+import { FormPhoneInput } from '../components/FormField';
 import PlainScreenHeader from '../components/PlainScreenHeader';
 import SectionHeader from '../components/SectionHeader';
 import { EMPTY_ARRAY } from '../constants/empty';
 
 interface Props {
   navigation: { goBack: () => void };
+  /** `focusPhone` — opened to add a number (e.g. before going live with a shared group). */
+  route?: { params?: { focusPhone?: boolean } };
 }
 
-const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
+const MyProfileScreen: React.FC<Props> = ({ navigation, route }) => {
   const theme = useTheme();
   const toast = useToast();
 
@@ -95,23 +98,13 @@ const MyProfileScreen: React.FC<Props> = ({ navigation }) => {
             />
 
             <Text style={[styles.label, { color: theme.textSecondary }]}>Mobile number</Text>
-            <View style={[
-              styles.phoneWrap,
-              { borderColor: theme.divider, backgroundColor: theme.background },
-              phoneDraft.length > 0 && !phoneValid && { borderColor: theme.danger },
-            ]}>
-              <Text style={[styles.phonePrefix, { color: theme.textPrimary }]}>+91</Text>
-              <View style={[styles.phoneDivider, { backgroundColor: theme.divider }]} />
-              <TextInput
-                style={[styles.phoneInput, { color: theme.textPrimary }]}
-                placeholder="10-digit number"
-                placeholderTextColor={theme.textSecondary}
-                value={phoneDraft}
-                onChangeText={(t) => setPhoneDraft(sanitizePhone(t))}
-                keyboardType="number-pad"
-                maxLength={INPUT_LIMITS.PHONE_LEN}
-              />
-            </View>
+            <FormPhoneInput
+              value={phoneDraft}
+              onChangeText={setPhoneDraft}
+              error={phoneDraft.length > 0 && !phoneValid}
+              autoFocus={!!route?.params?.focusPhone}
+              style={{ ...styles.phoneWrap, borderColor: theme.divider, backgroundColor: theme.background }}
+            />
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -159,13 +152,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
     fontSize: 16,
   },
-  phoneWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.lg,
-  },
-  phonePrefix: { fontSize: 16, fontWeight: '600' },
-  phoneDivider: { width: 1, height: 22, marginHorizontal: spacing.md },
-  phoneInput: { flex: 1, fontSize: 16, paddingVertical: spacing.md },
+  phoneWrap: { borderRadius: radius.md, paddingHorizontal: spacing.lg },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   rowIcon: { width: 22, textAlign: 'center' },
   rowValue: { ...typography.body, fontWeight: '600', flex: 1 },

@@ -81,7 +81,7 @@ import CenterModal from '../components/CenterModal';
 import AppSwitch from '../components/AppSwitch';
 import { useToast } from '../components/Toast';
 import { parseMessageDetailed } from '../utils/messageParser';
-import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe, pastMemberIn, wasGroupShared } from '../utils/split';
+import { SPLIT_BLOCKED_CATEGORY_IDS, isPayerLockedToMe, memberName, pastMemberIn, wasGroupShared } from '../utils/split';
 import { formatCurrency, titleCaseName } from '../utils/format';
 import { cashShortfall, NOT_ENOUGH_CASH, notEnoughCashText } from '../utils/cashBalance';
 import {
@@ -287,7 +287,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
   // Someone in this live-group expense has left the group: its money stays as it is.
   const pastMember = isEdit ? pastMemberIn(editTxn, groups) : null;
   const showPastLock = () => toast.info(
-    `${titleCaseName(pastMember!.name)} has left this group`,
+    `${titleCaseName(memberName(pastMember))} has left this group`,
     'Its amount, split and group can\'t change now. Add them back to change it.',
   );
   // Add: swipeable tabs; manual edit: tap-only; bank-parsed edit: no switch.
@@ -1011,12 +1011,12 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     setMySplitPercent(pct(myAmt));
     setSplitPicks(owing.map((sh: any) => ({
       contactId:   member(sh.memberId).contactId ?? null,
-      name:        member(sh.memberId).name || sh.name || 'Friend',
+      name:        memberName(member(sh.memberId)) || sh.name || 'Friend',
       shareAmount: Number(sh.shareAmount) || 0,
       percent:     pct(Number(sh.shareAmount) || 0),
     })));
     setSplitPaidBy(memo
-      ? { contactId: member(gs.paidByMemberId).contactId ?? null, name: member(gs.paidByMemberId).name || gs.paidByName || 'Friend' }
+      ? { contactId: member(gs.paidByMemberId).contactId ?? null, name: memberName(member(gs.paidByMemberId)) || gs.paidByName || 'Friend' }
       : null);
     return true;
   };
@@ -1225,7 +1225,7 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
             <FormField
               label="Amount (₹)"
               hint={amountLocked ? `${type === TRANSACTION_TYPES.CREDIT ? 'Income' : 'Expense'} from your bank SMS — not editable`
-                : pastMember ? `${titleCaseName(pastMember.name)} has left this group — not editable` : undefined}
+                : pastMember ? `${titleCaseName(memberName(pastMember))} has left this group — not editable` : undefined}
             >
               <FormAmountInput
                 value={amount}

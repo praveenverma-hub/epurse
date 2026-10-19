@@ -13,6 +13,7 @@ import { planOutgoing } from './expenses';
 import { BUILT_IN_CATEGORIES, flushGroup, newSyncId, syncAllSharedGroups } from './groupSync';
 import { reconcileRealtime, setRealtimeOpen } from './realtime';
 import { syncPushRegistration } from './push';
+import { autoLinkGroupMembers, contactLinkedMembers, unlinkedMembers } from './contactLink';
 
 /** Wait this long after a change before sending, so a burst (an edit, SMS ingest) goes as one. */
 const SEND_DEBOUNCE_MS = 1500;
@@ -34,14 +35,15 @@ export function installSharedSync(): void {
 
   let busy = false;
   const check = (s: any, prev: any) => {
-    if (busy || (s.transactions === prev?.transactions && s.groups === prev?.groups && s.lentBorrowed === prev?.lentBorrowed)) return;
+    if (busy || (s.transactions === prev?.transactions && s.groups === prev?.groups && s.lentBorrowed === prev?.lentBorrowed
+      && s.userPhones === prev?.userPhones)) return;
     busy = true;
     try {
       const at = new Date().toISOString();
       for (const g of s.groups as Group[]) {
         if (!g.shared || g.shared.status === 'ended') continue;
         const now = useEPurseStore.getState() as any;
-        const plan = planOutgoing(g, now.transactions, newSyncId, BUILT_IN_CATEGORIES, at, now.lentBorrowed);
+        const plan = planOutgoing(g, now.transactions, newSyncId, BUILT_IN_CATEGORIES, at, now.lentBorrowed, now.userPhones?.[0] ?? null);
         if (!plan) continue;
         const ops = Object.entries(plan.flags).map(([txnId, syncRejected]) => ({ kind: 'flag' as const, txnId, syncRejected }));
         now.setSharedGroupState(g.id, plan.shared, { syncIds: plan.syncIds, lbSyncIds: plan.lbSyncIds, ops });
@@ -68,6 +70,24 @@ export function installSharedSync(): void {
     void syncPushRegistration();
   };
   useEPurseStore.subscribe(followLive);
+
+  // People link to my contacts as soon as their fingerprint arrives — not only when the group
+  // is opened — so Home cards and Lent/Borrowed show my contact names too. Keyed per group so
+  // ordinary sync writes don't rescan; autoLink itself never asks for contacts permission.
+  const linkKeys = new Map<string, string>();
+  const followLinks = (s: any) => {
+    for (const g of s.groups as Group[]) {
+      if (!g.shared) continue;
+      const key = `${Object.keys(g.shared.fold.phoneKeys || {}).length}|${unlinkedMembers(g).length}|${contactLinkedMembers(g).length}`;
+      if (linkKeys.get(g.id) === key) continue;
+      linkKeys.set(g.id, key);
+      if ((Object.keys(g.shared.fold.phoneKeys || {}).length && unlinkedMembers(g).length) || contactLinkedMembers(g).length) {
+        void autoLinkGroupMembers(g.id);
+      }
+    }
+  };
+  useEPurseStore.subscribe(followLinks);
+  followLinks(useEPurseStore.getState());
 
   const pull = (localId: string) => { flushGroup(localId).catch(() => {}); };
   void setRealtimeOpen(AppState.currentState === 'active', pull);

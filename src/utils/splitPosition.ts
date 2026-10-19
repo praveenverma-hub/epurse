@@ -14,6 +14,8 @@
 // Pure: no React Native, so it's unit-tested (test:txnCard).
 // =============================================================================
 import type { CardGroup, CardTxn } from './txnCardModel';
+import type { GroupMember } from '../types/group';
+import { memberName } from './split';
 
 export type SplitRelation = 'payer' | 'owes_you' | 'you_owe' | 'owes_payer' | 'not_involved';
 export interface SplitPerson { key: string; name: string; isMe: boolean; isPayer: boolean; share: number; relation: SplitRelation }
@@ -34,7 +36,8 @@ const round2 = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 export function splitPosition(txn: CardTxn | null | undefined, { group = null }: { group?: CardGroup | null } = {}): SplitPositionResult | null {
   if (!txn) return null;
   const bill = round2(txn.amount);
-  const member = (id: string): { name?: string } => (group?.members || []).find((m) => m.memberId === id) || {};
+  // My contact name for a linked person, else the group's name for them.
+  const nameOf = (id: string): string => memberName((group?.members || []).find((m: GroupMember) => m.memberId === id));
 
   let entries: Entry[];
   let payerKey: string;
@@ -42,14 +45,14 @@ export function splitPosition(txn: CardTxn | null | undefined, { group = null }:
     const gs = txn.groupSplit;
     entries = gs.shares.map((s) => ({
       key: s.memberId,
-      name: s.memberId === 'me' ? 'You' : (member(s.memberId).name || s.name || 'Member'),
+      name: s.memberId === 'me' ? 'You' : (nameOf(s.memberId) || s.name || 'Member'),
       isMe: s.memberId === 'me',
       share: round2(s.shareAmount),
     }));
     payerKey = gs.paidByMemberId || 'me';
     // A payer with no share row (full-owed by someone else) still belongs in the list.
     if (!entries.some((e) => e.key === payerKey)) {
-      entries.push({ key: payerKey, name: member(payerKey).name || gs.paidByName || 'Someone', isMe: payerKey === 'me', share: 0 });
+      entries.push({ key: payerKey, name: nameOf(payerKey) || gs.paidByName || 'Someone', isMe: payerKey === 'me', share: 0 });
     }
   } else if (txn.isSplit && Array.isArray(txn.splitWith)) {
     const others: Entry[] = txn.splitWith.map((p, i) => ({

@@ -6,7 +6,9 @@
 // what lets the others see a wrong change and put it right.
 // =============================================================================
 
-import type { GroupShared } from '../types/group';
+import type { GroupMember, GroupShared } from '../types/group';
+import { memberName as shownName } from '../utils/split';
+import { toLocalMember } from './localGroup';
 import type { ExpenseBody, SettlementBody } from './events';
 import type { EntryState, Version } from './fold';
 
@@ -44,9 +46,16 @@ function expenseChanges(a: ExpenseBody, b: ExpenseBody): HistoryChange[] {
   return out;
 }
 
-function namer(shared: GroupShared) {
+/** This phone's members — a person linked to MY contacts shows under my contact name. */
+type LocalMembers = Pick<GroupMember, 'memberId' | 'name' | 'contactName'>[] | undefined;
+
+function namer(shared: GroupShared, members: LocalMembers) {
   const { fold, myMemberId } = shared;
-  const memberName = (id: string) => (id === myMemberId ? 'You' : fold.members[id]?.name ?? 'Someone');
+  const memberName = (id: string) => {
+    if (id === myMemberId) return 'You';
+    const local = members?.find((m) => m.memberId === toLocalMember(shared, id));
+    return (local && shownName(local)) || fold.members[id]?.name || 'Someone';
+  };
   const userName = (userId: string) => {
     const id = fold.memberOrder.find((m) => fold.members[m].userId === userId);
     return id ? memberName(id) : 'Someone';
@@ -54,9 +63,9 @@ function namer(shared: GroupShared) {
   return { memberName, userName };
 }
 
-function itemsOf(shared: GroupShared, entityId: string, e: EntryState): HistoryItem[] {
+function itemsOf(shared: GroupShared, entityId: string, e: EntryState, members: LocalMembers): HistoryItem[] {
   if (e.kind === 'correction') return [];
-  const { memberName, userName } = namer(shared);
+  const { memberName, userName } = namer(shared, members);
   const label = (d: ExpenseBody | SettlementBody) =>
     e.kind === 'expense' ? (d as ExpenseBody).title : `${memberName((d as SettlementBody).from)} paid ${memberName((d as SettlementBody).to)}`;
   const versions = e.versions as Version<ExpenseBody | SettlementBody>[];
@@ -77,9 +86,9 @@ function itemsOf(shared: GroupShared, entityId: string, e: EntryState): HistoryI
 }
 
 /** One expense's (or settlement's) history, newest first. Empty when the server has none. */
-export function entryHistory(shared: GroupShared | undefined, entityId: string | undefined): HistoryItem[] {
+export function entryHistory(shared: GroupShared | undefined, entityId: string | undefined, members?: LocalMembers): HistoryItem[] {
   const e = entityId ? shared?.fold.entries[entityId] : undefined;
-  return shared && e ? itemsOf(shared, entityId!, e).reverse() : [];
+  return shared && e ? itemsOf(shared, entityId!, e, members).reverse() : [];
 }
 
 export type EntrySummary = {
@@ -93,10 +102,10 @@ export type EntrySummary = {
 };
 
 /** What an expense or settlement is now (or was, if deleted) — the head of its history page. */
-export function entrySummary(shared: GroupShared | undefined, entityId: string | undefined): EntrySummary | null {
+export function entrySummary(shared: GroupShared | undefined, entityId: string | undefined, members?: LocalMembers): EntrySummary | null {
   const e = entityId ? shared?.fold.entries[entityId] : undefined;
   if (!shared || !e || e.kind === 'correction') return null;
-  const { memberName } = namer(shared);
+  const { memberName } = namer(shared, members);
   const deleted = !!e.deleted;
   if (e.kind === 'expense') {
     const d = e.data as ExpenseBody;
@@ -111,12 +120,12 @@ export function entrySummary(shared: GroupShared | undefined, entityId: string |
  * have a transaction to open. An edit of an old expense this phone never had (a late joiner)
  * shows from its correction.
  */
-export function groupHistory(shared: GroupShared | undefined, limit = 100): HistoryItem[] {
+export function groupHistory(shared: GroupShared | undefined, limit = 100, members?: LocalMembers): HistoryItem[] {
   if (!shared) return [];
-  const { userName } = namer(shared);
+  const { userName } = namer(shared, members);
   const out: HistoryItem[] = [];
   for (const [id, e] of Object.entries(shared.fold.entries)) {
-    if (e.kind !== 'correction') { out.push(...itemsOf(shared, id, e)); continue; }
+    if (e.kind !== 'correction') { out.push(...itemsOf(shared, id, e, members)); continue; }
     if (shared.fold.entries[e.data.correctsId]) continue;   // shown on the original
     const v = e.versions[0];
     const after = e.data.expense;

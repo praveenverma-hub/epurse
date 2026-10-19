@@ -131,5 +131,42 @@ check('group, not involved: even, payer still listed though he has no share row'
   pos.net.kind === 'even' && pos.people.find((p) => p.isMe).relation === 'not_involved' && pos.people[0].isPayer && pos.people[0].name === 'Rohit Sharma', rel(pos));
 check('a plain, unsplit txn has no position', splitPosition(base) === null);
 
+console.log('\n— deleted group keeps its ribbon, greyed (Oct-20-26) —');
+{
+  const former = { ...base, formerGroup: { name: 'Goa Trip', emoji: '🏖️', myShare: 300 } };
+  let r = buildTxnCard(former, { categoryName: 'Food & Dining' });
+  check('a deleted group\'s bill keeps the ribbon, flagged deleted', r.showGroupRibbon && r.ribbon?.name === 'Goa Trip' && r.ribbon.deleted === true, JSON.stringify(r.ribbon));
+  r = buildTxnCard(gTxn, { group: shared });
+  check('a live group\'s ribbon is not deleted', r.ribbon?.deleted === false && r.ribbon.name === shared.name);
+  r = buildTxnCard(gTxn, { group: shared, context: CARD_CONTEXT.GROUP });
+  check('group screen still has no ribbon', !r.showGroupRibbon && r.ribbon === null);
+  r = buildTxnCard({ ...former, groupId: 'g9' }, { group: shared });
+  check('back in a group, the live group wins over the old stamp', r.ribbon?.deleted === false);
+  const { readFileSync } = await import('node:fs');
+  const item = readFileSync(new URL('../../components/TransactionItem.js', import.meta.url), 'utf8');
+  check('the card paints a deleted ribbon in the disabled grey, name measured on the card',
+    /card\.ribbon\?\.deleted \? colors\.disabledText/.test(item) && /readableOn\(colors\.card, ribbonColor\)/.test(item));
+  check('…with no colourful emoji watermark behind it', /!card\.ribbon\.deleted && group\?\.emoji/.test(item));
+  check('the old "From <group>" text line is gone (the ribbon says it)', !/fromGroup/.test(item));
+}
+
+console.log('\n— names from MY contacts (Oct-20-26) —');
+{
+  const linkedGroup = { ...shared, members: shared.members.map((m) => (m.memberId === 'me' ? m : { ...m, contactName: `${m.name} (mine)` })) };
+  const pos = splitPosition(gTxn, { group: linkedGroup });
+  const others = pos.people.filter((p) => !p.isMe);
+  check('split section: every linked person under my contact name', others.length > 0 && others.every((p) => p.name.endsWith('(mine)')), rel(pos));
+  const memo = { ...gTxn, isGroupMemo: true, groupSplit: { ...gTxn.groupSplit, paidByMemberId: others[0].key } };
+  check('card payer line too', txnPayerName(memo, linkedGroup) === `${others[0].name.split(/\s+/)[0]}`, txnPayerName(memo, linkedGroup));
+  const { readFileSync } = await import('node:fs');
+  const src = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
+  check('the "Earlier balance" row takes my contact name and the number', /person: memberName\(m\)/.test(src('sync/balances.ts')) && /phone: m\?\.phone \|\| null/.test(src('sync/balances.ts')));
+  check('a person picked from contacts is linked from the start (contactName + phone)',
+    /contactId: c\.id, contactName: c\.name, phone: normalizePhone\(c\.phones\[0\]/.test(src('screens/GroupFormScreen.tsx')));
+  const detail = src('screens/GroupDetailScreen.tsx');
+  check('Group Detail shows no raw member.name', !/titleCaseName\(m\.name\)|titleCaseName\(forMember\.name\)|member\?\.name \|\|/.test(detail));
+  check('"has left this group" uses memberName everywhere', !/past(Member!?)?\.name\)/.test(src('components/DailyQueueStack.js') + src('screens/AddTransactionScreen.tsx')));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

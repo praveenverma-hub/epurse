@@ -33,8 +33,9 @@ export default function GroupHistoryScreen({ navigation, route }: Props) {
   const group = useEPurseStore((s: any) => s.groups.find((g: Group) => g.id === groupId)) as Group | undefined;
   const shared = group?.shared;
 
-  const items = useMemo(() => (entityId ? entryHistory(shared, entityId) : groupHistory(shared)), [shared, entityId]);
-  const summary = useMemo(() => (entityId ? entrySummary(shared, entityId) : null), [shared, entityId]);
+  const members = group?.members;
+  const items = useMemo(() => (entityId ? entryHistory(shared, entityId, members) : groupHistory(shared, 100, members)), [shared, entityId, members]);
+  const summary = useMemo(() => (entityId ? entrySummary(shared, entityId, members) : null), [shared, entityId, members]);
 
   const payer = summary && summary.kind === 'expense'
     ? `${summary.paidBy === 'You' ? 'You' : titleCaseName(summary.paidBy)} paid · `
