@@ -33,6 +33,11 @@ const { planOutgoing, UNSENDABLE } = await import(`${PROJECT_ROOT}/src/sync/expe
 const { pastMemberIn, defaultGroupSplit } = await import(`${PROJECT_ROOT}/src/utils/split.js`);
 const { planBalanceRows, EARLIER_BALANCE_PREFIX } = await import(`${PROJECT_ROOT}/src/sync/balances.ts`);
 const srv = await import(`${PROJECT_ROOT}/src/utils/__tests__/_fakeSyncServer.mjs`);
+const { buildCheckpoint } = await import(`${PROJECT_ROOT}/src/sync/fold.ts`);
+const { sealEvent } = await import(`${PROJECT_ROOT}/src/sync/crypto.ts`);
+const { encodeEvent } = await import(`${PROJECT_ROOT}/src/sync/events.ts`);
+const { base64ToBytes } = await import(`${PROJECT_ROOT}/src/backup/envelope.ts`);
+const { groupSyncStatus } = await import(`${PROJECT_ROOT}/src/utils/groupSyncStatus.ts`);
 const { server } = srv;
 
 let pass = 0, fail = 0;
@@ -987,6 +992,110 @@ section('B5. Names from MY contacts, seen from the other phone (Oct-20-26)');
   });
   check('an old contact-linked member gets its contact name back', groupOf(A, remote).members.find((m) => m.memberId === 'c_kb')?.contactName === 'Bunty');
   globalThis.__contacts = {};
+}
+
+section('AU1. An edit races a checkpoint from another phone (audit F03)');
+{
+  const X = phone('Kim'), Y = phone('Lee');
+  const Rq = await makeGroup('Race', X, Y);
+  await as(Y, async () => { addExpense(Y, localId(Y, Rq), 'Ferry', 200, everyone(localId(Y, Rq))); });
+  await syncAll(Y, X);
+  advanceDays(31);
+  await as(Y, async () => { editExpense(byTitle(Y, Rq, 'Ferry').id, { amount: 300 }); });
+  // Between Lee's pull and his send, Kim's phone posts a checkpoint — freezing the ferry.
+  server.beforeAppend = (gid) => {
+    const sh = groupOf(X, Rq).shared;
+    const g = server.groups.get(gid);
+    const cp = buildCheckpoint(sh.fold);
+    if (cp.baseSeq !== g.last_seq) throw new Error('Kim is behind');
+    const eventId = crypto.randomUUID();
+    const sealed = sealEvent(base64ToBytes(sh.keys['1']), gid, eventId, 1, encodeEvent({ type: 'group.checkpoint', ...cp }, new Date().toISOString()), (n) => crypto.getRandomValues(new Uint8Array(n)));
+    g.last_seq += 1;
+    server.events.push({ group_id: gid, seq: g.last_seq, event_id: eventId, author_id: X.user, key_epoch: 1, nonce: sealed.nonce, ciphertext: sealed.ciphertext,
+      system_type: null, system_subject: null, system_member: null, created_at: new Date().toISOString() });
+    g.checkpoint_seq = g.last_seq;
+  };
+  await syncAll(Y, X);
+  check('(the checkpoint really landed first)', server.beforeAppend === null && server.groups.get(Rq).checkpoint_seq != null);
+  check('the ferry counts once, at its new ₹300, on both phones (was: ₹200 + ₹300)',
+    sameBalances(Rq, X, Y) && balancesByName(X, Rq) === J({ Kim: -15000, Lee: 15000 }), balancesByName(X, Rq));
+  check('…both show ₹300', byTitle(X, Rq, 'Ferry')?.amount === 300 && byTitle(Y, Rq, 'Ferry')?.amount === 300);
+}
+
+section('AU2. A person\'s invite with its link edited (audit F05)');
+{
+  const X = phone('Mo'), Z = phone('Ned');
+  let gid, link, otherRemote;
+  await as(X, async () => {
+    gid = S().createGroup({ name: 'Bind', type: 'shared', members: [{ memberId: 'c_n', name: 'Ned', contactId: 'n' }, { memberId: 'c_o', name: 'Ola', contactId: 'o' }] });
+    link = await G.createInviteLink(gid, 'c_n');
+    otherRemote = S().groups.find((g) => g.id === gid).shared.memberMap.c_o;
+  });
+  const Rb = X.state.groups.find((g) => g.id === gid).shared.remoteId;
+  const tampered = link.replace(/&m=[0-9a-f-]{36}/, `&m=${otherRemote}`);
+  check('(the link really points at Ola now)', tampered !== link && tampered.includes(otherRemote));
+  await as(Z, () => joinLikeScreen(tampered));
+  await syncAll(X, Z);
+  const f = groupOf(X, Rb).shared.fold;
+  const nameOfUser = (u) => Object.values(f.members).find((m) => m.userId === u)?.name;
+  check('the joiner becomes Ned — who the inviter chose — not Ola', nameOfUser(Z.user) === 'Ned', String(nameOfUser(Z.user)));
+  check('…Ola stays unclaimed', !f.members[otherRemote].userId);
+}
+
+section('AU3. Compaction waits for a second phone to check the checkpoint (audit F02)');
+{
+  const X = phone('Pia'), Y = phone('Quin');
+  const Rc = await makeGroup('Check', X, Y);
+  await as(X, async () => { addExpense(X, localId(X, Rc), 'Tea', 100, everyone(localId(X, Rc))); });
+  await syncAll(X, Y);
+  advanceDays(31);
+  await sync(X);   // only Pia's phone is opened: it posts the checkpoint
+  const g = server.groups.get(Rc);
+  check('a checkpoint is posted, nobody else has checked it', g.checkpoint_seq != null && g.verified_checkpoint_seq == null);
+  const before = server.events.filter((e) => e.group_id === Rc).length;
+  advanceDays(95); srv.serverPurgeExpired();
+  check('…so 95 quiet days later nothing is deleted', server.events.filter((e) => e.group_id === Rc).length === before);
+  await sync(Y);   // Quin's phone checks it against its own history and says so
+  check('the other phone confirms it', g.verified_checkpoint_seq === g.checkpoint_seq);
+  check('…and confirming isn\'t activity (no wake, no push)', g.dormant_at != null);
+  srv.serverPurgeExpired();
+  check('then compaction runs, keeping the checkpoint', server.events.filter((e) => e.group_id === Rc).every((e) => e.seq >= g.checkpoint_seq)
+    && server.events.filter((e) => e.group_id === Rc).length < before);
+}
+
+section('AU4. Add Back after compaction; a removed member\'s open invite (audit F09)');
+{
+  const X = phone('Ria'), Y = phone('Sam'), W = phone('Tia'), Q = phone('Uday');
+  const Ra = await makeGroup('Again', X, Y, W);
+  let tiasInvite;
+  await as(W, async () => { tiasInvite = await G.createInviteLink(localId(W, Ra)); });
+  await as(X, () => G.removeSharedMember(localId(X, Ra), memberIdByName(localId(X, Ra), 'Tia')));
+  const used = await as(Q, () => errCode(() => joinLikeScreen(tiasInvite)));
+  check('the invite Tia made stops working once she\'s removed', used === 'INVITE_USED', String(used));
+  await as(X, async () => { addExpense(X, localId(X, Ra), 'Lunch', 400, ['me', memberIdByName(localId(X, Ra), 'Sam')]); });
+  await syncAll(X, Y);
+  advanceDays(31); await syncAll(X, Y);
+  advanceDays(95); srv.serverPurgeExpired();
+  check('(the removal row was compacted away)', !server.events.some((e) => e.group_id === Ra && e.system_type === 'member_removed'));
+  const back = await as(X, () => errCode(() => G.addBackMember(localId(X, Ra), memberIdByName(localId(X, Ra), 'Tia'))));
+  await syncAll(W, X, Y);
+  check('Add Back still works (was: "not a former member")', back === null && groupOf(W, Ra).shared.status === 'active', String(back));
+  check('…and every phone agrees', sameBalances(Ra, X, Y, W));
+}
+
+section('AU5. Sync failing shows on the group, and clears (audit F12)');
+{
+  const X = phone('Vik'), Y = phone('Wen');
+  const Rs = await makeGroup('Flaky', X, Y);
+  server.offline = true;
+  await as(X, async () => { addExpense(X, localId(X, Rs), 'Chai', 40, everyone(localId(X, Rs))); });
+  await errCode(() => sync(X));
+  check('a failed sync is noted on the group', !!groupOf(X, Rs).shared.syncFailedAt);
+  advanceDays(15 / 1440);
+  check('…and after a while the status says Not Synced, not Live', groupSyncStatus(groupOf(X, Rs)) === 'stale', groupSyncStatus(groupOf(X, Rs)));
+  server.offline = false;
+  await syncAll(X, Y);
+  check('back online: it syncs and the note clears', !groupOf(X, Rs).shared.syncFailedAt && !!byTitle(Y, Rs, 'Chai') && groupSyncStatus(groupOf(X, Rs)) === 'live');
 }
 
 section('Invariants, on every phone and every live group');

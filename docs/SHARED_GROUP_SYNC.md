@@ -145,16 +145,16 @@ tested by `npm run test:sync`.
 | type | body | who may send |
 |---|---|---|
 | `group.meta` | `name, emoji, color` | any member |
-| `member.add` | `memberId, name, phoneKey?` — a person in the group, joined or not; `phoneKey` = fingerprint of their number (§8c) | any member |
-| `member.claim` | `memberId, userId` — "this person is me" | the user themself (`userId` = author), once |
+| `member.add` | `memberId, name, phoneKey?, self?` — a person in the group, joined or not; `phoneKey` = fingerprint of their number (§8c); `self: true` = "this new person is me" (how the creator and a plain-invite joiner join, Oct-24-2026) | any member; `self` once per user |
+| `member.claim` | `memberId, userId` — "this person is me" | the user themself, once, and ONLY for the member their invite was made for (`member_joined.system_member`, Oct-24-2026; claims before 2026-11-01 server time replay as before) |
 | `member.rename` | `memberId, name` | any member |
 | `member.archive` | `memberId` — only when their balance is ₹0 at that point (§8a) | any member |
 | `member.phone` | `memberId, phoneKey` — a fingerprint for someone already in the group (§8c) | any member |
 | `expense.upsert` | `entityId, amountPaise, title, categoryId, date, paidBy, shares[{memberId, paise}]` | any member (create or edit) |
 | `settlement.upsert` | `entityId, from, to, amountPaise, date` (from ≠ to) | any member (create or edit) |
 | `expense.delete` / `settlement.delete` | `entityId` | any member |
-| `group.checkpoint` | `baseSeq, meta, members, activeUsers, deletedUsers, debts[{from, to, paise}]` | any member (§8b) |
-| `expense.correct` | `entityId, correctsId, title, date, debts[], expense` — an edit/delete of a frozen expense | any member (§8b) |
+| `group.checkpoint` | `baseSeq, meta, members, activeUsers, deletedUsers, debts[{from, to, paise}], corrections, bindings, frozenExpenses, frozenOther` | any member (§8b) |
+| `expense.correct` | `entityId, correctsId, title, date, debts[], expense` — an edit/delete of a frozen expense; `correctsId` must be a frozen EXPENSE every phone knows (`frozenTags`) | any member (§8b) |
 
 **Edits (decided Oct-13-2026):** any member can edit; the **last edit by seq wins** on every phone,
 with no prompt (overwrite). Every version is kept with who sent it and the **server's** time
@@ -187,13 +187,19 @@ history so far). An event is skipped, identically on every phone, when:
 - it names a member who doesn't exist, or an archived one who isn't already on that entry;
 - the sender isn't allowed to send it (table above), or isn't a member at that seq;
 - it edits a deleted entry (delete wins), or reuses an expense id as a settlement;
+- it sends a FROZEN entry's id as a new expense or settlement (`frozen`), or corrects something
+  that isn't a frozen expense (`unknown_entry`) — Oct-24-2026, audit F03/F04;
+- it claims a person the claimant's invite wasn't for (`not_invited_as`) — audit F05;
 - text is over the frozen v1 limits (`V1_LIMITS` — deliberately not `INPUT_LIMITS`).
 
 It depends only on the event sequence — never on local time, local data or settings —
 otherwise phones drift apart. Balances in the fold always sum to zero.
 
 **Server-side system events** are plaintext (`system_type`): `group_created`, `member_joined`,
-`member_left`, `member_removed`, `member_deleted`, with `system_subject` = the user id.
+`member_left`, `member_removed`, `member_deleted`, with `system_subject` = the user id. A
+`member_joined` from a person's invite also carries `system_member` = the member it was for (an
+opaque uuid; the server still sees no names). `member_left`/`member_removed` make that user's member
+a past member on every phone, however they lost access (Oct-24-2026, audit F06).
 
 ---
 
@@ -221,6 +227,12 @@ group; a resend is safe because each item's `eventId` is fixed when queued.
 **Send** (`flushGroup`): per group, one at a time; a `pending` group is created on the server
 first; ≤ 50 per `append_events`; sent items leave the outbox; then pull. Not a member / ended →
 the group is marked ended. Offline → stays queued. Debounced 1.5 s after a change.
+**Failing (Oct-24-2026, audit F12):** the group gets `syncFailedAt` (cleared by the next good pull)
+and, while the app is open, the engine retries at ~5 s, 15 s, 1 min, then every ~5 min (± half,
+so phones don't retry in step); opening the app retries every failed group. A realtime channel
+that (re)connects pulls at once — pokes sent while the socket was down are gone. The status line
+says **Not synced** once a failure is 10+ min past the last good sync (`groupSyncStatus` `stale`)
+and **Balances differ** on a checkpoint mismatch — never "Live" then. Group ⋮ → **Sync Now**.
 
 **Pull** (`pullGroup`): `seq > cursor`, 500 at a time → decrypt → `foldEvents` → `planIncoming`
 → ONE `setSharedGroupState` write with the new history, members, name AND the transaction changes.
@@ -231,9 +243,13 @@ alone until it's sent. New from someone else → a transaction `sync_<id>` (`syn
 no account; a memo if someone else paid) with Lent/Borrowed rows via `buildGroupLbRows`. Edited →
 updated in place (my own bank expense keeps its account; the balance moves by the difference;
 never auto-creates an account). Deleted → someone else's or a memo goes; my own bank expense stays
-as a plain expense of mine (`detachFromGroup`, the same rule Delete Group uses). Someone changes
-the payer of my bank expense to another member → a memo here, its account parked in
-`memoAccountId`; changed back, or deleted, the account is debited again. Mine, sent, but absent from the history → the rules skipped it:
+as a plain expense of mine (`detachFromGroup`, the same rule Delete Group uses).
+**My bank's record is mine (Oct-24-2026, audit F07):** someone else changing the AMOUNT or PAYER of
+my bank-recorded expense (`isPayerLockedToMe`: my account, not a manual entry) isn't applied here;
+`planOutgoing` sends my version back, and as the newest it wins on every phone (the edit stays in
+History). A new split of the same amount and payer, title, date or category still apply. A manual
+entry follows the group as before: changing its payer to someone else makes a memo here, its
+account parked in `memoAccountId`; changed back, or deleted, the account is debited again. Mine, sent, but absent from the history → the rules skipped it:
 flagged `syncRejected` (card chip **NOT SYNCED**) and not re-sent until it changes.
 
 **Triggers:** a change (debounced), opening a group, the Groups tab, app start and foreground.
@@ -270,8 +286,10 @@ live ones, so a correction updates the SAME local transaction in place (or remov
 for a moment and queue it again — harmless for an edit, double-counting for a correction. The same
 step turns an UNSENT edit/delete of an expense that a checkpoint has since frozen into a
 correction (same eventId) — sent as an edit it would land as a second, new expense on every phone.
-Pulling before sending keeps that window to milliseconds; it can't be closed fully without the
-server reading amounts.
+Pulling before sending keeps that window to milliseconds. **Closed Oct-24-2026 (audit F03):** an
+edit that still loses the race (another phone's checkpoint lands between my pull and my send) is
+refused on every phone (`frozen` — it used to count twice), and the next pull re-sends it as a
+correction under a new event id (`reconcileOutbox(shared, newId)`, scenario AU1).
 
 **Frozen settlements can't be deleted** (the rules don't see them). If a settle row is removed
 here (its Repayment transaction deleted), nothing is sent and the next pull puts the row back —
@@ -295,10 +313,14 @@ new event (data, system or checkpoint):
   per 10 minutes (`groups.last_push_at`), never for a checkpoint, never to the author. Expo learns a
   device token and that generic text; nothing else.
 - **Never fails a write:** both sends are wrapped and swallow their errors.
+- **Recipients:** each member's 2 newest phones (≤ 100 messages = one Expo request for 50
+  members; it used to be the 100 newest tokens, so some members got none — Oct-24-2026).
 - **Tokens:** `push_tokens` (≤ 5 per user, functions only). `src/sync/push.ts` registers this phone
   only while sharing is on, Settings → Notifications → **Shared Group Activity** is on (kind
   `sharedGroupActivity`, default on), it has a live group, notification permission is already
-  granted (never asked for here) and a session exists; otherwise it removes the token. Re-registered
+  granted (never asked for here) and a session exists; otherwise it removes the token — and if that
+call fails (offline) the token is kept marked `gone` and removed on the next try, so the switch
+really stops pushes (audit F13); a permission revoked in the OS removes it too. Re-registered
   daily; a token unseen for 60 days is pruned by cron. Sign-out removes it; Delete Account cascades.
 - **On the phone:** channel `shared-groups` ("Shared Groups"); with the app open the push isn't
   shown (realtime already pulled); a tap opens that group (`NotificationTapBoot`).
@@ -375,9 +397,9 @@ The app guarantees two things only:
 | Who may delete (decided Oct-15-2026) | **Any member**, like editing — the creator-only rule is gone (it made deletes, untags and ignores of someone else's expense bounce back or loop). |
 | Edit and delete of the same expense | Delete wins, in any order. |
 | Two phones edit the same OLD (checkpointed) expense | Each correction names the correction it was built on (`base`); the fold keeps the latest per expense (`fold.corrections`, also in checkpoints) and refuses a stale one the same way everywhere. A phone still holding an unsent correction rebuilds it on top when it sees the other (`reconcileOutbox`), so the last edit wins and debts match the card. |
-| Leave the group / remove someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). They're **archived**: still shown in old expenses, can't be added to new ones. **Remove (built Oct-15-2026):** Members tab → ⋮ on their row → Remove (`removeSharedMember`). **Any member** may remove anyone at ₹0; for someone who joined it also ends their server access (`remove_member`). If that server step fails, the row keeps offering Remove so it can be retried. |
+| Leave the group / remove someone | Allowed only when that person's balance in the group is ₹0 (app-enforced — the server can't see amounts). Losing server access any other way (a direct `remove_member`/`leave_group` call) still makes them a past member on every phone, balance kept and locked (Oct-24-2026, audit F06). They're **archived**: still shown in old expenses, can't be added to new ones. **Remove (built Oct-15-2026):** Members tab → ⋮ on their row → Remove (`removeSharedMember`). **Any member** may remove anyone at ₹0; for someone who joined it also ends their server access (`remove_member`). If that server step fails, the row keeps offering Remove so it can be retried. |
 | Someone left or was removed — what others see (confirmed Oct-15-2026) | They stay in the group's history: every past expense and settlement keeps them (balances must still add up, and every phone must compute the same from the same history). Members tab lists them under a collapsed **Past Members**. Their own phone keeps a read-only copy (**Sharing Ended**: no Add Expense / Edit Group / Group Zone / Add Member, hidden from group pickers, zone turned off) they can delete. |
-| **Add Back** (built Oct-15-2026) | Any member, from Past Members → ⋮ → Add Back: `readd_member` (migrations `20261017000000_add_back.sql`, `20261019000000_any_member.sql`) re-adds a FORMER member (their leave/removal marker must be in the history — after dormant compaction it may not be → new invite). No link: their phone still has the key and `syncAllSharedGroups` re-activates its ended copy when the server lists them again. Not for deleted accounts. Becomes per-user-key work once key rotation exists. |
+| **Add Back** (built Oct-15-2026) | Any member, from Past Members → ⋮ → Add Back: `readd_member` (migrations `20261017000000_add_back.sql`, `20261019000000_any_member.sql`) re-adds a FORMER member — remembered in `group_former_members` since Oct-24-2026, so it still works after dormant compaction drops their leave/removal marker. No link: their phone still has the key and `syncAllSharedGroups` re-activates its ended copy when the server lists them again. Not for deleted accounts. Becomes per-user-key work once key rotation exists. |
 | Someone who LEFT comes back (new invite) | They're their OLD member again: `member_joined` un-archives the member that user had claimed, on every phone; their phone adopts it (`commit`: the member holding my user id is me) and a "Sharing Ended" copy goes live again. |
 | Someone REMOVED comes back with an invite (decided Oct-15-2026, revised the same day) | They join as their old self, like someone who left. A member giving them an invite is the group's say-so; the server no longer keeps a removal list (`group_removals` dropped by `20261019000000_any_member.sql`). |
 | Someone deleted their account | Their member is a past member on every phone (`membersFromFold`): tagged Deleted Account, under Past Members, out of new splits, and the money of their old expenses locked like anyone who left. Their balance can still be settled. |
@@ -391,7 +413,7 @@ The app guarantees two things only:
 | Other parts of the app change a synced expense (ignore, untag, SMS refund, cleanup…) | ONE check point, not per action: after every store write, diff the synced groups' shared fields against what was last sent and queue events from the difference. Any member can edit any expense (§6); a custom category reads as "other" to the others, and the note stays local. |
 | App update changes a validation rule | Rules are frozen per event `v`. New rules → new `v` + `minSupportedVersion` bump in remote config, so no two live versions disagree. |
 | One bad event in a batch | NOT built: the server rejects the whole batch and `doFlush` stops there. Structural limits (size, batch) are checked on the phone before sending, so this needs an app bug — then the outbox is stuck until fixed. |
-| Someone is removed | V1: server access ends (row-level security). No key rotation yet; `key_epoch` is reserved for it. |
+| Someone is removed (or leaves) | V1: server access ends (row-level security) and the invites they made but nobody used stop working (Oct-24-2026). No key rotation yet; `key_epoch` is reserved for it. |
 | Unsent changes when sharing ends (I left, was removed, or everyone else left) — groups no longer end from inactivity (§9) | The group shows Sharing Ended; local data stays. |
 
 ---
@@ -403,6 +425,15 @@ active/deleted users, and **who owes whom per pair** — no expenses. Built by `
 (`fold.ts`), posted with `append_checkpoint`, which the server accepts only while its `baseSeq`
 is still the latest (so it never races a new expense).
 
+- **Also carries (Oct-24-2026):** `bindings` (people invited as someone who haven't become them
+  yet) and `frozenExpenses`/`frozenOther` — 12-hex-digit tags (`frozenTag` = sha256 of the id) of
+  every entry this and earlier checkpoints froze, ~1,000 per checkpoint. They let a phone that only
+  has the checkpoint refuse a frozen id sent as new, or a correction of something that wasn't an
+  expense, exactly like a phone with the history. Older checkpoints without them still verify (the
+  missing fields aren't compared). Debts in a checkpoint are running totals: capped at
+  `MAX_TOTAL_PAISE` (safe integer), not the ₹10-crore per-expense cap. A phone reads its own
+  checkpoint back through `parseEvent` before posting it and skips (and reports) one that doesn't
+  round-trip.
 - **When:** the next phone that syncs after the group has been quiet for
   `SHARED_CHECKPOINT_SETTLED_QUIET_MS` (7 days, everyone at ₹0) or
   `SHARED_CHECKPOINT_UNSETTLED_QUIET_MS` (30 days), with nothing waiting to send and no earlier
@@ -413,6 +444,11 @@ is still the latest (so it never races a new expense).
   then asks to compare with the group before settling up, and one Sentry warning goes out
   (`sync/report.ts`, the seq only). A phone missing history (late joiner, restored phone — it sees a seq gap) ADOPTS it:
   people and per-pair debts, `historyFrom` = the checkpoint.
+- **A second phone vouches (Oct-24-2026, audit F02).** A phone whose own history matched a
+  checkpoint someone ELSE posted tells the server (`ack_checkpoint`, `fold.verifiedCheckpoint` →
+  `shared.ackedCheckpoint`). Compaction deletes only up to such a checkpoint
+  (`groups.verified_checkpoint_seq`), so one member can't make an unchecked (or false, or
+  unreadable) summary the only record. A group where nobody else ever syncs keeps its history.
 - **Frozen.** Every entry before a checkpoint is frozen on every phone: kept for display, ignored
   by the rules. A phone that never saw it is in the same rule state, so phones stay in step.
 - **Editing an old expense** still looks like a normal edit. For a frozen one the app sends an
@@ -425,7 +461,7 @@ is still the latest (so it never races a new expense).
 - **Fresh start** after a checkpoint continues in the same group — same people, invite and key;
   nobody re-uploads anything.
 - **Compaction** runs only on DORMANT groups (90 quiet days, §9): events before the latest
-  checkpoint are dropped. `compact_groups` (all groups at once) stays unscheduled. A late joiner
+  checkpoint ANOTHER member's phone confirmed are dropped. `compact_groups` (all groups at once) stays unscheduled. A late joiner
   after that gets balances, not the older expenses, until history sharing (phase 5) exists.
 - **Keeping full history instead** = remove the `delete from group_events` in `purge_expired`;
   nothing on the phones changes.
@@ -439,8 +475,9 @@ it would have meant new invites for everyone. Migration `20261016000000_dormant_
 
 - Every data event sets `expires_at = now + 90 days` (a checkpoint doesn't — it isn't activity).
 - Daily `pg_cron` (`purge_expired`, 03:00 IST): a group past `expires_at` goes **dormant** —
-  if it has a checkpoint, events before it are deleted and `expires_at = infinity` until the next
-  change; without one it keeps its events and is looked at again the next day. Cost: the group
+  if it has a checkpoint another member's phone confirmed, events before it are deleted and
+  `expires_at = infinity` until the next change; without one it keeps its events and is looked at
+  again the next day. Cost: the group
   row, its members and a ~1–2 KB checkpoint.
 - **The next change wakes it**: `append_events` clears `dormant_at` and resets the 90 days. Nothing
   changes for the phones — same group, same key, same members; a phone that was offline through
@@ -526,7 +563,8 @@ new invite.
    no "Start Live Sharing" step; until someone is invited nothing leaves the phone). Invite:
    ⋮ → Invite People asks **"Who's This Invite For?"** (everyone not joined yet, or Someone New),
    or Members tab → **Invite** next to a person. A link for a person carries `&m=<memberId>`, and
-   their phone becomes that person; a Someone New link adds them under their own name. The link
+   their phone becomes that person (since Oct-24-2026 the SERVER keeps who the invite is for and
+   the rules allow only that claim — editing `m` changes nothing); a Someone New link adds them under their own name. The link
    names its person, so the Join screen offers **Join as Priya** and **I'm Not Priya** — a link
    forwarded to someone else then never takes Priya's place (once taken, Priya's debts would keep
    them from leaving). **The joiner is never asked otherwise** (decided Oct-15-2026): the app can't match a Google account to a name the inviter
@@ -597,12 +635,13 @@ new invite.
     - a crash between enqueue and send → resend is idempotent;
     - an invalid event is skipped on both;
     - a member is deleted → the marker is handled.
-- **Server: `supabase test db` (pgTAP):**
-  - a non-member can't read;
-  - direct inserts are denied;
-  - an invite can't be redeemed twice or after it expires;
-  - `append_events` is idempotent;
-  - `purge_user` keeps every event (history intact) and removes only memberships and invites.
+- **Server: `test:sql` (Oct-24-2026)** — every migration applied in order to real PostgreSQL
+  (PGlite, in-process; stand-ins for Supabase's auth/realtime/pg_net/pg_cron), called as role
+  `authenticated` the way PostgREST calls it: NULL/empty/short/wrong/expired/revoked/used invite
+  tokens, outsiders on every table and function, internal helpers not callable, NULL inputs to every
+  RPC, person-bound invites, Add Back after compaction, a leaver's invites, checkpoint confirmation
+  before compaction, push reaching every member. Not covered: two sessions racing (PGlite has one
+  connection) — the locks (group row, per-user advisory lock) are taken before every limit check.
 
 ---
 
@@ -622,6 +661,13 @@ groups therefore recover past the backup point; personal data only up to it.
 | The user's own group expenses added after the last backup | Come back from the server as group entries with no account (`accountId: null`): group balance right, the bank account balance misses that debit | Regular automatic backups (planned: on the user's chosen time slot) |
 | Anything personal after the last backup | Lost — no server copy, by design | Regular automatic backups |
 | Bank SMS for such an expense read again after restore | Could show the spend twice (group copy + new plain transaction); group copies never match SMS | Regular backups shrink the window; matching can come later |
+
+## 13a. Shared-groups audit, Oct-23/24-2026
+
+`docs/audits/shared-groups-2026-10-23/REPORT.md` — fixed the next day in
+`20261024000000_audit_fixes.sql` + the app (status per finding: `FIXES.md` in that folder).
+Decisions that stand (user): anyone may edit/delete, no confirmations or receipts, no duplicate
+detection, INR only, notes/location/custom categories stay local, restore limits (§12a).
 
 ## 13. Defaults to confirm
 

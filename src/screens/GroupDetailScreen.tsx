@@ -33,7 +33,7 @@ const typography = typographyBase as unknown as Record<string, import('react-nat
 import { useTheme } from '../hooks/useTheme';
 import { formatCurrency, formatDate, monthKey, titleCaseName } from '../utils/format';
 import { openSettleParts } from '../utils/settleAllocation';
-import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
+import { groupSyncStatus, GROUP_SYNC_LABEL, syncDotTone } from '../utils/groupSyncStatus';
 import { LB_NO_ACCOUNT, lbLinkedLine, lbTagLocked, lbTxnMerchant } from '../utils/lbEntryDisplay';
 import { categoryFieldsFor } from '../constants/twoTierCategories';
 import { countsForSpend, isSharedBill, memberName, spendContribution } from '../utils/split';
@@ -473,6 +473,13 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
         toast.success(`${name} removed`);
       }, 'Couldn\'t remove'),
     });
+  };
+
+  const handleSyncNow = () => {
+    flushGroup(group.id).then(
+      () => toast.success('Synced'),
+      (e) => toast.error('Couldn\'t sync', (e as Error).message),
+    );
   };
 
   const handleLeave = () => setConfirm({
@@ -930,7 +937,8 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                       push "Live" off the end). Same status + dot as the Groups list card. */}
                   {(() => {
                     const sync = groupSyncStatus(group);
-                    const dot = sync === 'live' ? theme.success : sync === 'waiting' ? theme.warning : null;
+                    const tone = syncDotTone(sync);
+                    const dot = tone ? theme[tone] : null;
                     return (
                       <View style={styles.cardMetaRow}>
                         <Text style={[styles.cardMeta, styles.cardMetaNames]} numberOfLines={1}>
@@ -961,6 +969,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
                     ]),
                     ...(canInvite ? [{ key: 'invite', label: 'Invite People', icon: 'person-add-outline' as const, onPress: startInvite }] : []),
                     ...(group.shared ? [{ key: 'history', label: 'History', icon: 'time-outline' as const, onPress: () => navigation.navigate('GroupHistory', { groupId: group.id }) }] : []),
+                    ...(live ? [{ key: 'sync', label: 'Sync Now', icon: 'sync-outline' as const, onPress: handleSyncNow }] : []),
                     // Live: Leave keeps a read-only copy here; Delete leaves AND removes it. Both ₹0 only.
                     ...(live ? [{ key: 'leave', label: 'Leave Group', icon: 'exit-outline' as const, destructive: true, onPress: handleLeave }] : []),
                     { key: 'delete', label: 'Delete Group', icon: 'trash-outline' as const, destructive: true, onPress: handleDeleteGroup },

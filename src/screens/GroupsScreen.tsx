@@ -30,7 +30,7 @@ import InfoIcon from '../components/InfoIcon';
 import SectionHeader from '../components/SectionHeader';
 import StatSplitRow from '../components/StatSplitRow';
 import type { Group } from '../types/group';
-import { groupSyncStatus, GROUP_SYNC_LABEL } from '../utils/groupSyncStatus';
+import { groupSyncStatus, GROUP_SYNC_LABEL, syncDotTone } from '../utils/groupSyncStatus';
 import { useSyncEnabled } from '../sync/config';
 import { syncAllSharedGroups } from '../sync/groupSync';
 
@@ -61,8 +61,8 @@ function GroupListCardRow({
   // Personal groups have no such state, so they keep the flat card.
   const stateColor = !isShared ? null : settled ? colors.success : net > 0 ? colors.lent : colors.borrowed;
   const sync = groupSyncStatus(group);
-  // Only live/waiting earn a coloured dot — the other states are facts, not activity.
-  const syncDot = sync === 'live' ? colors.success : sync === 'waiting' ? colors.warning : null;
+  const tone = syncDotTone(sync);
+  const syncDot = tone ? colors[tone] : null;
   return (
     // The shadow needs its own OPAQUE shell — Android's `elevation` under a
     // translucent fill (the state wash) renders as a muddy grey/olive box

@@ -21,6 +21,7 @@ import { V1_LIMITS, type ExpenseBody, type SyncEvent } from './events';
 import { buildCorrection } from './fold';
 import { planGroupChanges, toLocalMember, toRemoteMember } from './localGroup';
 import { cachedPhoneKey } from './phoneKey';
+import { isPayerLockedToMe } from '../utils/split';
 import {
   groupSettleRows, planIncomingSettlements, projectSettlement, settlementsWithMe, type LbOp, type SyncLbRow,
 } from './settlements';
@@ -45,15 +46,29 @@ function lastCorrection(outbox: OutboxItem[], id: string) {
   return c;
 }
 
+/** Sent, then skipped by the rules because a checkpoint froze the expense just before it landed (fold 'frozen'). */
+function lostToCheckpoint(f: GroupShared['fold'], o: OutboxItem): boolean {
+  const ev = o.event;
+  if (ev.type !== 'expense.upsert' && ev.type !== 'expense.delete') return false;
+  const e = f.entries[ev.entityId];
+  if (!e || !e.frozen || e.kind !== 'expense' || e.deleted) return false;
+  return ev.type === 'expense.delete' || !e.versions.some((v) => v.seq === o.seq);
+}
+
 /**
  * After a pull: drop what the history now has, and turn an UNSENT edit or delete of an
  * expense that a checkpoint has since frozen into a correction — sent as a plain edit, it
  * would count as a second, new expense. Same eventId, so a send already under way can't double it.
+ * One that was SENT but lost that race (`newId` given) goes again, as a correction under a new id.
  */
-export function reconcileOutbox(shared: GroupShared): OutboxItem[] {
+export function reconcileOutbox(shared: GroupShared, newId?: () => string): OutboxItem[] {
   const f = shared.fold;
   const out: OutboxItem[] = [];
-  for (const o of (shared.outbox ?? []).filter((x) => !(x.seq && x.seq <= f.seq))) {
+  const items = (shared.outbox ?? []).flatMap((x): OutboxItem[] => {
+    if (!(x.seq && x.seq <= f.seq)) return [x];
+    return newId && lostToCheckpoint(f, x) ? [{ eventId: newId(), at: x.at, event: x.event }] : [];
+  });
+  for (const o of items) {
     const ev = o.event;
     // An unsent correction overtaken by someone else's: rebuild it on top (so the last edit wins).
     if (ev.type === 'expense.correct' && !o.seq) {
@@ -73,6 +88,7 @@ export function reconcileOutbox(shared: GroupShared): OutboxItem[] {
     const from = pendingVersion(out, id);
     if (from === null || entry.deleted) continue;
     const next = ev.type === 'expense.upsert' ? (({ type: _t, ...body }) => body)(ev) : null;
+    if (next && JSON.stringify(next) === JSON.stringify(from ?? entry.data)) continue;  // the history already says this
     const c = buildCorrection(f, o.eventId, id, next, from, lastCorrection(out, id)?.entityId);
     if (c) out.push({ ...o, event: { type: 'expense.correct', ...c } });
   }
@@ -334,7 +350,11 @@ export function planIncoming(
     const localCategory = sharedCategory(local, builtIns);
     const have = localKey(local, titleOf(local), localCategory);
     const target = localKey(want, want.merchant, want.categoryId);
-    if (have !== target) {
+    // My bank's record of what I paid isn't anyone else's to change (audit F07): this phone keeps
+    // it, and planOutgoing sends it back as the newest version — like any later edit, it wins.
+    const bankHeld = local.syncOrigin !== 'remote' && isPayerLockedToMe(local)
+      && (Math.round(local.amount * 100) !== entry.data.amountPaise || want.groupSplit.paidByMemberId !== 'me');
+    if (have !== target && !bankHeld) {
       const fields: Partial<SyncTxn> = { amount: want.amount, merchant: want.merchant, createdAt: want.createdAt, groupSplit: want.groupSplit, isGroupMemo: want.isGroupMemo };
       if (local.cleanMerchant) fields.cleanMerchant = want.merchant;
       // A custom category here reads as 'other' on the server — keep it unless the server changed it.

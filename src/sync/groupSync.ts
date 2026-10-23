@@ -17,15 +17,15 @@ import { bytesToBase64, base64ToBytes } from '../backup/envelope';
 import { DEFAULT_CATEGORIES } from '../constants/categories';
 import type { Group, GroupShared } from '../types/group';
 import { generateGroupKey, randomUuid, sealEvent, openEvent, MAX_CIPHERTEXT_CHARS } from './crypto';
-import { encodeEvent, V1_LIMITS, type SyncEvent } from './events';
-import { buildCheckpoint, emptyFold, foldEvents, type IncomingEvent, type Rejection } from './fold';
+import { encodeEvent, parseEvent, V1_LIMITS, type SyncEvent } from './events';
+import { buildCheckpoint, emptyFold, foldEvents, sameCheckpoint, type IncomingEvent, type Rejection } from './fold';
 import { checkpointDue } from './checkpoint';
 import { planBalanceRows } from './balances';
 import { newInvite, buildInviteLink, parseInviteLink } from './invite';
 import { membersFromFold, metaOf, toRemoteMember, unclaimedMembers } from './localGroup';
 import { planIncoming, reconcileOutbox, skippedBySend, type OutboxItem } from './expenses';
 import {
-  rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
+  rpcCreateGroup, rpcAppendEvents, rpcAppendCheckpoint, rpcAckCheckpoint, rpcCreateInvite, rpcRedeemInvite, rpcLeaveGroup,
   rpcRemoveMember, rpcReaddMember, fetchEvents, fetchMyGroupIds, type EventRow, type SealedRow,
 } from './api';
 import { ensureSyncSession } from './session';
@@ -60,7 +60,7 @@ const toIncoming = (shared: GroupShared, r: EventRow): IncomingEvent => {
   }
   return {
     seq: r.seq, eventId: r.event_id, authorId: r.author_id, systemType: r.system_type,
-    systemSubject: r.system_subject, plaintext, createdAt: r.created_at,
+    systemSubject: r.system_subject, systemMember: r.system_member ?? null, plaintext, createdAt: r.created_at,
   };
 };
 
@@ -76,7 +76,7 @@ function commit(localId: string, pulled: GroupShared, onlyIfChanged = false) {
     report('checkpoint mismatch', { seq: pulled.fold.checkpointMismatch });
   }
   const skipped = skippedBySend(pulled);  // before reconcileOutbox drops the sent items
-  let shared: GroupShared = { ...pulled, outbox: reconcileOutbox(pulled) };
+  let shared: GroupShared = { ...pulled, outbox: reconcileOutbox(pulled, newSyncId) };
   // Already someone in this history (a rejoin, or a claim whose pull failed): that's me.
   const me = store().syncAccount?.userId;
   const mine = !shared.myMemberId && me ? shared.fold.memberOrder.find((id) => shared.fold.members[id].userId === me) : null;
@@ -103,14 +103,14 @@ export async function pullGroup(localId: string): Promise<Rejection[]> {
     if (!rows.length) {
       // Nothing new — still put back anything this phone has drifted from (e.g. a row of a
       // frozen settlement whose Repayment was deleted here).
-      if (!page) commit(localId, shared, true);
+      if (!page) commit(localId, { ...shared, syncedAt: new Date().toISOString(), syncFailedAt: undefined }, true);
       break;
     }
     // Re-read: the outbox may have grown while we were waiting.
     const latest = requireShared(localId).shared;
     const res = foldEvents(latest.fold, rows.map((r) => toIncoming(latest, r)));
     rejected.push(...res.rejected);
-    commit(localId, { ...latest, fold: res.fold, syncedAt: new Date().toISOString() });
+    commit(localId, { ...latest, fold: res.fold, syncedAt: new Date().toISOString(), syncFailedAt: undefined });
     if (rows.length < 500) break;
   }
   return rejected;
@@ -169,6 +169,7 @@ async function doFlush(localId: string) {
   }
   await pullGroup(localId);
   await postCheckpointIfDue(localId).catch(() => {});  // retried on the next sync
+  await confirmCheckpoint(localId).catch(() => {});    // same
 }
 
 async function postCheckpointIfDue(localId: string) {
@@ -176,10 +177,28 @@ async function postCheckpointIfDue(localId: string) {
   if (!checkpointDue(shared, Date.now())) return;
   const cp = buildCheckpoint(shared.fold);
   const item: OutboxItem = { eventId: newSyncId(), at: new Date().toISOString(), event: { type: 'group.checkpoint', ...cp } };
+  // Every phone must be able to read it back exactly, or a fresh phone would have nothing to start from.
+  const back = parseEvent(encodeEvent(item.event, item.at))?.event;
+  if (back?.type !== 'group.checkpoint' || !sameCheckpoint(back, cp)) {
+    report('checkpoint does not round-trip', { members: cp.members.length, debts: cp.debts.length });
+    return;
+  }
   const row = sealRows(shared, [item])[0];
   if (row.ciphertext.length > MAX_CIPHERTEXT_CHARS) return;  // too many people/debts for one event: the server keeps the history
   // false = something landed first; the next quiet spell tries again.
   if (await rpcAppendCheckpoint(shared.remoteId, cp.baseSeq, row)) await pullGroup(localId);
+}
+
+/**
+ * Tells the server this phone checked someone else's checkpoint against its own full history
+ * and it matched — only then may old history be compacted (20261024000000_audit_fixes.sql).
+ */
+async function confirmCheckpoint(localId: string) {
+  const { shared } = requireShared(localId);
+  const v = shared.fold.verifiedCheckpoint;
+  if (!v || v.seq <= (shared.ackedCheckpoint ?? 0)) return;
+  if (v.by !== store().syncAccount?.userId) await rpcAckCheckpoint(shared.remoteId, v.seq);
+  store().setSharedGroupState(localId, { ...requireShared(localId).shared, ackedCheckpoint: v.seq });
 }
 
 const chains = new Map<string, Promise<void>>();
@@ -192,8 +211,21 @@ function exclusive(localId: string, run: () => Promise<void>): Promise<void> {
   return next;
 }
 
+/** A failure worth showing and retrying: the server wasn't reached, or erred. */
+export const isRetryable = (e: unknown): boolean =>
+  e instanceof SyncError && (e.code === 'NETWORK' || e.code === 'SERVER' || e.code === 'SIGN_IN_FAILED');
+
+/** The group shows "Not synced" if this keeps up (groupSyncStatus); the next good pull clears it. */
+function noteFailure(localId: string, e: unknown) {
+  const sh = getGroup(localId)?.shared;
+  if (sh && sh.status !== 'ended' && !sh.syncFailedAt && isRetryable(e)) {
+    store().setSharedGroupState(localId, { ...sh, syncFailedAt: new Date().toISOString() });
+  }
+}
+
 /** Sends this group's queued changes, then pulls. */
-export const flushGroup = (localId: string): Promise<void> => exclusive(localId, () => doFlush(localId));
+export const flushGroup = (localId: string): Promise<void> =>
+  exclusive(localId, () => doFlush(localId)).catch((e) => { noteFailure(localId, e); throw e; });
 
 /** Turns a local shared group into a live one, with me as its first member. Run by the first invite. */
 async function startSharing(localId: string): Promise<void> {
@@ -207,8 +239,7 @@ async function startSharing(localId: string): Promise<void> {
   const others = group.members.filter((m) => m.memberId !== 'me' && !m.isMe);
   const first: SyncEvent[] = [
     metaOf(group),
-    { type: 'member.add', memberId: memberMap.me, name: myName() },
-    { type: 'member.claim', memberId: memberMap.me, userId },
+    { type: 'member.add', memberId: memberMap.me, name: myName(), self: true },
     ...others.map((m): SyncEvent => ({ type: 'member.add', memberId: memberMap[m.memberId], name: m.name.trim().slice(0, V1_LIMITS.NAME_MAX) || 'Member' })),
   ];
 
@@ -255,22 +286,23 @@ export async function createInviteLink(localId: string, forMember?: string): Pro
     ? remoteMember : null;
 
   const inv = newInvite(randomBytes);
-  await rpcCreateInvite(inv.inviteId, shared.remoteId, inv.tokenHashHex);
+  // The server keeps who it's for: the joiner can become only that person, whatever the link says.
+  await rpcCreateInvite(inv.inviteId, shared.remoteId, inv.tokenHashHex, claimable);
   return buildInviteLink(inv.inviteId, inv.token, key, claimable, claimable ? shared.fold.members[claimable].name : null);
 }
 
 /**
  * Joins from an invite link, all the way: a link made for one person makes me that person
- * (the INVITER says who it's for), unless `asNew` — "I'm Not Priya" on a forwarded link;
- * any other link makes me a new person under my own name. Rejoining makes me my old self
- * again. Returns the local group id.
+ * (the INVITER says who it's for — the server's copy, not the link's `m`), unless `asNew` —
+ * "I'm Not Priya" on a forwarded link; any other link makes me a new person under my own
+ * name. Rejoining makes me my old self again. Returns the local group id.
  */
 export async function joinFromLink(link: string, { asNew = false }: { asNew?: boolean } = {}): Promise<string> {
   const parsed = parseInviteLink(link.trim());
   if (!parsed) throw new SyncError('INVITE_INVALID', 'That isn\'t an ePurse invite link.');
-  const claimFor = asNew ? null : parsed.memberId;
   await ensureSyncSession();
   const redeemed = await rpcRedeemInvite(parsed.inviteId, parsed.token);
+  const claimFor = asNew ? null : redeemed.memberId;
 
   const existing = store().groups.find((g: Group) => g.shared?.remoteId === redeemed.groupId);
   let localId: string;
@@ -334,15 +366,14 @@ async function sendNow(localId: string, events: SyncEvent[]) {
   await pullGroup(localId);
 }
 
-/** "This one is me" — or, with no memberId, adds me under my own name. */
+/** "This one is me" (only the person my invite was for) — or, with no memberId, adds me under my own name. */
 async function claimMember(localId: string, memberId: string | null): Promise<void> {
   const userId = await ensureSyncSession();
   await pullGroup(localId);  // an earlier claim may have landed even though its pull failed
   if (requireShared(localId).shared.myMemberId) return;
   const id = memberId ?? newSyncId();
   await sendNow(localId, [
-    ...(memberId ? [] : [{ type: 'member.add', memberId: id, name: myName() } as SyncEvent]),
-    { type: 'member.claim', memberId: id, userId },
+    memberId ? { type: 'member.claim', memberId: id, userId } : { type: 'member.add', memberId: id, name: myName(), self: true },
   ]);
   const { shared } = requireShared(localId);
   if (shared.fold.members[id]?.userId !== userId) {
@@ -416,8 +447,13 @@ export async function leaveSharedGroup(localId: string): Promise<void> {
 export async function syncAllSharedGroups(): Promise<void> {
   const shared = store().groups.filter((g: Group) => g.shared && (g.shared.status !== 'ended' || g.shared.myMemberId));
   if (!shared.length) return;
-  const userId = await ensureSyncSession();
-  const mine = await fetchMyGroupIds(userId);
+  let mine: Set<string>;
+  try {
+    mine = await fetchMyGroupIds(await ensureSyncSession());
+  } catch (e) {
+    for (const g of shared) noteFailure(g.id, e);
+    throw e;
+  }
   for (const g of shared) {
     if (g.shared!.status === 'ended' && mine.has(g.shared!.remoteId)) {
       store().setSharedGroupState(g.id, reactivated(g.shared!));

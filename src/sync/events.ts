@@ -8,7 +8,9 @@
 // FROZEN for v1. These limits are deliberately NOT `INPUT_LIMITS`: changing a
 // form's limit must never change how an old event validates, or phones on
 // different app versions would compute different balances. A new rule means a
-// new `v` (and a `minSupportedVersion` bump), never an edit here.
+// new `v` (and a `minSupportedVersion` bump), never an edit here. (Pre-launch
+// exception, Oct-24-26: the audit fixes changed v1 in place — no phone outside
+// testing has it yet.)
 // =============================================================================
 
 import { isUuid } from './crypto';
@@ -28,6 +30,8 @@ export const V1_LIMITS = {
   MAX_MEMBERS: 100,
   /** Every pair of 100 members. */
   MAX_DEBTS: 4950,
+  /** One pair's running total in a checkpoint: many ₹10-crore expenses add up past MAX_PAISE. */
+  MAX_TOTAL_PAISE: Number.MAX_SAFE_INTEGER,
 } as const;
 
 export type Share = { memberId: string; paise: number };
@@ -55,6 +59,12 @@ export type Debt = { from: string; to: string; paise: number };
 
 export type CheckpointMember = { memberId: string; name: string; userId: string | null; archived: boolean };
 
+/** Someone who joined by an invite made for a person, and hasn't become that person yet. */
+export type Binding = { userId: string; memberId: string };
+
+/** The id tag the rules remember a frozen entry by (sync/fold.ts frozenTag): 12 hex digits. */
+const TAG_RE = /^[0-9a-f]{12}$/;
+
 /** Everything the next phone needs to start from here: no expenses, just people and who owes whom. */
 export type CheckpointBody = {
   /** The seq this summarises — the server only accepts it while that's still the latest. */
@@ -67,6 +77,12 @@ export type CheckpointBody = {
   debts: Debt[];
   /** Corrected expenses: the latest correction of each, so the next one can be checked against it. */
   corrections: CorrectionHead[];
+  /** Absent on checkpoints from before Oct-24-26 (then not compared). */
+  bindings?: Binding[];
+  /** Tags of every expense this and earlier checkpoints froze — the only ones a correction may name. */
+  frozenExpenses?: string[];
+  /** Tags of every other frozen entry (settlements, corrections, deleted expenses) — never reusable. */
+  frozenOther?: string[];
 };
 
 export type CorrectionHead = { correctsId: string; head: string; deleted: boolean };
@@ -91,7 +107,8 @@ export type SyncEvent =
   | { type: 'group.meta'; name: string; emoji: string | null; color: string | null }
   // phoneKey (Oct-17-26): optional fingerprint of the person's number (sync/phoneKey.ts) —
   // only links people to contacts, never touches a balance, so older phones dropping it is safe.
-  | { type: 'member.add'; memberId: string; name: string; phoneKey?: string }
+  // self (Oct-24-26): "this new person is me" — how a creator or a plain-invite joiner joins.
+  | { type: 'member.add'; memberId: string; name: string; phoneKey?: string; self?: true }
   | { type: 'member.claim'; memberId: string; userId: string }
   | { type: 'member.rename'; memberId: string; name: string }
   | { type: 'member.archive'; memberId: string }
@@ -145,11 +162,12 @@ function parseExpenseBody(o: any): ExpenseBody | null {
   };
 }
 
-function parseDebts(v: unknown): Debt[] | null {
+function parseDebts(v: unknown, max: number = V1_LIMITS.MAX_PAISE): Debt[] | null {
   if (!Array.isArray(v) || v.length > V1_LIMITS.MAX_DEBTS) return null;
   const out: Debt[] = [];
   for (const d of v) {
-    if (!d || !isUuid(d.from) || !isUuid(d.to) || d.from === d.to || !paise(d.paise, 1)) return null;
+    if (!d || !isUuid(d.from) || !isUuid(d.to) || d.from === d.to) return null;
+    if (typeof d.paise !== 'number' || !Number.isSafeInteger(d.paise) || d.paise < 1 || d.paise > max) return null;
     out.push({ from: d.from, to: d.to, paise: d.paise });
   }
   return out;
@@ -179,7 +197,7 @@ function parseCheckpoint(o: any): CheckpointBody | null {
   }
   const activeUsers = uuidList(o.activeUsers);
   const deletedUsers = uuidList(o.deletedUsers);
-  const debts = parseDebts(o.debts);
+  const debts = parseDebts(o.debts, V1_LIMITS.MAX_TOTAL_PAISE);
   if (!activeUsers || !deletedUsers || !debts) return null;
   if (debts.some((d) => !seen.has(d.from) || !seen.has(d.to))) return null;
   if (o.corrections !== undefined && !Array.isArray(o.corrections)) return null;
@@ -188,7 +206,22 @@ function parseCheckpoint(o: any): CheckpointBody | null {
     if (!c || !isUuid(c.correctsId) || !isUuid(c.head) || typeof c.deleted !== 'boolean') return null;
     corrections.push({ correctsId: c.correctsId, head: c.head, deleted: c.deleted });
   }
-  return { baseSeq: o.baseSeq, meta, members, activeUsers, deletedUsers, debts, corrections };
+  const out: CheckpointBody = { baseSeq: o.baseSeq, meta, members, activeUsers, deletedUsers, debts, corrections };
+  if (o.bindings !== undefined) {
+    if (!Array.isArray(o.bindings) || o.bindings.length > V1_LIMITS.MAX_MEMBERS) return null;
+    const bindings: Binding[] = [];
+    for (const b of o.bindings) {
+      if (!b || !isUuid(b.userId) || !isUuid(b.memberId) || !seen.has(b.memberId)) return null;
+      bindings.push({ userId: b.userId, memberId: b.memberId });
+    }
+    out.bindings = bindings;
+  }
+  for (const k of ['frozenExpenses', 'frozenOther'] as const) {
+    if (o[k] === undefined) continue;
+    if (!Array.isArray(o[k]) || !o[k].every((t: unknown) => typeof t === 'string' && TAG_RE.test(t))) return null;
+    out[k] = [...o[k]];
+  }
+  return out;
 }
 
 /** The event, rebuilt from known fields only — or null if anything is off. */
@@ -208,8 +241,15 @@ export function parseEvent(json: string | null): ParsedEvent | null {
 
     case 'member.add':
       if (!isUuid(o.memberId) || !text(o.name, V1_LIMITS.NAME_MAX)) return null;
+      if (o.self !== undefined && o.self !== true) return null;
       // A malformed fingerprint is dropped, never the person.
-      return { at, event: { type: o.type, memberId: o.memberId, name: o.name, ...(isPhoneKey(o.phoneKey) ? { phoneKey: o.phoneKey } : {}) } };
+      return {
+        at,
+        event: {
+          type: o.type, memberId: o.memberId, name: o.name,
+          ...(isPhoneKey(o.phoneKey) ? { phoneKey: o.phoneKey } : {}), ...(o.self ? { self: true as const } : {}),
+        },
+      };
 
     case 'member.rename':
       if (!isUuid(o.memberId) || !text(o.name, V1_LIMITS.NAME_MAX)) return null;

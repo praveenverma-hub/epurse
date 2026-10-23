@@ -1,0 +1,212 @@
+{
+  "date": "2026-10-23",
+  "scripts": 51,
+  "passed": 45,
+  "failed": 6,
+  "results": [
+    {
+      "name": "test:parse",
+      "status": 0
+    },
+    {
+      "name": "test:parser",
+      "status": 0
+    },
+    {
+      "name": "test:splitShares",
+      "status": 0
+    },
+    {
+      "name": "test:categorySuggest",
+      "status": 0
+    },
+    {
+      "name": "test:categoryQuickPick",
+      "status": 0
+    },
+    {
+      "name": "test:accountMatch",
+      "status": 0
+    },
+    {
+      "name": "test:self",
+      "status": 0
+    },
+    {
+      "name": "test:group",
+      "status": 0
+    },
+    {
+      "name": "test:txnCard",
+      "status": 0
+    },
+    {
+      "name": "test:groupHero",
+      "status": 0
+    },
+    {
+      "name": "test:lbEntry",
+      "status": 0
+    },
+    {
+      "name": "test:emoji",
+      "status": 0
+    },
+    {
+      "name": "test:cardLimit",
+      "status": 0
+    },
+    {
+      "name": "test:store",
+      "status": 1
+    },
+    {
+      "name": "test:defaultAccount",
+      "status": 0
+    },
+    {
+      "name": "test:settleAllocation",
+      "status": 0
+    },
+    {
+      "name": "test:sync",
+      "status": 0
+    },
+    {
+      "name": "test:groupScenarios",
+      "status": 0
+    },
+    {
+      "name": "test:e2e",
+      "status": 0
+    },
+    {
+      "name": "test:bulk",
+      "status": 0
+    },
+    {
+      "name": "test:dateRange",
+      "status": 0
+    },
+    {
+      "name": "test:reminders",
+      "status": 0
+    },
+    {
+      "name": "test:dueDate",
+      "status": 0
+    },
+    {
+      "name": "test:ccStatement",
+      "status": 0
+    },
+    {
+      "name": "test:accountFlow",
+      "status": 0
+    },
+    {
+      "name": "test:accountGradient",
+      "status": 0
+    },
+    {
+      "name": "test:contrast",
+      "status": 1
+    },
+    {
+      "name": "test:backup",
+      "status": 0
+    },
+    {
+      "name": "test:payload",
+      "status": 0
+    },
+    {
+      "name": "test:storage",
+      "status": 0
+    },
+    {
+      "name": "test:drive",
+      "status": 0
+    },
+    {
+      "name": "test:remoteConfig",
+      "status": 0
+    },
+    {
+      "name": "test:buildVariant",
+      "status": 0
+    },
+    {
+      "name": "test:smsSync",
+      "status": 0
+    },
+    {
+      "name": "test:onboarding",
+      "status": 0
+    },
+    {
+      "name": "test:homeCards",
+      "status": 0
+    },
+    {
+      "name": "test:homeTips",
+      "status": 0
+    },
+    {
+      "name": "test:bellFeed",
+      "status": 0
+    },
+    {
+      "name": "test:notifPolicy",
+      "status": 0
+    },
+    {
+      "name": "test:notifPlan",
+      "status": 0
+    },
+    {
+      "name": "test:headerLayout",
+      "status": 1
+    },
+    {
+      "name": "test:carousel",
+      "status": 0
+    },
+    {
+      "name": "test:layout",
+      "status": 0
+    },
+    {
+      "name": "test:profile",
+      "status": 1
+    },
+    {
+      "name": "test:arrange",
+      "status": 0
+    },
+    {
+      "name": "test:goalHistory",
+      "status": 0
+    },
+    {
+      "name": "test:retention",
+      "status": 0
+    },
+    {
+      "name": "test:goals",
+      "status": 0
+    },
+    {
+      "name": "test:rewards",
+      "status": 1
+    },
+    {
+      "name": "test:elevation",
+      "status": 1
+    },
+    {
+      "name": "test:modals",
+      "status": 0
+    }
+  ]
+}

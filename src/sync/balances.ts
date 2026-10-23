@@ -53,7 +53,8 @@ export function planBalanceRows(group: Group, txns: SyncTxn[], lb: SyncLbRow[], 
   for (const id of new Set([...Object.keys(want), ...Object.keys(have), ...earlier.keys()])) {
     const diff = (want[id] ?? 0) - (have[id] ?? 0);
     const row = earlier.get(id);
-    if (Math.abs(diff) <= 1) {   // a paisa of rounding isn't a balance
+    // A paisa off rows this phone has is their rupee rounding; with no rows here it's a real balance.
+    if (diff === 0 || (Math.abs(diff) <= 1 && have[id])) {
       if (row) ops.push({ kind: 'lbRemove', rowId: row.id });
       continue;
     }

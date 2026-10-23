@@ -2011,6 +2011,25 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 ## Groups
 
 **Done**
+- **Oct-24-2026 — shared-groups audit fixes** (`docs/audits/shared-groups-2026-10-23/FIXES.md` has the full
+  per-finding status). New migration `20261024000000_audit_fixes.sql`, **written but NOT pushed** (needs
+  `supabase db push` on test; the new app code depends on it). Every test phone needs this build before Nov-01.
+  - **Server:** NULL invite tokens no longer get in. NULL inputs are refused everywhere. Limits are counted after the locks.
+  - **Invites:** an invite made for a person can only make its joiner that person; editing the link changes nothing.
+    A leaver's open invites stop working.
+  - **Compaction:** history is deleted only up to a checkpoint another member's phone has checked.
+  - **Checkpoints:** a frozen expense sent again as new is refused (it used to count twice), and an edit that lost
+    that race is re-sent as a correction. A correction must name a real old expense. Checkpoints with very large
+    totals still parse.
+  - **Leaving and Add Back:** a member removed by a direct server call becomes a past member. Add Back works after compaction.
+  - **SMS expenses:** another member can't change the amount or payer of my SMS-recorded group expense; my
+    phone sends the bank's version back.
+  - **Small fixes:** a ₹0.01 balance known only from a checkpoint shows. Push reaches every member's 2 newest
+    phones. Turning push off while offline is retried. Clearer error messages.
+  - **Sync status:** failed syncs retry with backoff and catch up when the connection returns. The status shows
+    "Not synced" / "Balances differ". Group ⋮ → Sync Now.
+  - **Tests:** new `test:sql` (all migrations on real Postgres via PGlite, 63 checks); test:sync 259, test:groupScenarios 156.
+  - Not device-verified.
 - **Oct-20-2026 — group history rows: 2 lines max** (`GroupHistoryList`, both the History page and the detail
   sheet): line 1 = who did what (ellipsis), line 2 = change · time (time never shrinks). Was up to 5 lines.
 - **Oct-20-2026 — my own number for shared groups.** Required (inline `FormPhoneInput`, saved to profile) when

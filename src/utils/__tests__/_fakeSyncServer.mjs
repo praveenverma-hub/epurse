@@ -1,7 +1,7 @@
 // =============================================================================
 // In-memory stand-in for the Supabase side of shared-group sync (test-only).
 // Exports the same functions as src/sync/api.ts, and follows the LATEST version
-// of each SQL function in supabase/migrations/ — so the real groupSync, fold and
+// of each SQL function in supabase/migrations/ (the SQL itself is tested by test:sql) — so the real groupSync, fold and
 // crypto run against it unchanged. Row-level security is modelled where reads
 // depend on it (only members see a group's rows).
 //
@@ -23,10 +23,12 @@ export const server = {
   offline: false,
   failing: new Set(),
   losing: new Set(),
-  groups: new Map(),        // id → { id, created_by, last_seq, key_epoch, checkpoint_seq, last_event_at, expires_at, dormant_at, last_push_at }
+  groups: new Map(),        // id → { id, created_by, last_seq, key_epoch, checkpoint_seq, verified_checkpoint_seq, last_event_at, expires_at, dormant_at, last_push_at }
   members: [],              // { group_id, user_id, role, joined_at }
-  invites: new Map(),       // id → { group_id, created_by, token_hash, expires_at, used_by, used_at }
-  events: [],               // { group_id, seq, event_id, author_id, key_epoch, nonce, ciphertext, system_type, system_subject, created_at }
+  invites: new Map(),       // id → { group_id, created_by, token_hash, expires_at, used_by, used_at, revoked_at, member_id }
+  events: [],               // { group_id, seq, event_id, author_id, key_epoch, nonce, ciphertext, system_type, system_subject, system_member, created_at }
+  former: new Set(),        // `${group}|${user}` — group_former_members
+  beforeAppend: null,       // test hook: runs once, inside the next append_events, before it writes (a race)
   deletedUsers: new Set(),
   compacted: new Map(),     // event_id → { group_id, seq } — group_compacted_ids
   pokes: [],                // realtime broadcasts { group, seq }
@@ -37,7 +39,7 @@ export const server = {
     this.offline = false;
     this.failing.clear(); this.losing.clear();
     this.groups.clear(); this.members = []; this.invites.clear(); this.events = [];
-    this.deletedUsers.clear(); this.compacted.clear(); this.pokes = []; this.pushes = [];
+    this.deletedUsers.clear(); this.compacted.clear(); this.pokes = []; this.pushes = []; this.former.clear(); this.beforeAppend = null;
   },
 };
 
@@ -61,11 +63,11 @@ function onActivity(g) {
   if (to.length) { server.pushes.push({ group: g.id, to }); g.last_push_at = server.now; }
 }
 
-function appendSystem(groupId, type, subject) {
+function appendSystem(groupId, type, subject, member = null) {
   const g = server.groups.get(groupId);
   g.last_seq += 1;
   server.events.push({ group_id: groupId, seq: g.last_seq, event_id: crypto.randomUUID(), author_id: null,
-    key_epoch: null, nonce: null, ciphertext: null, system_type: type, system_subject: subject, created_at: iso() });
+    key_epoch: null, nonce: null, ciphertext: null, system_type: type, system_subject: subject, system_member: member, created_at: iso() });
   onActivity(g);
 }
 
@@ -83,6 +85,11 @@ function removeMember(groupId, userId, type) {
     const next = [...membersOf(groupId)].sort((a, b) => a.joined_at - b.joined_at || (a.user_id < b.user_id ? -1 : 1))[0];
     next.role = 'admin';
   }
+  // 20261024000000: their open invites stop working; a leaver/removed person is a former member.
+  for (const inv of server.invites.values()) {
+    if (inv.group_id === groupId && inv.created_by === userId && !inv.used_at && !inv.revoked_at) inv.revoked_at = server.now;
+  }
+  if (type === 'member_left' || type === 'member_removed') server.former.add(`${groupId}|${userId}`);
   appendSystem(groupId, type, userId);
 }
 
@@ -97,13 +104,14 @@ export async function rpcCreateGroup(groupId) {
   }
   if (server.members.filter((m) => m.user_id === uid()).length >= 100) raise('too many groups');
   server.groups.set(groupId, { id: groupId, created_by: uid(), last_seq: 0, key_epoch: 1, checkpoint_seq: null,
-    last_event_at: null, expires_at: server.now + 90 * DAY, dormant_at: null, last_push_at: null });
+    verified_checkpoint_seq: null, last_event_at: null, expires_at: server.now + 90 * DAY, dormant_at: null, last_push_at: null });
   server.members.push({ group_id: groupId, user_id: uid(), role: 'admin', joined_at: ++joinedCounter });
   appendSystem(groupId, 'group_created', uid());
 }
 
 export async function rpcAppendEvents(groupId, rows) {
   net('append_events');
+  if (server.beforeAppend) { const race = server.beforeAppend; server.beforeAppend = null; race(groupId); }
   if (!isMember(groupId)) raise('not a member');
   if (!Array.isArray(rows) || rows.length < 1 || rows.length > 50) raise('batch must hold 1-50 events');
   const g = server.groups.get(groupId);
@@ -146,13 +154,23 @@ export async function rpcAppendCheckpoint(groupId, baseSeq, row) {
   return true;
 }
 
-export async function rpcCreateInvite(inviteId, groupId, tokenHashHex) {
+export async function rpcAckCheckpoint(groupId, seq) {
+  net('ack_checkpoint');
+  const g = server.groups.get(groupId);
+  if (!g || !isMember(groupId)) raise('not a member');
+  if (g.checkpoint_seq !== seq) return false;
+  if (server.events.some((e) => e.group_id === groupId && e.seq === seq && e.author_id === uid())) return false;
+  g.verified_checkpoint_seq = Math.max(g.verified_checkpoint_seq ?? 0, seq);
+  return true;
+}
+
+export async function rpcCreateInvite(inviteId, groupId, tokenHashHex, memberId = null) {
   net('create_invite');
   if (!isMember(groupId)) raise('not a member');
-  const open = [...server.invites.values()].filter((i) => i.group_id === groupId && !i.used_at && i.expires_at > server.now);
+  const open = [...server.invites.values()].filter((i) => i.group_id === groupId && !i.used_at && !i.revoked_at && i.expires_at > server.now);
   if (open.length >= 20) raise('too many open invites');
   const expires = server.now + 2 * DAY;
-  server.invites.set(inviteId, { group_id: groupId, created_by: uid(), token_hash: tokenHashHex, expires_at: expires, used_by: null, used_at: null });
+  server.invites.set(inviteId, { group_id: groupId, created_by: uid(), token_hash: tokenHashHex, expires_at: expires, used_by: null, used_at: null, revoked_at: null, member_id: memberId });
   return new Date(expires).toISOString();
 }
 
@@ -160,18 +178,19 @@ export async function rpcRedeemInvite(inviteId, token) {
   net('redeem_invite');
   if (!uid()) raise('not signed in');
   const inv = server.invites.get(inviteId);
-  if (!inv || inv.token_hash !== sha256Hex(token)) raise('invalid invite');
+  if (!token || token.length < 32 || !inv || inv.token_hash !== sha256Hex(token)) raise('invalid invite');
+  if (!server.groups.has(inv.group_id)) raise('group has ended');
   if (!isMember(inv.group_id)) {
-    if (inv.used_at || inv.expires_at <= server.now) raise('invite expired or used');
-    if (!server.groups.has(inv.group_id)) raise('group has ended');
+    if (inv.used_at || inv.revoked_at || inv.expires_at <= server.now) raise('invite expired or used');
     if (membersOf(inv.group_id).length >= 50) raise('group is full');
     if (server.members.filter((m) => m.user_id === uid()).length >= 100) raise('too many groups');
     server.members.push({ group_id: inv.group_id, user_id: uid(), role: 'member', joined_at: ++joinedCounter });
+    server.former.delete(`${inv.group_id}|${uid()}`);
     Object.assign(inv, { used_by: uid(), used_at: server.now });
-    appendSystem(inv.group_id, 'member_joined', uid());
+    appendSystem(inv.group_id, 'member_joined', uid(), inv.member_id ?? null);
   }
   const g = server.groups.get(inv.group_id);
-  return { groupId: g.id, keyEpoch: g.key_epoch, lastSeq: g.last_seq };
+  return { groupId: g.id, keyEpoch: g.key_epoch, lastSeq: g.last_seq, memberId: inv.member_id ?? null };
 }
 
 export async function rpcLeaveGroup(groupId) {
@@ -190,11 +209,11 @@ export async function rpcReaddMember(groupId, userId) {
   net('readd_member');
   if (!isMember(groupId)) raise('not a member');
   if (isMember(groupId, userId)) return;
-  if (!server.events.some((e) => e.group_id === groupId && e.system_subject === userId
-    && (e.system_type === 'member_left' || e.system_type === 'member_removed'))) raise('not a former member');
+  if (!server.former.has(`${groupId}|${userId}`)) raise('not a former member');
   if (server.deletedUsers.has(userId)) raise('insert or update on table "group_members" violates foreign key constraint');
   if (membersOf(groupId).length >= 50) raise('group is full');
   if (server.members.filter((m) => m.user_id === userId).length >= 100) raise('member has too many groups');
+  server.former.delete(`${groupId}|${userId}`);
   server.members.push({ group_id: groupId, user_id: userId, role: 'member', joined_at: ++joinedCounter });
   appendSystem(groupId, 'member_joined', userId);
 }
@@ -226,13 +245,14 @@ export function serverDeleteAccount(userId) {
   server.deletedUsers.add(userId);
 }
 
-/** purge_expired (20261018000000_removals_authors_compaction.sql): compact quiet checkpointed groups, mark dormant. */
+/** purge_expired (20261024000000_audit_fixes.sql): compact quiet groups up to a checkpoint ANOTHER phone confirmed, mark dormant. */
 export function serverPurgeExpired() {
   for (const g of server.groups.values()) {
     if (g.expires_at > server.now) continue;
-    if (g.checkpoint_seq != null) {
-      for (const e of server.events) if (e.group_id === g.id && e.seq < g.checkpoint_seq) server.compacted.set(e.event_id, { group_id: g.id, seq: e.seq });
-      server.events = server.events.filter((e) => !(e.group_id === g.id && e.seq < g.checkpoint_seq));
+    const upTo = g.verified_checkpoint_seq;
+    if (upTo != null) {
+      for (const e of server.events) if (e.group_id === g.id && e.seq < upTo) server.compacted.set(e.event_id, { group_id: g.id, seq: e.seq });
+      server.events = server.events.filter((e) => !(e.group_id === g.id && e.seq < upTo));
       g.expires_at = Infinity;
     }
     g.dormant_at ??= server.now;

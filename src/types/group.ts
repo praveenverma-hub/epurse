@@ -62,9 +62,14 @@ export interface GroupShared {
   outbox?: OutboxItem[];
   /** Live again after "Sharing Ended" (Add Back, rejoin): take the server's history before sending anything. */
   resync?: boolean;
-  /** Joining: the person the invite link was for (its `m`), until I'm someone in the group. */
+  /** Joining: the person the invite was for (the server's word), until I'm someone in the group. */
   claimFor?: string | null;
+  /** Last pull that reached the server. */
   syncedAt: string | null;
+  /** The last send/pull failed (cleared by the next good pull) — "Not synced" while it's been a while. */
+  syncFailedAt?: string;
+  /** The last checkpoint this phone confirmed to the server (fold.verifiedCheckpoint). */
+  ackedCheckpoint?: number;
 }
 
 export interface Group {

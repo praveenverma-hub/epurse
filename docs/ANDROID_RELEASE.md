@@ -604,6 +604,13 @@ paperwork and store submission, plus device QA.
   (`eas credentials`; Play Console → App integrity) — else any debug-signed app with our package
   name could receive invite links (they carry group keys). Source: `epurse-web` repo,
   `web/public/.well-known/assetlinks.json`.
+- **Audit fixes (Oct-24-26, `docs/audits/shared-groups-2026-10-23/FIXES.md`):** run
+  `supabase db push` for `20261024000000_audit_fixes.sql` on TEST (not applied yet — the app's new
+  sync code needs it), then on prod with the rest. Every test phone must be on a build with the
+  fixes before **Nov-01-26**: after that, phones on the new build refuse old builds' claims
+  (`LEGACY_CLAIMS_UNTIL`, `sync/fold.ts`).
+- Release gate: `npm run test:sql` (server SQL on real Postgres) passes, and `SUPABASE_PROJECTS.prod`
+  is NOT the test project (audit F17).
 - Two-phone device test of invite → join → expenses → settle → leave, plus push.
 
 **Then, in order (each depends on the one before)**

@@ -1,0 +1,9 @@
+CONFIRMED 1: Reusing a frozen expense entity ID doubles debt and replaces its history
+CONFIRMED 2: Correction can create debt for an expense that never existed
+CONFIRMED 3: False checkpoint produces different balances on full-history and fresh phones
+CONFIRMED 4: Member can claim any unclaimed identity; no invite binding is checked
+CONFIRMED 5: Removing server access does not archive the member in the fold
+CONFIRMED 6: Valid individual expenses can generate an invalid checkpoint aggregate
+CONFIRMED 7: Phone fingerprints discard country-code distinctions
+CONFIRMED 8: Live status ignores stale sync time and checkpoint mismatch
+8 local audit probes confirmed; these assert current defects/limitations, not desired behavior.

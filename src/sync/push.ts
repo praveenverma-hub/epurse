@@ -26,7 +26,8 @@ const KV_KEY = 'token';
 /** Re-register this often while sharing; the server forgets a token unseen for 60 days. */
 const REFRESH_MS = DAY_MS;
 
-type Saved = { token: string; at: number };
+/** `gone` = removed here but the server wasn't told yet (offline) — retried until it is. */
+type Saved = { token: string; at: number; gone?: true };
 
 const kv = () => getMmkvDeviceKv(KV_ID);
 const readSaved = (): Saved | null => {
@@ -64,20 +65,31 @@ async function doSync(): Promise<void> {
   }
   if (!(await hasSyncSession())) return;
   const token = await deviceToken();
-  if (!token) return;
-  if (saved?.token === token && Date.now() - saved.at < REFRESH_MS) return;
-  if (saved && saved.token !== token) await unregister(saved.token);
+  // Permission turned off in the OS: the server shouldn't keep pushing to this phone.
+  if (!token) {
+    if (saved && !saved.gone) await unregister(saved.token);
+    return;
+  }
+  if (!saved?.gone && saved?.token === token && Date.now() - saved.at < REFRESH_MS) return;
+  if (saved && saved.token !== token) {
+    await unregister(saved.token);
+    if (readSaved()) return;  // still not told: the old token waits its turn
+  }
   await rpcRegisterPushToken(token);
   kv().set(KV_KEY, JSON.stringify({ token, at: Date.now() } satisfies Saved));
 }
 
 async function unregister(token: string): Promise<void> {
   try {
-    if (await hasSyncSession()) await rpcUnregisterPushToken(token);
+    if (await hasSyncSession()) {
+      await rpcUnregisterPushToken(token);
+      kv().remove(KV_KEY);
+      return;
+    }
   } catch {
-    // Offline: the server drops it after 60 days unseen.
+    // Offline — kept below.
   }
-  kv().remove(KV_KEY);
+  kv().set(KV_KEY, JSON.stringify({ token, at: Date.now(), gone: true } satisfies Saved));
 }
 
 let chain: Promise<void> = Promise.resolve();

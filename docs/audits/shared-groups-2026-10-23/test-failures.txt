@@ -1,0 +1,27 @@
+  ✗ …which is why DashboardScreen waits for BOTH stores and the first sweep  the store must be READ after the await, not before
+
+test:contrast
+  ✗ known gap: white on LB cards is 1.77:1 (accepted, must not worsen)  1.77
+  ✗ …and the weekly card keeps its acknowledgement button  a centred card is a moment you acknowledge — that button is the acknowledgement
+  ✗ danger is no worse on slate than on white (3.45 vs 4.62)  #D9363E
+  291/294 passed
+
+test:headerLayout
+  ✗ …and every switch is a discrete value, not a tuning number  numbers that several files must agree on belong in constants/, not here
+  130/131 passed
+
+test:profile
+  ✗ no NEW screen hand-rolls a back button  unexpected: components/SplitPage.tsx, components/ManageTransactionModal.js
+  124/125 passed
+
+test:rewards
+  ✓ the amount passed is next.target — the SAME field either kind already carries
+  ✗ the top-right quick action only renders when rewards are on AND there is a handler  got false, want true
+  ✗ History renders one MonthDivider per CLOSED month, with that month's own total  got false, want true
+  78/80 passed
+  ✗ the top-right quick action only renders when rewards are on AND there is a handler
+  ✗ History renders one MonthDivider per CLOSED month, with that month's own total
+
+test:elevation
+  ✗ no neutral shadow above 0.16 opacity  screens/OnboardingExperience.tsx:floatingIcon=0.2
+  22/23 passed

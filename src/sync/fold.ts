@@ -15,13 +15,16 @@
 // own state; a phone missing history (late joiner, restored phone) ADOPTS it.
 // Either way, every entry before it is frozen: the rules ignore it from then on,
 // exactly as a phone that never saw it would. Later edits to a frozen expense
-// arrive as `expense.correct` — the change in who-owes-whom.
+// arrive as `expense.correct` — the change in who-owes-whom. Frozen ids are
+// remembered as TAGS (in every checkpoint), so they can't come back as new entries
+// and a correction must name one (audit F03/F04, Oct-24-26).
 // =============================================================================
 
 import {
-  parseEvent, type CheckpointBody, type CorrectionBody, type Debt, type ExpenseBody,
+  parseEvent, type Binding, type CheckpointBody, type CorrectionBody, type Debt, type ExpenseBody,
   type SettlementBody, type SyncEvent,
 } from './events';
+import { sha256Hex } from './crypto';
 
 export type MemberState = { name: string; userId: string | null; archived: boolean };
 
@@ -70,6 +73,12 @@ export type GroupFold = {
   lastAt?: string | null;
   /** Corrected expense id → its latest correction (a correction must build on it). */
   corrections?: Record<string, { head: string; deleted: boolean }>;
+  /** userId → the member their invite was for, until they become them (absent before Oct-24-26). */
+  bindings?: Record<string, string>;
+  /** frozenTag(id) → 'e' (an expense a correction may name) or 'o' (anything else). Never shrinks. */
+  frozenTags?: Record<string, 'e' | 'o'>;
+  /** The last checkpoint THIS phone checked against its own history and found equal (sync/groupSync.ts confirms it). */
+  verifiedCheckpoint?: { seq: number; by: string | null } | null;
   /**
    * memberId → phone fingerprint (sync/phoneKey.ts), for linking people to contacts.
    * Kept OUT of MemberState and checkpoints on purpose: it never decides a balance, and
@@ -85,6 +94,8 @@ export type IncomingEvent = {
   authorId: string | null;
   systemType: string | null;
   systemSubject: string | null;
+  /** On `member_joined`: the member the invite was for. */
+  systemMember?: string | null;
   plaintext: string | null;
   /** Server time (`group_events.created_at`) — a phone's own clock can be wrong. */
   createdAt: string;
@@ -94,11 +105,27 @@ export type Rejection = { seq: number; eventId: string; reason: string };
 
 export const MAX_MEMBERS = 100;
 
+/**
+ * A `member.claim` with no invite naming that person was the only way to join before
+ * Oct-24-26 — accepted until every test phone has had a week to update. Server time, so
+ * every phone draws the line in the same place.
+ */
+const LEGACY_CLAIMS_UNTIL = Date.parse('2026-11-01T00:00:00Z');
+
+/** 48 bits of the id's hash — enough to tell frozen entries apart, small enough for ~1000 in a checkpoint. */
+export const frozenTag = (id: string): string => sha256Hex(id.toLowerCase()).slice(0, 12);
+
 export const emptyFold = (): GroupFold => ({
   seq: 0, meta: null, activeUsers: [], deletedUsers: [], members: {}, memberOrder: [], entries: {},
   balances: {}, debts: {}, historyFrom: 0, lastCheckpoint: 0, checkpointMismatch: null, lastAt: null, corrections: {},
-  phoneKeys: {},
+  phoneKeys: {}, bindings: {}, frozenTags: {}, verifiedCheckpoint: null,
 });
+
+const tagKind = (e: EntryState): 'e' | 'o' => (e.kind === 'expense' && !e.deleted ? 'e' : 'o');
+// Folds saved before Oct-24-26 have no tags: their frozen entries are the same thing.
+const tagsOf = (f: GroupFold): Record<string, 'e' | 'o'> => f.frozenTags ?? Object.fromEntries(
+  Object.entries(f.entries).filter(([, e]) => e.frozen).map(([id, e]) => [frozenTag(id), tagKind(e)]),
+);
 
 // Maps and arrays are copied once per fold; member/entry objects are replaced, never mutated.
 const cloneFold = (f: GroupFold): GroupFold => ({
@@ -112,6 +139,8 @@ const cloneFold = (f: GroupFold): GroupFold => ({
   debts: { ...f.debts },
   corrections: { ...f.corrections },
   phoneKeys: { ...f.phoneKeys },
+  bindings: { ...f.bindings },
+  frozenTags: { ...tagsOf(f) },
 });
 
 /** The entry as the rules see it: frozen ones don't exist. */
@@ -170,20 +199,39 @@ function addBalance(f: GroupFold, memberId: string, delta: number) {
 
 // ── Checkpoints and corrections (built by the app, applied here) ─────────────
 
-/** This phone's state as a checkpoint — also what an incoming checkpoint is compared against. */
-export const buildCheckpoint = (f: GroupFold): CheckpointBody => ({
-  baseSeq: f.seq,
-  meta: f.meta,
-  members: f.memberOrder.map((id) => ({ memberId: id, ...f.members[id] })),
-  activeUsers: [...f.activeUsers].sort(),
-  deletedUsers: [...f.deletedUsers].sort(),
-  debts: debtList(f.debts),
-  corrections: Object.keys(f.corrections ?? {}).sort().map((id) => ({ correctsId: id, ...f.corrections![id] })),
-});
+/** The tags once everything here is frozen: earlier tags never change kind, so every phone agrees. */
+function tagsAfterFreeze(f: GroupFold): Record<string, 'e' | 'o'> {
+  const tags = { ...tagsOf(f) };
+  for (const [id, e] of Object.entries(f.entries)) {
+    const t = frozenTag(id);
+    if (!tags[t]) tags[t] = tagKind(e);
+  }
+  return tags;
+}
 
-const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
+/** This phone's state as a checkpoint — also what an incoming checkpoint is compared against. */
+export const buildCheckpoint = (f: GroupFold): CheckpointBody => {
+  const tags = tagsAfterFreeze(f);
+  const ofKind = (k: 'e' | 'o') => Object.keys(tags).filter((t) => tags[t] === k).sort();
+  return {
+    baseSeq: f.seq,
+    meta: f.meta,
+    members: f.memberOrder.map((id) => ({ memberId: id, ...f.members[id] })),
+    activeUsers: [...f.activeUsers].sort(),
+    deletedUsers: [...f.deletedUsers].sort(),
+    debts: debtList(f.debts),
+    corrections: Object.keys(f.corrections ?? {}).sort().map((id) => ({ correctsId: id, ...f.corrections![id] })),
+    bindings: Object.keys(f.bindings ?? {}).sort().map((userId): Binding => ({ userId, memberId: f.bindings![userId] })),
+    frozenExpenses: ofKind('e'),
+    frozenOther: ofKind('o'),
+  };
+};
+
+/** Same summary? Fields a pre-Oct-24-26 checkpoint lacks are not compared. */
+export const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
+  const sorted = (v: string[] | undefined) => (v ? [...v].sort() : undefined);
   // Named fields only — the parsed event also carries `type`.
-  const norm = (c: CheckpointBody) => JSON.stringify({
+  const norm = (c: CheckpointBody, other: CheckpointBody) => JSON.stringify({
     baseSeq: c.baseSeq,
     meta: c.meta,
     members: c.members,
@@ -191,8 +239,11 @@ const sameCheckpoint = (a: CheckpointBody, b: CheckpointBody) => {
     deletedUsers: [...c.deletedUsers].sort(),
     debts: [...c.debts].sort((x, y) => (x.from + x.to < y.from + y.to ? -1 : 1)),
     corrections: [...c.corrections].sort((x, y) => (x.correctsId < y.correctsId ? -1 : 1)),
+    bindings: other.bindings && c.bindings ? [...c.bindings].sort((x, y) => (x.userId < y.userId ? -1 : 1)) : undefined,
+    frozenExpenses: other.frozenExpenses ? sorted(c.frozenExpenses) : undefined,
+    frozenOther: other.frozenOther ? sorted(c.frozenOther) : undefined,
   });
-  return norm(a) === norm(b);
+  return norm(a, b) === norm(b, a);
 };
 
 /**
@@ -254,7 +305,13 @@ function movesPastMember(f: GroupFold, before: Debt[], after: Debt[]): boolean {
   return Object.entries(net).some(([id, n]) => n !== 0 && f.members[id]?.archived);
 }
 
-function applySystem(f: GroupFold, type: string, subject: string | null): string | null {
+function unbindUser(f: GroupFold, userId: string) {
+  if (f.bindings?.[userId]) { const { [userId]: _, ...rest } = f.bindings; f.bindings = rest; }
+}
+
+const memberOfUser = (f: GroupFold, userId: string) => Object.keys(f.members).find((id) => f.members[id].userId === userId);
+
+function applySystem(f: GroupFold, type: string, subject: string | null, member: string | null): string | null {
   if (!subject) return 'bad_system';
   switch (type) {
     case 'group_created':
@@ -265,12 +322,22 @@ function applySystem(f: GroupFold, type: string, subject: string | null): string
       for (const [id, m] of Object.entries(f.members)) {
         if (m.userId === subject && m.archived) f.members[id] = { ...m, archived: false };
       }
+      // The invite said who they are: that's the only existing person they may become.
+      unbindUser(f, subject);
+      if (member && !memberOfUser(f, subject)) f.bindings = { ...f.bindings, [subject]: member };
       return null;
     case 'member_left':
     case 'member_removed':
+      // However they lost access (the app archives at ₹0 first; a direct server call doesn't),
+      // they're a past member now: nothing may move their balance until they're back.
+      for (const [id, m] of Object.entries(f.members)) {
+        if (m.userId === subject && !m.archived) f.members[id] = { ...m, archived: true };
+      }
+      // falls through
     case 'member_deleted':
       f.activeUsers = f.activeUsers.filter((u) => u !== subject);
       if (type === 'member_deleted' && !f.deletedUsers.includes(subject)) f.deletedUsers.push(subject);
+      unbindUser(f, subject);
       return null;
     default:
       return 'unknown_system';
@@ -278,18 +345,23 @@ function applySystem(f: GroupFold, type: string, subject: string | null): string
 }
 
 function freezeAll(f: GroupFold) {
+  f.frozenTags = tagsAfterFreeze(f);
   for (const id of Object.keys(f.entries)) {
     if (!f.entries[id].frozen) f.entries[id] = { ...f.entries[id], frozen: true };
   }
 }
 
-function applyCheckpoint(f: GroupFold, cp: CheckpointBody, seq: number, missingHistory: boolean): string | null {
+function applyCheckpoint(f: GroupFold, cp: CheckpointBody, seq: number, missingHistory: boolean, author: string | null): string | null {
   if (cp.baseSeq !== seq - 1) return 'bad_checkpoint';
+  const mine = missingHistory ? null : buildCheckpoint({ ...f, seq: cp.baseSeq });
   freezeAll(f);
   f.lastCheckpoint = seq;
 
-  if (!missingHistory) {
-    if (sameCheckpoint(buildCheckpoint({ ...f, seq: cp.baseSeq }), cp)) return null;
+  if (mine) {
+    if (sameCheckpoint(mine, cp)) {
+      f.verifiedCheckpoint = { seq, by: author };
+      return null;
+    }
     // Keep what our own history says; only a phone without history has to trust it.
     f.checkpointMismatch = seq;
     return 'checkpoint_mismatch';
@@ -308,6 +380,11 @@ function applyCheckpoint(f: GroupFold, cp: CheckpointBody, seq: number, missingH
   f.balances = {};
   applyDebts(f, cp.debts, 1);
   f.corrections = Object.fromEntries(cp.corrections.map((c) => [c.correctsId, { head: c.head, deleted: c.deleted }]));
+  f.bindings = Object.fromEntries((cp.bindings ?? []).map((b) => [b.userId, b.memberId]));
+  f.frozenTags = {
+    ...Object.fromEntries((cp.frozenOther ?? []).map((t) => [t, 'o' as const])),
+    ...Object.fromEntries((cp.frozenExpenses ?? []).map((t) => [t, 'e' as const])),
+  };
   f.historyFrom = seq;
   return null;
 }
@@ -321,9 +398,11 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
     case 'member.add':
       if (f.members[ev.memberId]) return 'member_exists';
       if (f.memberOrder.length >= MAX_MEMBERS) return 'too_many_members';
-      f.members[ev.memberId] = { name: ev.name, userId: null, archived: false };
+      if (ev.self && memberOfUser(f, author)) return 'claimed_twice';
+      f.members[ev.memberId] = { name: ev.name, userId: ev.self ? author : null, archived: false };
       f.memberOrder.push(ev.memberId);
       if (ev.phoneKey) f.phoneKeys = { ...f.phoneKeys, [ev.memberId]: ev.phoneKey };
+      if (ev.self) unbindUser(f, author);
       return null;
 
     case 'member.phone':
@@ -336,8 +415,11 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
       if (ev.userId !== author) return 'claim_for_other';
       if (!m || m.archived) return 'unknown_member';
       if (m.userId) return 'already_claimed';
-      if (Object.values(f.members).some((x) => x.userId === author)) return 'claimed_twice';
+      if (memberOfUser(f, author)) return 'claimed_twice';
+      // Only the person an invite was made for (audit F05) — not whoever edits the link.
+      if (f.bindings?.[author] !== ev.memberId && !(Date.parse(at) < LEGACY_CLAIMS_UNTIL)) return 'not_invited_as';
       f.members[ev.memberId] = { ...m, userId: author };
+      unbindUser(f, author);
       return null;
     }
 
@@ -360,6 +442,9 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
     case 'settlement.upsert': {
       const kind = ev.type === 'expense.upsert' ? 'expense' : 'settlement';
       const prev = live(f, ev.entityId);
+      // A frozen entry sent as new would count twice (an edit racing a checkpoint): the
+      // sender's phone re-sends it as a correction (expenses.ts planOutgoing).
+      if (!prev && f.frozenTags?.[frozenTag(ev.entityId)]) return 'frozen';
       if (prev && prev.kind !== kind) return 'wrong_kind';
       if (prev?.deleted) return 'deleted';
 
@@ -396,9 +481,10 @@ function applyData(f: GroupFold, ev: SyncEvent, author: string, seq: number, at:
     }
 
     case 'expense.correct': {
-      if (live(f, ev.entityId)) return 'entry_exists';
-      // A live expense is simply edited; only frozen (or, on a late joiner, unseen) ones are corrected.
+      if (live(f, ev.entityId) || f.frozenTags?.[frozenTag(ev.entityId)]) return 'entry_exists';
+      // A live expense is simply edited; only a frozen one — that every phone knows was an expense — is corrected.
       if (live(f, ev.correctsId)) return 'not_frozen';
+      if (f.frozenTags?.[frozenTag(ev.correctsId)] !== 'e') return 'unknown_entry';
       const { type: _t, ...data } = ev;
       const entry: EntryState = {
         kind: 'correction', createdBy: author, data, versions: [{ seq, by: author, at, data }], deleted: null, frozen: false,
@@ -436,16 +522,16 @@ function applyMut(f: GroupFold, e: IncomingEvent): string | null {
   f.seq = e.seq;
   f.lastAt = e.createdAt;
 
-  if (e.systemType) return applySystem(f, e.systemType, e.systemSubject);
+  if (e.systemType) return applySystem(f, e.systemType, e.systemSubject, e.systemMember ?? null);
 
   const parsed = parseEvent(e.plaintext);
   if (parsed?.event.type === 'group.checkpoint' && missingHistory) {
     // The server checked membership; a phone missing history can't, and has to start somewhere.
-    return applyCheckpoint(f, parsed.event, e.seq, true);
+    return applyCheckpoint(f, parsed.event, e.seq, true, e.authorId);
   }
   if (!e.authorId || !f.activeUsers.includes(e.authorId)) return 'not_member';
   if (!parsed) return 'unreadable';
-  if (parsed.event.type === 'group.checkpoint') return applyCheckpoint(f, parsed.event, e.seq, false);
+  if (parsed.event.type === 'group.checkpoint') return applyCheckpoint(f, parsed.event, e.seq, false, e.authorId);
   return applyData(f, parsed.event, e.authorId, e.seq, e.createdAt);
 }
 

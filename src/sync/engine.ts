@@ -10,21 +10,31 @@ import { AppState } from 'react-native';
 import { useEPurseStore } from '../store/ePurseStore';
 import type { Group } from '../types/group';
 import { planOutgoing } from './expenses';
-import { BUILT_IN_CATEGORIES, flushGroup, newSyncId, syncAllSharedGroups } from './groupSync';
+import { BUILT_IN_CATEGORIES, flushGroup, isRetryable, newSyncId, syncAllSharedGroups } from './groupSync';
 import { reconcileRealtime, setRealtimeOpen } from './realtime';
 import { syncPushRegistration } from './push';
 import { autoLinkGroupMembers, contactLinkedMembers, unlinkedMembers } from './contactLink';
 
 /** Wait this long after a change before sending, so a burst (an edit, SMS ingest) goes as one. */
 const SEND_DEBOUNCE_MS = 1500;
+/** Then, while it keeps failing and the app is open: about this long between tries (± half, so phones don't retry in step). */
+const RETRY_MS = [5_000, 15_000, 60_000, 5 * 60_000];
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
-const scheduleFlush = (groupId: string) => {
+const failures = new Map<string, number>();
+const scheduleFlush = (groupId: string, delay = SEND_DEBOUNCE_MS) => {
   clearTimeout(timers.get(groupId));
   timers.set(groupId, setTimeout(() => {
     timers.delete(groupId);
-    flushGroup(groupId).catch(() => {});  // offline: it stays queued for the next trigger
-  }, SEND_DEBOUNCE_MS));
+    flushGroup(groupId).then(() => { failures.delete(groupId); }, (e) => {
+      // In the background it waits for the app to open again (that syncs everything).
+      if (!isRetryable(e) || AppState.currentState !== 'active') return;
+      const n = failures.get(groupId) ?? 0;
+      failures.set(groupId, n + 1);
+      const base = RETRY_MS[Math.min(n, RETRY_MS.length - 1)];
+      scheduleFlush(groupId, base / 2 + Math.random() * base);
+    });
+  }, delay));
 };
 
 let installed = false;
@@ -89,14 +99,21 @@ export function installSharedSync(): void {
   useEPurseStore.subscribe(followLinks);
   followLinks(useEPurseStore.getState());
 
-  const pull = (localId: string) => { flushGroup(localId).catch(() => {}); };
+  const pull = (localId: string) => scheduleFlush(localId, 0);
   void setRealtimeOpen(AppState.currentState === 'active', pull);
   followLive(useEPurseStore.getState());
-  syncAllSharedGroups().catch(() => {});
+  // A group whose sync failed retries on its own timer, not only on the next change.
+  const retryFailed = () => {
+    for (const g of (useEPurseStore.getState() as any).groups as Group[]) {
+      if (g.shared?.syncFailedAt && g.shared.status !== 'ended' && !timers.has(g.id)) scheduleFlush(g.id, RETRY_MS[0]);
+    }
+  };
+  syncAllSharedGroups().catch(() => {}).finally(retryFailed);
   AppState.addEventListener('change', (state) => {
     void setRealtimeOpen(state === 'active');
     if (state !== 'active') return;
-    syncAllSharedGroups().catch(() => {});
+    failures.clear();
+    syncAllSharedGroups().catch(() => {}).finally(retryFailed);
     void syncPushRegistration();  // daily refresh, and permission may have just been granted
   });
 }

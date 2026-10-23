@@ -57,7 +57,8 @@ async function doReconcile() {
   for (const id of missing) {
     const ch = sb.channel(`group:${id}`, { config: { private: true } })
       .on('broadcast', { event: 'poke' }, (msg) => onPoke(id, msg?.payload?.seq))
-      .subscribe();
+      // (Re)connected: pokes sent while the socket was down are gone — catch up with a pull.
+      .subscribe((status) => { if (status === 'SUBSCRIBED') onPoke(id, Number.MAX_SAFE_INTEGER); });
     channels.set(id, ch);
   }
 }

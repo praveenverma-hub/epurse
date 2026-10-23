@@ -9,7 +9,7 @@ import {
 } from '../../sync/crypto.ts';
 import { newInvite, buildInviteLink, parseInviteLink, INVITE_BASE, APP_INVITE_BASE } from '../../sync/invite.ts';
 import { encodeEvent, parseEvent, V1_LIMITS } from '../../sync/events.ts';
-import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList } from '../../sync/fold.ts';
+import { emptyFold, foldEvents, buildCheckpoint, buildCorrection, debtList, frozenTag, sameCheckpoint } from '../../sync/fold.ts';
 import { membersFromFold, planGroupChanges, toLocalMember, toRemoteMember, unclaimedMembers, metaOf, memberBalancePaise, memberStatus } from '../../sync/localGroup.ts';
 import { projectExpense, planOutgoing, planIncoming, reconcileOutbox, skippedBySend, UNSENDABLE } from '../../sync/expenses.ts';
 import { checkpointDue } from '../../sync/checkpoint.ts';
@@ -242,10 +242,10 @@ const snapshot = () => JSON.stringify(f.balances);
   check('…but not its amount: that would move a balance of someone who left',
     step(data(U.rahul, expense(dinner, 360000, M.rahul, equal3(360000), 'Dinner at Thalassa'))) === 'past_member' && snapshot() === b);
   check('…nor can it be deleted', step(data(U.rahul, { type: 'expense.delete', entityId: dinner })) === 'past_member' && snapshot() === b);
-  const fix = buildCorrection({ ...f, entries: { ...f.entries, [dinner]: { ...f.entries[dinner], frozen: true } } }, randomUuid(rand), dinner,
-    { ...f.entries[dinner].data, amountPaise: 360000, shares: equal3(360000) });
+  const frozenF = { ...f, entries: { ...f.entries, [dinner]: { ...f.entries[dinner], frozen: true } }, frozenTags: { ...f.frozenTags, [frozenTag(dinner)]: 'e' } };
+  const fix = buildCorrection(frozenF, randomUuid(rand), dinner, { ...f.entries[dinner].data, amountPaise: 360000, shares: equal3(360000) });
   check('…nor corrected once frozen', fix && fix.debts.some((d) => d.from === M.amit || d.to === M.amit)
-    && foldEvents({ ...f, entries: { ...f.entries, [dinner]: { ...f.entries[dinner], frozen: true } } }, [data(U.rahul, { type: "expense.correct", ...fix })]).rejected[0]?.reason === 'past_member');
+    && foldEvents(frozenF, [data(U.rahul, { type: "expense.correct", ...fix })]).rejected[0]?.reason === 'past_member');
   step(sys('member_left', U.amit));
   check('history keeps Amit after he leaves', f.members[M.amit].name === 'Amit' && !f.activeUsers.includes(U.amit));
   check('a member who left can\'t send events', step(data(U.amit, { type: 'member.rename', memberId: M.amit, name: 'A' })) === 'not_member');
@@ -528,8 +528,8 @@ seq = 0;
   pull(A); pull(B);
   check('both phones start in step (nothing to send)', queue(A) === null && queue(B) === null);
 
-  // Rahul pays ₹1,000 from his bank, split equally with Priya.
-  A.txns = [{ id: 'IdM0001', type: 'debit', amount: 1000, merchant: 'Shack Dinner', categoryId: 'food', createdAt: '2026-10-14T20:00:00.000Z', accountId: 'acc1', groupId: 'gA',
+  // Rahul pays ₹1,000 (a manual entry — an SMS one is covered below), split equally with Priya.
+  A.txns = [{ id: 'IdM0001', type: 'debit', amount: 1000, merchant: 'Shack Dinner', categoryId: 'food', createdAt: '2026-10-14T20:00:00.000Z', accountId: 'acc1', groupId: 'gA', source: 'manual',
     groupSplit: { paidByMemberId: 'me', paidByName: 'You', shares: [{ memberId: 'me', name: 'You', shareAmount: 500 }, { memberId: 'c_42', name: 'Priya', shareAmount: 500 }] } }];
   const p1 = queue(A);
   const ev = p1?.shared.outbox[0]?.event;
@@ -592,7 +592,7 @@ seq = 0;
   // Rejected: Rahul adds an expense naming someone the server doesn't know.
   const GHOST = 'bbbbbbbb-0000-4000-8000-000000000001';
   A.group = { ...A.group, shared: { ...A.group.shared, memberMap: { ...A.group.shared.memberMap, c_9: GHOST } } };
-  A.txns = [{ id: 'IdM0002', type: 'debit', amount: 300, merchant: 'Cab', categoryId: 'travel', createdAt: AT, accountId: 'acc1', groupId: 'gA',
+  A.txns = [{ id: 'IdM0002', type: 'debit', amount: 300, merchant: 'Cab', categoryId: 'travel', createdAt: AT, accountId: 'acc1', groupId: 'gA', source: 'manual',
     groupSplit: { paidByMemberId: 'me', shares: [{ memberId: 'me', shareAmount: 150 }, { memberId: 'c_9', shareAmount: 150 }] } }, ...A.txns];
   const pr = queue(A);
   check('it is queued like any other', pr && pr.shared.outbox.some((o) => o.event.type === 'expense.upsert' && o.event.title === 'Cab'));
@@ -824,6 +824,149 @@ console.log('\n— phone fingerprints: linking group members to contacts (Oct-17
   check('autoLink fills / refreshes the contact name of members linked by contact id',
     /contactLinkedMembers\(group, refreshNames\)/.test(linkSrc) && /old\.contactName !== c\.name/.test(linkSrc));
   check('…and never drops a call that arrives mid-run', /again\.set\(groupId/.test(linkSrc) && /void autoLinkGroupMembers\(groupId, \{ refreshNames: refresh \}\)/.test(linkSrc));
+}
+
+console.log('\n— audit fixes (docs/audits/shared-groups-2026-10-23, Oct-24-26) —');
+{
+  // Its own group, after the legacy-claim cut-off: every join goes through the new rules.
+  const id = () => randomUuid(rand);
+  const u = { a: id(), b: id(), c: id() };
+  const m = { a: id(), b: id(), c: id() };
+  let n = 0;
+  const at = (s) => new Date(Date.UTC(2026, 10, 1, 10, s)).toISOString();
+  const s = (type, subject, member = null) => ({ seq: ++n, eventId: id(), authorId: null, systemType: type, systemSubject: subject, systemMember: member, plaintext: null, createdAt: at(n) });
+  const d = (author, event) => ({ seq: ++n, eventId: id(), authorId: author, systemType: null, systemSubject: null, plaintext: encodeEvent(event, at(n)), createdAt: at(n) });
+  const exp = (entityId, paise, paidBy, debtor) => ({ type: 'expense.upsert', entityId, amountPaise: paise, title: 'Dinner', categoryId: 'food', date: '2026-11-01', paidBy, shares: [{ memberId: debtor, paise }] });
+  const fold = (evs, from = emptyFold()) => foldEvents(from, evs);
+
+  const start = [
+    s('group_created', u.a),
+    d(u.a, { type: 'member.add', memberId: m.a, name: 'A', self: true }),
+    d(u.a, { type: 'member.add', memberId: m.b, name: 'B' }),
+    d(u.a, { type: 'member.add', memberId: m.c, name: 'C' }),
+  ];
+  const g0 = fold(start);
+  check('the creator joins by adding themselves (member.add self)', g0.rejected.length === 0 && g0.fold.members[m.a].userId === u.a);
+
+  // F05 — invites bind a person.
+  const asB = fold([s('member_joined', u.b, m.b), d(u.b, { type: 'member.claim', memberId: m.b, userId: u.b })], g0.fold);
+  check('an invite made for B lets its joiner become B', asB.rejected.length === 0 && asB.fold.members[m.b].userId === u.b && !asB.fold.bindings[u.b]);
+  const grab = fold([s('member_joined', u.b, m.b), d(u.b, { type: 'member.claim', memberId: m.c, userId: u.b })], g0.fold);
+  check('…but not C (editing the link\'s m changes nothing)', grab.rejected[0]?.reason === 'not_invited_as' && !grab.fold.members[m.c].userId);
+  const plain = fold([s('member_joined', u.c), d(u.c, { type: 'member.claim', memberId: m.c, userId: u.c })], g0.fold);
+  check('a plain invite can\'t claim anyone', plain.rejected[0]?.reason === 'not_invited_as');
+  const selfAdd = fold([s('member_joined', u.c), d(u.c, { type: 'member.add', memberId: id(), name: 'Cee', self: true })], g0.fold);
+  check('…it joins as a new person instead', selfAdd.rejected.length === 0 && Object.values(selfAdd.fold.members).some((x) => x.userId === u.c));
+  const twice = fold([d(u.a, { type: 'member.add', memberId: id(), name: 'A2', self: true })], g0.fold);
+  check('adding myself twice is refused', twice.rejected[0]?.reason === 'claimed_twice');
+  const legacy = foldEvents(emptyFold(), base);
+  check('claims from before the cut-off still replay (existing test groups)', legacy.rejected.length === 0);
+
+  // A checkpoint carries the pending binding: a phone that starts from it agrees.
+  const pend = fold([s('member_joined', u.b, m.b)], g0.fold).fold;
+  const cpB = d(u.a, { type: 'group.checkpoint', ...buildCheckpoint(pend) });
+  const claimB = d(u.b, { type: 'member.claim', memberId: m.b, userId: u.b });
+  const full = fold([cpB, claimB], pend);
+  const fresh = fold([cpB, claimB]);
+  check('a binding survives a checkpoint: the claim lands on full and fresh phones alike',
+    full.rejected.length === 0 && fresh.rejected.length === 0 && fresh.fold.members[m.b].userId === u.b
+    && JSON.stringify(full.fold.members) === JSON.stringify(fresh.fold.members));
+
+  // F06 — losing access makes a past member, however it happened.
+  const owes = fold([d(u.a, exp(id(), 10000, m.a, m.b))], asB.fold).fold;
+  const removed = fold([s('member_removed', u.b)], owes).fold;
+  check('removed by a direct server call while owing: archived, balance kept', removed.members[m.b].archived && removed.balances[m.b] === -10000);
+  check('…so nothing new can include them', fold([d(u.a, exp(id(), 500, m.a, m.b))], removed).rejected[0]?.reason === 'archived_member');
+  check('…until they\'re back', !fold([s('member_joined', u.b)], removed).fold.members[m.b].archived);
+
+  // F03 — a frozen id can't come back as a new expense.
+  const e1 = id();
+  const pre = fold([d(u.a, exp(e1, 10000, m.a, m.b))], asB.fold).fold;
+  const cp = d(u.a, { type: 'group.checkpoint', ...buildCheckpoint(pre) });
+  const reuse = d(u.b, exp(e1, 10000, m.a, m.b));
+  const fullR = fold([cp, reuse], pre), freshR = fold([cp, reuse]);
+  check('re-sending a frozen expense as new is refused (was: counted twice)',
+    fullR.rejected.some((r) => r.reason === 'frozen') && fullR.fold.balances[m.a] === 10000, JSON.stringify(fullR.rejected));
+  check('…on a phone that only has the checkpoint too (same tags)',
+    freshR.rejected.some((r) => r.reason === 'frozen') && JSON.stringify(freshR.fold.balances) === JSON.stringify(fullR.fold.balances));
+  check('…and its history isn\'t replaced', fullR.fold.entries[e1].versions.length === 1);
+
+  // F04 — a correction must name a real frozen expense.
+  const ghost = id();
+  const fake = d(u.b, { type: 'expense.correct', entityId: id(), correctsId: ghost, base: ghost, title: 'Invented', date: '2026-11-01', debts: [{ from: m.b, to: m.a, paise: 50000 }], expense: null });
+  check('a correction of an expense that never existed is refused (was: +₹500)',
+    fold([cp, fake], pre).rejected.some((r) => r.reason === 'unknown_entry') && fold([cp, fake]).rejected.some((r) => r.reason === 'unknown_entry'));
+  const real = buildCorrection(fold([cp], pre).fold, id(), e1, null);
+  const fixR = fold([cp, d(u.b, { type: 'expense.correct', ...real })], pre);
+  check('…a real one still lands', fixR.rejected.length === 0 && (fixR.fold.balances[m.a] ?? 0) === 0);
+
+  // F11 — legitimately huge totals still make a readable checkpoint.
+  const big = V1_LIMITS.MAX_PAISE;
+  const huge = fold([d(u.a, exp(id(), big, m.a, m.b)), d(u.a, exp(id(), big, m.a, m.b))], asB.fold).fold;
+  const hcp = buildCheckpoint(huge);
+  const back = parseEvent(encodeEvent({ type: 'group.checkpoint', ...hcp }, at(99)))?.event;
+  check('two ₹10-crore expenses: the checkpoint still parses and matches', huge.balances[m.a] === 2 * big && back && sameCheckpoint(back, hcp));
+
+  // F02 — which checkpoints this phone may vouch for.
+  const v = fold([cp], pre).fold;
+  check('a matching checkpoint is recorded as verified, with its author', v.verifiedCheckpoint?.seq === cp.seq && v.verifiedCheckpoint?.by === u.a);
+  check('…not on a phone that adopted it', !fold([cp]).fold.verifiedCheckpoint);
+  const lie = { ...d(u.b, { type: 'group.checkpoint', ...buildCheckpoint(pre), debts: [] }), seq: pre.seq + 1 };
+  const lied = fold([lie], pre).fold;
+  check('…nor a false one (mismatch kept, never vouched for)', lied.checkpointMismatch === lie.seq && !lied.verifiedCheckpoint);
+  const legacyCp = { ...buildCheckpoint(pre) };
+  delete legacyCp.bindings; delete legacyCp.frozenExpenses; delete legacyCp.frozenOther;
+  check('a checkpoint from before Oct-24 still verifies (missing fields aren\'t compared)',
+    !fold([d(u.a, { type: 'group.checkpoint', ...legacyCp })], pre).fold.checkpointMismatch);
+
+  // F12 — the status line says when it isn't really live.
+  const { groupSyncStatus, STALE_AFTER_MS } = await import('../../utils/groupSyncStatus.ts');
+  const members = { [m.a]: { name: 'A', userId: u.a, archived: false }, [m.b]: { name: 'B', userId: u.b, archived: false } };
+  const sh = (extra) => ({ type: 'shared', shared: { status: 'active', outbox: [], syncedAt: new Date(0).toISOString(), fold: { ...pre, members }, ...extra } });
+  const now = Date.parse('2026-11-02T00:00:00Z');
+  check('two people, no trouble → live', groupSyncStatus(sh({}), now) === 'live');
+  check('balances disagree → mismatch, not live', groupSyncStatus(sh({ fold: { ...pre, members, checkpointMismatch: 6 } }), now) === 'mismatch');
+  check('sync failing and last good one long ago → stale', groupSyncStatus(sh({ syncFailedAt: new Date(now).toISOString() }), now) === 'stale');
+  check('…a failure right after a good sync isn\'t (the retry is on it)',
+    groupSyncStatus(sh({ syncFailedAt: new Date(now).toISOString(), syncedAt: new Date(now - STALE_AFTER_MS + 1000).toISOString() }), now) === 'live');
+}
+
+console.log('\n— my bank record vs a peer\'s edit (F07) —');
+{
+  const BUILT = new Set(['food', 'other']);
+  const me = randomUuid(rand), priya = randomUuid(rand), e = randomUuid(rand);
+  const bodyOf = (paise, paidBy = me) => ({ entityId: e, amountPaise: paise, title: 'Dinner', categoryId: 'food', date: '2026-11-01', paidBy, shares: [{ memberId: me, paise: paise / 2 }, { memberId: priya, paise: paise / 2 }] });
+  const foldWith = (body) => ({ ...emptyFold(), members: { [me]: { name: 'Me', userId: 'u1', archived: false }, [priya]: { name: 'Priya', userId: 'u2', archived: false } }, memberOrder: [me, priya],
+    entries: { [e]: { kind: 'expense', createdBy: 'u1', data: body, versions: [], deleted: null, frozen: false } } });
+  const group = (body) => ({ id: 'g', name: 'Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }, { memberId: 'c_1', name: 'Priya' }],
+    shared: { remoteId: 'r', keys: {}, keyEpoch: 1, myMemberId: me, memberMap: { me, c_1: priya }, fold: foldWith(body), status: 'active', syncedAt: null, outbox: [] } });
+  const sms = { id: 't1', type: 'debit', amount: 1000, merchant: 'Dinner', categoryId: 'food', createdAt: '2026-11-01', accountId: 'acc1', groupId: 'g', syncId: e, source: 'sms',
+    groupSplit: { paidByMemberId: 'me', shares: [{ memberId: 'me', shareAmount: 500 }, { memberId: 'c_1', shareAmount: 500 }] } };
+
+  const bumped = group(bodyOf(120000));
+  check('Priya changes the amount of my SMS expense: my phone doesn\'t apply it', !planIncoming(bumped, [sms], BUILT).some((o) => o.kind === 'update'));
+  const back = planOutgoing(bumped, [sms], () => randomUuid(rand), BUILT, '2026-11-01T00:00:00Z');
+  check('…and sends my bank\'s amount back as the newest version',
+    back?.shared.outbox.some((o) => o.event.type === 'expense.upsert' && o.event.amountPaise === 100000));
+  check('…same when she says someone else paid', !planIncoming(group(bodyOf(100000, priya)), [sms], BUILT).some((o) => o.kind === 'update'));
+  const resplit = group({ ...bodyOf(100000), shares: [{ memberId: me, paise: 30000 }, { memberId: priya, paise: 70000 }] });
+  const ops = planIncoming(resplit, [sms], BUILT);
+  check('a new split of the same amount and payer still applies', ops.some((o) => o.kind === 'update' && o.fields.groupSplit.shares.some((x) => x.memberId === 'c_1' && x.shareAmount === 700)));
+  const manual = { ...sms, source: 'manual' };
+  check('a manual entry follows the group as before', planIncoming(bumped, [manual], BUILT).some((o) => o.kind === 'update' && o.fields.amount === 1200));
+}
+
+console.log('\n— a paisa known only from a checkpoint (F18) —');
+{
+  const { planBalanceRows } = await import('../../sync/balances.ts');
+  const me = randomUuid(rand), priya = randomUuid(rand);
+  const fold = { ...emptyFold(), members: { [me]: { name: 'Me', userId: 'u1', archived: false }, [priya]: { name: 'Priya', userId: 'u2', archived: false } }, memberOrder: [me, priya] };
+  const [a, b] = me < priya ? [me, priya] : [priya, me];
+  fold.debts = { [`${a}|${b}`]: a === me ? 1 : -1 };   // Priya owes me ₹0.01
+  const g = { id: 'g', name: 'Trip', type: 'shared', members: [{ memberId: 'me', name: 'You', isMe: true }, { memberId: 'c_1', name: 'Priya' }],
+    shared: { remoteId: 'r', keys: {}, keyEpoch: 1, myMemberId: me, memberMap: { me, c_1: priya }, fold, status: 'active', syncedAt: null, outbox: [] } };
+  const rows = planBalanceRows(g, [], [], '2026-11-01T00:00:00Z');
+  check('₹0.01 with no rows here → an Earlier Balance row, so Settle and Leave agree', rows.length === 1 && rows[0].kind === 'lbCreate' && rows[0].row.amount === 0.01, JSON.stringify(rows));
 }
 
 console.log(`\n${'─'.repeat(34)}\n  ${fail ? '\x1b[31m' : '\x1b[32m'}${pass}/${pass + fail} passed\x1b[0m`);
