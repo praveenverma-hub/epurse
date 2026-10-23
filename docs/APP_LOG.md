@@ -9,6 +9,32 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 
 ## Transactions & Parser (SMS ingestion, categorisation, self-transfer, retention)
 
+- **Oct-24-2026 — "Always for <payee>".** Both category sheets (Manage and Choose Category) have a switch under the
+  categories on bank-SMS rows: on, the picked category is saved as a merchant rule (`userCustomRules`, via
+  `utils/payeeRule.ts` + `applyPayeeRule` in the shared draft commit) and the payee's next SMS lands there by itself.
+  It's shown ON while a rule exists, and turning it off forgets the payee.
+  - **The gap it fixes:** UPI payments to people (maid, milkman, tutor) came in as P2P every month. Nothing had
+    ever saved a rule (`saveUserCustomRule` had no caller).
+  - **Guards:**
+    - A rule applies only in its direction: Income on money in; others on money out or refunds.
+    - Rule keys now match whole words only ("RAVI" no longer catches "SRAVIKA").
+    - Never offered for Transfers, manual entries or synced rows. Past rows are left alone.
+  - test:store +10 (real SMS through ingest). Not device-verified.
+
+- **Oct-24-2026 — categories for a salaried household** (on top of Home & Family):
+  - **New sub-categories:** Home & Family › Household Help, Family Support; Bills › Loan EMI, Bank Charges & Fees;
+    Shopping › Clothing & Footwear; Investments › Deposits & Savings, Gold; Income › Reimbursements.
+  - **Fuel → Vehicle:** now Petrol & Diesel, Service & Repairs, Parking & Tolls. FASTag SMS and the brand
+    entry moved here from Travel.
+  - **Insurance & EMI split** into Insurance and Loan EMI (Bajaj Finance → Loan EMI). Myntra and AJIO → Clothing & Footwear.
+  - **Store v44:** relabels Fuel → Vehicle on stored transactions, archived transactions and saved merchant rules.
+    It also refreshes the persisted flat category list: before this, Home & Family rows on an existing install
+    showed the last category's name and icon. Old "Insurance & EMI" rows are NOT split (pre-launch, user's call):
+    they keep that label and still count under Bills.
+  - **Not added:** Refunds & Cashback (a refund is the `isRefund` flag on a credit, keeping its purchase category).
+  - Tests: categorySuggest 42, categoryQuickPick 37, storage e2e +3, parser FASTag expectations → `fuel`.
+    Not device-verified.
+
 **Done**
 - Three-gate accept filter (source/phrase/amount), merchant enrichment with two-tier
   categories + subscription detection, self-transfer auto-detect (dual-mask/phone/name/ref).

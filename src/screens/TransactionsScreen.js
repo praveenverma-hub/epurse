@@ -1089,6 +1089,7 @@ const TransactionsScreen = ({ navigation, route }) => {
       <CategoryPickerModal
         visible={!!activeTxn}
         categoryOnly
+        transaction={activeTxn}
         categories={categories}
         selectedCategoryId={activeTxn?.categoryId}
         selectedParent={activeTxn?.parentCategory}

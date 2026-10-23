@@ -1,4 +1,5 @@
 import { canSplitTransaction } from './split';
+import { canRememberCategory, payeeRuleKey } from './payeeRule';
 
 export function createManageDraft(txn) {
   return {
@@ -28,6 +29,7 @@ export function applyCategoryPickerDraft(store, txn, quickDraft) {
     isHidden: quickDraft.isHidden,
     isIgnored: quickDraft.isIgnored,
     isRefund: quickDraft.isRefund,
+    alwaysForPayee: quickDraft.alwaysForPayee,
   });
 }
 
@@ -90,4 +92,21 @@ export function applyManageDraft(store, txn, draft) {
   if (draft.split) current.setTransactionSplit(txn.id, draft.split.others, draft.split.meta);
   if (draft.note.trim() !== (txn.note || '').trim()) current.setTransactionNote(txn.id, draft.note);
   if (!txn.isIgnored && draft.isIgnored) current.ignoreTransaction(txn.id);
+  applyPayeeRule(current, txn, draft);
+}
+
+/**
+ * "Always for <payee>" (`draft.alwaysForPayee`; undefined = the row wasn't shown): on saves
+ * the picked category for the payee's next SMS, off forgets it. Past rows are left alone.
+ */
+export function applyPayeeRule(current, txn, draft) {
+  const key = payeeRuleKey(txn);
+  if (!key || draft.alwaysForPayee === undefined) return;
+  if (!draft.alwaysForPayee) { current.removeUserCustomRule(key); return; }
+  if (!canRememberCategory(txn, draft)) return;
+  current.saveUserCustomRule(key, {
+    parentCategory: draft.parentCategory,
+    childCategory: draft.childCategory,
+    ...(txn.merchant ? { cleanMerchant: txn.merchant } : {}),
+  });
 }

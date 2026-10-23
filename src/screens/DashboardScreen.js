@@ -998,6 +998,7 @@ const DashboardScreen = ({ navigation }) => {
       <CategoryPickerModal
         visible={!!activeTxn}
         categoryOnly
+        transaction={activeTxn}
         categories={categories}
         txnType={activeTxn?.type}
         categoryLocked={lbTagLocked(activeTxn, lentBorrowedAll)}

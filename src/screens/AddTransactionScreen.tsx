@@ -728,9 +728,10 @@ const AddTransactionScreen = ({ navigation, route }: { navigation: NavigationPro
     return true;
   };
 
-  // Category follows the merchant as it's typed, until picked by hand.
+  // Category follows merchant text first, then an optional note, until picked by hand.
   const autoCategory = useAutoCategory({
     merchant,
+    note,
     isIncome: type === TRANSACTION_TYPES.CREDIT,
     enabled: !isEdit,
     apply: (p, c) => {

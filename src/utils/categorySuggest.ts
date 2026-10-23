@@ -35,6 +35,9 @@ const SHOP = 'Shopping';
 const HEALTH = 'Health & Fitness';
 const EDU = 'Education';
 const INCOME = 'Income';
+const HOME = 'Home & Family';
+const VEHICLE = 'Vehicle';
+const INVEST = 'Investments';
 
 /**
  * Everyday words → [parent, child]. Lowercase; multi-word phrases allowed (the
@@ -63,7 +66,7 @@ export const MANUAL_CATEGORY_KEYWORDS: Record<string, [string, string]> = {
   // Travel & Commute
   cab: [TRAVEL, 'Daily Commute'], taxi: [TRAVEL, 'Daily Commute'], auto: [TRAVEL, 'Daily Commute'],
   rickshaw: [TRAVEL, 'Daily Commute'], metro: [TRAVEL, 'Daily Commute'], bus: [TRAVEL, 'Daily Commute'],
-  toll: [TRAVEL, 'Daily Commute'], parking: [TRAVEL, 'Daily Commute'], commute: [TRAVEL, 'Daily Commute'],
+  commute: [TRAVEL, 'Daily Commute'],
   'bike taxi': [TRAVEL, 'Daily Commute'],
   flight: [TRAVEL, 'Long Distance'], flights: [TRAVEL, 'Long Distance'], train: [TRAVEL, 'Long Distance'],
   airport: [TRAVEL, 'Long Distance'], hotel: [TRAVEL, 'Long Distance'], trip: [TRAVEL, 'Long Distance'],
@@ -81,19 +84,34 @@ export const MANUAL_CATEGORY_KEYWORDS: Record<string, [string, string]> = {
   wifi: [BILLS, 'Mobile & Internet'], internet: [BILLS, 'Mobile & Internet'], broadband: [BILLS, 'Mobile & Internet'],
   dth: [BILLS, 'Mobile & Internet'], postpaid: [BILLS, 'Mobile & Internet'], prepaid: [BILLS, 'Mobile & Internet'],
   subscription: [BILLS, 'Fixed Subscriptions'], ott: [BILLS, 'Fixed Subscriptions'], newspaper: [BILLS, 'Fixed Subscriptions'],
-  insurance: [BILLS, 'Insurance & EMI'], premium: [BILLS, 'Insurance & EMI'], emi: [BILLS, 'Insurance & EMI'],
-  'loan emi': [BILLS, 'Insurance & EMI'],
+  insurance: [BILLS, 'Insurance'], premium: [BILLS, 'Insurance'], 'health insurance': [BILLS, 'Insurance'],
+  emi: [BILLS, 'Loan EMI'], 'loan emi': [BILLS, 'Loan EMI'], loan: [BILLS, 'Loan EMI'], 'home loan': [BILLS, 'Loan EMI'],
+  'car loan': [BILLS, 'Loan EMI'], 'personal loan': [BILLS, 'Loan EMI'], 'education loan': [BILLS, 'Loan EMI'],
+  'bank charges': [BILLS, 'Bank Charges & Fees'], 'annual fee': [BILLS, 'Bank Charges & Fees'], 'late fee': [BILLS, 'Bank Charges & Fees'],
+  'late payment': [BILLS, 'Bank Charges & Fees'], 'convenience fee': [BILLS, 'Bank Charges & Fees'],
+  'processing fee': [BILLS, 'Bank Charges & Fees'], 'service charge': [BILLS, 'Bank Charges & Fees'],
+  'atm charges': [BILLS, 'Bank Charges & Fees'], 'sms charges': [BILLS, 'Bank Charges & Fees'],
+  'card interest': [BILLS, 'Bank Charges & Fees'], penalty: [BILLS, 'Bank Charges & Fees'],
+  rent: [BILLS, 'Rent & Housing'], 'house rent': [BILLS, 'Rent & Housing'], landlord: [BILLS, 'Rent & Housing'],
+  property: [BILLS, 'Rent & Housing'], society: [BILLS, 'Rent & Housing'],
+  tax: [BILLS, 'Taxes & Government'], taxes: [BILLS, 'Taxes & Government'], 'income tax': [BILLS, 'Taxes & Government'],
+  gst: [BILLS, 'Taxes & Government'], challan: [BILLS, 'Taxes & Government'], passport: [BILLS, 'Taxes & Government'],
 
   // Shopping
-  shopping: [SHOP, 'Online Shopping'], clothes: [SHOP, 'Online Shopping'], clothing: [SHOP, 'Online Shopping'],
-  shoes: [SHOP, 'Online Shopping'], shirt: [SHOP, 'Online Shopping'], jeans: [SHOP, 'Online Shopping'],
-  dress: [SHOP, 'Online Shopping'], gift: [SHOP, 'Online Shopping'], gifts: [SHOP, 'Online Shopping'],
+  shopping: [SHOP, 'Online Shopping'],
+  clothes: [SHOP, 'Clothing & Footwear'], clothing: [SHOP, 'Clothing & Footwear'], shoes: [SHOP, 'Clothing & Footwear'],
+  shirt: [SHOP, 'Clothing & Footwear'], tshirt: [SHOP, 'Clothing & Footwear'], jeans: [SHOP, 'Clothing & Footwear'],
+  dress: [SHOP, 'Clothing & Footwear'], footwear: [SHOP, 'Clothing & Footwear'], sneakers: [SHOP, 'Clothing & Footwear'],
+  kurta: [SHOP, 'Clothing & Footwear'], saree: [SHOP, 'Clothing & Footwear'], tailor: [SHOP, 'Clothing & Footwear'],
+  gift: [SHOP, 'Gifts & Donations'], gifts: [SHOP, 'Gifts & Donations'],
   salon: [SHOP, 'Beauty & Care'], haircut: [SHOP, 'Beauty & Care'], 'hair cut': [SHOP, 'Beauty & Care'],
   spa: [SHOP, 'Beauty & Care'], parlour: [SHOP, 'Beauty & Care'], parlor: [SHOP, 'Beauty & Care'],
   grooming: [SHOP, 'Beauty & Care'], makeup: [SHOP, 'Beauty & Care'], cosmetics: [SHOP, 'Beauty & Care'],
   laptop: [SHOP, 'Electronics'], headphones: [SHOP, 'Electronics'], earphones: [SHOP, 'Electronics'],
   charger: [SHOP, 'Electronics'], electronics: [SHOP, 'Electronics'], gadget: [SHOP, 'Electronics'],
   'mobile phone': [SHOP, 'Electronics'],
+  donation: [SHOP, 'Gifts & Donations'], donate: [SHOP, 'Gifts & Donations'], charity: [SHOP, 'Gifts & Donations'],
+  'birthday gift': [SHOP, 'Gifts & Donations'], 'wedding gift': [SHOP, 'Gifts & Donations'],
   sports: [SHOP, 'Sports & Outdoors'], cricket: [SHOP, 'Sports & Outdoors'], football: [SHOP, 'Sports & Outdoors'],
   badminton: [SHOP, 'Sports & Outdoors'], bicycle: [SHOP, 'Sports & Outdoors'], trekking: [SHOP, 'Sports & Outdoors'],
 
@@ -112,14 +130,38 @@ export const MANUAL_CATEGORY_KEYWORDS: Record<string, [string, string]> = {
   gym: [HEALTH, 'Gym & Fitness'], fitness: [HEALTH, 'Gym & Fitness'], yoga: [HEALTH, 'Gym & Fitness'],
   workout: [HEALTH, 'Gym & Fitness'], protein: [HEALTH, 'Gym & Fitness'],
 
-  // Fuel
-  petrol: ['Fuel', 'Petrol & Diesel'], diesel: ['Fuel', 'Petrol & Diesel'], fuel: ['Fuel', 'Petrol & Diesel'],
-  cng: ['Fuel', 'Petrol & Diesel'], 'ev charging': ['Fuel', 'Petrol & Diesel'],
+  // Home & Family
+  plumber: [HOME, 'Home Maintenance'], electrician: [HOME, 'Home Maintenance'], carpenter: [HOME, 'Home Maintenance'],
+  repair: [HOME, 'Home Maintenance'], repairs: [HOME, 'Home Maintenance'], 'home repair': [HOME, 'Home Maintenance'],
+  maid: [HOME, 'Household Help'], 'maid salary': [HOME, 'Household Help'], housekeeping: [HOME, 'Household Help'],
+  cook: [HOME, 'Household Help'], 'house help': [HOME, 'Household Help'], 'domestic help': [HOME, 'Household Help'],
+  'driver salary': [HOME, 'Household Help'], 'cook salary': [HOME, 'Household Help'],
+  parents: [HOME, 'Family Support'], mom: [HOME, 'Family Support'], dad: [HOME, 'Family Support'],
+  mummy: [HOME, 'Family Support'], 'family support': [HOME, 'Family Support'], 'pocket money': [HOME, 'Family Support'],
+  'sent home': [HOME, 'Family Support'],
+  daycare: [HOME, 'Childcare'], childcare: [HOME, 'Childcare'], babysitter: [HOME, 'Childcare'],
+  pet: [HOME, 'Pet Care'], vet: [HOME, 'Pet Care'], veterinary: [HOME, 'Pet Care'], dog: [HOME, 'Pet Care'], cat: [HOME, 'Pet Care'],
+
+  // Vehicle
+  petrol: [VEHICLE, 'Petrol & Diesel'], diesel: [VEHICLE, 'Petrol & Diesel'], fuel: [VEHICLE, 'Petrol & Diesel'],
+  cng: [VEHICLE, 'Petrol & Diesel'], 'ev charging': [VEHICLE, 'Petrol & Diesel'],
+  'car service': [VEHICLE, 'Service & Repairs'], 'bike service': [VEHICLE, 'Service & Repairs'],
+  'car repair': [VEHICLE, 'Service & Repairs'], 'bike repair': [VEHICLE, 'Service & Repairs'],
+  servicing: [VEHICLE, 'Service & Repairs'], mechanic: [VEHICLE, 'Service & Repairs'], puncture: [VEHICLE, 'Service & Repairs'],
+  tyre: [VEHICLE, 'Service & Repairs'], tyres: [VEHICLE, 'Service & Repairs'], 'car wash': [VEHICLE, 'Service & Repairs'],
+  'oil change': [VEHICLE, 'Service & Repairs'],
+  toll: [VEHICLE, 'Parking & Tolls'], tolls: [VEHICLE, 'Parking & Tolls'], parking: [VEHICLE, 'Parking & Tolls'],
+  fastag: [VEHICLE, 'Parking & Tolls'],
 
   // Investments
-  sip: ['Investments', 'Mutual Funds'], 'mutual fund': ['Investments', 'Mutual Funds'],
-  'mutual funds': ['Investments', 'Mutual Funds'], stocks: ['Investments', 'Stocks & Trading'],
-  shares: ['Investments', 'Stocks & Trading'],
+  sip: [INVEST, 'Mutual Funds'], 'mutual fund': [INVEST, 'Mutual Funds'],
+  'mutual funds': [INVEST, 'Mutual Funds'], stocks: [INVEST, 'Stocks & Trading'],
+  shares: [INVEST, 'Stocks & Trading'],
+  fd: [INVEST, 'Deposits & Savings'], 'fixed deposit': [INVEST, 'Deposits & Savings'],
+  'recurring deposit': [INVEST, 'Deposits & Savings'], ppf: [INVEST, 'Deposits & Savings'], nps: [INVEST, 'Deposits & Savings'],
+  sukanya: [INVEST, 'Deposits & Savings'], 'savings scheme': [INVEST, 'Deposits & Savings'],
+  'digital gold': [INVEST, 'Gold'], 'gold bond': [INVEST, 'Gold'], sgb: [INVEST, 'Gold'], 'gold etf': [INVEST, 'Gold'],
+  'gold coin': [INVEST, 'Gold'],
 
   // Education
   course: [EDU, 'Online Courses'], 'online course': [EDU, 'Online Courses'], classes: [EDU, 'Online Courses'],
@@ -129,6 +171,9 @@ export const MANUAL_CATEGORY_KEYWORDS: Record<string, [string, string]> = {
   // Income (only ever offered for an Income entry — see `allowParent`)
   salary: [INCOME, 'Salary'], bonus: [INCOME, 'Salary'], stipend: [INCOME, 'Salary'],
   freelance: [INCOME, 'Freelance'], freelancing: [INCOME, 'Freelance'], 'client payment': [INCOME, 'Freelance'],
+  interest: [INCOME, 'Interest & Dividends'], dividend: [INCOME, 'Interest & Dividends'], 'fd interest': [INCOME, 'Interest & Dividends'],
+  reimbursement: [INCOME, 'Reimbursements'], reimbursed: [INCOME, 'Reimbursements'], 'expense claim': [INCOME, 'Reimbursements'],
+  'rental income': [INCOME, 'Other Income'], honorarium: [INCOME, 'Other Income'],
 };
 
 const KEYWORD_PHRASES = Object.keys(MANUAL_CATEGORY_KEYWORDS).sort((a, b) => b.length - a.length);
@@ -206,4 +251,18 @@ export function suggestCategory(text: string, opts: SuggestOptions = {}): Catego
     }
   }
   return null;
+}
+
+/**
+ * Category suggestion for a manual entry. Merchant text gets the full personalised
+ * pipeline (history and saved rules). Notes are a secondary signal only: they use
+ * the safe built-in brand/keyword matches and cannot teach or trigger a merchant
+ * rule. This prevents a one-off note from changing future merchant categorisation.
+ */
+export function suggestCategoryForEntry(
+  merchant: string,
+  note: string,
+  opts: SuggestOptions = {},
+): CategorySuggestion | null {
+  return suggestCategory(merchant, opts) ?? suggestCategory(note, { allowParent: opts.allowParent });
 }

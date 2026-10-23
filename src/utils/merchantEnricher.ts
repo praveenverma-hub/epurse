@@ -107,8 +107,6 @@ export const GLOBAL_MERCHANT_DICTIONARY: Record<string, MerchantBrand> = {
   BLUSMART:        { name: 'BluSmart',         parentCategory: 'Travel & Commute', childCategory: 'Daily Commute' },
   DMRC:            { name: 'Delhi Metro',      parentCategory: 'Travel & Commute', childCategory: 'Daily Commute' },
   NREDI:           { name: 'Delhi Metro',      parentCategory: 'Travel & Commute', childCategory: 'Daily Commute' },
-  PAYTMFASTAG:     { name: 'FASTag',           parentCategory: 'Travel & Commute', childCategory: 'Daily Commute' },
-  FASTAG:          { name: 'FASTag',           parentCategory: 'Travel & Commute', childCategory: 'Daily Commute' },
 
   // ── Long Distance ──────────────────────────────────────────────────────────
   IRCTC:           { name: 'IRCTC',            parentCategory: 'Travel & Commute', childCategory: 'Long Distance' },
@@ -167,18 +165,18 @@ export const GLOBAL_MERCHANT_DICTIONARY: Record<string, MerchantBrand> = {
   MGL:             { name: 'MGL',              parentCategory: 'Bills & Utilities', childCategory: 'Variable Utilities' },
   MAHANAGAR:       { name: 'Mahanagar Gas',    parentCategory: 'Bills & Utilities', childCategory: 'Variable Utilities' },
 
-  // ── Insurance & EMI ────────────────────────────────────────────────────────
-  LICPREMIUM:      { name: 'LIC',              parentCategory: 'Bills & Utilities', childCategory: 'Insurance & EMI' },
-  HDFCERGO:        { name: 'HDFC ERGO',        parentCategory: 'Bills & Utilities', childCategory: 'Insurance & EMI' },
-  ICICILOMBARD:    { name: 'ICICI Lombard',    parentCategory: 'Bills & Utilities', childCategory: 'Insurance & EMI' },
-  BAJAJFINANCE:    { name: 'Bajaj Finance',    parentCategory: 'Bills & Utilities', childCategory: 'Insurance & EMI' },
+  // ── Insurance / Loan EMI ───────────────────────────────────────────────────
+  LICPREMIUM:      { name: 'LIC',              parentCategory: 'Bills & Utilities', childCategory: 'Insurance' },
+  HDFCERGO:        { name: 'HDFC ERGO',        parentCategory: 'Bills & Utilities', childCategory: 'Insurance' },
+  ICICILOMBARD:    { name: 'ICICI Lombard',    parentCategory: 'Bills & Utilities', childCategory: 'Insurance' },
+  BAJAJFINANCE:    { name: 'Bajaj Finance',    parentCategory: 'Bills & Utilities', childCategory: 'Loan EMI' },
 
   // ── Online Shopping (AFTER AMAZONPRIME / PRIMEVIDEO to avoid early match) ─
   AMAZONPAY:       { name: 'Amazon',           parentCategory: 'Shopping', childCategory: 'Online Shopping' },
   AMAZON:          { name: 'Amazon',           parentCategory: 'Shopping', childCategory: 'Online Shopping' },
   FLIPKART:        { name: 'Flipkart',         parentCategory: 'Shopping', childCategory: 'Online Shopping' },
-  MYNTRA:          { name: 'Myntra',           parentCategory: 'Shopping', childCategory: 'Online Shopping' },
-  AJIO:            { name: 'AJIO',             parentCategory: 'Shopping', childCategory: 'Online Shopping' },
+  MYNTRA:          { name: 'Myntra',           parentCategory: 'Shopping', childCategory: 'Clothing & Footwear' },
+  AJIO:            { name: 'AJIO',             parentCategory: 'Shopping', childCategory: 'Clothing & Footwear' },
   MEESHO:          { name: 'Meesho',           parentCategory: 'Shopping', childCategory: 'Online Shopping' },
   TATACLIQ:        { name: 'Tata CLiQ',        parentCategory: 'Shopping', childCategory: 'Online Shopping' },
   FIRSTCRY:        { name: 'FirstCry',         parentCategory: 'Shopping', childCategory: 'Online Shopping' },
@@ -218,13 +216,15 @@ export const GLOBAL_MERCHANT_DICTIONARY: Record<string, MerchantBrand> = {
   CULTFIT:         { name: 'Cult.fit',         parentCategory: 'Health & Fitness', childCategory: 'Gym & Fitness' },
   CUREFIT:         { name: 'Cult.fit',         parentCategory: 'Health & Fitness', childCategory: 'Gym & Fitness' },
 
-  // ── Fuel / Petrol & Diesel ─────────────────────────────────────────────────
-  INDIANOIL:       { name: 'Indian Oil',       parentCategory: 'Fuel', childCategory: 'Petrol & Diesel' },
-  IOCL:            { name: 'Indian Oil',       parentCategory: 'Fuel', childCategory: 'Petrol & Diesel' },
-  HPCL:            { name: 'HP Petrol',        parentCategory: 'Fuel', childCategory: 'Petrol & Diesel' },
-  BPCL:            { name: 'Bharat Petroleum', parentCategory: 'Fuel', childCategory: 'Petrol & Diesel' },
-  SHELL:           { name: 'Shell',            parentCategory: 'Fuel', childCategory: 'Petrol & Diesel' },
-  RELIANCEPETRO:   { name: 'Reliance Petro',   parentCategory: 'Fuel', childCategory: 'Petrol & Diesel' },
+  // ── Vehicle ────────────────────────────────────────────────────────────────
+  PAYTMFASTAG:     { name: 'FASTag',           parentCategory: 'Vehicle', childCategory: 'Parking & Tolls' },
+  FASTAG:          { name: 'FASTag',           parentCategory: 'Vehicle', childCategory: 'Parking & Tolls' },
+  INDIANOIL:       { name: 'Indian Oil',       parentCategory: 'Vehicle', childCategory: 'Petrol & Diesel' },
+  IOCL:            { name: 'Indian Oil',       parentCategory: 'Vehicle', childCategory: 'Petrol & Diesel' },
+  HPCL:            { name: 'HP Petrol',        parentCategory: 'Vehicle', childCategory: 'Petrol & Diesel' },
+  BPCL:            { name: 'Bharat Petroleum', parentCategory: 'Vehicle', childCategory: 'Petrol & Diesel' },
+  SHELL:           { name: 'Shell',            parentCategory: 'Vehicle', childCategory: 'Petrol & Diesel' },
+  RELIANCEPETRO:   { name: 'Reliance Petro',   parentCategory: 'Vehicle', childCategory: 'Petrol & Diesel' },
 
   // ── Investments ────────────────────────────────────────────────────────────
   ZERODHA:         { name: 'Zerodha',          parentCategory: 'Investments', childCategory: 'Stocks & Trading' },
@@ -335,8 +335,11 @@ function mapToBrand(sanitized: string, userRules?: UserRules): MappedBrand {
   }
   const upper = sanitized.toUpperCase();
 
-  // 1. User rules (exact UPPERCASE key, then substring for keys ≥ 4 chars)
+  // 1. User rules (exact UPPERCASE key, then a key ≥ 4 chars found as WHOLE words — a rule
+  //    for "RAVI" must not catch "SRAVIKA"; most rules are people paid by UPI).
   if (userRules && typeof userRules === 'object') {
+    const words = (s: string) => ` ${s.replace(/[^A-Z0-9&]+/g, ' ').trim()} `;
+    const inUpper = words(upper);
     if (userRules[upper]) {
       const rule = userRules[upper];
       return {
@@ -348,7 +351,7 @@ function mapToBrand(sanitized: string, userRules?: UserRules): MappedBrand {
       };
     }
     for (const key of Object.keys(userRules)) {
-      if (key.length >= 4 && upper.includes(key)) {
+      if (key.length >= 4 && inUpper.includes(words(key))) {
         const rule = userRules[key];
         return {
           cleanMerchant:     rule.cleanMerchant || smartTitleCase(sanitized),

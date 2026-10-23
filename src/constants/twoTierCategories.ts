@@ -64,7 +64,11 @@ export const PARENT_CATEGORIES: ParentCat[] = [
       { id: 'fixed_sub',       label: 'Fixed Subscriptions',    emoji: '📺' },
       { id: 'variable_util',   label: 'Variable Utilities',     emoji: '⚡' },
       { id: 'mobile_internet', label: 'Mobile & Internet',      emoji: '📱' },
-      { id: 'insurance_emi',   label: 'Insurance & EMI',        emoji: '🛡️' },
+      { id: 'insurance_emi',   label: 'Insurance',              emoji: '🛡️' },
+      { id: 'loan_emi',        label: 'Loan EMI',               emoji: '🏦' },
+      { id: 'rent_housing',    label: 'Rent & Housing',         emoji: '🏠' },
+      { id: 'taxes_fees',      label: 'Taxes & Government',     emoji: '🏛️' },
+      { id: 'bank_fees',       label: 'Bank Charges & Fees',    emoji: '💸' },
     ],
   },
   {
@@ -75,9 +79,25 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     legacyId: 'shopping',
     children: [
       { id: 'online',      label: 'Online Shopping',            emoji: '📦' },
+      { id: 'clothing',    label: 'Clothing & Footwear',        emoji: '👕' },
       { id: 'beauty',      label: 'Beauty & Care',              emoji: '💄' },
       { id: 'electronics', label: 'Electronics',                emoji: '💻' },
       { id: 'sports',      label: 'Sports & Outdoors',          emoji: '🏃' },
+      { id: 'gifts',       label: 'Gifts & Donations',          emoji: '🎁' },
+    ],
+  },
+  {
+    id: 'home_family',
+    label: 'Home & Family',
+    emoji: '🏡',
+    color: '#D97706',
+    legacyId: 'home_family',
+    children: [
+      { id: 'household_help',   label: 'Household Help',   emoji: '🧹' },
+      { id: 'home_maintenance', label: 'Home Maintenance', emoji: '🛠️' },
+      { id: 'family_support',   label: 'Family Support',   emoji: '👪' },
+      { id: 'childcare',        label: 'Childcare',        emoji: '🧸' },
+      { id: 'pet_care',         label: 'Pet Care',          emoji: '🐾' },
     ],
   },
   {
@@ -103,13 +123,16 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     ],
   },
   {
+    // Was "Fuel" (v44 relabels stored rows); the id and legacy id stay `fuel`.
     id: 'fuel',
-    label: 'Fuel',
-    emoji: '⛽',
+    label: 'Vehicle',
+    emoji: '🚗',
     color: '#F97316',
     legacyId: 'fuel',
     children: [
-      { id: 'petrol', label: 'Petrol & Diesel', emoji: '⛽' },
+      { id: 'petrol',          label: 'Petrol & Diesel',   emoji: '⛽' },
+      { id: 'vehicle_service', label: 'Service & Repairs', emoji: '🔧' },
+      { id: 'parking_tolls',   label: 'Parking & Tolls',   emoji: '🅿️' },
     ],
   },
   {
@@ -119,8 +142,10 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     color: '#14B8A6',
     legacyId: 'investments',
     children: [
-      { id: 'stocks', label: 'Stocks & Trading', emoji: '📊' },
-      { id: 'mf',     label: 'Mutual Funds',      emoji: '💹' },
+      { id: 'stocks',   label: 'Stocks & Trading',   emoji: '📊' },
+      { id: 'mf',       label: 'Mutual Funds',       emoji: '💹' },
+      { id: 'deposits', label: 'Deposits & Savings', emoji: '🐷' },
+      { id: 'gold',     label: 'Gold',               emoji: '🪙' },
     ],
   },
   {
@@ -160,6 +185,9 @@ export const PARENT_CATEGORIES: ParentCat[] = [
     children: [
       { id: 'salary',    label: 'Salary',    emoji: '💰' },
       { id: 'freelance', label: 'Freelance', emoji: '💼' },
+      { id: 'interest',  label: 'Interest & Dividends', emoji: '📥' },
+      { id: 'reimbursement', label: 'Reimbursements', emoji: '↩️' },
+      { id: 'other_income', label: 'Other Income', emoji: '➕' },
     ],
   },
 ];
@@ -365,6 +393,16 @@ export const parentCatIdForTxn = (
   if (t.parentCategory && maps.parentLabelToId[t.parentCategory]) return maps.parentLabelToId[t.parentCategory];
   return maps.legacyToParentId[t.categoryId ?? ''] || 'other';
 };
+
+// ─── Store v44 (Oct-24-26): renamed built-ins ────────────────────────────────
+// Labels are stored on every transaction and saved merchant rule, so a rename needs this.
+// (Insurance & EMI → Insurance / Loan EMI is NOT migrated — pre-launch, user's call: old rows
+// keep that label and still count under Bills.)
+
+/** Old built-in labels → today's, for one stored row (txn or merchant rule). Ids never change. */
+export function relabelV44<T extends { parentCategory?: string }>(row: T): T {
+  return row?.parentCategory === 'Fuel' ? { ...row, parentCategory: 'Vehicle' } : row;
+}
 
 /**
  * Store v43 repair: a transaction whose built-in labels name a different category than

@@ -25,6 +25,8 @@ import { applyManageDraft, createManageDraft, manageDraftChanged } from '../util
 import { setReviewFlowDraft } from '../utils/reviewFlowDraft';
 import { txnAccountLabel } from '../utils/txnCardModel';
 import { useLbChildAllowed } from '../hooks/useSettlePeople';
+import RememberPayeeRow from './RememberPayeeRow';
+import { canRememberCategory, payeeRuleFor } from '../utils/payeeRule';
 
 // A fresh draft per opening. Closing never writes to the ledger.
 const GROUP_TONE = '#A8409F';
@@ -56,7 +58,11 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
   const transactions = useEPurseStore((s) => s.transactions);
   const userRules = useEPurseStore((s) => s.userCustomRules);
   const committing = useRef(false);
-  const changed = manageDraftChanged(txn, draft);
+  // "Always for <payee>": on while a rule exists; follows the picked category (utils/payeeRule).
+  const savedRule = !!payeeRuleFor(txn, userRules);
+  const canRemember = !categoryLocked && canRememberCategory(txn, draft);
+  const alwaysOn = draft.alwaysForPayee ?? savedRule;
+  const changed = manageDraftChanged(txn, draft) || (canRemember && alwaysOn !== savedRule);
   const patch = (values) => { setError(''); setDraft((old) => ({ ...old, ...values })); };
   // Same label the list card shows ("HDFC ··4521") — one rule, txnCardModel.
   const accountLabel = txnAccountLabel(txn, accounts.find((item) => item.id === txn.accountId));
@@ -172,7 +178,8 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
       // one here does not prematurely attach it or invent a second split model.
       const target = groups.find((g) => g.id === d.groupId);
       const shared = !d.groupSplit && target?.type === 'shared' && d.groupId !== (txn.groupId || null);
-      applyManageDraft(useEPurseStore, txn, shared ? { ...d, groupId: txn.groupId || null } : d);
+      const rule = { alwaysForPayee: canRememberCategory(txn, d) && !categoryLocked ? (d.alwaysForPayee ?? savedRule) : undefined };
+      applyManageDraft(useEPurseStore, txn, { ...(shared ? { ...d, groupId: txn.groupId || null } : d), ...rule });
       if (d.specialCategory) {
         if (d.specialCategory === 'cc_bill') onSelectCategory('cc_bill');
         else (onSelectLentBorrow || onSelectCategory)(d.specialCategory);
@@ -371,6 +378,9 @@ function ManageSession({ transaction: txn, initialDraft, categories, categoryLoc
                       {shownPicks.map(({ parent: item, child }) => childChip(item, child, false))}
                     </View>}
                   </>}
+                {canRemember && <View style={styles.rememberRow}>
+                  <RememberPayeeRow name={txn.merchant || 'This Payee'} value={alwaysOn} onValueChange={(v) => patch({ alwaysForPayee: v })} />
+                </View>}
                 {draft.specialCategory && <Text style={styles.explanation}>Done opens {draft.specialCategory === 'cc_bill' ? 'the credit-card payment reconciliation' : 'the person-link'} flow to finish this change.</Text>}
                 <Text style={styles.sectionLabel}>Actions</Text>
                 {actionRows.map((row, i) => <View key={i} style={i ? styles.actionsSecond : styles.actions}>{row}</View>)}
@@ -452,4 +462,5 @@ const makeStyles = (t) => StyleSheet.create({
   chipLabelOn: { color: '#FFFFFF' },
   allChip: { gap: 2, borderColor: t.primary + '55', backgroundColor: t.primary + '0D' },
   error: { ...typography.small, color: t.danger, marginTop: spacing.sm },
+  rememberRow: { marginTop: spacing.sm },
 });

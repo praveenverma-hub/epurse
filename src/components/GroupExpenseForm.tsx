@@ -128,10 +128,11 @@ export default function GroupExpenseForm({ group, onAdd, presetAmount, presetMer
       } : {}),
     } : null,
   );
-  // Category follows the merchant as it's typed, until picked by hand. Off for
+  // Category follows merchant text first, then an optional note, until picked by hand. Off for
   // edits and the tagging flow (category already decided there).
   const autoCategory = useAutoCategory({
     merchant,
+    note,
     isIncome: false,
     enabled: !editTxn && !hideCategory,
     apply: (p, c) => {

@@ -118,6 +118,10 @@ console.log(`\n${C.bold}══════ Storage — AsyncStorage migration �
   const persisted = JSON.parse(J(partialize(S())));
   persisted.transactions[0] = { ...persisted.transactions[0], smsText: 'Rs.450.00 debited … Avl bal Rs.42,310.50' };
   persisted.transactions.push({ id: 'stale1', amount: 100, type: 'debit', categoryId: 'borrow_repaid', parentCategory: 'Food & Dining', childCategory: 'Restaurants', createdAt: new Date().toISOString() });
+  // v44: renamed built-ins, and a flat list from before Home & Family existed.
+  persisted.transactions.push({ id: 'fuel1', amount: 900, type: 'debit', categoryId: 'fuel', parentCategory: 'Fuel', childCategory: 'Petrol & Diesel', merchant: 'Indian Oil', createdAt: new Date().toISOString() });
+  persisted.userCustomRules = { 'HP PUMP': { parentCategory: 'Fuel', childCategory: 'Petrol & Diesel', cleanMerchant: 'HP Pump' } };
+  persisted.categories = persisted.categories.filter((c) => c.id !== 'home_family').map((c) => (c.id === 'fuel' ? { ...c, name: 'Fuel' } : c));
   const legacyRaw = J({ state: persisted, version: OLD });
 
   const { records, device } = fresh();
@@ -138,6 +142,11 @@ console.log(`\n${C.bold}══════ Storage — AsyncStorage migration �
     && S().monthlyAggregates['2026-05'].totalSpend === 1234);
   check('e2e: the normal migrate chain ran (v42 stripped the SMS body, v43 fixed stale labels)', S().transactions.every((t) => t.smsText === undefined)
     && S().transactions.find((t) => t.id === 'stale1')?.childCategory === 'Repaid');
+  const tx = (id) => S().transactions.find((t) => t.id === id);
+  check('e2e: v44 renames Fuel → Vehicle (id unchanged)', tx('fuel1')?.parentCategory === 'Vehicle' && tx('fuel1')?.categoryId === 'fuel', J(tx('fuel1')));
+  check('e2e: …saved merchant rules too', S().userCustomRules['HP PUMP']?.parentCategory === 'Vehicle');
+  check('e2e: …and the flat list gains new built-ins and their current names',
+    S().categories.some((c) => c.id === 'home_family') && S().categories.find((c) => c.id === 'fuel')?.name === 'Vehicle');
   const after = await records.load();
   check('e2e: …and the migrated result was written back at the current version',
     after.meta.storeVersion === String(CURRENT) && after.rows.transactions.every((x) => x.value.smsText === undefined));

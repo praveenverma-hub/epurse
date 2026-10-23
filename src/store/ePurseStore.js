@@ -39,10 +39,12 @@ import {
   LB_ALL_CATS,
   categoryFieldsFor,
   fixStaleCategoryLabels,
+  relabelV44,
   BUDGETABLE_PARENT_ID_SET as BUDGETABLE_PARENT_IDS,
   CREDIT_ONLY_PARENT_IDS,
 } from '../constants/twoTierCategories';
 import { DEFAULT_THEME_ID, THEMES } from '../constants/themes';
+import { ruleFitsDirection } from '../utils/payeeRule';
 import { GOAL_COLORS, DEFAULT_GOAL_EMOJI, GOAL_MERCHANT_LIMIT } from '../constants/goals';
 import {
   snapAmount,
@@ -1124,6 +1126,16 @@ const ensureRequiredCategories = (categories = []) => {
     }
   });
   return Array.from(byId.values());
+};
+
+/**
+ * The persisted flat list with every built-in as the app defines it NOW (built-ins can't be
+ * edited, so a new one or a rename reaches existing installs), custom ones after. Without it
+ * a new built-in id found no entry and its rows showed the list's last category.
+ */
+const withBuiltInCategories = (categories = []) => {
+  const builtIn = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
+  return [...DEFAULT_CATEGORIES, ...categories.filter((c) => !builtIn.has(c.id))];
 };
 
 /**
@@ -5286,7 +5298,7 @@ export const useEPurseStore = create(
           candidate.rawMerchant = candidate.merchant || '';
           if (!candidate.userEditedCategory || !candidate.userEditedMerchant) {
             const userRules = state.userCustomRules || {};
-            const { cleanMerchant, parentCategory, childCategory, isKnownSubscription } =
+            const { cleanMerchant, parentCategory, childCategory, isKnownSubscription, source: brandSource } =
               cleanMerchantName(candidate.merchant, userRules);
             if (cleanMerchant && !candidate.userEditedMerchant) {
               candidate.merchant = cleanMerchant;
@@ -5294,7 +5306,9 @@ export const useEPurseStore = create(
             } else {
               candidate.cleanMerchant = candidate.merchant || '';
             }
-            if (parentCategory && !candidate.userEditedCategory) {
+            // A saved payee rule ("Always for …") only applies to money moving its way.
+            if (parentCategory && !candidate.userEditedCategory
+              && (brandSource !== 'user_rule' || ruleFitsDirection(parentCategory, candidate))) {
               candidate.parentCategory = parentCategory;
               candidate.childCategory  = childCategory;
               const legacyId = toLegacyCat(parentCategory, childCategory);
@@ -5869,6 +5883,13 @@ export const useEPurseStore = create(
         set((s) => ({
           userCustomRules: { ...s.userCustomRules, [rawMerchantKey]: rule },
         })),
+
+      removeUserCustomRule: (rawMerchantKey) =>
+        set((s) => {
+          if (!s.userCustomRules?.[rawMerchantKey]) return s;
+          const { [rawMerchantKey]: _gone, ...rest } = s.userCustomRules;
+          return { userCustomRules: rest };
+        }),
 
       updateTransactionCategory: (id, categoryId) =>
         set((s) => {
@@ -7215,7 +7236,7 @@ export const useEPurseStore = create(
       // Bump this whenever the schema changes in a way that requires a wipe.
       // The migration below kills any stale demo / seed data that an older
       // build might have written to AsyncStorage before we removed the seeds.
-      version: 43,
+      version: 44,
       migrate: (persistedState, version) => {
         let state = persistedState ? { ...persistedState } : {};
 
@@ -8015,6 +8036,21 @@ export const useEPurseStore = create(
         if (version < 43) {
           const fix = (list) => (list || []).map(fixStaleCategoryLabels);
           state = { ...state, transactions: fix(state.transactions), archivedTransactions: fix(state.archivedTransactions) };
+        }
+
+        // v44 (Oct-24-26): built-ins added (Home & Family and new sub-categories) and Fuel
+        // renamed Vehicle. Stored labels follow.
+        if (version < 44) {
+          const fix = (list) => (list || []).map((t) => relabelV44(t));
+          const rules = Object.fromEntries(Object.entries(state.userCustomRules || {})
+            .map(([key, rule]) => [key, relabelV44(rule)]));
+          state = {
+            ...state,
+            categories: withBuiltInCategories(state.categories || []),
+            transactions: fix(state.transactions),
+            archivedTransactions: fix(state.archivedTransactions),
+            userCustomRules: rules,
+          };
         }
 
         return state;

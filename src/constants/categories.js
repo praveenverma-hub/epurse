@@ -10,12 +10,13 @@
 export const DEFAULT_CATEGORIES = [
   { id: 'food',          name: 'Food & Dining',  color: '#FF5A1F', emoji: '🍔' },
   { id: 'travel',        name: 'Travel & Cabs',  color: '#3B82F6', emoji: '🚕' },
-  { id: 'fuel',          name: 'Fuel',           color: '#F97316', emoji: '⛽' },
+  { id: 'fuel',          name: 'Vehicle',        color: '#F97316', emoji: '🚗' },
   { id: 'bills',         name: 'Bills & Utility',color: '#8B5CF6', emoji: '💡' },
   { id: 'shopping',      name: 'Shopping',       color: '#EC4899', emoji: '🛍️' },
   { id: 'groceries',     name: 'Groceries',      color: '#10B981', emoji: '🥦' },
   { id: 'entertainment', name: 'Entertainment',  color: '#F59E0B', emoji: '🎬' },
   { id: 'health',        name: 'Health & Fitness', color: '#EF4444', emoji: '💊' },
+  { id: 'home_family',   name: 'Home & Family',   color: '#D97706', emoji: '🏡' },
   { id: 'education',     name: 'Education',      color: '#0EA5E9', emoji: '🎓' },
   { id: 'investments',   name: 'Investments',    color: '#14B8A6', emoji: '📈' },
   { id: 'salary',        name: 'Salary',         color: '#059669', emoji: '💰' },
@@ -92,11 +93,13 @@ export const CATEGORY_KEYWORDS = {
     // Airlines
     'indigo', 'spicejet', 'air india', 'vistara', 'akasa',
     // Transit / generic
-    'metro', 'fastag', 'paytm fastag', 'flight', 'cab ', 'cab.',
+    'metro', 'flight', 'cab ', 'cab.',
   ],
+  // The Vehicle parent: fuel, and FASTag tolls (moved from travel Oct-24-26).
   fuel: [
     'fuel', 'petrol', 'diesel', 'shell', 'hpcl', 'iocl', 'bpcl',
     'reliance petroleum', 'indian oil', 'hp petrol', 'bharat petroleum',
+    'fastag', 'paytm fastag',
   ],
   bills: [
     // Telecom

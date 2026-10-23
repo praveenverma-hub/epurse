@@ -496,12 +496,12 @@ const INVEST_CARDS_MARKETING = [
 // SUITE 7 — FASTag, intl/DCC, fuel surcharge, reversals, EMI conversion, DBT.
 // ─────────────────────────────────────────────────────────────────────────────
 const FASTAG_FX_SURCHARGE = [
-  // FASTag toll debit → wallet account, toll plaza merchant, travel.
+  // FASTag toll debit → wallet account, toll plaza merchant, Vehicle (`fuel`, Oct-24-26; was travel).
   {
     name: 'FASTag toll debit (SBI wallet)',
     sender: 'SBIINB',
     sms: 'FASTag Debit: ₹310.00 debited from your linked SBI FASTag wallet for vehicle DL3C-XX-1102 at Kherki Daula Plaza on 07-Jun-26 14:10:02. Avl Bal: ₹180.00.',
-    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 310, merchant: 'Kherki Daula Plaza', categoryId: 'travel' },
+    expect: { accept: true, type: 'debit', accountType: 'Digital Wallet', amount: 310, merchant: 'Kherki Daula Plaza', categoryId: 'fuel' },
   },
   // FASTag low-balance alert — no money moved.
   {
@@ -1496,7 +1496,7 @@ const AUG26_SWEEP = [
     expect: { accept: true, type: 'debit', amount: 5000, merchantIncludes: 'SIP-AXIS' } },
   { name: 'BUG 3 — FASTag recharge has no debit verb but is real money',
     sender: 'ICICIB', sms: 'Your FASTag linked to A/c XX5521 has been recharged with Rs.500.00 on 07-Aug-26.',
-    expect: { accept: true, type: 'debit', amount: 500, categoryId: 'travel' } },
+    expect: { accept: true, type: 'debit', amount: 500, categoryId: 'fuel' } },
   { name: 'Loan EMI debit',
     sender: 'AXISBK', sms: 'EMI of Rs.18,450.00 for Loan A/c XX7781 has been debited on 05-Aug-26.',
     expect: { accept: true, type: 'debit', amount: 18450 } },
@@ -1674,13 +1674,13 @@ const KEYWORD_SHADOWING_SEP26 = [
     expect: { accept: true, type: 'credit', amount: 5000, categoryId: 'lent_settled' } },
 
   // Independent keywords must keep obeying CATEGORY_KEYWORDS ORDER, which is
-  // load-bearing: this matches both `fastag` (travel) and `recharge` (bills) and
+  // load-bearing: this matches both `fastag` (fuel = Vehicle) and `recharge` (bills) and
   // neither contains the other. A "longest keyword wins" rule was tried here and
   // sent every FASTag top-up to bills — length only tracks specificity among
   // keywords that actually overlap.
-  { name: 'FASTag recharge stays travel (order decides, not length)',
+  { name: 'FASTag recharge stays Vehicle, not bills (order decides, not length)',
     sender: 'ICICIB', sms: 'Your FASTag linked to A/c XX5521 has been recharged with Rs.500.00 on 07-Aug-26.',
-    expect: { accept: true, type: 'debit', amount: 500, categoryId: 'travel' } },
+    expect: { accept: true, type: 'debit', amount: 500, categoryId: 'fuel' } },
 ];
 
 // Card LIMITS read off SMS (Oct-10-26): the bank's available / total limit rides on

@@ -6078,5 +6078,49 @@ console.log('\n— Excluded shared group + Delete Group keeps what stayed recogn
   check('an EXCLUDED group\'s bills stay excluded after delete', spend() === before && S().transactions.find((t) => t.merchant === 'Cab')?.formerGroup?.excludeFromTotals === true, `${before} → ${spend()}`);
 }
 
+console.log('\n— "Always for this payee" (Oct-24-26) —');
+{
+  const { applyManageDraft, createManageDraft } = await import(`${PROJECT_ROOT}/src/utils/manageTransactionDraft.js`);
+  reset();
+  useStore.setState({ userCustomRules: {}, accounts: [{ id: 'a1', name: 'HDFC', bankName: 'HDFC', type: 'Bank', mask: '4021', balance: 50000, primary: true }] });
+  // Each message received on its own day (same amount + time would be one SMS seen twice).
+  const on = (date) => new Date(`${date.replace(/-26$/, '-2026')} 10:00`).getTime();
+  const pay = (amt, date, id, payee = 'SUNITA DEVI') =>
+    ingest('HDFCBK', `Rs.${amt}.00 debited from A/c xx4021 on ${date} to ${payee} via UPI. Avl bal Rs.42,310.50`, { smsId: id, receivedAt: on(date) });
+  const bySms = (id) => useStore.getState().transactions.find((t) => t.smsId === id);
+  pay(3000, '01-Aug-26', 'p1');
+  const first = bySms('p1');
+  check('a UPI payment to a person arrives uncategorised as household help (the daily friction)',
+    first && first.source === 'sms' && first.childCategory !== 'Household Help', JSON.stringify(first && [first.merchant, first.categoryId, first.childCategory]));
+  applyManageDraft(useStore, first, { ...createManageDraft(first), categoryId: 'home_family', parentCategory: 'Home & Family', childCategory: 'Household Help', alwaysForPayee: true });
+  check('picking Household Help with "Always" saves a rule for the payee', Object.values(useStore.getState().userCustomRules).some((r) => r.childCategory === 'Household Help'),
+    JSON.stringify(useStore.getState().userCustomRules));
+  pay(3000, '01-Sep-26', 'p2');
+  const next = bySms('p2');
+  check('…next month\'s SMS lands in Household Help by itself',
+    next?.parentCategory === 'Home & Family' && next?.childCategory === 'Household Help' && next?.categoryId === 'home_family', JSON.stringify(next && [next.categoryId, next.childCategory]));
+  check('…the first one is still what the user picked, nothing else changed', bySms('p1').childCategory === 'Household Help');
+  ingest('HDFCBK', 'Rs.500.00 credited to A/c xx4021 on 03-Sep-26 from SUNITA DEVI via UPI. Avl bal Rs.42,810.50', { smsId: 'p3', receivedAt: on('03-Sep-26') });
+  check('money IN from the same payee isn\'t made a household expense', /sunita devi/i.test(bySms('p3')?.rawMerchant || '') && bySms('p3').childCategory !== 'Household Help',
+    JSON.stringify(bySms('p3') && [bySms('p3').type, bySms('p3').childCategory]));
+  pay(800, '04-Sep-26', 'p4', 'SUNITA DEVIKA');
+  check('a different payee whose name merely contains it is left alone (whole words)', /devika/i.test(bySms('p4')?.rawMerchant || '') && bySms('p4').childCategory !== 'Household Help',
+    JSON.stringify(bySms('p4') && [bySms('p4').rawMerchant, bySms('p4').childCategory]));
+  applyManageDraft(useStore, bySms('p2'), { ...createManageDraft(bySms('p2')), alwaysForPayee: false });
+  check('turning "Always" off forgets the payee', !Object.values(useStore.getState().userCustomRules).length);
+  pay(3000, '01-Oct-26', 'p5');
+  check('…and the next SMS is back to the parser\'s guess', bySms('p5') && bySms('p5').childCategory !== 'Household Help');
+  const manual = { ...first, source: 'manual' };
+  const { canRememberCategory, ruleFitsDirection } = await import(`${PROJECT_ROOT}/src/utils/payeeRule.ts`);
+  check('only bank-SMS rows offer it, and never for Transfers',
+    !canRememberCategory(manual, { parentCategory: 'Home & Family', childCategory: 'Household Help' })
+    && !canRememberCategory(first, { parentCategory: 'Transfers', childCategory: 'P2P Transfer' })
+    && canRememberCategory(first, { parentCategory: 'Home & Family', childCategory: 'Household Help' }));
+  check('an Income rule only fits money in; a spend rule fits money out or a refund',
+    ruleFitsDirection('Income', { type: 'credit' }) && !ruleFitsDirection('Income', { type: 'debit' })
+    && ruleFitsDirection('Shopping', { type: 'debit' }) && ruleFitsDirection('Shopping', { type: 'credit', isRefund: true })
+    && !ruleFitsDirection('Shopping', { type: 'credit' }));
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

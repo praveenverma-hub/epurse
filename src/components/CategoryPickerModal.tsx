@@ -29,6 +29,9 @@ import { STATIC_CONFIG } from '../config/staticConfig';
 import PrimaryButtonBase from './PrimaryButton';
 import EditIcon from './EditIcon';
 import SheetCloseButton from './SheetCloseButton';
+import RememberPayeeRow from './RememberPayeeRow';
+import { useEPurseStore } from '../store/ePurseStore';
+import { canRememberCategory, payeeRuleFor } from '../utils/payeeRule';
 import {
   ParentCat,
   ChildCat,
@@ -52,6 +55,8 @@ export interface CategoryPickerDraft {
   isHidden: boolean;
   isIgnored: boolean;
   isRefund: boolean;
+  /** "Always for <payee>" — undefined when the row isn't offered (utils/payeeRule.ts). */
+  alwaysForPayee?: boolean;
 }
 
 const PrimaryButton = PrimaryButtonBase as React.FC<{
@@ -98,6 +103,8 @@ interface Props {
   onRestore?: () => void;
   /** Commits staged category/quick-action changes in the category-only flow. */
   onDone?: (draft: CategoryPickerDraft) => void;
+  /** The transaction, for "Always for <payee>" (category-only flow; SMS payees only). */
+  transaction?: any;
   onDelete?: () => void;
   onClose: () => void;
   /** groupId the transaction currently belongs to (if any). */
@@ -382,6 +389,7 @@ const CategoryPickerModal: React.FC<Props> = ({
   onIgnore,
   onRestore,
   onDone,
+  transaction,
   onDelete,
   onClose,
   currentGroupId,
@@ -412,6 +420,10 @@ const CategoryPickerModal: React.FC<Props> = ({
     });
     setQuickInfo(null);
   }, [visible, selectedCategoryId, selectedParent, selectedChild, isHidden, isIgnored, isRefund]);
+  const userRules = useEPurseStore((s: any) => s.userCustomRules);
+  const savedRule = !!payeeRuleFor(transaction, userRules);
+  const canRemember = categoryOnly && !categoryLocked && canRememberCategory(transaction, draft);
+  const alwaysOn = draft.alwaysForPayee ?? savedRule;
   const showPrivacy = categoryOnly && !draft.isIgnored && STATIC_CONFIG.categoryPicker.quickActions.privacy;
   const showIgnore = categoryOnly && STATIC_CONFIG.categoryPicker.quickActions.ignore;
   const showRefund = categoryOnly && !draft.isIgnored && canRefund && STATIC_CONFIG.categoryPicker.quickActions.refund;
@@ -420,7 +432,8 @@ const CategoryPickerModal: React.FC<Props> = ({
     || draft.childCategory !== selectedChild
     || draft.isHidden !== isHidden
     || draft.isIgnored !== isIgnored
-    || draft.isRefund !== !!isRefund;
+    || draft.isRefund !== !!isRefund
+    || (canRemember && alwaysOn !== savedRule);
   const quickInfoText = quickInfo === 'private' && draft.isHidden
     ? 'Hidden from default views, but still counted in totals. Find it using the Private filter in Activity.'
     : quickInfo === 'ignore' && draft.isIgnored
@@ -527,6 +540,13 @@ const CategoryPickerModal: React.FC<Props> = ({
             </>
           )}
 
+          {canRemember && (
+            <View style={styles.rememberRow}>
+              <RememberPayeeRow name={transaction?.merchant || 'This Payee'} value={alwaysOn}
+                onValueChange={(v) => setDraft((current) => ({ ...current, alwaysForPayee: v }))} />
+            </View>
+          )}
+
           {(showPrivacy || showIgnore || showRefund) && (
             <View style={[styles.quickActions, { borderTopColor: theme.divider }]}>
               {showPrivacy && quickAction(draft.isHidden ? 'Public' : 'Private', 'eye-off-outline', theme.success, !!draft.isHidden,
@@ -554,7 +574,7 @@ const CategoryPickerModal: React.FC<Props> = ({
           {categoryOnly && (
             <View style={styles.quickFooter}>
               <PrimaryButton title="Done" disabled={!hasChanges} onPress={() => {
-                if (hasChanges) (onDone ? onDone(draft) : onClose());
+                if (hasChanges) (onDone ? onDone({ ...draft, alwaysForPayee: canRemember ? alwaysOn : undefined }) : onClose());
               }} />
             </View>
           )}
@@ -694,6 +714,7 @@ export default CategoryPickerModal;
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  rememberRow: { marginTop: spacing.sm },
   backdrop: {
     flex: 1,
     backgroundColor: '#0006',

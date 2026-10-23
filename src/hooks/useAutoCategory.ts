@@ -11,10 +11,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useEPurseStore } from '../store/ePurseStore';
 import { LB_ALL_CATS } from '../constants/twoTierCategories';
-import { buildCategoryHistory, suggestCategory } from '../utils/categorySuggest';
+import { buildCategoryHistory, suggestCategoryForEntry } from '../utils/categorySuggest';
 
 interface Options {
   merchant: string;
+  /** Optional note. Used only when the merchant text has no category signal. */
+  note?: string;
   /** Income entries only take Income categories; expenses never do. */
   isIncome: boolean;
   /** Off for edits and flows where the category is already decided. */
@@ -23,7 +25,7 @@ interface Options {
   apply: (parentCategory: string, childCategory: string) => void;
 }
 
-export function useAutoCategory({ merchant, isIncome, enabled, apply }: Options) {
+export function useAutoCategory({ merchant, note = '', isIncome, enabled, apply }: Options) {
   const transactions = useEPurseStore((s: any) => s.transactions);
   const userRules = useEPurseStore((s: any) => s.userCustomRules);
 
@@ -34,14 +36,14 @@ export function useAutoCategory({ merchant, isIncome, enabled, apply }: Options)
 
   const suggestion = useMemo(
     () =>
-      suggestCategory(merchant, {
+      suggestCategoryForEntry(merchant, note, {
         history,
         userRules: userRules || undefined,
         // Transfers (self / P2P / Lent / Borrowed) carry their own semantics and
         // are never guessed; Income only for income, never for an expense.
         allowParent: (p) => p !== 'Transfers' && (isIncome ? p === 'Income' : p !== 'Income'),
       }),
-    [merchant, history, userRules, isIncome],
+    [merchant, note, history, userRules, isIncome],
   );
 
   const [isAuto, setIsAuto] = useState(false);
