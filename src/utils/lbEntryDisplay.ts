@@ -36,14 +36,36 @@ export function lbNoteText(note?: string | null): string {
 
 const kindLabel = (e: LbDisplayEntry) => (ENTRY_LABEL as Record<string, string>)[e.kind] || e.kind;
 
-export function lbEntryTitle(e: LbDisplayEntry): string {
+/** The split bill behind a ledger row, when its transaction is still kept. */
+export interface LbSplitTxn { amount?: number; splitWith?: unknown[] }
+
+// A plain split's debt leg (store note "Split · Zomato"): lent = I paid, borrowed = they did.
+const SPLIT_NOTE = /^Split ·\s*/;
+const isSplitRow = (e: LbDisplayEntry) =>
+  !e.isGroupLine && (e.kind === 'lent' || e.kind === 'borrowed') && SPLIT_NOTE.test(e.note || '');
+
+// On a split row the person is already the screen — who paid the bill leads, the merchant is context.
+export function lbEntryTitle(e: LbDisplayEntry, txn?: LbSplitTxn | null): string {
   if (e.isGroupLine) return e.groupName || 'Group';
+  if (isSplitRow(e)) {
+    const who = e.kind === 'lent' ? 'You' : 'They';
+    return txn?.amount ? `${who} paid ${formatCurrency(txn.amount)}` : `${who} paid the bill`;
+  }
   return lbNoteText(e.note) || kindLabel(e);
 }
 
-export function lbEntryMeta(e: LbDisplayEntry): string {
+export function lbEntryMeta(e: LbDisplayEntry, txn?: LbSplitTxn | null): string {
   if (e.isGroupLine) return 'Net from group';
   const date = formatDate(e.date);
+  if (isSplitRow(e)) {
+    const people = (txn?.splitWith?.length || 0) + 1;
+    return [
+      (e.note || '').replace(SPLIT_NOTE, '').trim(),
+      e.kind === 'lent' ? 'Their share' : 'Your share',
+      date,
+      people > 2 ? `${people} people` : '',
+    ].filter(Boolean).join(' · ');
+  }
   return lbEntryTitle(e) === kindLabel(e) ? date : `${kindLabel(e)} · ${date}`;
 }
 

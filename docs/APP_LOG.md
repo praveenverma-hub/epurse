@@ -1903,6 +1903,11 @@ one line where possible; link a file/symbol name (greppable) instead of describi
 
 ## Lent/Borrowed & Splits
 
+- **Oct-24-2026 — split rows on a person's ledger say who paid.** The person is already the screen, so a split's row
+  no longer leads with the merchant: "You paid ₹1,200" / "They paid ₹1,200", then "Zomato · Their share / Your share ·
+  12 Oct · 3 people" (count only at 3+). Same title in `LbEntryDetailSheet`. `lbEntryTitle/lbEntryMeta(e, txn)`;
+  test:lbEntry +5. Not device-verified.
+
 **Done**
 - **Oct-20-2026 — LB add form opens from a tab tucked under the header's curve** (`CollapsingHeaderScreen
   attachedTab`): "Add Lent Entry ⌄" peeks below the header as a second curved layer; tap → the form unfolds

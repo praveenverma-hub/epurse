@@ -31,7 +31,7 @@ const typography = typographyBase as unknown as Record<string, TextStyle>;
 export const lbToneInk = (tone: LbEntryTone, theme: { lent: string; borrowed: string }) =>
   tone === 'lent' ? theme.lent : tone === 'borrowed' || tone === 'outflow' ? theme.borrowed : colors.textPrimary;
 
-interface SourceTxn { id: string; merchant?: string; source?: string }
+interface SourceTxn { id: string; merchant?: string; source?: string; amount?: number; splitWith?: unknown[] }
 
 interface Props {
   /** The tapped row; null = closed. */
@@ -128,7 +128,7 @@ export default function LbEntryDetailSheet({ entry, person, sourceTxn, editable,
           <View style={styles.handle} />
           {/* Action pill top-right — same spot and shape as TxnDetailSheet's Edit. */}
           <View style={styles.topRow}>
-            <Text style={styles.title} numberOfLines={2}>{lbEntryTitle(shown)}</Text>
+            <Text style={styles.title} numberOfLines={2}>{lbEntryTitle(shown, sourceTxn)}</Text>
             {action ? (
               <TouchableOpacity
                 style={[styles.actionBtn, { borderColor: ctaInk }]}

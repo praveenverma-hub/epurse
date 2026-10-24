@@ -308,8 +308,10 @@ const LbPersonScreen = ({ route, navigation }) => {
   // plain; a group line is a running net, so it keeps the lent/borrowed framing.
   // Every row taps into the same detail sheet; the chevron says so and keeps
   // the amounts in one column.
+  const txnById = useMemo(() => new Map(transactions.map((t) => [t.id, t])), [transactions]);
   const renderEntry = useCallback((entry) => {
     const entryColor = lbToneInk(lbEntryTone(entry), theme);
+    const txn = entry.sourceTxnId ? txnById.get(entry.sourceTxnId) : null;
     return (
       <TouchableOpacity
         key={entry.id}
@@ -323,9 +325,9 @@ const LbPersonScreen = ({ route, navigation }) => {
           <Ionicons name={rowIconName(entry)} size={18} color={entryColor} />
         </View>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
-          <Text style={styles.entryTitle} numberOfLines={1}>{lbEntryTitle(entry)}</Text>
+          <Text style={styles.entryTitle} numberOfLines={1}>{lbEntryTitle(entry, txn)}</Text>
           <View style={styles.entrySubRow}>
-            <Text style={[styles.entrySub, styles.entrySubText]} numberOfLines={1}>{lbEntryMeta(entry)}</Text>
+            <Text style={[styles.entrySub, styles.entrySubText]} numberOfLines={1}>{lbEntryMeta(entry, txn)}</Text>
             {/* A live group's settlement the server's rules skipped (sync/settlements.ts). */}
             {entry.syncRejected ? <StatusChip tone="warning" label="NOT SYNCED" /> : null}
           </View>
@@ -336,9 +338,9 @@ const LbPersonScreen = ({ route, navigation }) => {
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={styles.entryChevron} />
       </TouchableOpacity>
     );
-  }, [theme]);
+  }, [theme, txnById]);
 
-  const detailTxn = detailEntry?.sourceTxnId ? transactions.find((t) => t.id === detailEntry.sourceTxnId) || null : null;
+  const detailTxn = detailEntry?.sourceTxnId ? txnById.get(detailEntry.sourceTxnId) || null : null;
 
   if (!person) {
     return (

@@ -1094,6 +1094,7 @@ export default function GroupDetailScreen({ navigation, route }: { navigation: a
       <CategoryPickerModal
         visible={!!categoryTxn}
         categoryOnly
+        transaction={categoryTxn}
         categories={categories}
         selectedCategoryId={categoryTxn?.categoryId}
         selectedParent={categoryTxn?.parentCategory}

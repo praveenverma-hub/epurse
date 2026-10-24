@@ -25,6 +25,14 @@ check('store placeholder note is not a title', lbEntryTitle(e) === 'Received bac
 e = row({ kind: 'lent', note: 'From txn: Swiggy', sourceTxnId: 't1' });
 check('"From txn: X" stamp → title is the merchant', lbEntryTitle(e) === 'Swiggy', lbEntryTitle(e));
 check('edit sheet seeds an empty note for a placeholder', lbNoteText('Manual settlement') === '' && lbNoteText(' Dinner ') === 'Dinner');
+e = row({ kind: 'lent', amount: 400, note: 'Split · Zomato', sourceTxnId: 't2' });
+const bill = { amount: 1200, splitWith: [{}, {}] };
+check('split I paid → who paid the bill leads', lbEntryTitle(e, bill) === 'You paid ₹1,200', lbEntryTitle(e, bill));
+check('…meta: merchant · their share · date · people', lbEntryMeta(e, bill) === `Zomato · Their share · ${lbEntryMeta(row({ kind: 'lent' }))} · 3 people`, lbEntryMeta(e, bill));
+check('…two people → no count', !lbEntryMeta(e, { amount: 800, splitWith: [{}] }).includes('people'));
+check('…transaction gone → no amount, still who paid', lbEntryTitle(e) === 'You paid the bill' && lbEntryMeta(e).startsWith('Zomato · Their share'));
+e = row({ kind: 'borrowed', amount: 400, note: 'Split · Zomato', sourceTxnId: 't3' });
+check('split they paid → "They paid", your share', lbEntryTitle(e, bill) === 'They paid ₹1,200' && lbEntryMeta(e, bill).startsWith('Zomato · Your share · '));
 e = row({ kind: 'borrowed', isGroupLine: true, groupName: 'Goa Trip', groupId: 'g1' });
 check('group line → group name once', lbEntryTitle(e) === 'Goa Trip' && lbEntryMeta(e) === 'Net from group');
 check('group borrowed net → −, borrowed tone', lbEntrySign(e) === '−' && lbEntryTone(e) === 'borrowed');
